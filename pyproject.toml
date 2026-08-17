@@ -2,6 +2,7 @@
 name = "karbi"
 version = "0.1.0"
 description = "Internal Wildberries automation platform"
+license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiokafka>=0.12.0",
