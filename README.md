@@ -8,10 +8,16 @@ Runtime configuration is loaded from YAML. Use `backend/shared/settings/config.l
 `config.docker.yaml` in Compose, and inject secrets through the `${ENVIRONMENT_VARIABLE}` placeholders.
 Production secrets must never be committed.
 
-The React frontend lives in `frontend/`. During the first UI iteration it uses MSW to serve deterministic
-mock responses for login, automations, sellers, products, and daily review snapshots. Run it with
+The React frontend lives in `frontend/` and uses the FastAPI endpoints under `/api/v1`. Run it with
 `just frontend-dev`; validate it with `just frontend-check`. Compose builds the frontend separately and
 the edge Nginx serves it while forwarding `/api/` to FastAPI.
+
+Creating a Wildberries seller stores its API key encrypted and writes a catalog-sync event to the
+`wb_core.outbox_events` table in the same transaction. The standalone `outbox-publisher` process publishes
+pending events to Kafka. The WB worker consumes `wb.catalog.sync.requested`, loads all product cards through
+the official cursor-based Content API, and upserts them into `wb_core.articles`. Consumer-side inbox records
+make repeated Kafka delivery safe. Deleting a seller physically removes the seller, credentials, products,
+unpublished events, and review history.
 
 Employee accounts are created from an application container or a configured local environment:
 

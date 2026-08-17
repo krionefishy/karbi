@@ -107,14 +107,22 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .reviews-workspace { display: flex; height: calc(100vh - 72px); }
 .seller-sidebar { display: flex; width: 280px; flex: 0 0 280px; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
 .seller-search { padding: 18px 16px; border-bottom: 1px solid var(--line); }
+.seller-tools { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.seller-tools .field-label { margin: 0; }
+.add-seller-button { display: inline-flex; height: 32px; align-items: center; gap: 5px; padding: 0 9px; color: #fff; background: var(--forest); border: 0; font-size: 11px; font-weight: 600; cursor: pointer; }
 .search-input { position: relative; }
 .search-input input { padding-right: 38px; }
 .search-input svg { position: absolute; top: 14px; right: 12px; color: var(--muted); }
 .seller-list { overflow-y: auto; }
-.seller-item { position: relative; display: block; width: 100%; padding: 17px 16px; text-align: left; background: var(--surface); border: 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+.seller-item { position: relative; display: flex; width: 100%; align-items: center; background: var(--surface); border-bottom: 1px solid var(--line); }
 .seller-item:hover { background: var(--paper); }
-.seller-selected { padding-left: 19px; background: var(--positive-bg); }
+.seller-selected { background: var(--positive-bg); }
 .seller-selected::before { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; content: ""; background: var(--forest); }
+.seller-select { min-width: 0; flex: 1; padding: 17px 8px 17px 16px; text-align: left; background: transparent; border: 0; cursor: pointer; }
+.seller-actions { display: flex; gap: 3px; padding-right: 8px; }
+.seller-actions button { display: inline-flex; width: 27px; height: 27px; align-items: center; justify-content: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
+.seller-actions .danger-icon { color: var(--negative); }
+.seller-empty { padding: 24px 16px; color: var(--muted); font-size: 12px; }
 .seller-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .seller-row > strong { font-size: 13px; }
 .seller-meta { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
@@ -171,6 +179,20 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .rating-row:first-child .rating-track i { background: var(--gold); }
 .rating-row:nth-last-child(-n+2) .rating-track i { background: rgba(196,62,54,.5); }
 .loading-block { padding: 42px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); text-align: center; }
+.empty-state { max-width: 1320px; margin: 0 auto; padding: 56px; text-align: center; background: var(--surface); border: 1px solid var(--line); }
+.empty-state h2 { margin-bottom: 8px; }.empty-state p { margin-bottom: 22px; color: var(--muted); font-size: 13px; }
+.article-catalog { max-width: 1320px; margin: 0 auto; background: var(--surface); border: 1px solid var(--line); }
+.article-head, .article-row { display: grid; grid-template-columns: minmax(260px, 1fr) 180px 220px; align-items: center; min-height: 54px; border-bottom: 1px solid var(--line); }
+.article-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
+.article-head > *, .article-row > * { padding: 0 16px; }.article-row strong { font-size: 13px; }.article-row code { color: var(--muted); font-size: 11px; }
+.modal-overlay { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; background: rgba(20,28,23,.42); }
+.seller-dialog, .delete-dialog { position: relative; width: 460px; padding: 36px; background: var(--paper); border: 1px solid var(--forest); }
+.seller-dialog h2, .delete-dialog h2 { margin-bottom: 9px; font-size: 25px; }.seller-dialog > .muted { margin-bottom: 28px; font-size: 13px; line-height: 1.5; }
+.dialog-close { position: absolute; top: 14px; right: 14px; display: inline-flex; width: 36px; height: 36px; align-items: center; justify-content: center; background: transparent; border: 0; cursor: pointer; }
+.seller-form { display: grid; gap: 20px; }.seller-form input { width: 100%; height: 44px; padding: 0 13px; background: var(--surface); border: 1px solid var(--line); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }.danger-button { height: 40px; padding: 0 17px; color: #fff; background: var(--negative); border: 1px solid var(--negative); font-weight: 600; cursor: pointer; }
+.delete-dialog { border-color: var(--negative); }.delete-dialog p { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.sync-queued { color: var(--muted); }.sync-syncing { color: var(--gold); }
 
 @media (max-width: 1180px) {
   .seller-sidebar { width: 240px; flex-basis: 240px; }

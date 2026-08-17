@@ -1,32 +1,83 @@
-import { Search } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { Seller } from "../features/reviews/types";
 
-interface SellerSidebarProps {
+interface Props {
   sellers: Seller[];
   selectedId: string;
-  onSelect: (sellerId: string) => void;
+  onSelect: (id: string) => void;
+  onAdd: () => void;
+  onEdit: (seller: Seller) => void;
+  onDelete: (seller: Seller) => void;
+  onRetry: (seller: Seller) => void;
 }
 
-const statusText = { success: "Готово", syncing: "Сбор", error: "Ошибка" } as const;
+const statusText = { queued: "В очереди", success: "Готово", syncing: "Сбор", error: "Ошибка" } as const;
 
-export function SellerSidebar({ sellers, selectedId, onSelect }: SellerSidebarProps) {
+export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, onDelete, onRetry }: Props) {
   const [search, setSearch] = useState("");
-  const filtered = useMemo(() => sellers.filter((seller) => seller.name.toLowerCase().includes(search.toLowerCase())), [search, sellers]);
+  const filtered = useMemo(
+    () => sellers.filter((seller) => seller.name.toLowerCase().includes(search.toLowerCase())),
+    [search, sellers],
+  );
   return (
     <aside className="seller-sidebar">
       <div className="seller-search">
-        <label className="field-label" htmlFor="seller-search">Поиск селлера</label>
-        <div className="search-input"><input id="seller-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Название" /><Search size={16} /></div>
+        <div className="seller-tools">
+          <span className="field-label">Селлеры</span>
+          <button className="add-seller-button" onClick={onAdd}>
+            <Plus size={14} />Добавить
+          </button>
+        </div>
+        <div className="search-input">
+          <input
+            aria-label="Поиск селлера"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Название"
+          />
+          <Search size={16} />
+        </div>
       </div>
       <div className="seller-list">
         {filtered.map((seller) => (
-          <button key={seller.id} onClick={() => onSelect(seller.id)} className={`seller-item ${selectedId === seller.id ? "seller-selected" : ""}`}>
-            <span className="seller-row"><strong>{seller.name}</strong><span className={`sync-state sync-${seller.sync_status}`}><i />{statusText[seller.sync_status]}</span></span>
-            <span className="seller-meta">{seller.product_count} товаров · {seller.sync_status === "error" ? "требуется внимание" : "обновлено сегодня"}</span>
-          </button>
+          <div
+            key={seller.id}
+            className={`seller-item ${selectedId === seller.id ? "seller-selected" : ""}`}
+          >
+            <button className="seller-select" onClick={() => onSelect(seller.id)}>
+              <span className="seller-row">
+                <strong>{seller.name}</strong>
+                <span className={`sync-state sync-${seller.catalog_sync_status}`}>
+                  <i />{statusText[seller.catalog_sync_status]}
+                </span>
+              </span>
+              <span className="seller-meta">
+                {seller.product_count} товаров
+                {seller.catalog_sync_error ? ` · ${seller.catalog_sync_error}` : ""}
+              </span>
+            </button>
+            <span className="seller-actions">
+              {seller.catalog_sync_status === "error" && (
+                <button onClick={() => onRetry(seller)} aria-label="Повторить синхронизацию">
+                  <RefreshCw size={13} />
+                </button>
+              )}
+              <button onClick={() => onEdit(seller)} aria-label="Редактировать селлера">
+                <Pencil size={13} />
+              </button>
+              <button
+                className="danger-icon"
+                onClick={() => onDelete(seller)}
+                aria-label="Удалить селлера"
+              >
+                <Trash2 size={13} />
+              </button>
+            </span>
+          </div>
         ))}
+        {!filtered.length && <p className="seller-empty">Селлеры не найдены</p>}
       </div>
     </aside>
   );

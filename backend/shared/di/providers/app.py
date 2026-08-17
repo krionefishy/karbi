@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.platform.application import AuthService, PasswordService, TokenService
 from backend.modules.platform.infrastructure.postgres import UserRepository
+from backend.modules.wb_core.application import SellerService
+from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
+from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 from backend.storage.redis import RedisClient
@@ -23,6 +26,12 @@ class AppProvider(Provider):
     @provide(scope=Scope.APP)
     def password_service(self) -> PasswordService:
         return PasswordService()
+
+    @provide(scope=Scope.APP)
+    def credential_cipher(self, settings: Settings) -> CredentialCipher:
+        return CredentialCipher(
+            settings.security.credential_encryption_keys, settings.security.credential_fingerprint_key
+        )
 
 
 class WorkerProvider(Provider):
@@ -50,3 +59,13 @@ class SessionProvider(Provider):
         tokens: TokenService,
     ) -> AuthService:
         return AuthService(users, passwords, tokens)
+
+    @provide(scope=Scope.REQUEST)
+    def seller_repository(self, session: AsyncSession) -> SellerRepository:
+        return SellerRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def seller_service(
+        self, session: AsyncSession, repository: SellerRepository, cipher: CredentialCipher
+    ) -> SellerService:
+        return SellerService(session, repository, cipher)

@@ -1,8 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, MetaData, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -20,8 +31,17 @@ class SellerModel(WBCoreBase):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+    catalog_sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    last_catalog_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    catalog_sync_error: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    __table_args__ = (Index("ix_wb_core_sellers_active", "is_active"),)
+    __table_args__ = (
+        CheckConstraint(
+            "catalog_sync_status IN ('queued', 'syncing', 'success', 'error')",
+            name="ck_wb_core_sellers_catalog_sync_status",
+        ),
+        Index("ix_wb_core_sellers_active", "is_active"),
+    )
 
 
 class CredentialModel(WBCoreBase):
@@ -35,7 +55,7 @@ class CredentialModel(WBCoreBase):
         unique=True,
     )
     encrypted_api_key: Mapped[str] = mapped_column(String, nullable=False)
-    key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -52,6 +72,8 @@ class ArticleModel(WBCoreBase):
         nullable=False,
     )
     article: Mapped[str] = mapped_column(String(255), nullable=False)
+    vendor_code: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -62,3 +84,33 @@ class ArticleModel(WBCoreBase):
         UniqueConstraint("seller_id", "article", name="uq_wb_core_articles_seller_article"),
         Index("ix_wb_core_articles_seller_active", "seller_id", "is_active"),
     )
+
+
+class OutboxEventModel(WBCoreBase):
+    __tablename__ = "outbox_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    topic: Mapped[str] = mapped_column(String(255), nullable=False)
+    message_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_wb_core_outbox_pending", "published_at", "next_attempt_at", "created_at"),)
+
+
+class InboxEventModel(WBCoreBase):
+    __tablename__ = "inbox_events"
+
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

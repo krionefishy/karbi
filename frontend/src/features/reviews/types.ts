@@ -2,8 +2,22 @@ export interface Seller {
   id: string;
   name: string;
   product_count: number;
-  sync_status: "success" | "syncing" | "error";
-  last_sync_at: string;
+  catalog_sync_status: "queued" | "success" | "syncing" | "error";
+  last_catalog_sync_at: string | null;
+  catalog_sync_error: string | null;
+}
+
+export interface SellerArticle {
+  id: string;
+  seller_id: string;
+  article: string;
+  vendor_code: string;
+  name: string;
+}
+
+export interface SellerInput {
+  name: string;
+  api_key: string;
 }
 
 export interface RatingCounts {

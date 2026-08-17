@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from backend.shared.kafka_streams.consumer import consume
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.kafka_streams.subscribers import s3_consumers
-from backend.shared.kafka_streams.topics import StorageTopics
+from backend.shared.kafka_streams.topics import all_topics
 from backend.storage.s3 import S3Client
 
 
@@ -28,7 +28,7 @@ async def ensure_topics(
                 num_partitions=partitions,
                 replication_factor=replication_factor,
             )
-            for topic in StorageTopics.all()
+            for topic in all_topics()
             if topic not in existing_topics
         ]
         if missing_topics:

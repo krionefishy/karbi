@@ -7,6 +7,19 @@ import { getAutomations } from "../features/automations/api";
 
 const icons = [MessageSquareText, BarChart3, Boxes];
 
+function sellerLabel(count: number | null) {
+  const value = count ?? 0;
+  if (value % 10 === 1 && value % 100 !== 11) return `${value} селлер`;
+  if ([2, 3, 4].includes(value % 10) && ![12, 13, 14].includes(value % 100)) return `${value} селлера`;
+  return `${value} селлеров`;
+}
+
+function lastRunLabel(value: string | null) {
+  return value
+    ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+    : "ещё не запускалась";
+}
+
 export function AutomationsPage() {
   const { data = [], isLoading } = useQuery({ queryKey: ["automations"], queryFn: getAutomations });
   return (
@@ -14,26 +27,61 @@ export function AutomationsPage() {
       <AppHeader />
       <main className="page-container automations-page">
         <div className="page-heading">
-          <div><p className="eyebrow">Рабочее пространство</p><h1>Автоматизации</h1><p className="muted">Выберите процесс, с данными которого хотите работать.</p></div>
-          <span className="system-status"><i /> Все системы работают</span>
+          <div>
+            <p className="eyebrow">Рабочее пространство</p>
+            <h1>Автоматизации</h1>
+            <p className="muted">Выберите процесс, с данными которого хотите работать.</p>
+          </div>
+          <span className="system-status">
+            <i /> Все системы работают
+          </span>
         </div>
-        {isLoading ? <div className="loading-block">Загружаем автоматизации…</div> : (
+        {isLoading ? (
+          <div className="loading-block">Загружаем автоматизации…</div>
+        ) : (
           <section className="automation-grid" aria-label="Доступные автоматизации">
             {data.map((automation, index) => {
               const Icon = icons[index] ?? Boxes;
               const active = automation.status === "active";
               return (
-                <article className={`automation-card ${active ? "automation-active" : "automation-disabled"}`} key={automation.id}>
+                <article
+                  className={`automation-card ${active ? "automation-active" : "automation-disabled"}`}
+                  key={automation.id}
+                >
                   <div className="automation-card-top">
-                    <span className="automation-icon"><Icon size={22} /></span>
-                    <span className={`status-badge ${active ? "status-active" : "status-soon"}`}><span />{active ? "Активна" : "Скоро"}</span>
+                    <span className="automation-icon">
+                      <Icon size={22} />
+                    </span>
+                    <span className={`status-badge ${active ? "status-active" : "status-soon"}`}>
+                      <span />
+                      {active ? "Активна" : "Скоро"}
+                    </span>
                   </div>
                   <h2>{automation.title}</h2>
                   <p className="muted">{automation.description}</p>
                   <div className="automation-meta">
-                    {active ? <><span><b>{automation.seller_count}</b> селлера</span><span>Последний запуск <b>сегодня, 06:10</b></span></> : <span>Автоматизация находится в плане разработки</span>}
+                    {active ? (
+                      <>
+                        <span>
+                          <b>{sellerLabel(automation.seller_count)}</b>
+                        </span>
+                        <span>
+                          Последний запуск <b>{lastRunLabel(automation.last_run_at)}</b>
+                        </span>
+                      </>
+                    ) : (
+                      <span>Автоматизация находится в плане разработки</span>
+                    )}
                   </div>
-                  {active ? <Link className="primary-button card-action" to="/automations/wb-reviews">Открыть <ArrowRight size={16} /></Link> : <button className="secondary-button card-action" disabled>Недоступно</button>}
+                  {active ? (
+                    <Link className="primary-button card-action" to="/automations/wb-reviews">
+                      Открыть <ArrowRight size={16} />
+                    </Link>
+                  ) : (
+                    <button className="secondary-button card-action" disabled>
+                      Недоступно
+                    </button>
+                  )}
                 </article>
               );
             })}

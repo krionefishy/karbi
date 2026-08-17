@@ -18,3 +18,15 @@ class StorageTopics:
     @classmethod
     def all(cls) -> tuple[str, ...]:
         return (cls.WB_REVIEWS_EXPORT_UPLOAD, cls.WB_REVIEWS_EXPORT_DELETE)
+
+
+class WBCoreTopics:
+    CATALOG_SYNC_REQUESTED = validate_topic_name("wb.catalog.sync.requested")
+
+    @classmethod
+    def all(cls) -> tuple[str, ...]:
+        return (cls.CATALOG_SYNC_REQUESTED,)
+
+
+def all_topics() -> tuple[str, ...]:
+    return (*StorageTopics.all(), *WBCoreTopics.all())

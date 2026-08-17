@@ -76,6 +76,23 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
+    networks:
+      - internal
+
+  outbox-publisher:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "backend.workers.outbox.main"]
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_healthy
     networks:
       - internal
 
