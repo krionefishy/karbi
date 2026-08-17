@@ -1,6 +1,9 @@
 set dotenv-load
 
 compose := "docker compose -f deploy/compose.yaml"
+test_compose := "docker compose -f deploy/compose.test.yaml"
+test_database_url := "postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test"
+test_redis_url := "redis://localhost:56380/0"
 
 default:
     @just --list
@@ -16,6 +19,24 @@ lint:
     uv run ruff check backend
     uv run ruff format --check backend
     uv run mypy backend
+
+test:
+    uv run pytest
+
+test-infra-up:
+    {{ test_compose }} up -d
+    @for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do if {{ test_compose }} exec -T db-test pg_isready -U karbi -d karbi_test >/dev/null 2>&1 && {{ test_compose }} exec -T redis-test redis-cli ping >/dev/null 2>&1; then exit 0; fi; sleep 1; done; {{ test_compose }} logs; exit 1
+
+test-infra-down:
+    {{ test_compose }} down --volumes --remove-orphans
+
+test-migrate:
+    DATABASE_URL={{ test_database_url }} uv run alembic -n platform upgrade head
+    DATABASE_URL={{ test_database_url }} uv run alembic -n wb_core upgrade head
+    DATABASE_URL={{ test_database_url }} uv run alembic -n wb_reviews upgrade head
+
+test-all: test-infra-up test-migrate
+    DATABASE_URL={{ test_database_url }} REDIS_URL={{ test_redis_url }} uv run pytest
 
 migrate-platform:
     uv run alembic -n platform upgrade head
@@ -39,4 +60,3 @@ compose-status:
 
 compose-logs service="":
     {{ compose }} logs {{ service }}
-

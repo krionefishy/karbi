@@ -1,3 +1,5 @@
+name: karbi
+
 services:
   nginx:
     image: nginx:1.27-alpine
@@ -157,4 +159,3 @@ networks:
   proxy:
   internal:
     internal: true
-
