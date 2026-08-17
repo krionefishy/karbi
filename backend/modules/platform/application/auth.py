@@ -124,8 +124,8 @@ class AuthService:
             raise AuthenticationError
         return AuthSession(user, self._tokens.issue_access(user.id), new_refresh_token)
 
-    async def current_user(self, access_token: str) -> User:
-        user = await self._users.get_by_id(self._tokens.decode_access(access_token))
+    async def current_user(self, user_id: uuid.UUID) -> User:
+        user = await self._users.get_by_id(user_id)
         if user is None or not user.is_active:
             raise AuthenticationError
         return user

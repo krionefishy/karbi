@@ -1,9 +1,10 @@
 from typing import Annotated, Literal
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Cookie, Header, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
+from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.platform.application import AuthenticationError, AuthService, AuthSession
 from backend.modules.platform.domain import User
 from backend.shared.settings import Settings
@@ -112,12 +113,10 @@ async def refresh(
 @inject
 async def me(
     auth: FromDishka[AuthService],
-    authorization: Annotated[str | None, Header()] = None,
+    principal: CurrentPrincipal,
 ) -> UserResponse:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise _unauthorized()
     try:
-        user = await auth.current_user(authorization.removeprefix("Bearer ").strip())
+        user = await auth.current_user(principal.user_id)
     except AuthenticationError as error:
         raise _unauthorized() from error
     return _user_response(user)

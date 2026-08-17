@@ -18,14 +18,11 @@ class AppProvider(Provider):
     database = from_context(Database)
     redis = from_context(RedisClient)
     kafka_producer = from_context(KafkaProducerWrapper)
+    token_service = from_context(TokenService)
 
     @provide(scope=Scope.APP)
     def password_service(self) -> PasswordService:
         return PasswordService()
-
-    @provide(scope=Scope.APP)
-    def token_service(self, settings: Settings, redis: RedisClient) -> TokenService:
-        return TokenService(settings, redis)
 
 
 class WorkerProvider(Provider):

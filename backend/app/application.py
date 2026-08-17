@@ -1,23 +1,20 @@
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from dishka import make_async_container
 from dishka.integrations.fastapi import setup_dishka
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from redis.exceptions import RedisError
+from fastapi import FastAPI
 
 from backend.app.api.router import router
-from backend.app.http.client_ip import resolve_client_ip
+from backend.app.http.setup import setup_http_middleware
 from backend.infrastructure.logging import configure_logging
+from backend.modules.platform.application import TokenService
 from backend.shared.di import ALL_PROVIDERS
 from backend.shared.kafka_streams.kafka import start_kafka, stop_kafka
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
-from backend.storage.redis import RedisClient, SlidingWindowRateLimiter
+from backend.storage.redis import RedisClient
 from backend.storage.s3 import S3Client
 
 
@@ -28,13 +25,9 @@ class Application:
 
         self.database = Database()
         self.redis = RedisClient()
+        self.token_service = TokenService(self.settings, self.redis)
         self.kafka_producer = KafkaProducerWrapper()
         self.s3 = self._create_s3_client()
-        self.rate_limiter = SlidingWindowRateLimiter(
-            redis_client=self.redis,
-            limit=self.settings.rate_limit.requests,
-            window_seconds=self.settings.rate_limit.window_seconds,
-        )
 
         self.app = FastAPI(title="Karbi API", version="0.1.0", lifespan=self.lifespan)
         self.app.state.database = self.database
@@ -45,6 +38,7 @@ class Application:
                 Settings: self.settings,
                 Database: self.database,
                 RedisClient: self.redis,
+                TokenService: self.token_service,
                 KafkaProducerWrapper: self.kafka_producer,
             },
         )
@@ -69,37 +63,12 @@ class Application:
         self.app.include_router(router, prefix="/api/v1")
 
     def _setup_middleware(self) -> None:
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=list(self.settings.app.cors_origins),
-            allow_credentials=bool(self.settings.app.cors_origins),
-            allow_methods=["*"],
-            allow_headers=["*"],
+        setup_http_middleware(
+            self.app,
+            settings=self.settings,
+            redis=self.redis,
+            token_service=self.token_service,
         )
-
-        @self.app.middleware("http")
-        async def rate_limit(request: Request, call_next):
-            if not self.settings.rate_limit.enabled or request.url.path.startswith("/api/v1/health/"):
-                return await call_next(request)
-            identity = resolve_client_ip(
-                request,
-                behind_trusted_proxy=self.settings.app.trust_proxy_headers,
-            )
-            try:
-                decision = await self.rate_limiter.check(identity)
-            except RedisError:
-                logging.getLogger("rate_limit").exception("rate_limit_backend_unavailable")
-                return JSONResponse(status_code=503, content={"detail": "Service temporarily unavailable"})
-            if not decision.allowed:
-                return JSONResponse(
-                    status_code=429,
-                    content={"detail": "Too many requests"},
-                    headers={"Retry-After": str(decision.retry_after_seconds)},
-                )
-            response = await call_next(request)
-            response.headers["X-RateLimit-Limit"] = str(self.settings.rate_limit.requests)
-            response.headers["X-RateLimit-Remaining"] = str(decision.remaining)
-            return response
 
     async def _on_startup(self) -> None:
         self.settings.validate_runtime_secrets()
