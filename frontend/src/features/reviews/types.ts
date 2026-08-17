@@ -44,3 +44,16 @@ export interface SellerReviewHistory {
   seller_id: string;
   products: ProductReviewHistory[];
 }
+
+export interface ReviewSyncRun {
+  id: string;
+  trigger: "scheduled" | "manual";
+  snapshot_date: string;
+  status: "queued" | "running" | "success" | "partial_success" | "error";
+  total_sellers: number;
+  completed_sellers: number;
+  failed_sellers: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}

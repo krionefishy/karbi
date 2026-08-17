@@ -1,5 +1,5 @@
 import { apiRequest } from "../../api/http";
-import type { Seller, SellerArticle, SellerInput } from "./types";
+import type { ReviewSyncRun, Seller, SellerArticle, SellerInput, SellerReviewHistory } from "./types";
 
 export function getSellers() {
   return apiRequest<Seller[]>("/api/v1/wb/sellers");
@@ -22,3 +22,12 @@ export const deleteSeller = (sellerId: string) =>
 
 export const retrySellerSync = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/catalog-sync`, { method: "POST" });
+
+export const getSellerReviewHistory = (sellerId: string, days = 90) =>
+  apiRequest<SellerReviewHistory>(`/api/v1/wb/reviews/sellers/${sellerId}/history?days=${days}`);
+
+export const getLatestReviewSync = () =>
+  apiRequest<ReviewSyncRun | null>("/api/v1/wb/reviews/sync/latest");
+
+export const startReviewSync = () =>
+  apiRequest<ReviewSyncRun>("/api/v1/wb/reviews/sync", { method: "POST" });

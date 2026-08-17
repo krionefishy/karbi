@@ -47,3 +47,6 @@ rate_limit:
   window_seconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
 worker:
   poll_interval_seconds: 30
+  review_sync_hour: 12
+  review_sync_timezone: Europe/Moscow
+  feedback_page_size: ${WB_FEEDBACK_PAGE_SIZE:-5000}

@@ -6,10 +6,12 @@ from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.platform.presentation.http import router as auth_router
 from backend.modules.wb_core.application import SellerService
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
+from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
 
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(wb_sellers_router)
+router.include_router(wb_reviews_router)
 
 
 @router.get("/automations")

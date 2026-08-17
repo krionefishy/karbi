@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -130,6 +131,9 @@ class RateLimitConfig:
 @dataclass(frozen=True, slots=True)
 class WorkerConfig:
     poll_interval_seconds: int = 30
+    review_sync_hour: int = 12
+    review_sync_timezone: str = "Europe/Moscow"
+    feedback_page_size: int = 5000
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,11 +177,13 @@ class Settings:
         rate_limit["window_seconds"] = int(rate_limit.get("window_seconds", 60))
         worker = dict(data.get("worker", {}))
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
+        worker["review_sync_hour"] = int(worker.get("review_sync_hour", 12))
+        worker["feedback_page_size"] = int(worker.get("feedback_page_size", 5000))
         security = data.get("security", {})
         keys = security.get("credential_encryption_keys", [])
         if isinstance(keys, str):
             keys = [key.strip() for key in keys.split(",") if key.strip()]
-        return cls(
+        settings = cls(
             app=AppConfig(**{**app, "cors_origins": tuple(app.get("cors_origins", []))}),
             database=DatabaseConfig(**database),
             redis=RedisConfig(**redis),
@@ -191,6 +197,20 @@ class Settings:
             rate_limit=RateLimitConfig(**rate_limit),
             worker=WorkerConfig(**worker),
         )
+        settings.validate_values()
+        return settings
+
+    def validate_values(self) -> None:
+        if not 0 <= self.worker.review_sync_hour <= 23:
+            raise ValueError("worker.review_sync_hour must be between 0 and 23")
+        if not 1 <= self.worker.feedback_page_size <= 5000:
+            raise ValueError("worker.feedback_page_size must be between 1 and 5000")
+        if self.worker.poll_interval_seconds < 1:
+            raise ValueError("worker.poll_interval_seconds must be positive")
+        try:
+            ZoneInfo(self.worker.review_sync_timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("worker.review_sync_timezone is invalid") from error
 
     def validate_runtime_secrets(self) -> None:
         if self.app.environment not in {"production", "prod"}:

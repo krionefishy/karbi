@@ -10,6 +10,7 @@ from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
 from backend.workers.wb_reviews.catalog_consumer import CatalogSyncConsumer
+from backend.workers.wb_reviews.review_consumer import ReviewSyncConsumer
 from backend.workers.wb_reviews.worker import WBReviewsWorker
 
 
@@ -18,26 +19,40 @@ class WBReviewsWorkerApplication:
         self.settings = settings or load_settings()
         configure_logging(self.settings.app.log_level)
         self.database = Database()
-        self.worker = WBReviewsWorker(self.settings.worker.poll_interval_seconds)
-        self.catalog_consumer = self._create_catalog_consumer()
+        self.worker = WBReviewsWorker(
+            self.database,
+            self.settings.worker.poll_interval_seconds,
+            self.settings.worker.review_sync_hour,
+            self.settings.worker.review_sync_timezone,
+            self.settings.kafka.enabled,
+        )
+        self.catalog_consumer, self.review_consumer = self._create_consumers()
         self.container = make_async_container(
             *WORKER_PROVIDERS,
-            context={
-                Settings: self.settings,
-                Database: self.database,
-            },
+            context={Settings: self.settings, Database: self.database},
         )
 
-    def _create_catalog_consumer(self) -> CatalogSyncConsumer | None:
+    def _create_consumers(self) -> tuple[CatalogSyncConsumer | None, ReviewSyncConsumer | None]:
         if not self.settings.kafka.enabled:
-            return None
-        return CatalogSyncConsumer(
-            self.database,
-            CredentialCipher(
-                self.settings.security.credential_encryption_keys, self.settings.security.credential_fingerprint_key
+            return None, None
+        cipher = CredentialCipher(
+            self.settings.security.credential_encryption_keys,
+            self.settings.security.credential_fingerprint_key,
+        )
+        return (
+            CatalogSyncConsumer(
+                self.database,
+                cipher,
+                self.settings.kafka.bootstrap_servers,
+                f"{self.settings.kafka.consumer_group}.wb.catalog",
             ),
-            self.settings.kafka.bootstrap_servers,
-            f"{self.settings.kafka.consumer_group}.wb.catalog",
+            ReviewSyncConsumer(
+                self.database,
+                cipher,
+                self.settings.kafka.bootstrap_servers,
+                f"{self.settings.kafka.consumer_group}.wb.reviews",
+                self.settings.worker.feedback_page_size,
+            ),
         )
 
     async def run(self) -> None:
@@ -49,22 +64,26 @@ class WBReviewsWorkerApplication:
                 pool_size=self.settings.database.pool_size,
                 max_overflow=self.settings.database.max_overflow,
             )
+            tasks: list[asyncio.Task[None]] = []
             if self.settings.kafka.enabled:
-                if self.catalog_consumer is None:
-                    raise RuntimeError("WB catalog consumer is not configured")
+                if self.catalog_consumer is None or self.review_consumer is None:
+                    raise RuntimeError("WB consumers are not configured")
                 await ensure_topics(
                     bootstrap_servers=self.settings.kafka.bootstrap_servers,
                     partitions=self.settings.kafka.topic_partitions,
                     replication_factor=self.settings.kafka.topic_replication_factor,
                 )
-                consumer_task = asyncio.create_task(self.catalog_consumer.run(), name="wb-catalog-consumer")
-                try:
-                    await self.worker.run()
-                finally:
-                    consumer_task.cancel()
-                    await asyncio.gather(consumer_task, return_exceptions=True)
-            else:
+                tasks = [
+                    asyncio.create_task(self.catalog_consumer.run(), name="wb-catalog-consumer"),
+                    asyncio.create_task(self.review_consumer.run(), name="wb-review-consumer"),
+                ]
+            try:
                 await self.worker.run()
+            finally:
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             await self.container.close()
             await self.database.disconnect()

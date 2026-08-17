@@ -7,6 +7,8 @@ from backend.modules.platform.application import AuthService, PasswordService, T
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_reviews.application import ReviewSyncService
+from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
@@ -69,3 +71,16 @@ class SessionProvider(Provider):
         self, session: AsyncSession, repository: SellerRepository, cipher: CredentialCipher
     ) -> SellerService:
         return SellerService(session, repository, cipher)
+
+    @provide(scope=Scope.REQUEST)
+    def review_sync_repository(self, session: AsyncSession) -> ReviewSyncRepository:
+        return ReviewSyncRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def review_sync_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        reviews: ReviewSyncRepository,
+    ) -> ReviewSyncService:
+        return ReviewSyncService(session, sellers, reviews)

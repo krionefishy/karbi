@@ -28,5 +28,13 @@ class WBCoreTopics:
         return (cls.CATALOG_SYNC_REQUESTED,)
 
 
+class WBReviewsTopics:
+    SYNC_REQUESTED = validate_topic_name("wb.reviews.sync.requested")
+
+    @classmethod
+    def all(cls) -> tuple[str, ...]:
+        return (cls.SYNC_REQUESTED,)
+
+
 def all_topics() -> tuple[str, ...]:
-    return (*StorageTopics.all(), *WBCoreTopics.all())
+    return (*StorageTopics.all(), *WBCoreTopics.all(), *WBReviewsTopics.all())

@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 import type { ProductReviewHistory } from "../features/reviews/types";
 import { ReviewTimeline } from "./ReviewTimeline";
 
-const product: ProductReviewHistory = { id: "p1", article: "123", name: "Товар", snapshots: Array.from({ length: 8 }, (_, index) => ({ date: `2026-08-${String(index + 1).padStart(2, "0")}`, ratings: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 10 + index } })) };
+const today = new Date();
+const product: ProductReviewHistory = { id: "p1", article: "123", name: "Товар", snapshots: Array.from({ length: 8 }, (_, index) => {
+  const date = new Date(today);
+  date.setUTCDate(today.getUTCDate() - 7 + index);
+  return { date: date.toISOString().slice(0, 10), ratings: { 1: 1, 2: 2, 3: 3, 4: 4, 5: 10 + index } };
+}) };
 
 describe("ReviewTimeline", () => {
   it("calculates the five-star delta from adjacent snapshots", () => {

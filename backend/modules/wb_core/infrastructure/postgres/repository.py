@@ -64,7 +64,9 @@ class SellerRepository:
         )
         await self.session.execute(
             delete(OutboxEventModel).where(
-                OutboxEventModel.aggregate_id == seller_id, OutboxEventModel.published_at.is_(None)
+                OutboxEventModel.aggregate_id == seller_id,
+                OutboxEventModel.event_type == "WBCatalogSyncRequested",
+                OutboxEventModel.published_at.is_(None),
             )
         )
         await self.session.delete(seller)

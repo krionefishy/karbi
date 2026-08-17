@@ -134,6 +134,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .reviews-heading h1 { margin-bottom: 6px; }
 .reviews-heading p { margin-bottom: 0; font-size: 13px; }
 .last-sync { text-align: right; }.last-sync strong { display: block; font-size: 13px; }
+.review-sync-actions { display: flex; align-items: center; gap: 18px; }
+.review-sync-actions .catalog-status { padding-left: 18px; border-left: 1px solid var(--line); }
+.inline-error { max-width: 1320px; margin: -12px auto 18px; padding: 10px 12px; color: var(--negative); background: var(--negative-bg); border: 1px solid rgba(196,62,54,.24); font-size: 12px; }
 .timeline-section { max-width: 1320px; margin: 0 auto; }
 .timeline-toolbar { position: sticky; z-index: 10; top: -30px; display: flex; min-height: 72px; align-items: center; gap: 28px; justify-content: space-between; margin-bottom: 15px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); }
 .window-controls { display: flex; align-items: center; gap: 8px; }
@@ -157,6 +160,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .product-identity span { color: var(--muted); font: 10px "JetBrains Mono", monospace; }
 .day-cell { position: relative; display: flex; min-width: 0; align-items: center; justify-content: center; flex-direction: column; gap: 5px; padding: 10px 4px; background: var(--surface); border: 0; border-left: 1px solid var(--line); cursor: pointer; }
 .day-cell:hover { background: var(--paper); }
+.day-empty { color: var(--muted); cursor: default; font: 11px "JetBrains Mono", monospace; }
 .today-cell { background: rgba(26,60,43,.045) !important; box-shadow: inset 1px 0 var(--line), inset -1px 0 var(--line); }
 .day-selected { color: #fff; background: var(--forest) !important; }
 .review-count { display: flex; align-items: center; gap: 5px; font: 500 13px "JetBrains Mono", monospace; }

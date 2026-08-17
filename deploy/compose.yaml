@@ -50,6 +50,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me}
       CREDENTIALS_ENCRYPTION_KEYS: ${CREDENTIALS_ENCRYPTION_KEYS:-}
       CREDENTIALS_FINGERPRINT_KEY: ${CREDENTIALS_FINGERPRINT_KEY:-}
+      WB_FEEDBACK_PAGE_SIZE: ${WB_FEEDBACK_PAGE_SIZE:-5000}
     depends_on:
       migrate:
         condition: service_completed_successfully
