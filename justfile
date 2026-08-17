@@ -9,6 +9,15 @@ default:
 
 install:
     uv sync
+    cd frontend && npm ci
+
+frontend-dev:
+    cd frontend && npm run dev
+
+frontend-check:
+    cd frontend && npm run lint
+    cd frontend && npm test
+    cd frontend && npm run build
 
 format:
     uv run ruff format backend

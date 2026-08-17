@@ -13,6 +13,7 @@ backend/shared/settings/config.yaml
 backend/shared/settings/config.production.yaml
 
 # Test and tooling artifacts
+.superdesign/
 .pytest_cache/
 .coverage
 htmlcov/
@@ -22,6 +23,8 @@ htmlcov/
 # Frontend
 node_modules/
 frontend/dist/
+frontend/coverage/
+*.tsbuildinfo
 
 # IDE and OS
 .idea/
@@ -32,4 +35,3 @@ frontend/dist/
 pg_data/
 redis_data/
 kafka_data/
-
