@@ -23,6 +23,7 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 1120px; min-height: 100vh; background: var(--paper); }
+.session-loading { display: grid; min-height: 100vh; place-items: center; color: var(--forest); font-family: "Space Grotesk", sans-serif; font-size: 30px; letter-spacing: .14em; }
 button, input { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; }

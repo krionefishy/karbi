@@ -36,6 +36,9 @@ class RedisClient:
     async def get(self, key: str) -> str | None:
         return cast(str | None, await self._require_client().get(key))
 
+    async def getdel(self, key: str) -> str | None:
+        return cast(str | None, await self._require_client().getdel(key))
+
     async def set(self, key: str, value: str, ttl_seconds: int | None = None) -> None:
         await self._require_client().set(key, value, ex=ttl_seconds)
 

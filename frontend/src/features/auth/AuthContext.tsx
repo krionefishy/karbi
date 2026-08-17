@@ -1,43 +1,51 @@
-import { createContext, useContext, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
+import { setAccessToken } from "../../api/http";
+import { restoreSession } from "./api";
 import type { CurrentUser } from "./types";
 
 interface AuthValue {
   user: CurrentUser | null;
+  isLoading: boolean;
   setSession: (user: CurrentUser, accessToken: string) => void;
   clearSession: () => void;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
-const USER_KEY = "karbi.user";
-
-function readUser(): CurrentUser | null {
-  try {
-    const value = sessionStorage.getItem(USER_KEY);
-    return value ? (JSON.parse(value) as CurrentUser) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: PropsWithChildren) {
-  const [user, setUser] = useState<CurrentUser | null>(readUser);
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    restoreSession()
+      .then((session) => {
+        if (active) setUser(session.user);
+      })
+      .catch(() => setAccessToken(null))
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const value = useMemo<AuthValue>(
     () => ({
       user,
+      isLoading,
       setSession: (nextUser, accessToken) => {
-        sessionStorage.setItem("karbi.access_token", accessToken);
-        sessionStorage.setItem(USER_KEY, JSON.stringify(nextUser));
+        setAccessToken(accessToken);
         setUser(nextUser);
       },
       clearSession: () => {
-        sessionStorage.removeItem("karbi.access_token");
-        sessionStorage.removeItem(USER_KEY);
+        setAccessToken(null);
         setUser(null);
       },
     }),
-    [user],
+    [isLoading, user],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
@@ -49,8 +57,11 @@ export function useAuth() {
 }
 
 export function ProtectedRoute() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const location = useLocation();
+  if (isLoading) {
+    return <main className="session-loading" aria-label="Восстановление сессии">KARBI</main>;
+  }
   if (!user) {
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }

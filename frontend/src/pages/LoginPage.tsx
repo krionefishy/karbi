@@ -7,14 +7,14 @@ import { login } from "../features/auth/api";
 import { useAuth } from "../features/auth/AuthContext";
 
 export function LoginPage() {
-  const { user, setSession } = useAuth();
+  const { user, isLoading, setSession } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
-  if (user) return <Navigate to="/automations" replace />;
+  if (!isLoading && user) return <Navigate to="/automations" replace />;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

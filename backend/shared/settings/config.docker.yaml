@@ -34,6 +34,8 @@ s3:
 auth:
   jwt_secret: ${JWT_SECRET:-change-me}
   algorithm: HS256
+  issuer: karbi
+  audience: karbi-api
   access_token_ttl_seconds: 86400
   refresh_token_ttl_seconds: 604800
 security:

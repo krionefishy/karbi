@@ -18,7 +18,9 @@ kafka:
 s3:
   enabled: false
 auth:
-  jwt_secret: test-only-secret
+  jwt_secret: test-only-secret-at-least-32-characters
+  issuer: karbi
+  audience: karbi-api
 security:
   credential_encryption_keys: []
   credential_fingerprint_key: test-only-fingerprint-key

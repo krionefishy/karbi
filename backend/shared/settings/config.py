@@ -110,6 +110,8 @@ class AuthConfig:
     algorithm: str = "HS256"
     access_token_ttl_seconds: int = 86_400
     refresh_token_ttl_seconds: int = 604_800
+    issuer: str = "karbi"
+    audience: str = "karbi-api"
 
 
 @dataclass(frozen=True, slots=True)

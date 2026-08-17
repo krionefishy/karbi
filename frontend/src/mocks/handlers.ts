@@ -3,21 +3,6 @@ import { delay, http, HttpResponse } from "msw";
 import { automations, histories, sellers } from "./data";
 
 export const handlers = [
-  http.post("/api/v1/auth/login", async ({ request }) => {
-    const credentials = (await request.json()) as { username?: string; password?: string };
-    await delay(250);
-    if (!credentials.username || !credentials.password) {
-      return HttpResponse.json({ detail: "Введите логин и пароль" }, { status: 401 });
-    }
-    return HttpResponse.json({
-      access_token: "mock-access-token",
-      token_type: "bearer",
-      expires_in: 86_400,
-      user: { id: "mock-user", username: credentials.username },
-    });
-  }),
-  http.get("/api/v1/auth/me", () => HttpResponse.json({ id: "mock-user", username: "demo" })),
-  http.post("/api/v1/auth/logout", () => HttpResponse.json({ status: "ok" })),
   http.get("/api/v1/automations", async () => {
     await delay(180);
     return HttpResponse.json(automations);

@@ -26,6 +26,8 @@ s3:
   enabled: false
 auth:
   jwt_secret: change-me
+  issuer: karbi
+  audience: karbi-api
   access_token_ttl_seconds: 86400
   refresh_token_ttl_seconds: 604800
 security:

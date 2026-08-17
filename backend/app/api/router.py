@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from backend.modules.platform.presentation.http import router as auth_router
+
 router = APIRouter()
+router.include_router(auth_router)
 
 
 @router.get("/health/live", include_in_schema=False)

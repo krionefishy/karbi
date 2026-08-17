@@ -13,6 +13,15 @@ mock responses for login, automations, sellers, products, and daily review snaps
 `just frontend-dev`; validate it with `just frontend-check`. Compose builds the frontend separately and
 the edge Nginx serves it while forwarding `/api/` to FastAPI.
 
+Employee accounts are created from an application container or a configured local environment:
+
+```bash
+python -m backend.commands.create_user --username employee
+```
+
+Passwords are Argon2 hashes. Authentication uses a 24-hour access JWT kept in frontend memory and a
+single-use, rotating 7-day refresh token in an HttpOnly cookie backed by Redis.
+
 Shared `storage/pg` owns the SQLAlchemy engine and sessions. Each
 `modules/<module>/infrastructure/postgres` package owns only that module's ORM models and repositories;
 this keeps database adapters on the module boundary and makes later service extraction mechanical.
