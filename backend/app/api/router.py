@@ -1,0 +1,20 @@
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+router = APIRouter()
+
+
+@router.get("/health/live", include_in_schema=False)
+async def live() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.get("/health/ready", include_in_schema=False)
+async def ready(request: Request) -> JSONResponse:
+    database_ready = await request.app.state.database.ping()
+    redis_ready = await request.app.state.redis.ping()
+    status_code = 200 if database_ready and redis_ready else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"database": database_ready, "redis": redis_ready},
+    )

@@ -2,8 +2,7 @@ set dotenv-load
 
 compose := "docker compose -f deploy/compose.yaml"
 test_compose := "docker compose -f deploy/compose.test.yaml"
-test_database_url := "postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test"
-test_redis_url := "redis://localhost:56380/0"
+test_config := "backend/shared/settings/config.test.yaml"
 
 default:
     @just --list
@@ -21,7 +20,7 @@ lint:
     uv run mypy backend
 
 test:
-    uv run pytest
+    CONFIG_PATH={{ test_config }} uv run pytest
 
 test-infra-up:
     {{ test_compose }} up -d
@@ -31,12 +30,12 @@ test-infra-down:
     {{ test_compose }} down --volumes --remove-orphans
 
 test-migrate:
-    DATABASE_URL={{ test_database_url }} uv run alembic -n platform upgrade head
-    DATABASE_URL={{ test_database_url }} uv run alembic -n wb_core upgrade head
-    DATABASE_URL={{ test_database_url }} uv run alembic -n wb_reviews upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n platform upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_core upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_reviews upgrade head
 
 test-all: test-infra-up test-migrate
-    DATABASE_URL={{ test_database_url }} REDIS_URL={{ test_redis_url }} uv run pytest
+    CONFIG_PATH={{ test_config }} uv run pytest
 
 migrate-platform:
     uv run alembic -n platform upgrade head

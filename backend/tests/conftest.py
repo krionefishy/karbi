@@ -4,12 +4,13 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from backend.entrypoints.api import create_app
+from backend.app.application import create_app
+from backend.shared.settings import load_settings
 
 
 @pytest.fixture
 def app() -> FastAPI:
-    return create_app()
+    return create_app(load_settings("backend/shared/settings/config.test.yaml"))
 
 
 @pytest.fixture

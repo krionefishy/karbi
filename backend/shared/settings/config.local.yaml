@@ -1,0 +1,39 @@
+app:
+  environment: local
+  host: 0.0.0.0
+  port: 8000
+  log_level: INFO
+  cors_origins: []
+  trust_proxy_headers: false
+database:
+  host: localhost
+  port: 5432
+  user: karbi
+  password: karbi
+  database: karbi
+redis:
+  host: localhost
+  port: 6379
+  database: 0
+  password: ""
+kafka:
+  enabled: false
+  bootstrap_servers: localhost:9092
+  consumer_group: karbi
+  topic_partitions: 3
+  topic_replication_factor: 1
+s3:
+  enabled: false
+auth:
+  jwt_secret: change-me
+  access_token_ttl_seconds: 86400
+  refresh_token_ttl_seconds: 604800
+security:
+  credential_encryption_keys: []
+  credential_fingerprint_key: ""
+rate_limit:
+  enabled: true
+  requests: 30
+  window_seconds: 60
+worker:
+  poll_interval_seconds: 30

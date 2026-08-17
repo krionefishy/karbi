@@ -1,0 +1,47 @@
+app:
+  environment: ${APP_ENVIRONMENT:-docker}
+  host: 0.0.0.0
+  port: 8000
+  log_level: ${APP_LOG_LEVEL:-INFO}
+  cors_origins: []
+  trust_proxy_headers: true
+database:
+  host: db
+  port: 5432
+  user: ${DB_USER:-karbi}
+  password: ${DB_PASSWORD:-karbi}
+  database: ${DB_NAME:-karbi}
+redis:
+  host: redis
+  port: 6379
+  database: 0
+  password: ${REDIS_PASSWORD:-karbi}
+kafka:
+  enabled: ${KAFKA_ENABLED:-true}
+  bootstrap_servers: kafka:9092
+  consumer_group: karbi
+  topic_partitions: 3
+  topic_replication_factor: 1
+s3:
+  enabled: ${S3_ENABLED:-false}
+  endpoint_url: ${S3_ENDPOINT_URL:-}
+  tenant_id: ${S3_TENANT_ID:-}
+  key_id: ${S3_KEY_ID:-}
+  secret_key: ${S3_SECRET_KEY:-}
+  bucket: ${S3_BUCKET:-}
+  region: ${S3_REGION:-ru-central-1}
+  verify_tls: ${S3_VERIFY_TLS:-true}
+auth:
+  jwt_secret: ${JWT_SECRET:-change-me}
+  algorithm: HS256
+  access_token_ttl_seconds: 86400
+  refresh_token_ttl_seconds: 604800
+security:
+  credential_encryption_keys: ${CREDENTIALS_ENCRYPTION_KEYS:-}
+  credential_fingerprint_key: ${CREDENTIALS_FINGERPRINT_KEY:-}
+rate_limit:
+  enabled: true
+  requests: ${RATE_LIMIT_REQUESTS:-30}
+  window_seconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+worker:
+  poll_interval_seconds: 30

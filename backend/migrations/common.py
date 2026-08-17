@@ -5,10 +5,11 @@ from alembic import context
 from sqlalchemy import MetaData, pool, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from backend.shared.settings import load_settings
+
 
 def run_migrations(metadata: MetaData, schema: str) -> None:
-    config = context.config
-    database_url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    database_url = os.getenv("DATABASE_URL") or load_settings().database.url
 
     if context.is_offline_mode():
         context.configure(

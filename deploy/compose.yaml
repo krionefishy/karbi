@@ -20,24 +20,32 @@ services:
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
     environment: &application-environment
-      APP_ENVIRONMENT: docker
-      DATABASE_URL: postgresql+asyncpg://${DB_USER:-karbi}:${DB_PASSWORD:-karbi}@db:5432/${DB_NAME:-karbi}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-karbi}@redis:6379/0
-      KAFKA_ENABLED: "false"
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CONFIG_PATH: /app/backend/shared/settings/config.docker.yaml
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-docker}
+      DB_USER: ${DB_USER:-karbi}
+      DB_PASSWORD: ${DB_PASSWORD:-karbi}
+      DB_NAME: ${DB_NAME:-karbi}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-karbi}
+      KAFKA_ENABLED: ${KAFKA_ENABLED:-true}
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-30}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+      S3_ENABLED: ${S3_ENABLED:-false}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_TENANT_ID: ${S3_TENANT_ID:-}
+      S3_KEY_ID: ${S3_KEY_ID:-}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-ru-central-1}
+      S3_VERIFY_TLS: ${S3_VERIFY_TLS:-true}
       JWT_SECRET: ${JWT_SECRET:-change-me}
-      CREDENTIALS_ENCRYPTION_KEY: ${CREDENTIALS_ENCRYPTION_KEY:-}
+      CREDENTIALS_ENCRYPTION_KEYS: ${CREDENTIALS_ENCRYPTION_KEYS:-}
+      CREDENTIALS_FINGERPRINT_KEY: ${CREDENTIALS_FINGERPRINT_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready')"]
@@ -53,7 +61,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
-    command: ["python", "-m", "backend.entrypoints.wb_reviews_worker"]
+    command: ["python", "-m", "backend.workers.wb_reviews.main"]
     environment: *application-environment
     depends_on:
       migrate:
@@ -138,6 +146,7 @@ services:
       KAFKA_LOG_RETENTION_HOURS: 72
       KAFKA_LOG_RETENTION_BYTES: 2147483648
       KAFKA_LOG_SEGMENT_BYTES: 268435456
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
     volumes:
       - kafka_data:/var/lib/kafka/data

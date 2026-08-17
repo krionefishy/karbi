@@ -1,0 +1,28 @@
+app:
+  environment: test
+  log_level: WARNING
+database:
+  host: localhost
+  port: 55433
+  user: karbi
+  password: karbi
+  database: karbi_test
+redis:
+  host: localhost
+  port: 56380
+  database: 0
+kafka:
+  enabled: false
+  topic_partitions: 1
+  topic_replication_factor: 1
+s3:
+  enabled: false
+auth:
+  jwt_secret: test-only-secret
+security:
+  credential_encryption_keys: []
+  credential_fingerprint_key: test-only-fingerprint-key
+rate_limit:
+  enabled: false
+worker:
+  poll_interval_seconds: 1
