@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test
+      REDIS_URL: redis://localhost:56380/0
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.11"
+          enable-cache: true
+
+      - name: Install Python dependencies
+        run: uv sync --locked
+
+      - name: Verify lockfile
+        run: uv lock --check
+
+      - name: Start test infrastructure
+        run: |
+          docker compose -f deploy/compose.test.yaml up -d
+          timeout 30s bash -c 'until docker compose -f deploy/compose.test.yaml exec -T db-test pg_isready -U karbi -d karbi_test; do sleep 2; done'
+          timeout 30s bash -c 'until docker compose -f deploy/compose.test.yaml exec -T redis-test redis-cli ping; do sleep 2; done'
+
+      - name: Apply platform migrations
+        run: uv run alembic -n platform upgrade head
+
+      - name: Apply WB core migrations
+        run: uv run alembic -n wb_core upgrade head
+
+      - name: Apply WB reviews migrations
+        run: uv run alembic -n wb_reviews upgrade head
+
+      - name: Run Ruff
+        run: |
+          uv run ruff check backend
+          uv run ruff format --check backend
+
+      - name: Run mypy
+        run: uv run mypy backend
+
+      - name: Run tests
+        run: uv run pytest --cov=backend --cov-report=term-missing
+
+      - name: Build application image
+        run: docker build -f deploy/Dockerfile -t karbi:ci .
+
+      - name: Stop test infrastructure
+        if: always()
+        run: docker compose -f deploy/compose.test.yaml down --volumes --remove-orphans
+
