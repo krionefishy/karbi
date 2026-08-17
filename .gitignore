@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# Secrets and local configuration
+.env
+*.pem
+backend/shared/settings/config.yaml
+backend/shared/settings/config.production.yaml
+
+# Test and tooling artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local data
+pg_data/
+redis_data/
+kafka_data/
+
