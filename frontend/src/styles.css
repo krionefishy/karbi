@@ -169,9 +169,11 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .product-identity { display: flex; min-width: 0; justify-content: center; flex-direction: column; padding: 13px 16px; border-right: 1px solid var(--line); }
 .product-identity strong { overflow: hidden; margin-bottom: 6px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .product-identity span { color: var(--muted); font: 10px "JetBrains Mono", monospace; }
+.product-identity a, .wb-article-link { color: var(--forest); text-decoration: underline; text-decoration-color: rgba(26,60,43,.35); text-underline-offset: 2px; }
+.product-identity a:hover, .wb-article-link:hover { text-decoration-color: currentColor; }
 .day-cell { position: relative; display: flex; min-width: 0; align-items: center; justify-content: center; flex-direction: column; gap: 5px; padding: 10px 4px; background: var(--surface); border: 0; border-left: 1px solid var(--line); cursor: pointer; }
 .day-cell:hover { background: var(--paper); }
-.day-empty { color: var(--muted); cursor: default; font: 11px "JetBrains Mono", monospace; }
+.day-empty { color: var(--muted); cursor: default; font: 9px "JetBrains Mono", monospace; text-align: center; text-transform: uppercase; }
 .today-cell { background: rgba(26,60,43,.045) !important; box-shadow: inset 1px 0 var(--line), inset -1px 0 var(--line); }
 .day-selected { color: #fff; background: var(--forest) !important; }
 .review-count { display: flex; align-items: center; gap: 5px; font: 500 13px "JetBrains Mono", monospace; }

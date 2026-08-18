@@ -36,6 +36,7 @@ class SnapshotResponse(BaseModel):
 class ProductHistoryResponse(BaseModel):
     id: uuid.UUID
     article: str
+    vendor_code: str
     name: str
     snapshots: list[SnapshotResponse]
 
@@ -92,6 +93,7 @@ async def seller_history(
             ProductHistoryResponse(
                 id=product.id,
                 article=product.article,
+                vendor_code=product.vendor_code,
                 name=product.name,
                 snapshots=[SnapshotResponse(**snapshot) for snapshot in product.snapshots],
             )

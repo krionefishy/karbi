@@ -6,6 +6,8 @@ import type { DailyReviewSnapshot, ProductReviewHistory } from "../features/revi
 interface ReviewTimelineProps { products: ProductReviewHistory[]; }
 interface Selection { productId: string; date: string; }
 
+const HISTORY_DAYS = 90;
+
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", timeZone: "UTC" });
 const weekdayFormatter = new Intl.DateTimeFormat("ru-RU", { weekday: "short", timeZone: "UTC" });
 
@@ -55,12 +57,9 @@ function RatingDetails({ snapshot }: { snapshot: DailyReviewSnapshot }) {
 
 export function ReviewTimeline({ products }: ReviewTimelineProps) {
   const today = moscowToday();
-  const earliestSnapshot = products
-    .flatMap((product) => product.snapshots.map((snapshot) => snapshot.date))
-    .sort()[0];
-  const fallbackStart = new Date(`${today}T00:00:00Z`);
-  fallbackStart.setUTCDate(fallbackStart.getUTCDate() - 6);
-  const dates = calendarDates(earliestSnapshot ?? fallbackStart.toISOString().slice(0, 10), today);
+  const historyStart = new Date(`${today}T00:00:00Z`);
+  historyStart.setUTCDate(historyStart.getUTCDate() - (HISTORY_DAYS - 1));
+  const dates = calendarDates(historyStart.toISOString().slice(0, 10), today);
   const maxOffset = Math.max(0, dates.length - 7);
   const [offset, setOffset] = useState(0);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -91,10 +90,19 @@ export function ReviewTimeline({ products }: ReviewTimelineProps) {
           const selectedSnapshot = selection?.productId === product.id ? product.snapshots.find((snapshot) => snapshot.date === selection.date) : undefined;
           return <div className="product-block" key={product.id}>
             <div className="timeline-grid product-row">
-              <div className="product-identity"><strong>{product.name}</strong><span>арт. {product.article}</span></div>
+              <div className="product-identity">
+                <strong>{product.name}</strong>
+                <span>
+                  WB{" "}
+                  <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
+                    {product.article}
+                  </a>
+                  {product.vendor_code && <> · продавца {product.vendor_code}</>}
+                </span>
+              </div>
               {range.map((date) => {
                 const snapshot = snapshots.get(date);
-                if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>—</div>;
+                if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>Нет данных</div>;
                 const previousDate = new Date(`${date}T00:00:00Z`);
                 previousDate.setUTCDate(previousDate.getUTCDate() - 1);
                 const previous = snapshots.get(previousDate.toISOString().slice(0, 10));

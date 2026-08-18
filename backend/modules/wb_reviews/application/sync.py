@@ -16,6 +16,7 @@ from backend.shared.outbox import OutboxRepository
 class ProductHistory:
     id: uuid.UUID
     article: str
+    vendor_code: str
     name: str
     snapshots: list[dict]
 
@@ -84,7 +85,13 @@ class ReviewSyncService:
         return ReviewHistory(
             seller_id,
             [
-                ProductHistory(article.id, article.article, article.name, by_article.get(article.article, []))
+                ProductHistory(
+                    article.id,
+                    article.article,
+                    article.vendor_code,
+                    article.name,
+                    by_article.get(article.article, []),
+                )
                 for article in articles
             ],
         )

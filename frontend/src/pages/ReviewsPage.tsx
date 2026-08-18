@@ -204,7 +204,16 @@ export function ReviewsPage() {
               {articles.map((article) => (
                 <div className="article-row" key={article.id}>
                   <strong>{article.name}</strong>
-                  <code>{article.article}</code>
+                  <code>
+                    <a
+                      className="wb-article-link"
+                      href={`https://www.wildberries.ru/catalog/${article.article}/detail.aspx`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {article.article}
+                    </a>
+                  </code>
                   <code>{article.vendor_code || "—"}</code>
                 </div>
               ))}

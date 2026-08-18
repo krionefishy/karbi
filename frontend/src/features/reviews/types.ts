@@ -36,6 +36,7 @@ export interface DailyReviewSnapshot {
 export interface ProductReviewHistory {
   id: string;
   article: string;
+  vendor_code: string;
   name: string;
   snapshots: DailyReviewSnapshot[];
 }
