@@ -47,6 +47,23 @@ class ReviewSyncRepository:
         )
         return self.to_domain(model) if model else None
 
+    async def last_run_finished_at(self, statuses: tuple[str, ...]) -> datetime | None:
+        """When a run in one of these states last finished."""
+        return await self.session.scalar(
+            select(ReviewSyncRunModel.finished_at)
+            .where(ReviewSyncRunModel.status.in_(statuses), ReviewSyncRunModel.finished_at.is_not(None))
+            .order_by(ReviewSyncRunModel.finished_at.desc())
+            .limit(1)
+        )
+
+    async def count_runs_since(self, moment: datetime) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count()).select_from(ReviewSyncRunModel).where(ReviewSyncRunModel.created_at >= moment)
+            )
+            or 0
+        )
+
     async def create_run(
         self, trigger: str, snapshot_date: date, seller_ids: list[uuid.UUID]
     ) -> tuple[ReviewSyncRunModel, list[ReviewSyncJobModel]]:

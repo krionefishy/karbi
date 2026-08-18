@@ -1,8 +1,27 @@
+export type AutomationStatus = "active" | "degraded" | "failed" | "running" | "idle";
+
+export interface AutomationRun {
+  id: string;
+  trigger: "scheduled" | "manual";
+  status: "queued" | "running" | "success" | "partial_success" | "error";
+  snapshot_date: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  total_sellers: number;
+  completed_sellers: number;
+  failed_sellers: number;
+  duration_seconds: number | null;
+}
+
 export interface Automation {
   id: string;
   title: string;
   description: string;
-  status: "active";
-  last_run_at: string | null;
-  seller_count: number | null;
+  status: AutomationStatus;
+  seller_count: number;
+  runs_last_24h: number;
+  last_run: AutomationRun | null;
+  last_success_at: string | null;
+  next_run_at: string | null;
 }

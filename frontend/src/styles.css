@@ -105,10 +105,24 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .automation-icon { display: inline-flex; width: 46px; height: 46px; align-items: center; justify-content: center; color: var(--forest); background: var(--paper); border: 1px solid var(--line); }
 .status-active { color: var(--positive); border-color: rgba(22,132,74,.25); }
 .status-active > span { background: var(--positive); }
+.status-running { color: var(--forest); border-color: rgba(26,60,43,.25); }
+.status-running > span { background: var(--forest); animation: status-pulse 1.6s ease-in-out infinite; }
+.status-degraded { color: var(--gold); border-color: rgba(216,154,22,.32); }
+.status-degraded > span { background: var(--gold); }
+.status-failed { color: var(--negative); border-color: rgba(196,62,54,.28); }
+.status-failed > span { background: var(--negative); }
+.status-idle { color: var(--muted); }
+.status-idle > span { background: var(--muted); }
+@keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 .status-soon > span { background: var(--muted); }
 .automation-card h2 { max-width: 290px; margin-bottom: 10px; font-size: 21px; }
 .automation-card > p { min-height: 66px; font-size: 14px; line-height: 1.55; }
-.automation-meta { display: grid; gap: 8px; margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font: 11px "JetBrains Mono", monospace; }
+.automation-meta { display: grid; gap: 10px; margin: 18px 0 0; padding-top: 18px; border-top: 1px solid var(--line); font: 11px "JetBrains Mono", monospace; }
+.automation-meta > div { display: grid; grid-template-columns: 128px 1fr; gap: 4px 12px; align-items: baseline; }
+.automation-meta dt { color: var(--muted); letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+.automation-meta dd { margin: 0; color: var(--text); }
+.automation-run-detail { display: block; margin-top: 3px; color: var(--muted); }
+.automation-failed { color: var(--negative); font-weight: 500; }
 .automation-meta span { display: flex; justify-content: space-between; }
 .automation-meta b { color: var(--text); font-weight: 500; }
 .card-action { align-self: flex-start; margin-top: auto; }

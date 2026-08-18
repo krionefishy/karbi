@@ -4,6 +4,15 @@ import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
 import { getAutomations, getPlatformReadiness } from "../features/automations/api";
+import type { AutomationStatus } from "../features/automations/types";
+
+const statusLabels: Record<AutomationStatus, string> = {
+  active: "Активна",
+  running: "Идёт синхронизация",
+  degraded: "Прошла с ошибками",
+  failed: "Последний запуск упал",
+  idle: "Ещё не запускалась",
+};
 
 function sellerLabel(count: number | null) {
   const value = count ?? 0;
@@ -12,10 +21,17 @@ function sellerLabel(count: number | null) {
   return `${value} селлеров`;
 }
 
-function lastRunLabel(value: string | null) {
-  return value
-    ? new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
-    : "ещё не запускалась";
+const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+
+function momentLabel(value: string | null, fallback = "—") {
+  return value ? momentFormatter.format(new Date(value)) : fallback;
+}
+
+function durationLabel(seconds: number | null) {
+  if (seconds === null) return null;
+  if (seconds < 60) return `${seconds} с`;
+  const minutes = Math.floor(seconds / 60);
+  return seconds % 60 ? `${minutes} мин ${seconds % 60} с` : `${minutes} мин`;
 }
 
 export function AutomationsPage() {
@@ -58,21 +74,47 @@ export function AutomationsPage() {
                     <span className="automation-icon">
                       <MessageSquareText size={22} />
                     </span>
-                    <span className="status-badge status-active">
+                    <span className={`status-badge status-${automation.status}`}>
                       <span />
-                      Активна
+                      {statusLabels[automation.status]}
                     </span>
                   </div>
                   <h2>{automation.title}</h2>
                   <p className="muted">{automation.description}</p>
-                  <div className="automation-meta">
-                    <span>
-                      <b>{sellerLabel(automation.seller_count)}</b>
-                    </span>
-                    <span>
-                      Последний запуск <b>{lastRunLabel(automation.last_run_at)}</b>
-                    </span>
-                  </div>
+                  <dl className="automation-meta">
+                    <div>
+                      <dt>Селлеров</dt>
+                      <dd>{sellerLabel(automation.seller_count)}</dd>
+                    </div>
+                    <div>
+                      <dt>Последний запуск</dt>
+                      <dd>
+                        {momentLabel(automation.last_run?.finished_at ?? automation.last_run?.created_at ?? null,
+                          "ещё не запускалась")}
+                        {automation.last_run && (
+                          <span className="automation-run-detail">
+                            {automation.last_run.completed_sellers} из {automation.last_run.total_sellers}
+                            {automation.last_run.failed_sellers > 0 && (
+                              <b className="automation-failed"> · {automation.last_run.failed_sellers} с ошибкой</b>
+                            )}
+                            {durationLabel(automation.last_run.duration_seconds) &&
+                              ` · ${durationLabel(automation.last_run.duration_seconds)}`}
+                          </span>
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Успешно завершалась</dt>
+                      <dd>{momentLabel(automation.last_success_at, "ни разу")}</dd>
+                    </div>
+                    <div>
+                      <dt>Следующий запуск</dt>
+                      <dd>
+                        {momentLabel(automation.next_run_at)}
+                        <span className="automation-run-detail">за сутки запусков: {automation.runs_last_24h}</span>
+                      </dd>
+                    </div>
+                  </dl>
                   <Link className="primary-button card-action" to="/automations/wb-reviews">
                     Открыть <ArrowRight size={16} />
                   </Link>

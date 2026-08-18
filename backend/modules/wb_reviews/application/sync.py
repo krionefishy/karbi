@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,31 @@ class ProductHistory:
 class ReviewHistory:
     seller_id: uuid.UUID
     products: list[ProductHistory]
+
+
+SUCCESSFUL_STATUSES = ("success", "partial_success")
+
+
+@dataclass(frozen=True, slots=True)
+class SyncOverview:
+    """What the automation card needs: is it alive, and when did it last work."""
+
+    seller_count: int
+    last_run: ReviewSyncRun | None
+    last_success_at: datetime | None
+    runs_last_24h: int
+
+    @property
+    def status(self) -> str:
+        if self.last_run is None:
+            return "idle"
+        if self.last_run.status in ("queued", "running"):
+            return "running"
+        if self.last_run.status == "success":
+            return "active"
+        if self.last_run.status == "partial_success":
+            return "degraded"
+        return "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +137,15 @@ class ReviewSyncService:
                 )
             )
         return replace(run, jobs=tuple(jobs))
+
+    async def overview(self) -> SyncOverview:
+        """Real state of the automation, assembled from the runs we recorded."""
+        return SyncOverview(
+            seller_count=len(await self.sellers.list_sellers()),
+            last_run=await self.latest(),
+            last_success_at=await self.reviews.last_run_finished_at(SUCCESSFUL_STATUSES),
+            runs_last_24h=await self.reviews.count_runs_since(datetime.now(UTC) - timedelta(hours=24)),
+        )
 
     async def history(self, seller_id: uuid.UUID, days: int) -> ReviewHistory:
         if await self.sellers.get(seller_id) is None:
