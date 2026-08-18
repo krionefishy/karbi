@@ -1,33 +1,142 @@
 # Karbi
 
-Internal automation platform for Wildberries workflows.
+Karbi is an internal automation platform for marketplace workflows. The current application manages
+Wildberries sellers, synchronizes their product catalogs, and stores daily review-count snapshots for every
+product and rating from one to five stars.
 
-The project starts as a modular monolith with independently runnable API and worker processes. PostgreSQL schemas isolate platform data, Wildberries account/catalog data, and review aggregation data.
+The project is a modular monolith: business modules share one deployment and PostgreSQL instance, while API,
+background consumers, and the outbox publisher run as independent processes. Module boundaries and database
+schemas are kept explicit so a module can be extracted into a separate service later.
 
-Runtime configuration is loaded from YAML. Use `backend/shared/settings/config.local.yaml` locally,
-`config.docker.yaml` in Compose, and inject secrets through the `${ENVIRONMENT_VARIABLE}` placeholders.
-Production secrets must never be committed.
+## Stack
 
-The React frontend lives in `frontend/` and uses the FastAPI endpoints under `/api/v1`. Run it with
-`just frontend-dev`; validate it with `just frontend-check`. Compose builds the frontend separately and
-the edge Nginx serves it while forwarding `/api/` to FastAPI.
+- FastAPI, SQLAlchemy 2, Alembic, PostgreSQL
+- Kafka with transactional outbox and idempotent consumers
+- Redis for refresh sessions and sliding-window rate limiting
+- React, TypeScript, TanStack Query, Vite
+- Nginx as the single HTTP entry point
+- Docker Compose for local and server deployment
 
-Creating a Wildberries seller stores its API key encrypted and writes a catalog-sync event to the
-`wb_core.outbox_events` table in the same transaction. The standalone `outbox-publisher` process publishes
-pending events to Kafka. The WB worker consumes `wb.catalog.sync.requested`, loads all product cards through
-the official cursor-based Content API, and upserts them into `wb_core.articles`. Consumer-side inbox records
-make repeated Kafka delivery safe. Deleting a seller physically removes the seller, credentials, products,
-unpublished events, and review history.
+## Runtime components
 
-Employee accounts are created from an application container or a configured local environment:
+| Component | Responsibility |
+| --- | --- |
+| `api` | Authentication, seller management, review history, and manual synchronization endpoints |
+| `wb-reviews-worker` | WB catalog/review consumers and the daily scheduler |
+| `outbox-publisher` | Reliably publishes committed outbox events to Kafka |
+| `frontend` | Employee web interface |
+| `nginx` | Serves the frontend and proxies `/api/` to FastAPI |
+| `db`, `redis`, `kafka` | Application infrastructure |
+
+PostgreSQL data is separated into schemas:
+
+- `platform` — employee accounts;
+- `wb_core` — sellers, encrypted credentials, articles, inbox, and outbox;
+- `wb_reviews` — daily rating snapshots and synchronization runs.
+
+The review scheduler starts one run per day after 12:00 `Europe/Moscow`. A manual run uses the same
+outbox/Kafka pipeline. WB requests are made only after the SQLAlchemy session has been closed; collected data
+is persisted in a separate short transaction.
+
+## Quick start
+
+Requirements: Docker with Compose, or Python 3.12, `uv`, Node.js 22, and `just` for local development.
+
+1. Create the environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Generate secrets and place them in `.env`:
+
+   ```bash
+   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   openssl rand -hex 32
+   ```
+
+   Use the Fernet value for `CREDENTIALS_ENCRYPTION_KEYS`. Generate separate random values for
+   `CREDENTIALS_FINGERPRINT_KEY` and `JWT_SECRET`.
+
+3. Start the application:
+
+   ```bash
+   just compose-up
+   ```
+
+   By default, the web interface is available at [http://localhost:8080](http://localhost:8080).
+   Migrations run automatically before the API and workers start.
+
+4. Create the first employee account:
+
+   ```bash
+   docker compose -f deploy/compose.yaml exec api \
+     python -m backend.commands.create_user --username employee
+   ```
+
+Useful operational commands:
 
 ```bash
-python -m backend.commands.create_user --username employee
+just compose-status
+just compose-logs api
+just compose-logs wb-reviews-worker
+just compose-down
 ```
 
-Passwords are Argon2 hashes. Authentication uses a 24-hour access JWT kept in frontend memory and a
-single-use, rotating 7-day refresh token in an HttpOnly cookie backed by Redis.
+## Configuration and secrets
 
-Shared `storage/pg` owns the SQLAlchemy engine and sessions. Each
-`modules/<module>/infrastructure/postgres` package owns only that module's ORM models and repositories;
-this keeps database adapters on the module boundary and makes later service extraction mechanical.
+Runtime settings are loaded from YAML:
+
+- `backend/shared/settings/config.local.yaml` for direct local execution;
+- `backend/shared/settings/config.docker.yaml` for Compose;
+- `backend/shared/settings/config.test.yaml` for tests.
+
+Docker configuration resolves credentials from environment variables. Never commit `.env`, WB API keys, JWT
+secrets, or credential-encryption keys. `APP_ENVIRONMENT=production` enables strict startup validation for
+required secrets and unsafe CORS settings.
+
+Wildberries API keys are encrypted before being stored. The first value in `CREDENTIALS_ENCRYPTION_KEYS` is
+used for new writes; additional comma-separated keys can be retained temporarily during key rotation.
+
+## Development
+
+Install dependencies:
+
+```bash
+just install
+```
+
+Run the API and worker directly using `CONFIG_PATH` when needed. The frontend development server starts with:
+
+```bash
+just frontend-dev
+```
+
+Quality checks:
+
+```bash
+just lint
+just frontend-check
+```
+
+Run backend tests with isolated PostgreSQL and Redis:
+
+```bash
+just test-infra-up
+just test-migrate
+just test
+just test-infra-down
+```
+
+Apply all local migrations:
+
+```bash
+just migrate-all
+```
+
+Kafka topics are registered in application code and created through the Kafka admin client at startup. They
+must not be created by ad-hoc shell scripts.
+
+## License
+
+Karbi is available under the [MIT License](LICENSE).
