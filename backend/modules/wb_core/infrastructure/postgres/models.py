@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -74,15 +75,28 @@ class ArticleModel(WBCoreBase):
     article: Mapped[str] = mapped_column(String(255), nullable=False)
     vendor_code: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     name: Mapped[str] = mapped_column(String(512), nullable=False, default="")
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    imt_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    brand: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    subject_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    subject_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    photo_url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    sizes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # active — в продаже, archived — в корзине WB, feedback_only — карточки нет
+    # ни в каталоге, ни в корзине, но по ней приходят отзывы.
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "state IN ('active', 'archived', 'feedback_only')",
+            name="ck_wb_core_articles_state",
+        ),
         UniqueConstraint("seller_id", "article", name="uq_wb_core_articles_seller_article"),
-        Index("ix_wb_core_articles_seller_active", "seller_id", "is_active"),
+        Index("ix_wb_core_articles_seller_state", "seller_id", "state"),
+        Index("ix_wb_core_articles_seller_imt", "seller_id", "imt_id"),
     )
 
 

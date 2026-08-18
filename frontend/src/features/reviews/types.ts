@@ -7,12 +7,19 @@ export interface Seller {
   catalog_sync_error: string | null;
 }
 
+export type ArticleState = "active" | "archived" | "feedback_only";
+
 export interface SellerArticle {
   id: string;
   seller_id: string;
   article: string;
   vendor_code: string;
   name: string;
+  imt_id: number | null;
+  brand: string;
+  subject_name: string;
+  photo_url: string;
+  state: ArticleState;
 }
 
 export interface SellerInput {
@@ -38,7 +45,13 @@ export interface ProductReviewHistory {
   article: string;
   vendor_code: string;
   name: string;
+  imt_id: number | null;
+  brand: string;
+  photo_url: string;
+  state: ArticleState;
   snapshots: DailyReviewSnapshot[];
+  /** Same days, summed across every article of the WB склейка. */
+  card_snapshots: DailyReviewSnapshot[];
 }
 
 export interface SellerReviewHistory {
@@ -70,4 +83,5 @@ export interface ReviewSyncJob {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  attempts: number;
 }

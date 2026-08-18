@@ -81,11 +81,20 @@ class ReviewSyncRepository:
     async def get_job(self, job_id: uuid.UUID) -> ReviewSyncJobModel | None:
         return await self.session.get(ReviewSyncJobModel, job_id)
 
-    async def mark_job_running(self, job_id: uuid.UUID) -> bool:
+    async def mark_job_running(self, job_id: uuid.UUID, lease_seconds: int) -> bool:
+        """Claim the job and hold a lease, so a crashed worker cannot wedge the run."""
+        now = datetime.now(UTC)
         result = await self.session.execute(
             update(ReviewSyncJobModel)
             .where(ReviewSyncJobModel.id == job_id, ReviewSyncJobModel.status == "queued")
-            .values(status="running", started_at=datetime.now(UTC), error=None)
+            .values(
+                status="running",
+                started_at=now,
+                error=None,
+                attempts=ReviewSyncJobModel.attempts + 1,
+                next_attempt_at=None,
+                lease_expires_at=now + timedelta(seconds=lease_seconds),
+            )
             .returning(ReviewSyncJobModel.id)
         )
         return result.scalar_one_or_none() is not None
@@ -107,6 +116,8 @@ class ReviewSyncRepository:
                 feedback_count=feedback_count,
                 error=None,
                 finished_at=datetime.now(UTC),
+                next_attempt_at=None,
+                lease_expires_at=None,
             )
         )
 
@@ -114,8 +125,128 @@ class ReviewSyncRepository:
         await self.session.execute(
             update(ReviewSyncJobModel)
             .where(ReviewSyncJobModel.id == job_id)
-            .values(status="error", error=error[:1000], finished_at=datetime.now(UTC))
+            .values(
+                status="error",
+                error=error[:1000],
+                finished_at=datetime.now(UTC),
+                next_attempt_at=None,
+                lease_expires_at=None,
+            )
         )
+
+    async def reschedule_job(
+        self,
+        job_id: uuid.UUID,
+        error: str,
+        *,
+        max_attempts: int,
+        backoff_seconds: int,
+    ) -> bool:
+        """Put a temporarily failed job back in the queue; return False once attempts run out.
+
+        Wildberries answers 429 for minutes at a time, so a spent retry budget
+        inside one message must not cost the day's snapshot.
+        """
+        job = await self.session.get(ReviewSyncJobModel, job_id)
+        if job is None:
+            return False
+        if job.attempts >= max_attempts:
+            await self.fail_job(job_id, error)
+            return False
+        delay = backoff_seconds * (2 ** max(job.attempts - 1, 0))
+        await self.session.execute(
+            update(ReviewSyncJobModel)
+            .where(ReviewSyncJobModel.id == job_id)
+            .values(
+                status="queued",
+                error=error[:1000],
+                started_at=None,
+                finished_at=None,
+                lease_expires_at=None,
+                next_attempt_at=datetime.now(UTC) + timedelta(seconds=delay),
+            )
+        )
+        return True
+
+    async def expire_leases(self, max_attempts: int) -> int:
+        """Return jobs whose worker died back to the queue for immediate retry."""
+        now = datetime.now(UTC)
+        expired = list(
+            await self.session.scalars(
+                select(ReviewSyncJobModel).where(
+                    ReviewSyncJobModel.status == "running",
+                    ReviewSyncJobModel.lease_expires_at.is_not(None),
+                    ReviewSyncJobModel.lease_expires_at < now,
+                )
+            )
+        )
+        for job in expired:
+            if job.attempts >= max_attempts:
+                job.status = "error"
+                job.error = "Синхронизация не завершилась за отведённое время"
+                job.finished_at = now
+            else:
+                job.status = "queued"
+                job.error = "Воркер не завершил задачу, поставлена в очередь заново"
+                job.started_at = None
+                job.next_attempt_at = now
+            job.lease_expires_at = None
+        return len(expired)
+
+    async def claim_due_jobs(self, limit: int = 50) -> list[ReviewSyncJobModel]:
+        """Jobs waiting for a retry whose backoff has elapsed."""
+        now = datetime.now(UTC)
+        jobs = list(
+            await self.session.scalars(
+                select(ReviewSyncJobModel)
+                .where(
+                    ReviewSyncJobModel.status == "queued",
+                    ReviewSyncJobModel.next_attempt_at.is_not(None),
+                    ReviewSyncJobModel.next_attempt_at <= now,
+                )
+                .order_by(ReviewSyncJobModel.next_attempt_at)
+                .with_for_update(skip_locked=True)
+                .limit(limit)
+            )
+        )
+        for job in jobs:
+            job.next_attempt_at = None
+        return jobs
+
+    async def abandon_stale_runs(self, max_age_seconds: int) -> list[uuid.UUID]:
+        """Close runs that can never finish, so a new one is allowed to start."""
+        cutoff = datetime.now(UTC) - timedelta(seconds=max_age_seconds)
+        run_ids = list(
+            await self.session.scalars(
+                select(ReviewSyncRunModel.id).where(
+                    ReviewSyncRunModel.status.in_(ACTIVE_RUN_STATUSES),
+                    ReviewSyncRunModel.created_at < cutoff,
+                )
+            )
+        )
+        for run_id in run_ids:
+            await self.session.execute(
+                update(ReviewSyncJobModel)
+                .where(
+                    ReviewSyncJobModel.run_id == run_id,
+                    ReviewSyncJobModel.status.in_(ACTIVE_RUN_STATUSES),
+                )
+                .values(
+                    status="error",
+                    error="Прогон закрыт по таймауту",
+                    finished_at=datetime.now(UTC),
+                    next_attempt_at=None,
+                    lease_expires_at=None,
+                )
+            )
+            await self.finalize_run(run_id)
+        return run_ids
+
+    async def run_of_job(self, job_id: uuid.UUID) -> ReviewSyncRunModel | None:
+        job = await self.session.get(ReviewSyncJobModel, job_id)
+        if job is None:
+            return None
+        return await self.session.get(ReviewSyncRunModel, job.run_id)
 
     async def finalize_run(self, run_id: uuid.UUID) -> None:
         counts = await self.session.execute(

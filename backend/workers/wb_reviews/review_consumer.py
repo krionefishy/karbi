@@ -7,9 +7,10 @@ from datetime import date
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb import CatalogCard
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_reviews.infrastructure.wb import (
+    FeedbackAggregation,
     WBFeedbackClient,
     WBFeedbackPermanentError,
     WBFeedbackTemporaryError,
@@ -17,6 +18,8 @@ from backend.modules.wb_reviews.infrastructure.wb import (
 from backend.shared.kafka_streams.topics import WBReviewsTopics
 from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
+
+NO_RATINGS = (0, 0, 0, 0, 0)
 
 
 class ReviewSyncConsumer:
@@ -29,13 +32,19 @@ class ReviewSyncConsumer:
         page_size: int,
         request_interval_seconds: float = 1.0,
         retry_wait_seconds: int = 600,
+        lease_seconds: int = 1800,
+        max_attempts: int = 3,
+        retry_backoff_seconds: int = 300,
+        client: WBFeedbackClient | None = None,
     ) -> None:
         self.database = database
         self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
-        self.catalog_client = WBContentClient()
-        self.feedback_client = WBFeedbackClient(
+        self.lease_seconds = lease_seconds
+        self.max_attempts = max_attempts
+        self.retry_backoff_seconds = retry_backoff_seconds
+        self.feedback_client = client or WBFeedbackClient(
             page_size=page_size,
             request_interval_seconds=request_interval_seconds,
             max_retry_wait_seconds=retry_wait_seconds,
@@ -94,32 +103,22 @@ class ReviewSyncConsumer:
                 sellers.mark_inbox(event_id, "WBReviewSyncRequested")
                 await session.commit()
                 return
-            await reviews.mark_job_running(job_id)
+            await reviews.mark_job_running(job_id, self.lease_seconds)
             await reviews.mark_run_running(run_id)
             encrypted_key = credential.encrypted_api_key
             await session.commit()
 
+        # Phase 2: talk to WB. The catalog is already in Postgres, so only
+        # feedbacks are fetched here.
         try:
             api_key = self.cipher.decrypt(encrypted_key)
-            catalog = await self.catalog_client.get_articles(api_key)
             aggregation = await self.feedback_client.aggregate(api_key)
-        except (
-            CredentialDecryptionError,
-            WBPermanentError,
-            WBTemporaryError,
-            WBFeedbackPermanentError,
-            WBFeedbackTemporaryError,
-        ) as error:
-            await self._finish_failure(event_id, run_id, job_id, str(error))
+        except (CredentialDecryptionError, WBFeedbackPermanentError) as error:
+            await self._finish(event_id, run_id, job_id, str(error), retry=False)
             return
-
-        products = {item["article"]: item for item in catalog}
-        for article, product in aggregation.products.items():
-            products.setdefault(
-                article,
-                {"article": article, "vendor_code": product.vendor_code, "name": product.name},
-            )
-        article_counts = {article: aggregation.counts.get(article, (0, 0, 0, 0, 0)) for article in products}
+        except WBFeedbackTemporaryError as error:
+            await self._finish(event_id, run_id, job_id, str(error), retry=True)
+            return
 
         # Phase 3: persist the fully collected result in one short transaction.
         async with self.database.session() as session:
@@ -128,24 +127,62 @@ class ReviewSyncConsumer:
             if await sellers.get(seller_id) is None:
                 await reviews.fail_job(job_id, "Селлер удалён во время синхронизации")
             else:
-                await sellers.upsert_articles(seller_id, list(products.values()))
-                await reviews.upsert_daily_counts(seller_id, snapshot_date, article_counts)
-                await reviews.complete_job(job_id, len(products), aggregation.feedback_count)
+                known = {article.article for article in await sellers.list_articles(seller_id)}
+                unknown = self._unknown_cards(aggregation, known)
+                await sellers.ensure_feedback_articles(seller_id, unknown)
+                articles = known | {card.article for card in unknown}
+                counts = {article: aggregation.counts.get(article, NO_RATINGS) for article in articles}
+                await reviews.upsert_daily_counts(seller_id, snapshot_date, counts)
+                await reviews.complete_job(job_id, len(counts), aggregation.feedback_count)
             await reviews.finalize_run(run_id)
             sellers.mark_inbox(event_id, "WBReviewSyncRequested")
             await session.commit()
 
-    async def _finish_failure(
+    @staticmethod
+    def _unknown_cards(aggregation: FeedbackAggregation, known: set[str]) -> list[CatalogCard]:
+        return [
+            CatalogCard(
+                article=product.article,
+                vendor_code=product.vendor_code,
+                name=product.name,
+                imt_id=product.imt_id,
+            )
+            for article, product in aggregation.products.items()
+            if article not in known
+        ]
+
+    async def _finish(
         self,
         event_id: uuid.UUID,
         run_id: uuid.UUID,
         job_id: uuid.UUID,
         error: str,
+        *,
+        retry: bool,
     ) -> None:
+        """Close out a failed attempt.
+
+        The inbox row is always written and the offset always committed: a retry
+        is re-dispatched later as a fresh event, which keeps redelivery bounded
+        instead of blocking the partition on one throttled seller.
+        """
         async with self.database.session() as session:
             sellers = SellerRepository(session)
             reviews = ReviewSyncRepository(session)
-            await reviews.fail_job(job_id, error)
+            rescheduled = False
+            if retry:
+                rescheduled = await reviews.reschedule_job(
+                    job_id,
+                    error,
+                    max_attempts=self.max_attempts,
+                    backoff_seconds=self.retry_backoff_seconds,
+                )
+            if not rescheduled:
+                await reviews.fail_job(job_id, error)
             await reviews.finalize_run(run_id)
             sellers.mark_inbox(event_id, "WBReviewSyncRequested")
             await session.commit()
+        self.logger.warning(
+            "review_sync_attempt_failed",
+            extra={"job_id": str(job_id), "rescheduled": rescheduled, "error": error},
+        )

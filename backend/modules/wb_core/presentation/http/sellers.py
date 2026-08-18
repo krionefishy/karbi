@@ -68,6 +68,11 @@ class ArticleResponse(BaseModel):
     article: str
     vendor_code: str
     name: str
+    imt_id: int | None
+    brand: str
+    subject_name: str
+    photo_url: str
+    state: str
 
 
 def seller_response(seller: Seller) -> SellerResponse:
@@ -149,7 +154,16 @@ async def list_articles(
         raise not_found() from error
     return [
         ArticleResponse(
-            id=item.id, seller_id=item.seller_id, article=item.article, vendor_code=item.vendor_code, name=item.name
+            id=item.id,
+            seller_id=item.seller_id,
+            article=item.article,
+            vendor_code=item.vendor_code,
+            name=item.name,
+            imt_id=item.imt_id,
+            brand=item.brand,
+            subject_name=item.subject_name,
+            photo_url=item.photo_url,
+            state=item.state,
         )
         for item in articles
     ]

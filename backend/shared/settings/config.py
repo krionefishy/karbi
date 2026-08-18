@@ -134,8 +134,24 @@ class WorkerConfig:
     review_sync_hour: int = 12
     review_sync_timezone: str = "Europe/Moscow"
     feedback_page_size: int = 5000
-    feedback_request_interval_seconds: float = 1.0
+    feedback_request_interval_seconds: float = 0.0
     feedback_retry_wait_seconds: int = 600
+    job_lease_seconds: int = 1800
+    job_max_attempts: int = 3
+    job_retry_backoff_seconds: int = 300
+    run_max_age_seconds: int = 21_600
+
+
+@dataclass(frozen=True, slots=True)
+class WBApiConfig:
+    """Egress budget for Wildberries. Buckets are shared across every worker through Redis."""
+
+    window_seconds: int = 60
+    content_per_key: int = 90
+    content_per_host: int = 90
+    feedbacks_per_key: int = 55
+    feedbacks_per_host: int = 55
+    max_wait_seconds: int = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +165,7 @@ class Settings:
     security: SecurityConfig
     rate_limit: RateLimitConfig
     worker: WorkerConfig
+    wb_api: WBApiConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -181,8 +198,13 @@ class Settings:
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
         worker["review_sync_hour"] = int(worker.get("review_sync_hour", 12))
         worker["feedback_page_size"] = int(worker.get("feedback_page_size", 5000))
-        worker["feedback_request_interval_seconds"] = float(worker.get("feedback_request_interval_seconds", 1.0))
+        worker["feedback_request_interval_seconds"] = float(worker.get("feedback_request_interval_seconds", 0.0))
         worker["feedback_retry_wait_seconds"] = int(worker.get("feedback_retry_wait_seconds", 600))
+        worker["job_lease_seconds"] = int(worker.get("job_lease_seconds", 1800))
+        worker["job_max_attempts"] = int(worker.get("job_max_attempts", 3))
+        worker["job_retry_backoff_seconds"] = int(worker.get("job_retry_backoff_seconds", 300))
+        worker["run_max_age_seconds"] = int(worker.get("run_max_age_seconds", 21_600))
+        wb_api = {key: int(value) for key, value in dict(data.get("wb_api", {})).items()}
         security = data.get("security", {})
         keys = security.get("credential_encryption_keys", [])
         if isinstance(keys, str):
@@ -200,6 +222,7 @@ class Settings:
             ),
             rate_limit=RateLimitConfig(**rate_limit),
             worker=WorkerConfig(**worker),
+            wb_api=WBApiConfig(**wb_api),
         )
         settings.validate_values()
         return settings
@@ -211,10 +234,30 @@ class Settings:
             raise ValueError("worker.feedback_page_size must be between 1 and 5000")
         if self.worker.poll_interval_seconds < 1:
             raise ValueError("worker.poll_interval_seconds must be positive")
-        if self.worker.feedback_request_interval_seconds <= 0:
-            raise ValueError("worker.feedback_request_interval_seconds must be positive")
+        if self.worker.feedback_request_interval_seconds < 0:
+            raise ValueError("worker.feedback_request_interval_seconds cannot be negative")
         if self.worker.feedback_retry_wait_seconds < 1:
             raise ValueError("worker.feedback_retry_wait_seconds must be positive")
+        if self.worker.job_lease_seconds < 60:
+            raise ValueError("worker.job_lease_seconds must be at least 60")
+        if self.worker.job_max_attempts < 1:
+            raise ValueError("worker.job_max_attempts must be positive")
+        if self.worker.job_retry_backoff_seconds < 1:
+            raise ValueError("worker.job_retry_backoff_seconds must be positive")
+        if self.worker.run_max_age_seconds <= self.worker.job_lease_seconds:
+            raise ValueError("worker.run_max_age_seconds must exceed worker.job_lease_seconds")
+        if self.wb_api.window_seconds < 1:
+            raise ValueError("wb_api.window_seconds must be positive")
+        if (
+            min(
+                self.wb_api.content_per_key,
+                self.wb_api.content_per_host,
+                self.wb_api.feedbacks_per_key,
+                self.wb_api.feedbacks_per_host,
+            )
+            < 1
+        ):
+            raise ValueError("wb_api budgets must be positive")
         try:
             ZoneInfo(self.worker.review_sync_timezone)
         except ZoneInfoNotFoundError as error:

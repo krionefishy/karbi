@@ -23,6 +23,7 @@ class ReviewSyncJob:
     error: str | None
     started_at: datetime | None
     finished_at: datetime | None
+    attempts: int = 0
 
 
 @dataclass(frozen=True, slots=True)

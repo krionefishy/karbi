@@ -1,7 +1,9 @@
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +15,9 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     OutboxEventModel,
     SellerModel,
 )
+from backend.modules.wb_core.infrastructure.wb import CatalogCard
+
+_UPSERT_CHUNK = 500
 
 
 class SellerRepository:
@@ -22,7 +27,7 @@ class SellerRepository:
     async def list_sellers(self) -> list[Seller]:
         counts = (
             select(ArticleModel.seller_id, func.count().label("count"))
-            .where(ArticleModel.is_active)
+            .where(ArticleModel.state == "active")
             .group_by(ArticleModel.seller_id)
             .subquery()
         )
@@ -73,40 +78,104 @@ class SellerRepository:
         return True
 
     async def list_articles(self, seller_id: uuid.UUID) -> list[Article]:
+        """Everything we know about the seller, archived cards included.
+
+        Archived товары keep their review history, so hiding them would lose the
+        very numbers the timeline exists to show.
+        """
         rows = await self.session.scalars(
             select(ArticleModel)
-            .where(ArticleModel.seller_id == seller_id, ArticleModel.is_active)
-            .order_by(ArticleModel.name, ArticleModel.article)
+            .where(ArticleModel.seller_id == seller_id)
+            .order_by(
+                case({"active": 0, "archived": 1}, value=ArticleModel.state, else_=2),
+                ArticleModel.name,
+                ArticleModel.article,
+            )
         )
-        return [Article(row.id, row.seller_id, row.article, row.vendor_code, row.name) for row in rows]
+        return [self._article(row) for row in rows]
 
-    async def upsert_articles(self, seller_id: uuid.UUID, articles: list[dict[str, str]]) -> None:
-        active_articles = [item["article"] for item in articles]
-        if active_articles:
+    async def upsert_catalog(
+        self,
+        seller_id: uuid.UUID,
+        *,
+        active: Sequence[CatalogCard],
+        archived: Sequence[CatalogCard],
+        archived_available: bool,
+    ) -> None:
+        await self._upsert_cards(seller_id, active, "active")
+        await self._upsert_cards(seller_id, archived, "archived")
+        known = [card.article for card in active] + [card.article for card in archived]
+        # Anything the account no longer lists is not "inactive" — it is a card we
+        # can still see in feedbacks but can no longer resolve through the catalog.
+        demote = update(ArticleModel).where(ArticleModel.seller_id == seller_id)
+        if known:
+            demote = demote.where(ArticleModel.article.not_in(known))
+        if not archived_available:
+            demote = demote.where(ArticleModel.state == "active")
+        await self.session.execute(demote.values(state="feedback_only", updated_at=func.now()))
+
+    async def ensure_feedback_articles(self, seller_id: uuid.UUID, cards: Sequence[CatalogCard]) -> None:
+        """Register articles seen only in feedbacks without touching catalog state."""
+        if not cards:
+            return
+        for chunk in self._chunks([self._row(seller_id, card, "feedback_only") for card in cards]):
+            statement = insert(ArticleModel).values(chunk)
             await self.session.execute(
-                update(ArticleModel)
-                .where(ArticleModel.seller_id == seller_id, ArticleModel.article.not_in(active_articles))
-                .values(is_active=False)
-            )
-        else:
-            await self.session.execute(
-                update(ArticleModel).where(ArticleModel.seller_id == seller_id).values(is_active=False)
-            )
-        for item in articles:
-            statement = (
-                insert(ArticleModel)
-                .values(seller_id=seller_id, is_active=True, **item)
-                .on_conflict_do_update(
+                statement.on_conflict_do_update(
                     constraint="uq_wb_core_articles_seller_article",
                     set_={
-                        "name": item["name"],
-                        "vendor_code": item["vendor_code"],
-                        "is_active": True,
+                        "name": statement.excluded.name,
+                        "vendor_code": statement.excluded.vendor_code,
+                        "imt_id": func.coalesce(statement.excluded.imt_id, ArticleModel.imt_id),
+                        "updated_at": func.now(),
+                    },
+                    where=ArticleModel.state == "feedback_only",
+                )
+            )
+
+    async def _upsert_cards(self, seller_id: uuid.UUID, cards: Sequence[CatalogCard], state: str) -> None:
+        if not cards:
+            return
+        for chunk in self._chunks([self._row(seller_id, card, state) for card in cards]):
+            statement = insert(ArticleModel).values(chunk)
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    constraint="uq_wb_core_articles_seller_article",
+                    set_={
+                        "name": statement.excluded.name,
+                        "vendor_code": statement.excluded.vendor_code,
+                        "imt_id": statement.excluded.imt_id,
+                        "brand": statement.excluded.brand,
+                        "subject_id": statement.excluded.subject_id,
+                        "subject_name": statement.excluded.subject_name,
+                        "photo_url": statement.excluded.photo_url,
+                        "sizes": statement.excluded.sizes,
+                        "state": statement.excluded.state,
                         "updated_at": func.now(),
                     },
                 )
             )
-            await self.session.execute(statement)
+
+    @staticmethod
+    def _row(seller_id: uuid.UUID, card: CatalogCard, state: str) -> dict[str, Any]:
+        return {
+            "id": uuid.uuid4(),
+            "seller_id": seller_id,
+            "article": card.article,
+            "vendor_code": card.vendor_code,
+            "name": card.name,
+            "imt_id": card.imt_id,
+            "brand": card.brand,
+            "subject_id": card.subject_id,
+            "subject_name": card.subject_name,
+            "photo_url": card.photo_url,
+            "sizes": card.sizes,
+            "state": state,
+        }
+
+    @staticmethod
+    def _chunks(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+        return [rows[offset : offset + _UPSERT_CHUNK] for offset in range(0, len(rows), _UPSERT_CHUNK)]
 
     async def set_sync_status(self, seller_id: uuid.UUID, status: str, error: str | None = None) -> None:
         values: dict = {"catalog_sync_status": status, "catalog_sync_error": error}
@@ -124,4 +193,19 @@ class SellerRepository:
     def _seller(model: SellerModel, count: int) -> Seller:
         return Seller(
             model.id, model.name, count, model.catalog_sync_status, model.last_catalog_sync_at, model.catalog_sync_error
+        )
+
+    @staticmethod
+    def _article(model: ArticleModel) -> Article:
+        return Article(
+            id=model.id,
+            seller_id=model.seller_id,
+            article=model.article,
+            vendor_code=model.vendor_code,
+            name=model.name,
+            imt_id=model.imt_id,
+            brand=model.brand,
+            subject_name=model.subject_name,
+            photo_url=model.photo_url,
+            state=model.state,
         )

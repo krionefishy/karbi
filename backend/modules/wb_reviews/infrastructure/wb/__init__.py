@@ -1,4 +1,5 @@
 from backend.modules.wb_reviews.infrastructure.wb.client import (
+    FEEDBACKS_BUCKET,
     FeedbackAggregation,
     FeedbackProduct,
     WBFeedbackClient,
@@ -7,6 +8,7 @@ from backend.modules.wb_reviews.infrastructure.wb.client import (
 )
 
 __all__ = [
+    "FEEDBACKS_BUCKET",
     "FeedbackAggregation",
     "FeedbackProduct",
     "WBFeedbackClient",

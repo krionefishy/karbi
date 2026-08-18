@@ -15,12 +15,19 @@ class RateLimitDecision:
 
 
 class SlidingWindowRateLimiter:
-    def __init__(self, redis_client: RedisClient, limit: int, window_seconds: int) -> None:
+    def __init__(
+        self,
+        redis_client: RedisClient,
+        limit: int,
+        window_seconds: int,
+        key_prefix: str = "rate_limit:ip",
+    ) -> None:
         if limit < 1 or window_seconds < 1:
             raise ValueError("Rate limit and window must be positive")
         self._redis = redis_client
         self._limit = limit
         self._window_ms = window_seconds * 1000
+        self._key_prefix = key_prefix
         self._script: RedisScript | None = None
 
     async def check(self, identity: str) -> RateLimitDecision:
@@ -28,7 +35,7 @@ class SlidingWindowRateLimiter:
             source = _SCRIPT_PATH.read_text(encoding="utf-8")
             self._script = self._redis.register_script(source)
         result = await self._script(
-            keys=[f"rate_limit:ip:{identity}"],
+            keys=[f"{self._key_prefix}:{identity}"],
             args=[self._window_ms, self._limit, uuid.uuid4().hex],
         )
         return RateLimitDecision(

@@ -17,7 +17,13 @@ import {
   startReviewSync,
   updateSeller,
 } from "../features/reviews/api";
-import type { Seller, SellerInput } from "../features/reviews/types";
+import type { ArticleState, Seller, SellerInput } from "../features/reviews/types";
+
+const articleStateText: Record<ArticleState, string> = {
+  active: "В продаже",
+  archived: "В архиве WB",
+  feedback_only: "Нет в каталоге",
+};
 
 const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   queued: "В очереди",
@@ -187,6 +193,7 @@ export function ReviewsPage() {
                 {syncErrors.map((job) => (
                   <li key={job.id}>
                     {job.seller_name}: {job.error ?? "неизвестная ошибка"}
+                    {job.attempts > 1 && ` (попыток: ${job.attempts})`}
                   </li>
                 ))}
               </ul>
@@ -216,10 +223,23 @@ export function ReviewsPage() {
                 <span>Товар</span>
                 <span>Артикул WB</span>
                 <span>Артикул продавца</span>
+                <span>Статус</span>
               </div>
               {articles.map((article) => (
                 <div className="article-row" key={article.id}>
-                  <strong>{article.name}</strong>
+                  <div className="article-title">
+                    {article.photo_url ? (
+                      <img className="product-photo" src={article.photo_url} alt="" loading="lazy" />
+                    ) : (
+                      <span className="product-photo product-photo-empty" aria-hidden="true" />
+                    )}
+                    <span>
+                      <strong>{article.name}</strong>
+                      {(article.brand || article.subject_name) && (
+                        <em>{[article.brand, article.subject_name].filter(Boolean).join(" · ")}</em>
+                      )}
+                    </span>
+                  </div>
                   <code>
                     <a
                       className="wb-article-link"
@@ -231,6 +251,9 @@ export function ReviewsPage() {
                     </a>
                   </code>
                   <code>{article.vendor_code || "—"}</code>
+                  <span className={`product-state product-state-${article.state}`}>
+                    {articleStateText[article.state]}
+                  </span>
                 </div>
               ))}
             </section>

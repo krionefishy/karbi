@@ -2,6 +2,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
+ARTICLE_STATES = ("active", "archived", "feedback_only")
+
 
 @dataclass(frozen=True, slots=True)
 class Seller:
@@ -20,3 +22,8 @@ class Article:
     article: str
     vendor_code: str
     name: str
+    imt_id: int | None = None
+    brand: str = ""
+    subject_name: str = ""
+    photo_url: str = ""
+    state: str = "active"

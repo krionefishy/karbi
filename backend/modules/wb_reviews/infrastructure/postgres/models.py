@@ -82,6 +82,11 @@ class ReviewSyncJobModel(WBReviewsBase):
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Set only while the job waits for a retry; a dispatched job carries NULL so
+    # the reaper cannot hand the same work out twice.
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -90,4 +95,6 @@ class ReviewSyncJobModel(WBReviewsBase):
         ),
         UniqueConstraint("run_id", "seller_id", name="uq_wb_reviews_sync_run_seller"),
         Index("ix_wb_reviews_sync_run_sellers_run_status", "run_id", "status"),
+        Index("ix_wb_reviews_sync_run_sellers_due", "status", "next_attempt_at"),
+        Index("ix_wb_reviews_sync_run_sellers_lease", "status", "lease_expires_at"),
     )

@@ -1,10 +1,22 @@
 import asyncio
 import hashlib
+import logging
 import random
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from backend.modules.wb_core.infrastructure.wb import (
+    WBThrottle,
+    WBThrottleTimeout,
+    host_bucket,
+    key_bucket,
+    scope_for_key,
+)
+from backend.modules.wb_core.infrastructure.wb.observability import read_rate_limit
+
+FEEDBACKS_BUCKET = "feedbacks"
 
 
 class WBFeedbackPermanentError(Exception):
@@ -20,6 +32,7 @@ class FeedbackProduct:
     article: str
     vendor_code: str
     name: str
+    imt_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +51,7 @@ class WBFeedbackClient:
         timeout_seconds: float = 60.0,
         request_interval_seconds: float = 1.0,
         max_retry_wait_seconds: float = 600.0,
+        throttle: WBThrottle | None = None,
     ) -> None:
         if not 1 <= page_size <= 5000:
             raise ValueError("WB feedback page size must be between 1 and 5000")
@@ -45,30 +59,27 @@ class WBFeedbackClient:
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
         self.request_interval_seconds = request_interval_seconds
         self.max_retry_wait_seconds = max_retry_wait_seconds
+        self.throttle = throttle
+        self.logger = logging.getLogger("wb.feedbacks.client")
 
     async def aggregate(self, api_key: str) -> FeedbackAggregation:
+        """Every feedback of the account, counted per nmID.
+
+        Three passes are needed: unanswered, answered and the archive. A
+        feedback that has been answered but not yet archived belongs to none of
+        the other two buckets, so dropping the middle pass silently undercounts.
+        Ids seen twice across passes are deduplicated.
+        """
         counts: dict[str, list[int]] = {}
         products: dict[str, FeedbackProduct] = {}
         seen: set[bytes] = set()
         async with httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout) as client:
-            await self._consume_pages(
-                client,
-                api_key,
-                "/api/v1/feedbacks",
-                {"isAnswered": "false"},
-                counts,
-                products,
-                seen,
-            )
-            await self._consume_pages(
-                client,
-                api_key,
-                "/api/v1/feedbacks/archive",
-                {},
-                counts,
-                products,
-                seen,
-            )
+            for path, extra_params in (
+                ("/api/v1/feedbacks", {"isAnswered": "false"}),
+                ("/api/v1/feedbacks", {"isAnswered": "true"}),
+                ("/api/v1/feedbacks/archive", {}),
+            ):
+                await self._consume_pages(client, api_key, path, extra_params, counts, products, seen)
         return FeedbackAggregation(
             counts={
                 article: (values[0], values[1], values[2], values[3], values[4]) for article, values in counts.items()
@@ -131,12 +142,14 @@ class WBFeedbackClient:
         seen.add(digest)
         article = str(article_value)
         counts.setdefault(article, [0, 0, 0, 0, 0])[rating_value - 1] += 1
+        imt_value = str(details.get("imtId") or "")
         products.setdefault(
             article,
             FeedbackProduct(
                 article=article,
                 vendor_code=str(details.get("supplierArticle") or ""),
                 name=str(details.get("productName") or details.get("supplierArticle") or article),
+                imt_id=int(imt_value) if imt_value.isdigit() else None,
             ),
         )
 
@@ -149,7 +162,16 @@ class WBFeedbackClient:
     ) -> httpx.Response:
         attempt = 0
         waited_seconds = 0.0
+        scope = scope_for_key(api_key)
         while True:
+            if self.throttle is not None:
+                try:
+                    await self.throttle.acquire(
+                        (key_bucket(FEEDBACKS_BUCKET), scope),
+                        (host_bucket(FEEDBACKS_BUCKET), "all"),
+                    )
+                except WBThrottleTimeout as error:
+                    raise WBFeedbackTemporaryError(f"WB Feedbacks API: {error}") from error
             try:
                 response = await client.get(path, headers={"Authorization": api_key}, params=params)
             except httpx.RequestError as error:
@@ -161,6 +183,9 @@ class WBFeedbackClient:
                 waited_seconds = next_waited_seconds
                 attempt += 1
                 continue
+            snapshot = read_rate_limit(self.logger, response, path=path)
+            if self.throttle is not None:
+                self.throttle.observe(key_bucket(FEEDBACKS_BUCKET), scope, snapshot)
             if response.status_code in {400, 401, 402, 403, 413, 422}:
                 raise WBFeedbackPermanentError(
                     f"WB Feedbacks API rejected the request with status {response.status_code}"
@@ -179,7 +204,8 @@ class WBFeedbackClient:
                 response.raise_for_status()
             except httpx.HTTPError as error:
                 raise WBFeedbackTemporaryError(f"Ошибка WB Feedbacks API: {error}") from error
-            await asyncio.sleep(self.request_interval_seconds)
+            if self.request_interval_seconds:
+                await asyncio.sleep(self.request_interval_seconds)
             return response
 
     async def _wait_before_retry(
@@ -202,13 +228,15 @@ class WBFeedbackClient:
 
     @staticmethod
     def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+        """Wait exactly as long as WB asked, and guess only when it stayed silent."""
         fallback_steps = (5.0, 10.0, 20.0, 30.0, 60.0)
         fallback = fallback_steps[min(attempt, len(fallback_steps) - 1)]
+        if response is None:
+            return fallback + random.uniform(0.1, 1.0)
+        retry_header = response.headers.get("X-Ratelimit-Retry") or response.headers.get("Retry-After")
+        if retry_header is None:
+            return fallback + random.uniform(0.1, 1.0)
         try:
-            retry_header = None
-            if response is not None:
-                retry_header = response.headers.get("X-Ratelimit-Retry") or response.headers.get("Retry-After")
-            requested = max(float(retry_header), 0.0) if retry_header is not None else fallback
+            return max(float(retry_header), 0.0) + random.uniform(0.1, 1.0)
         except ValueError:
-            requested = fallback
-        return max(requested, fallback) + random.uniform(0.1, 1.0)
+            return fallback + random.uniform(0.1, 1.0)

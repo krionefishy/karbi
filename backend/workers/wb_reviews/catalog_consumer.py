@@ -13,12 +13,19 @@ from backend.storage.pg import Database
 
 
 class CatalogSyncConsumer:
-    def __init__(self, database: Database, cipher: CredentialCipher, bootstrap_servers: str, group_id: str) -> None:
+    def __init__(
+        self,
+        database: Database,
+        cipher: CredentialCipher,
+        bootstrap_servers: str,
+        group_id: str,
+        client: WBContentClient | None = None,
+    ) -> None:
         self.database = database
         self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
-        self.client = WBContentClient()
+        self.client = client or WBContentClient()
         self.logger = logging.getLogger("wb.catalog.consumer")
 
     async def run(self) -> None:
@@ -64,7 +71,7 @@ class CatalogSyncConsumer:
             await session.commit()
             encrypted_key = credential.encrypted_api_key
         try:
-            articles = await self.client.get_articles(self.cipher.decrypt(encrypted_key))
+            catalog = await self.client.get_catalog(self.cipher.decrypt(encrypted_key))
         except WBPermanentError as error:
             async with self.database.session() as session:
                 repository = SellerRepository(session)
@@ -78,7 +85,21 @@ class CatalogSyncConsumer:
                 repository.mark_inbox(event_id, "WBCatalogSyncRequested")
                 await session.commit()
                 return
-            await repository.upsert_articles(seller_id, articles)
+            await repository.upsert_catalog(
+                seller_id,
+                active=catalog.active,
+                archived=catalog.archived,
+                archived_available=catalog.archived_available,
+            )
             await repository.set_sync_status(seller_id, "success")
             repository.mark_inbox(event_id, "WBCatalogSyncRequested")
             await session.commit()
+        self.logger.info(
+            "catalog_synced",
+            extra={
+                "seller_id": str(seller_id),
+                "active": len(catalog.active),
+                "archived": len(catalog.archived),
+                "archived_available": catalog.archived_available,
+            },
+        )

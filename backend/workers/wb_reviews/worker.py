@@ -20,6 +20,8 @@ class WBReviewsWorker:
         timezone: str,
         enabled: bool,
         now: Callable[[ZoneInfo], datetime] | None = None,
+        job_max_attempts: int = 3,
+        run_max_age_seconds: int = 21_600,
     ) -> None:
         self._database = database
         self._poll_interval_seconds = poll_interval_seconds
@@ -27,6 +29,8 @@ class WBReviewsWorker:
         self._timezone = ZoneInfo(timezone)
         self._enabled = enabled
         self._now = now or (lambda timezone: datetime.now(timezone))
+        self._job_max_attempts = job_max_attempts
+        self._run_max_age_seconds = run_max_age_seconds
         self._stop = asyncio.Event()
         self._logger = structlog.get_logger("wb_reviews_worker")
 
@@ -37,12 +41,29 @@ class WBReviewsWorker:
         self._logger.info("worker_started")
         while not self._stop.is_set():
             if self._enabled:
+                await self._recover()
                 await self._schedule_if_due()
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._poll_interval_seconds)
             except TimeoutError:
                 continue
         self._logger.info("worker_stopped")
+
+    async def _recover(self) -> None:
+        """Re-dispatch retries and release jobs whose worker never came back."""
+        async with self._database.session() as session:
+            service = self._service(session)
+            report = await service.run_maintenance(
+                max_attempts=self._job_max_attempts,
+                max_run_age_seconds=self._run_max_age_seconds,
+            )
+        if report.changed:
+            self._logger.info(
+                "review_sync_maintenance",
+                expired_leases=report.expired_leases,
+                requeued_jobs=report.requeued_jobs,
+                abandoned_runs=report.abandoned_runs,
+            )
 
     async def _schedule_if_due(self) -> None:
         now = self._now(self._timezone)
@@ -52,6 +73,9 @@ class WBReviewsWorker:
             reviews = ReviewSyncRepository(session)
             if await reviews.run_for_date(now.date()) is not None:
                 return
-            service = ReviewSyncService(session, SellerRepository(session), reviews)
-            run = await service.request("scheduled", now.date())
+            run = await self._service(session).request("scheduled", now.date())
             self._logger.info("review_sync_scheduled", run_id=str(run.id), status=run.status)
+
+    @staticmethod
+    def _service(session) -> ReviewSyncService:
+        return ReviewSyncService(session, SellerRepository(session), ReviewSyncRepository(session))

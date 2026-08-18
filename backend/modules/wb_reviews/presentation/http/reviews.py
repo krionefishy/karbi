@@ -39,6 +39,7 @@ class SyncJobResponse(BaseModel):
     error: str | None
     started_at: str | None
     finished_at: str | None
+    attempts: int
 
 
 class SnapshotResponse(BaseModel):
@@ -51,7 +52,12 @@ class ProductHistoryResponse(BaseModel):
     article: str
     vendor_code: str
     name: str
+    imt_id: int | None
+    brand: str
+    photo_url: str
+    state: str
     snapshots: list[SnapshotResponse]
+    card_snapshots: list[SnapshotResponse]
 
 
 class ReviewHistoryResponse(BaseModel):
@@ -82,6 +88,7 @@ def run_response(run: ReviewSyncRun) -> SyncRunResponse:
                 error=job.error,
                 started_at=job.started_at.isoformat() if job.started_at else None,
                 finished_at=job.finished_at.isoformat() if job.finished_at else None,
+                attempts=job.attempts,
             )
             for job in run.jobs
         ],
@@ -122,7 +129,12 @@ async def seller_history(
                 article=product.article,
                 vendor_code=product.vendor_code,
                 name=product.name,
+                imt_id=product.imt_id,
+                brand=product.brand,
+                photo_url=product.photo_url,
+                state=product.state,
                 snapshots=[SnapshotResponse(**snapshot) for snapshot in product.snapshots],
+                card_snapshots=[SnapshotResponse(**snapshot) for snapshot in product.card_snapshots],
             )
             for product in history.products
         ],

@@ -1,15 +1,26 @@
-import { ChevronDown, ChevronLeft, ChevronRight, Star, Triangle } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Star, Triangle } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { DailyReviewSnapshot, ProductReviewHistory } from "../features/reviews/types";
+import type { ArticleState, DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; }
 interface Selection { productId: string; date: string; }
 
 const HISTORY_DAYS = 90;
+const RATINGS = [5, 4, 3, 2, 1] as const;
+
+const stateLabels: Record<ArticleState, string> = {
+  active: "В продаже",
+  archived: "В архиве WB",
+  feedback_only: "Нет в каталоге",
+};
 
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short", timeZone: "UTC" });
 const weekdayFormatter = new Intl.DateTimeFormat("ru-RU", { weekday: "short", timeZone: "UTC" });
+
+function totalOf(ratings: RatingCounts): number {
+  return RATINGS.reduce((sum, rating) => sum + ratings[rating], 0);
+}
 
 function moscowToday(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -33,6 +44,12 @@ function calendarDates(from: string, to: string): string[] {
   return dates;
 }
 
+function previousDay(date: string): string {
+  const cursor = new Date(`${date}T00:00:00Z`);
+  cursor.setUTCDate(cursor.getUTCDate() - 1);
+  return cursor.toISOString().slice(0, 10);
+}
+
 function Delta({ value }: { value: number | null }) {
   if (value === null) return <span className="delta delta-neutral">—</span>;
   if (value === 0) return <span className="delta delta-neutral">— 0</span>;
@@ -40,16 +57,48 @@ function Delta({ value }: { value: number | null }) {
   return <span className={`delta ${positive ? "delta-positive" : "delta-negative"}`}><Triangle size={8} fill="currentColor" className={positive ? "" : "triangle-down"} />{positive ? "+" : "−"}{Math.abs(value)}</span>;
 }
 
-function RatingDetails({ snapshot }: { snapshot: DailyReviewSnapshot }) {
-  const total = Object.values(snapshot.ratings).reduce((sum, count) => sum + count, 0);
+function RatingDetails({ snapshot, card }: { snapshot: DailyReviewSnapshot; card?: DailyReviewSnapshot }) {
+  const total = totalOf(snapshot.ratings);
+  const cardTotal = card ? totalOf(card.ratings) : null;
   return (
     <div className="rating-details">
-      <div className="detail-header"><span className="detail-date">Детали за {dateFormatter.format(new Date(`${snapshot.date}T00:00:00Z`))}</span><span>Всего отзывов: <b>{total.toLocaleString("ru-RU")}</b></span></div>
+      <div className="detail-header">
+        <span className="detail-date">Детали за {dateFormatter.format(new Date(`${snapshot.date}T00:00:00Z`))}</span>
+        <span>Всего отзывов: <b>{total.toLocaleString("ru-RU")}</b></span>
+        {cardTotal !== null && cardTotal !== total && (
+          <span className="detail-card">По карточке целиком: <b>{cardTotal.toLocaleString("ru-RU")}</b></span>
+        )}
+      </div>
       <div className="rating-bars">
-        {([5, 4, 3, 2, 1] as const).map((rating) => {
+        {RATINGS.map((rating) => {
           const value = snapshot.ratings[rating];
           return <div className="rating-row" key={rating}><span>{rating} <Star size={12} fill="currentColor" /></span><div className="rating-track"><i style={{ width: `${total ? (value / total) * 100 : 0}%` }} /></div><b>{value.toLocaleString("ru-RU")}</b></div>;
         })}
+      </div>
+    </div>
+  );
+}
+
+function ProductIdentity({ product }: { product: ProductReviewHistory }) {
+  return (
+    <div className="product-identity">
+      {product.photo_url
+        ? <img className="product-photo" src={product.photo_url} alt="" loading="lazy" />
+        : <span className="product-photo product-photo-empty" aria-hidden="true" />}
+      <div className="product-identity-text">
+        <strong>{product.name}</strong>
+        <span>
+          WB{" "}
+          <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
+            {product.article}
+          </a>
+          {product.vendor_code && <> · продавца {product.vendor_code}</>}
+          {product.brand && <> · {product.brand}</>}
+        </span>
+        <span className="product-tags">
+          <span className={`product-state product-state-${product.state}`}>{stateLabels[product.state]}</span>
+          {product.imt_id !== null && <span className="product-card-id">карточка {product.imt_id}</span>}
+        </span>
       </div>
     </div>
   );
@@ -77,7 +126,7 @@ export function ReviewTimeline({ products }: ReviewTimelineProps) {
           <div><span className="eyebrow">Окно просмотра</span><strong className="range-title">{range[0] && dateFormatter.format(new Date(`${range[0]}T00:00:00Z`))} — {range.at(-1) && dateFormatter.format(new Date(`${range.at(-1)}T00:00:00Z`))}</strong></div>
         </div>
         <label className="history-slider"><span className="field-label">Глубина истории</span><input type="range" min="0" max={maxOffset} value={maxOffset - offset} onChange={(event) => setOffset(maxOffset - Number(event.target.value))} /></label>
-        <span className="five-star-key"><Star size={13} fill="currentColor" /> Основное значение: 5 звёзд</span>
+        <span className="five-star-key"><MessageSquare size={13} /> Основное значение: всего отзывов по артикулу</span>
       </div>
 
       <div className="timeline-table">
@@ -87,33 +136,26 @@ export function ReviewTimeline({ products }: ReviewTimelineProps) {
         </div>
         {products.map((product) => {
           const snapshots = new Map(product.snapshots.map((snapshot) => [snapshot.date, snapshot]));
-          const selectedSnapshot = selection?.productId === product.id ? product.snapshots.find((snapshot) => snapshot.date === selection.date) : undefined;
+          const cardSnapshots = new Map(product.card_snapshots.map((snapshot) => [snapshot.date, snapshot]));
+          const selectedSnapshot = selection?.productId === product.id ? snapshots.get(selection.date) : undefined;
           return <div className="product-block" key={product.id}>
             <div className="timeline-grid product-row">
-              <div className="product-identity">
-                <strong>{product.name}</strong>
-                <span>
-                  WB{" "}
-                  <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
-                    {product.article}
-                  </a>
-                  {product.vendor_code && <> · продавца {product.vendor_code}</>}
-                </span>
-              </div>
+              <ProductIdentity product={product} />
               {range.map((date) => {
                 const snapshot = snapshots.get(date);
                 if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>Нет данных</div>;
-                const previousDate = new Date(`${date}T00:00:00Z`);
-                previousDate.setUTCDate(previousDate.getUTCDate() - 1);
-                const previous = snapshots.get(previousDate.toISOString().slice(0, 10));
-                const delta = previous ? snapshot.ratings[5] - previous.ratings[5] : null;
+                const previous = snapshots.get(previousDay(date));
+                const total = totalOf(snapshot.ratings);
+                // A missing previous day is not a zero — leave the delta blank
+                // so a gap in the series never reads as "reviews disappeared".
+                const delta = previous ? total - totalOf(previous.ratings) : null;
                 const selected = selection?.productId === product.id && selection.date === snapshot.date;
                 return <button className={`day-cell ${date === today ? "today-cell" : ""} ${selected ? "day-selected" : ""}`} onClick={() => setSelection(selected ? null : { productId: product.id, date: snapshot.date })} key={snapshot.date} aria-expanded={selected}>
-                  <span className="review-count"><Star size={11} fill="currentColor" />{snapshot.ratings[5].toLocaleString("ru-RU")}</span><Delta value={delta} /><ChevronDown size={12} className="expand-chevron" />
+                  <span className="review-count"><MessageSquare size={11} />{total.toLocaleString("ru-RU")}</span><Delta value={delta} /><ChevronDown size={12} className="expand-chevron" />
                 </button>;
               })}
             </div>
-            {selectedSnapshot && <RatingDetails snapshot={selectedSnapshot} />}
+            {selectedSnapshot && <RatingDetails snapshot={selectedSnapshot} card={cardSnapshots.get(selectedSnapshot.date)} />}
           </div>;
         })}
       </div>
