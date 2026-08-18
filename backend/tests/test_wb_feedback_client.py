@@ -76,10 +76,43 @@ async def test_feedback_client_stops_after_rate_limit_retries(monkeypatch) -> No
     monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.random.uniform", lambda *_: 0.1)
 
     with respx.mock(base_url="https://feedbacks-api.wildberries.ru") as router:
-        route = router.get("/api/v1/feedbacks").respond(429, headers={"Retry-After": "1"})
+        route = router.get("/api/v1/feedbacks").respond(
+            429,
+            headers={"X-Ratelimit-Retry": "7", "Retry-After": "1"},
+        )
 
-        with pytest.raises(WBFeedbackTemporaryError, match="после 5 попыток"):
-            await WBFeedbackClient().aggregate("secret")
+        with pytest.raises(WBFeedbackTemporaryError, match="после 10 секунд повторов"):
+            await WBFeedbackClient(max_retry_wait_seconds=10).aggregate("secret")
 
-    assert route.call_count == 5
-    assert sleep.await_count == 4
+    assert route.call_count == 3
+    assert sleep.await_count == 2
+    assert sleep.await_args_list[0].args[0] == pytest.approx(7.1)
+    assert sum(call.args[0] for call in sleep.await_args_list) == pytest.approx(10)
+
+
+async def test_feedback_client_retries_the_same_page_after_rate_limit(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.modules.wb_reviews.infrastructure.wb.client.asyncio.sleep",
+        AsyncMock(),
+    )
+    monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.random.uniform", lambda *_: 0.1)
+
+    with respx.mock(base_url="https://feedbacks-api.wildberries.ru") as router:
+        active_route = router.get("/api/v1/feedbacks").mock(
+            side_effect=[
+                httpx.Response(429, headers={"X-Ratelimit-Retry": "1"}),
+                httpx.Response(200, json={"data": {"feedbacks": [feedback("a", 101, 5)]}}),
+                httpx.Response(200, json={"data": {"feedbacks": []}}),
+            ]
+        )
+        router.get("/api/v1/feedbacks/archive").respond(200, json={"data": {"feedbacks": []}})
+
+        result = await WBFeedbackClient(
+            page_size=1,
+            request_interval_seconds=0,
+            max_retry_wait_seconds=10,
+        ).aggregate("secret")
+
+    assert result.counts == {"101": (0, 0, 0, 0, 1)}
+    assert active_route.call_count == 3
+    assert [call.request.url.params["skip"] for call in active_route.calls] == ["0", "0", "1"]

@@ -36,13 +36,15 @@ class WBFeedbackClient:
         self,
         page_size: int = 5000,
         timeout_seconds: float = 60.0,
-        request_interval_seconds: float = 0.5,
+        request_interval_seconds: float = 1.0,
+        max_retry_wait_seconds: float = 600.0,
     ) -> None:
         if not 1 <= page_size <= 5000:
             raise ValueError("WB feedback page size must be between 1 and 5000")
         self.page_size = page_size
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
         self.request_interval_seconds = request_interval_seconds
+        self.max_retry_wait_seconds = max_retry_wait_seconds
 
     async def aggregate(self, api_key: str) -> FeedbackAggregation:
         counts: dict[str, list[int]] = {}
@@ -145,26 +147,33 @@ class WBFeedbackClient:
         api_key: str,
         params: dict[str, str],
     ) -> httpx.Response:
-        for attempt in range(5):
+        attempt = 0
+        waited_seconds = 0.0
+        while True:
             try:
                 response = await client.get(path, headers={"Authorization": api_key}, params=params)
             except httpx.RequestError as error:
-                if attempt == 4:
+                next_waited_seconds = await self._wait_before_retry(None, attempt, waited_seconds)
+                if next_waited_seconds is None:
                     raise WBFeedbackTemporaryError(
-                        f"Не удалось подключиться к WB Feedbacks API после 5 попыток: {error}"
+                        f"Не удалось подключиться к WB Feedbacks API {self._retry_exhausted_message()}: {error}"
                     ) from error
-                await asyncio.sleep(self._retry_delay(None, attempt))
+                waited_seconds = next_waited_seconds
+                attempt += 1
                 continue
             if response.status_code in {400, 401, 402, 403, 413, 422}:
                 raise WBFeedbackPermanentError(
                     f"WB Feedbacks API rejected the request with status {response.status_code}"
                 )
             if response.status_code == 429 or response.status_code >= 500:
-                if attempt == 4:
+                next_waited_seconds = await self._wait_before_retry(response, attempt, waited_seconds)
+                if next_waited_seconds is None:
                     raise WBFeedbackTemporaryError(
-                        f"WB Feedbacks API временно недоступен после 5 попыток: HTTP {response.status_code}"
+                        f"WB Feedbacks API временно недоступен {self._retry_exhausted_message()}: "
+                        f"HTTP {response.status_code}"
                     )
-                await asyncio.sleep(self._retry_delay(response, attempt))
+                waited_seconds = next_waited_seconds
+                attempt += 1
                 continue
             try:
                 response.raise_for_status()
@@ -172,13 +181,34 @@ class WBFeedbackClient:
                 raise WBFeedbackTemporaryError(f"Ошибка WB Feedbacks API: {error}") from error
             await asyncio.sleep(self.request_interval_seconds)
             return response
-        raise RuntimeError("WB feedback request retry loop exhausted")
+
+    async def _wait_before_retry(
+        self,
+        response: httpx.Response | None,
+        attempt: int,
+        waited_seconds: float,
+    ) -> float | None:
+        remaining = self.max_retry_wait_seconds - waited_seconds
+        if remaining <= 0:
+            return None
+        delay = min(self._retry_delay(response, attempt), remaining)
+        await asyncio.sleep(delay)
+        return waited_seconds + delay
+
+    def _retry_exhausted_message(self) -> str:
+        if self.max_retry_wait_seconds == 600:
+            return "после 10 минут повторов"
+        return f"после {self.max_retry_wait_seconds:g} секунд повторов"
 
     @staticmethod
     def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
-        fallback = float(min(2**attempt, 30))
+        fallback_steps = (5.0, 10.0, 20.0, 30.0, 60.0)
+        fallback = fallback_steps[min(attempt, len(fallback_steps) - 1)]
         try:
-            requested = max(float(response.headers.get("Retry-After", fallback)), 0.0) if response else fallback
+            retry_header = None
+            if response is not None:
+                retry_header = response.headers.get("X-Ratelimit-Retry") or response.headers.get("Retry-After")
+            requested = max(float(retry_header), 0.0) if retry_header is not None else fallback
         except ValueError:
             requested = fallback
-        return max(requested, fallback) + random.uniform(0.1, 0.5)
+        return max(requested, fallback) + random.uniform(0.1, 1.0)

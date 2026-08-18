@@ -50,3 +50,5 @@ worker:
   review_sync_hour: 12
   review_sync_timezone: Europe/Moscow
   feedback_page_size: ${WB_FEEDBACK_PAGE_SIZE:-5000}
+  feedback_request_interval_seconds: ${WB_FEEDBACK_REQUEST_INTERVAL_SECONDS:-1.0}
+  feedback_retry_wait_seconds: ${WB_FEEDBACK_RETRY_WAIT_SECONDS:-600}

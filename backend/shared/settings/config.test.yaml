@@ -31,3 +31,5 @@ worker:
   review_sync_hour: 12
   review_sync_timezone: Europe/Moscow
   feedback_page_size: 5000
+  feedback_request_interval_seconds: 1.0
+  feedback_retry_wait_seconds: 600

@@ -134,6 +134,8 @@ class WorkerConfig:
     review_sync_hour: int = 12
     review_sync_timezone: str = "Europe/Moscow"
     feedback_page_size: int = 5000
+    feedback_request_interval_seconds: float = 1.0
+    feedback_retry_wait_seconds: int = 600
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +181,8 @@ class Settings:
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
         worker["review_sync_hour"] = int(worker.get("review_sync_hour", 12))
         worker["feedback_page_size"] = int(worker.get("feedback_page_size", 5000))
+        worker["feedback_request_interval_seconds"] = float(worker.get("feedback_request_interval_seconds", 1.0))
+        worker["feedback_retry_wait_seconds"] = int(worker.get("feedback_retry_wait_seconds", 600))
         security = data.get("security", {})
         keys = security.get("credential_encryption_keys", [])
         if isinstance(keys, str):
@@ -207,6 +211,10 @@ class Settings:
             raise ValueError("worker.feedback_page_size must be between 1 and 5000")
         if self.worker.poll_interval_seconds < 1:
             raise ValueError("worker.poll_interval_seconds must be positive")
+        if self.worker.feedback_request_interval_seconds <= 0:
+            raise ValueError("worker.feedback_request_interval_seconds must be positive")
+        if self.worker.feedback_retry_wait_seconds < 1:
+            raise ValueError("worker.feedback_retry_wait_seconds must be positive")
         try:
             ZoneInfo(self.worker.review_sync_timezone)
         except ZoneInfoNotFoundError as error:

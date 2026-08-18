@@ -45,6 +45,8 @@ class WBReviewsWorkerApplication:
                 self.settings.kafka.bootstrap_servers,
                 f"{self.settings.kafka.consumer_group}.wb.reviews",
                 self.settings.worker.feedback_page_size,
+                self.settings.worker.feedback_request_interval_seconds,
+                self.settings.worker.feedback_retry_wait_seconds,
             ),
         )
 

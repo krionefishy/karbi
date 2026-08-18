@@ -27,13 +27,19 @@ class ReviewSyncConsumer:
         bootstrap_servers: str,
         group_id: str,
         page_size: int,
+        request_interval_seconds: float = 1.0,
+        retry_wait_seconds: int = 600,
     ) -> None:
         self.database = database
         self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
         self.catalog_client = WBContentClient()
-        self.feedback_client = WBFeedbackClient(page_size=page_size)
+        self.feedback_client = WBFeedbackClient(
+            page_size=page_size,
+            request_interval_seconds=request_interval_seconds,
+            max_retry_wait_seconds=retry_wait_seconds,
+        )
         self.logger = logging.getLogger("wb.reviews.consumer")
 
     async def run(self) -> None:
