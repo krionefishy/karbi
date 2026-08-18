@@ -137,6 +137,16 @@ just migrate-all
 Kafka topics are registered in application code and created through the Kafka admin client at startup. They
 must not be created by ad-hoc shell scripts.
 
+## Deployment
+
+Every push to `main` starts the CI/CD orchestrator. The tested commit is then deployed over SSH to the
+dedicated checkout at `/opt/karbi/app`: the server fetches that exact revision, builds the Docker images
+locally, applies migrations through Compose, starts the stack, and verifies the API and background workers.
+No container registry is required.
+
+The production `.env` remains on the server and is never copied from CI. The repository must define the
+`SSH_HOST`, `SSH_USERNAME`, `SSH_PORT`, `SSH_PRIVATE_KEY`, and `SSH_FINGERPRINT` Actions secrets.
+
 ## License
 
 Karbi is available under the [MIT License](LICENSE).

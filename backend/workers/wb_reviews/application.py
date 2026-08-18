@@ -1,10 +1,7 @@
 import asyncio
 import signal
 
-from dishka import make_async_container
-
 from backend.infrastructure.logging import configure_logging
-from backend.shared.di import WORKER_PROVIDERS
 from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings, load_settings
@@ -27,10 +24,6 @@ class WBReviewsWorkerApplication:
             self.settings.kafka.enabled,
         )
         self.catalog_consumer, self.review_consumer = self._create_consumers()
-        self.container = make_async_container(
-            *WORKER_PROVIDERS,
-            context={Settings: self.settings, Database: self.database},
-        )
 
     def _create_consumers(self) -> tuple[CatalogSyncConsumer | None, ReviewSyncConsumer | None]:
         if not self.settings.kafka.enabled:
@@ -85,7 +78,6 @@ class WBReviewsWorkerApplication:
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
         finally:
-            await self.container.close()
             await self.database.disconnect()
 
     def install_signal_handlers(self) -> None:

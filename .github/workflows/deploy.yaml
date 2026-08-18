@@ -1,0 +1,82 @@
+name: CD
+
+on:
+  workflow_call:
+    secrets:
+      SSH_HOST:
+        required: true
+      SSH_USERNAME:
+        required: true
+      SSH_PORT:
+        required: true
+      SSH_PRIVATE_KEY:
+        required: true
+      SSH_FINGERPRINT:
+        required: true
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Deploy tested revision
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          port: ${{ secrets.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          envs: DEPLOY_SHA
+          command_timeout: 25m
+          script: |
+            set -eu
+
+            cd /opt/karbi/app
+            test -f .env
+
+            git fetch --prune origin main
+            git cat-file -e "${DEPLOY_SHA}^{commit}"
+            git merge-base --is-ancestor "${DEPLOY_SHA}" origin/main
+            git checkout --force main
+            git reset --hard "${DEPLOY_SHA}"
+
+            sudo docker compose --env-file .env -f deploy/compose.yaml build
+            sudo docker compose --env-file .env -f deploy/compose.yaml up -d --remove-orphans
+
+            ready=false
+            for attempt in $(seq 1 36); do
+              if curl --fail --silent --show-error --max-time 5 \
+                http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then
+                ready=true
+                break
+              fi
+              sleep 5
+            done
+
+            if [ "$ready" != "true" ]; then
+              sudo docker compose --env-file .env -f deploy/compose.yaml ps
+              sudo docker compose --env-file .env -f deploy/compose.yaml logs \
+                --tail=200 migrate api wb-reviews-worker outbox-publisher nginx
+              exit 1
+            fi
+
+            test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
+              ps --status running -q wb-reviews-worker | wc -l | tr -d ' ')" = "1"
+            test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
+              ps --status running -q outbox-publisher | wc -l | tr -d ' ')" = "1"
+
+            sudo docker compose --env-file .env -f deploy/compose.yaml ps
+            sudo docker image prune --force

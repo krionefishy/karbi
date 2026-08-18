@@ -36,13 +36,6 @@ class AppProvider(Provider):
         )
 
 
-class WorkerProvider(Provider):
-    scope = Scope.APP
-
-    settings = from_context(Settings)
-    database = from_context(Database)
-
-
 class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     async def session(self, database: Database) -> AsyncIterator[AsyncSession]:
