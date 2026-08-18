@@ -87,10 +87,20 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .page-heading .muted { margin-bottom: 0; }
 .system-status { display: flex; align-items: center; gap: 9px; padding: 8px 11px; background: var(--surface); border: 1px solid var(--line); color: var(--muted); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
 .system-status i { background: var(--positive); }
+.system-status-checking i { background: var(--gold); animation: status-pulse 1.2s ease-in-out infinite; }
+.system-status-degraded { color: var(--negative); border-color: rgba(196,62,54,.3); }
+.system-status-degraded i { background: var(--negative); }
+@keyframes status-pulse { 50% { opacity: .3; } }
 .automation-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; padding: 1px; background: var(--line); }
 .automation-card { position: relative; display: flex; min-height: 360px; flex-direction: column; padding: 30px; background: var(--surface); }
 .automation-active::before { position: absolute; top: 0; left: 0; width: 4px; height: 100%; content: ""; background: var(--forest); }
-.automation-disabled { background: rgba(255,255,255,.62); }
+.automation-placeholder { justify-content: center; background: rgba(255,255,255,.56); }
+.placeholder-visual { display: grid; width: 72%; max-width: 280px; gap: 15px; margin: auto; opacity: .52; }
+.placeholder-mark { width: 48px; height: 48px; background: var(--neutral-bg); border: 1px solid var(--line); }
+.placeholder-line { width: 62%; height: 10px; background: var(--neutral-bg); border: 1px solid var(--line); }
+.placeholder-line-wide { width: 100%; height: 15px; }
+.placeholder-panel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 15px; padding-top: 20px; border-top: 1px solid var(--line); }
+.placeholder-panel i { display: block; height: 54px; background: var(--paper); border: 1px solid var(--line); }
 .automation-card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; }
 .automation-icon { display: inline-flex; width: 46px; height: 46px; align-items: center; justify-content: center; color: var(--forest); background: var(--paper); border: 1px solid var(--line); }
 .status-active { color: var(--positive); border-color: rgba(22,132,74,.25); }
@@ -135,6 +145,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .reviews-heading p { margin-bottom: 0; font-size: 13px; }
 .last-sync { text-align: right; }.last-sync strong { display: block; font-size: 13px; }
 .review-sync-actions { display: flex; align-items: center; gap: 18px; }
+.review-sync-button { padding-right: 22px; padding-left: 22px; border-radius: 999px; }
 .review-sync-actions .catalog-status { padding-left: 18px; border-left: 1px solid var(--line); }
 .inline-error { max-width: 1320px; margin: -12px auto 18px; padding: 10px 12px; color: var(--negative); background: var(--negative-bg); border: 1px solid rgba(196,62,54,.24); font-size: 12px; }
 .timeline-section { max-width: 1320px; margin: 0 auto; }

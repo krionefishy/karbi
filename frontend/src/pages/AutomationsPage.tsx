@@ -1,11 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, BarChart3, Boxes, MessageSquareText } from "lucide-react";
+import { ArrowRight, MessageSquareText } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
-import { getAutomations } from "../features/automations/api";
-
-const icons = [MessageSquareText, BarChart3, Boxes];
+import { getAutomations, getPlatformReadiness } from "../features/automations/api";
 
 function sellerLabel(count: number | null) {
   const value = count ?? 0;
@@ -22,6 +20,19 @@ function lastRunLabel(value: string | null) {
 
 export function AutomationsPage() {
   const { data = [], isLoading } = useQuery({ queryKey: ["automations"], queryFn: getAutomations });
+  const readiness = useQuery({
+    queryKey: ["platform-readiness"],
+    queryFn: getPlatformReadiness,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+  const readinessState = readiness.isPending ? "checking" : readiness.isSuccess ? "ready" : "degraded";
+  const readinessText = {
+    checking: "Проверяем платформу",
+    ready: "API и хранилища доступны",
+    degraded: "Проблема API или хранилищ",
+  }[readinessState];
+
   return (
     <div className="app-page">
       <AppHeader />
@@ -32,59 +43,54 @@ export function AutomationsPage() {
             <h1>Автоматизации</h1>
             <p className="muted">Выберите процесс, с данными которого хотите работать.</p>
           </div>
-          <span className="system-status">
-            <i /> Все системы работают
+          <span className={`system-status system-status-${readinessState}`} role="status">
+            <i /> {readinessText}
           </span>
         </div>
         {isLoading ? (
           <div className="loading-block">Загружаем автоматизации…</div>
         ) : (
           <section className="automation-grid" aria-label="Доступные автоматизации">
-            {data.map((automation, index) => {
-              const Icon = icons[index] ?? Boxes;
-              const active = automation.status === "active";
+            {data.map((automation) => {
               return (
-                <article
-                  className={`automation-card ${active ? "automation-active" : "automation-disabled"}`}
-                  key={automation.id}
-                >
+                <article className="automation-card automation-active" key={automation.id}>
                   <div className="automation-card-top">
                     <span className="automation-icon">
-                      <Icon size={22} />
+                      <MessageSquareText size={22} />
                     </span>
-                    <span className={`status-badge ${active ? "status-active" : "status-soon"}`}>
+                    <span className="status-badge status-active">
                       <span />
-                      {active ? "Активна" : "Скоро"}
+                      Активна
                     </span>
                   </div>
                   <h2>{automation.title}</h2>
                   <p className="muted">{automation.description}</p>
                   <div className="automation-meta">
-                    {active ? (
-                      <>
-                        <span>
-                          <b>{sellerLabel(automation.seller_count)}</b>
-                        </span>
-                        <span>
-                          Последний запуск <b>{lastRunLabel(automation.last_run_at)}</b>
-                        </span>
-                      </>
-                    ) : (
-                      <span>Автоматизация находится в плане разработки</span>
-                    )}
+                    <span>
+                      <b>{sellerLabel(automation.seller_count)}</b>
+                    </span>
+                    <span>
+                      Последний запуск <b>{lastRunLabel(automation.last_run_at)}</b>
+                    </span>
                   </div>
-                  {active ? (
-                    <Link className="primary-button card-action" to="/automations/wb-reviews">
-                      Открыть <ArrowRight size={16} />
-                    </Link>
-                  ) : (
-                    <button className="secondary-button card-action" disabled>
-                      Недоступно
-                    </button>
-                  )}
+                  <Link className="primary-button card-action" to="/automations/wb-reviews">
+                    Открыть <ArrowRight size={16} />
+                  </Link>
                 </article>
               );
             })}
+            <article className="automation-card automation-placeholder" aria-label="Заглушка автоматизации">
+              <div className="placeholder-visual" aria-hidden="true">
+                <span className="placeholder-mark" />
+                <span className="placeholder-line placeholder-line-wide" />
+                <span className="placeholder-line" />
+                <span className="placeholder-panel">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </div>
+            </article>
           </section>
         )}
       </main>

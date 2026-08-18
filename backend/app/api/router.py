@@ -18,6 +18,10 @@ router.include_router(wb_reviews_router)
 @inject
 async def automations(_: CurrentPrincipal, sellers: FromDishka[SellerService]) -> list[dict]:
     seller_count = len(await sellers.list_sellers())
+    return automation_catalog(seller_count)
+
+
+def automation_catalog(seller_count: int) -> list[dict]:
     return [
         {
             "id": "wb-reviews",
@@ -26,23 +30,7 @@ async def automations(_: CurrentPrincipal, sellers: FromDishka[SellerService]) -
             "status": "active",
             "last_run_at": None,
             "seller_count": seller_count,
-        },
-        {
-            "id": "marketplace-reports",
-            "title": "Сводные отчёты маркетплейсов",
-            "description": "Единая отчётность по продажам и остаткам.",
-            "status": "coming_soon",
-            "last_run_at": None,
-            "seller_count": None,
-        },
-        {
-            "id": "ozon-reviews",
-            "title": "Мониторинг отзывов Ozon",
-            "description": "Динамика рейтингов и отзывов по товарам Ozon.",
-            "status": "coming_soon",
-            "last_run_at": None,
-            "seller_count": None,
-        },
+        }
     ]
 
 

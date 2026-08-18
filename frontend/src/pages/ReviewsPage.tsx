@@ -150,7 +150,7 @@ export function ReviewsPage() {
                 </div>
               )}
               <button
-                className="primary-button"
+                className="primary-button review-sync-button"
                 disabled={
                   sellers.length === 0 ||
                   reviewSyncMutation.isPending ||
