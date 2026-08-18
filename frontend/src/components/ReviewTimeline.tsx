@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Star, Triangle } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { averageRating, fiveStarsToTarget, pluralizeFives } from "../features/reviews/rating";
 import type { ArticleState, DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; }
@@ -57,6 +58,25 @@ function Delta({ value }: { value: number | null }) {
   return <span className={`delta ${positive ? "delta-positive" : "delta-negative"}`}><Triangle size={8} fill="currentColor" className={positive ? "" : "triangle-down"} />{positive ? "+" : "−"}{Math.abs(value)}</span>;
 }
 
+function RatingGoal({ label, ratings }: { label: string; ratings: RatingCounts }) {
+  const average = averageRating(ratings);
+  if (average === null) return null;
+  const needed = fiveStarsToTarget(ratings);
+  return (
+    <div className="rating-goal-row">
+      <span className="rating-goal-label">{label}</span>
+      <b className="rating-goal-value">{average.toFixed(2)}</b>
+      {needed === 0 ? (
+        <span className="rating-goal-done">оценка 5,0 достигнута</span>
+      ) : (
+        <span>
+          до 5,0 — ещё <b>{needed.toLocaleString("ru-RU")}</b> {pluralizeFives(needed)}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function RatingDetails({ snapshot, card }: { snapshot: DailyReviewSnapshot; card?: DailyReviewSnapshot }) {
   const total = totalOf(snapshot.ratings);
   const cardTotal = card ? totalOf(card.ratings) : null;
@@ -74,6 +94,13 @@ function RatingDetails({ snapshot, card }: { snapshot: DailyReviewSnapshot; card
           const value = snapshot.ratings[rating];
           return <div className="rating-row" key={rating}><span>{rating} <Star size={12} fill="currentColor" /></span><div className="rating-track"><i style={{ width: `${total ? (value / total) * 100 : 0}%` }} /></div><b>{value.toLocaleString("ru-RU")}</b></div>;
         })}
+      </div>
+      <div className="rating-goal">
+        <RatingGoal label="По артикулу" ratings={snapshot.ratings} />
+        {card && cardTotal !== total && <RatingGoal label="По карточке" ratings={card.ratings} />}
+        <p className="rating-goal-note">
+          Оценка снизу по нашим данным: WB часть отзывов из рейтинга исключает, поэтому у него до 5,0 обычно ближе.
+        </p>
       </div>
     </div>
   );

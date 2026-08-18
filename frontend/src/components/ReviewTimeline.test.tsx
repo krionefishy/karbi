@@ -63,6 +63,28 @@ describe("ReviewTimeline", () => {
     expect(screen.getByText(/По карточке целиком:/)).toBeInTheDocument();
   });
 
+  it("shows how many five-star reviews are still missing, per article and per card", () => {
+    render(<ReviewTimeline products={[product]} />);
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+
+    // Which day opens depends on the Moscow date, so the arithmetic itself is
+    // covered in rating.test.ts; here we only check both rows are wired up.
+    expect(screen.getByText("По артикулу")).toBeInTheDocument();
+    expect(screen.getByText("По карточке")).toBeInTheDocument();
+    expect(screen.getAllByText(/до 5,0 — ещё/)).toHaveLength(2);
+  });
+
+  it("reports a distribution that already displays as 5.0", () => {
+    const perfect = {
+      ...product,
+      snapshots: product.snapshots.map((snapshot) => ({ ...snapshot, ratings: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 50 } })),
+      card_snapshots: [],
+    };
+    render(<ReviewTimeline products={[perfect]} />);
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+    expect(screen.getByText("оценка 5,0 достигнута")).toBeInTheDocument();
+  });
+
   it("labels an article that WB no longer lists", () => {
     render(<ReviewTimeline products={[{ ...product, state: "feedback_only" }]} />);
     expect(screen.getByText("Нет в каталоге")).toBeInTheDocument();
