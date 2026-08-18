@@ -1,6 +1,7 @@
 set dotenv-load
 
 compose := "docker compose -f deploy/compose.yaml"
+prod_compose := "sudo docker compose --env-file .env -f deploy/compose.yaml"
 test_compose := "docker compose -f deploy/compose.test.yaml"
 test_config := "backend/shared/settings/config.test.yaml"
 
@@ -68,3 +69,31 @@ compose-status:
 
 compose-logs service="":
     {{ compose }} logs {{ service }}
+
+# Build and deploy the current server checkout, then verify critical processes.
+prod-deploy:
+    @test -f .env || (echo "Missing production .env in the repository root" >&2; exit 1)
+    {{ prod_compose }} config --quiet
+    {{ prod_compose }} build
+    {{ prod_compose }} up -d --remove-orphans
+    @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
+    @test "$({{ prod_compose }} ps --status running -q wb-reviews-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q outbox-publisher | wc -l | tr -d ' ')" = "1"
+    {{ prod_compose }} ps
+
+# Start production containers without rebuilding images.
+prod-up:
+    @test -f .env || (echo "Missing production .env in the repository root" >&2; exit 1)
+    {{ prod_compose }} up -d --remove-orphans
+
+# Stop production containers without deleting persistent volumes.
+prod-down:
+    {{ prod_compose }} down --remove-orphans
+
+# Show production container and health status.
+prod-status:
+    {{ prod_compose }} ps
+
+# Follow production logs for all services or one named service.
+prod-logs service="":
+    {{ prod_compose }} logs --tail=200 --follow {{ service }}
