@@ -28,8 +28,8 @@ def main() -> None:
     args = parser.parse_args()
     password = getpass.getpass("Password: ")
     confirmation = getpass.getpass("Repeat password: ")
-    if len(password) < 12:
-        parser.error("password must contain at least 12 characters")
+    if len(password) < 8:
+        parser.error("password must contain at least 8 characters")
     if password != confirmation:
         parser.error("passwords do not match")
     try:
