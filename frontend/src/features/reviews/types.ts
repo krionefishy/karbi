@@ -57,4 +57,17 @@ export interface ReviewSyncRun {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  jobs: ReviewSyncJob[];
+}
+
+export interface ReviewSyncJob {
+  id: string;
+  seller_id: string;
+  seller_name: string;
+  status: "queued" | "running" | "success" | "error";
+  product_count: number;
+  feedback_count: number;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
 }

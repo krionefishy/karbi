@@ -1,9 +1,10 @@
 from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 import respx
 
-from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient
+from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient, WBFeedbackTemporaryError
 
 
 def feedback(feedback_id: str, article: int, rating: int, name: str = "Товар") -> dict:
@@ -67,3 +68,18 @@ async def test_feedback_client_ignores_feedback_without_valid_rating(monkeypatch
 
     assert result.counts == {}
     assert result.feedback_count == 0
+
+
+async def test_feedback_client_stops_after_rate_limit_retries(monkeypatch) -> None:
+    sleep = AsyncMock()
+    monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.asyncio.sleep", sleep)
+    monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.random.uniform", lambda *_: 0.1)
+
+    with respx.mock(base_url="https://feedbacks-api.wildberries.ru") as router:
+        route = router.get("/api/v1/feedbacks").respond(429, headers={"Retry-After": "1"})
+
+        with pytest.raises(WBFeedbackTemporaryError, match="после 5 попыток"):
+            await WBFeedbackClient().aggregate("secret")
+
+    assert route.call_count == 5
+    assert sleep.await_count == 4

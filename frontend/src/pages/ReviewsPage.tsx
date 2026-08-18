@@ -66,6 +66,10 @@ export function ReviewsPage() {
     refetchInterval: (query) =>
       query.state.data?.status === "queued" || query.state.data?.status === "running" ? 3000 : false,
   });
+  const processedSellers = reviewSync
+    ? reviewSync.completed_sellers + reviewSync.failed_sellers
+    : 0;
+  const syncErrors = reviewSync?.jobs.filter((job) => job.status === "error") ?? [];
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["wb-sellers"] });
   const saveMutation = useMutation({
     mutationFn: (payload: SellerInput | Partial<SellerInput>) =>
@@ -142,7 +146,7 @@ export function ReviewsPage() {
                   <strong>
                     {reviewSync.status === "queued" && "В очереди"}
                     {reviewSync.status === "running" &&
-                      `${reviewSync.completed_sellers} из ${reviewSync.total_sellers}`}
+                      `${processedSellers} из ${reviewSync.total_sellers}`}
                     {reviewSync.status === "success" && "Завершён"}
                     {reviewSync.status === "partial_success" && "Завершён с ошибками"}
                     {reviewSync.status === "error" && "Ошибка"}
@@ -174,6 +178,18 @@ export function ReviewsPage() {
               {reviewSyncMutation.error instanceof ApiError
                 ? reviewSyncMutation.error.message
                 : "Не удалось запустить синхронизацию"}
+            </div>
+          )}
+          {syncErrors.length > 0 && (
+            <div className="inline-error sync-errors" role="status">
+              <strong>Не удалось собрать данные:</strong>
+              <ul>
+                {syncErrors.map((job) => (
+                  <li key={job.id}>
+                    {job.seller_name}: {job.error ?? "неизвестная ошибка"}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {isLoading || articlesLoading || historyLoading ? (

@@ -148,6 +148,8 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .review-sync-button { padding-right: 22px; padding-left: 22px; border-radius: 999px; }
 .review-sync-actions .catalog-status { padding-left: 18px; border-left: 1px solid var(--line); }
 .inline-error { max-width: 1320px; margin: -12px auto 18px; padding: 10px 12px; color: var(--negative); background: var(--negative-bg); border: 1px solid rgba(196,62,54,.24); font-size: 12px; }
+.sync-errors strong { display: block; margin-bottom: 6px; }
+.sync-errors ul { display: grid; margin: 0; padding-left: 18px; gap: 4px; }
 .timeline-section { max-width: 1320px; margin: 0 auto; }
 .timeline-toolbar { position: sticky; z-index: 10; top: -30px; display: flex; min-height: 72px; align-items: center; gap: 28px; justify-content: space-between; margin-bottom: 15px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--line); }
 .window-controls { display: flex; align-items: center; gap: 8px; }

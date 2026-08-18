@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,6 +8,10 @@ import httpx
 
 
 class WBFeedbackPermanentError(Exception):
+    pass
+
+
+class WBFeedbackTemporaryError(Exception):
     pass
 
 
@@ -27,11 +32,17 @@ class FeedbackAggregation:
 class WBFeedbackClient:
     base_url = "https://feedbacks-api.wildberries.ru"
 
-    def __init__(self, page_size: int = 5000, timeout_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        page_size: int = 5000,
+        timeout_seconds: float = 60.0,
+        request_interval_seconds: float = 0.5,
+    ) -> None:
         if not 1 <= page_size <= 5000:
             raise ValueError("WB feedback page size must be between 1 and 5000")
         self.page_size = page_size
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
+        self.request_interval_seconds = request_interval_seconds
 
     async def aggregate(self, api_key: str) -> FeedbackAggregation:
         counts: dict[str, list[int]] = {}
@@ -135,17 +146,39 @@ class WBFeedbackClient:
         params: dict[str, str],
     ) -> httpx.Response:
         for attempt in range(5):
-            response = await client.get(path, headers={"Authorization": api_key}, params=params)
+            try:
+                response = await client.get(path, headers={"Authorization": api_key}, params=params)
+            except httpx.RequestError as error:
+                if attempt == 4:
+                    raise WBFeedbackTemporaryError(
+                        f"Не удалось подключиться к WB Feedbacks API после 5 попыток: {error}"
+                    ) from error
+                await asyncio.sleep(self._retry_delay(None, attempt))
+                continue
             if response.status_code in {400, 401, 402, 403, 413, 422}:
                 raise WBFeedbackPermanentError(
                     f"WB Feedbacks API rejected the request with status {response.status_code}"
                 )
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt == 4:
-                    response.raise_for_status()
-                await asyncio.sleep(float(response.headers.get("Retry-After", min(2**attempt, 15))))
+                    raise WBFeedbackTemporaryError(
+                        f"WB Feedbacks API временно недоступен после 5 попыток: HTTP {response.status_code}"
+                    )
+                await asyncio.sleep(self._retry_delay(response, attempt))
                 continue
-            response.raise_for_status()
-            await asyncio.sleep(0.34)
+            try:
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                raise WBFeedbackTemporaryError(f"Ошибка WB Feedbacks API: {error}") from error
+            await asyncio.sleep(self.request_interval_seconds)
             return response
         raise RuntimeError("WB feedback request retry loop exhausted")
+
+    @staticmethod
+    def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+        fallback = float(min(2**attempt, 30))
+        try:
+            requested = max(float(response.headers.get("Retry-After", fallback)), 0.0) if response else fallback
+        except ValueError:
+            requested = fallback
+        return max(requested, fallback) + random.uniform(0.1, 0.5)

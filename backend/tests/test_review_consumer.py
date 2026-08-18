@@ -6,7 +6,12 @@ from types import SimpleNamespace
 from typing import cast
 
 from backend.modules.wb_core.infrastructure.wb import WBContentClient
-from backend.modules.wb_reviews.infrastructure.wb import FeedbackAggregation, FeedbackProduct, WBFeedbackClient
+from backend.modules.wb_reviews.infrastructure.wb import (
+    FeedbackAggregation,
+    FeedbackProduct,
+    WBFeedbackClient,
+    WBFeedbackTemporaryError,
+)
 from backend.shared.security import CredentialCipher
 from backend.storage.pg import Database
 from backend.workers.wb_reviews import review_consumer as consumer_module
@@ -58,6 +63,7 @@ class FakeReviews:
         self.job = SimpleNamespace(id=job_id, status="queued")
         self.saved_counts: dict[str, tuple[int, int, int, int, int]] = {}
         self.completed = False
+        self.failed_error: str | None = None
 
     async def get_job(self, job_id: uuid.UUID):
         return self.job if job_id == self.job.id else None
@@ -76,7 +82,8 @@ class FakeReviews:
         self.completed = True
 
     async def fail_job(self, job_id: uuid.UUID, error: str) -> None:
-        raise AssertionError(error)
+        self.failed_error = error
+        self.job.status = "error"
 
     async def finalize_run(self, run_id: uuid.UUID) -> None:
         return None
@@ -102,6 +109,11 @@ class FakeFeedbackClient:
             products={"456": FeedbackProduct("456", "SKU-456", "Feedback product")},
             feedback_count=18,
         )
+
+
+class RateLimitedFeedbackClient:
+    async def aggregate(self, api_key: str) -> FeedbackAggregation:
+        raise WBFeedbackTemporaryError("WB Feedbacks API временно недоступен после 5 попыток: HTTP 429")
 
 
 class FakeCipher:
@@ -140,6 +152,42 @@ async def test_review_consumer_closes_database_session_while_calling_wb(monkeypa
     )
 
     assert reviews.completed
+    assert reviews.failed_error is None
     assert reviews.saved_counts["123"] == (1, 2, 3, 4, 5)
     assert reviews.saved_counts["456"] == (0, 0, 0, 1, 2)
+    assert sellers.inbox_events == [event_id]
+
+
+async def test_review_consumer_marks_rate_limited_job_failed_and_finishes_message(monkeypatch) -> None:
+    seller_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    database = FakeDatabase()
+    sellers = FakeSellers(seller_id)
+    reviews = FakeReviews(job_id)
+    monkeypatch.setattr(consumer_module, "SellerRepository", lambda session: sellers)
+    monkeypatch.setattr(consumer_module, "ReviewSyncRepository", lambda session: reviews)
+
+    consumer = ReviewSyncConsumer(
+        cast(Database, database),
+        cast(CredentialCipher, FakeCipher()),
+        "kafka:9092",
+        "test",
+        5000,
+    )
+    consumer.catalog_client = cast(WBContentClient, FakeCatalogClient(database))
+    consumer.feedback_client = cast(WBFeedbackClient, RateLimitedFeedbackClient())
+    event_id = uuid.uuid4()
+
+    await consumer.process(
+        {
+            "event_id": str(event_id),
+            "run_id": str(uuid.uuid4()),
+            "job_id": str(job_id),
+            "seller_id": str(seller_id),
+            "snapshot_date": "2026-08-18",
+        }
+    )
+
+    assert reviews.failed_error is not None
+    assert "HTTP 429" in reviews.failed_error
     assert sellers.inbox_events == [event_id]

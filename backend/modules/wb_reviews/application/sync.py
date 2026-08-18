@@ -1,12 +1,12 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_reviews.domain import ReviewSyncRun
+from backend.modules.wb_reviews.domain import ReviewSyncJob, ReviewSyncRun
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.shared.kafka_streams.topics import WBReviewsTopics
 from backend.shared.outbox import OutboxRepository
@@ -67,7 +67,26 @@ class ReviewSyncService:
         return self.reviews.to_domain(run)
 
     async def latest(self) -> ReviewSyncRun | None:
-        return await self.reviews.latest_run()
+        run = await self.reviews.latest_run()
+        if run is None:
+            return None
+        jobs = []
+        for job in await self.reviews.jobs_for_run(run.id):
+            seller = await self.sellers.get(job.seller_id)
+            jobs.append(
+                ReviewSyncJob(
+                    id=job.id,
+                    seller_id=job.seller_id,
+                    seller_name=seller.name if seller else "Удалённый селлер",
+                    status=job.status,
+                    product_count=job.product_count,
+                    feedback_count=job.feedback_count,
+                    error=job.error,
+                    started_at=job.started_at,
+                    finished_at=job.finished_at,
+                )
+            )
+        return replace(run, jobs=tuple(jobs))
 
     async def history(self, seller_id: uuid.UUID, days: int) -> ReviewHistory:
         if await self.sellers.get(seller_id) is None:

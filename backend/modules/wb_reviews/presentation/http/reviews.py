@@ -26,6 +26,19 @@ class SyncRunResponse(BaseModel):
     created_at: str
     started_at: str | None
     finished_at: str | None
+    jobs: list["SyncJobResponse"]
+
+
+class SyncJobResponse(BaseModel):
+    id: uuid.UUID
+    seller_id: uuid.UUID
+    seller_name: str
+    status: str
+    product_count: int
+    feedback_count: int
+    error: str | None
+    started_at: str | None
+    finished_at: str | None
 
 
 class SnapshotResponse(BaseModel):
@@ -58,6 +71,20 @@ def run_response(run: ReviewSyncRun) -> SyncRunResponse:
         created_at=run.created_at.isoformat(),
         started_at=run.started_at.isoformat() if run.started_at else None,
         finished_at=run.finished_at.isoformat() if run.finished_at else None,
+        jobs=[
+            SyncJobResponse(
+                id=job.id,
+                seller_id=job.seller_id,
+                seller_name=job.seller_name,
+                status=job.status,
+                product_count=job.product_count,
+                feedback_count=job.feedback_count,
+                error=job.error,
+                started_at=job.started_at.isoformat() if job.started_at else None,
+                finished_at=job.finished_at.isoformat() if job.finished_at else None,
+            )
+            for job in run.jobs
+        ],
     )
 
 

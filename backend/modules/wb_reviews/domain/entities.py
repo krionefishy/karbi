@@ -13,6 +13,19 @@ class DailyRatings:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewSyncJob:
+    id: uuid.UUID
+    seller_id: uuid.UUID
+    seller_name: str
+    status: str
+    product_count: int
+    feedback_count: int
+    error: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewSyncRun:
     id: uuid.UUID
     trigger: str
@@ -24,3 +37,4 @@ class ReviewSyncRun:
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    jobs: tuple[ReviewSyncJob, ...] = ()

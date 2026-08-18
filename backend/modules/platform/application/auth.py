@@ -77,15 +77,17 @@ class TokenService:
         )
         return token
 
-    async def rotate_refresh(self, token: str) -> tuple[uuid.UUID, str]:
-        user_id = await self._redis.getdel(self._refresh_key(token))
+    async def renew_refresh(self, token: str) -> uuid.UUID:
+        user_id = await self._redis.getex(
+            self._refresh_key(token),
+            self._config.refresh_token_ttl_seconds,
+        )
         if user_id is None:
             raise AuthenticationError
         try:
-            parsed_user_id = uuid.UUID(user_id)
+            return uuid.UUID(user_id)
         except ValueError as error:
             raise AuthenticationError from error
-        return parsed_user_id, await self.issue_refresh(parsed_user_id)
 
     async def revoke_refresh(self, token: str) -> None:
         await self._redis.delete(self._refresh_key(token))
@@ -117,12 +119,12 @@ class AuthService:
         return await self._create_session(user)
 
     async def refresh(self, refresh_token: str) -> AuthSession:
-        user_id, new_refresh_token = await self._tokens.rotate_refresh(refresh_token)
+        user_id = await self._tokens.renew_refresh(refresh_token)
         user = await self._users.get_by_id(user_id)
         if user is None or not user.is_active:
-            await self._tokens.revoke_refresh(new_refresh_token)
+            await self._tokens.revoke_refresh(refresh_token)
             raise AuthenticationError
-        return AuthSession(user, self._tokens.issue_access(user.id), new_refresh_token)
+        return AuthSession(user, self._tokens.issue_access(user.id), refresh_token)
 
     async def current_user(self, user_id: uuid.UUID) -> User:
         user = await self._users.get_by_id(user_id)

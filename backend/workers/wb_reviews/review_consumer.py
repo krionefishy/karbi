@@ -7,9 +7,13 @@ from datetime import date
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError, WBTemporaryError
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
-from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient, WBFeedbackPermanentError
+from backend.modules.wb_reviews.infrastructure.wb import (
+    WBFeedbackClient,
+    WBFeedbackPermanentError,
+    WBFeedbackTemporaryError,
+)
 from backend.shared.kafka_streams.topics import WBReviewsTopics
 from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
@@ -93,8 +97,14 @@ class ReviewSyncConsumer:
             api_key = self.cipher.decrypt(encrypted_key)
             catalog = await self.catalog_client.get_articles(api_key)
             aggregation = await self.feedback_client.aggregate(api_key)
-        except (CredentialDecryptionError, WBPermanentError, WBFeedbackPermanentError) as error:
-            await self._permanent_failure(event_id, run_id, job_id, str(error))
+        except (
+            CredentialDecryptionError,
+            WBPermanentError,
+            WBTemporaryError,
+            WBFeedbackPermanentError,
+            WBFeedbackTemporaryError,
+        ) as error:
+            await self._finish_failure(event_id, run_id, job_id, str(error))
             return
 
         products = {item["article"]: item for item in catalog}
@@ -119,7 +129,7 @@ class ReviewSyncConsumer:
             sellers.mark_inbox(event_id, "WBReviewSyncRequested")
             await session.commit()
 
-    async def _permanent_failure(
+    async def _finish_failure(
         self,
         event_id: uuid.UUID,
         run_id: uuid.UUID,
