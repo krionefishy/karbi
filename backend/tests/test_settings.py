@@ -1,3 +1,7 @@
+from dataclasses import replace
+
+import pytest
+
 from backend.shared.settings import load_settings
 
 
@@ -10,3 +14,12 @@ def test_test_settings_are_loaded_from_yaml() -> None:
     assert settings.auth.refresh_token_ttl_seconds == 604_800
     assert settings.worker.feedback_request_interval_seconds == 0.0
     assert settings.worker.feedback_retry_wait_seconds == 600
+
+
+def test_a_request_timeout_below_the_poll_timeout_is_refused() -> None:
+    """Long polling holds the connection open, so the request must outlive the poll."""
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    broken = replace(settings, telegram=replace(settings.telegram, request_timeout_seconds=1, poll_timeout_seconds=25))
+
+    with pytest.raises(ValueError, match="request_timeout_seconds"):
+        broken.validate_values()

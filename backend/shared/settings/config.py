@@ -144,6 +144,20 @@ class WorkerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TelegramConfig:
+    """One process polls every bot; the tokens themselves live in the database."""
+
+    api_base_url: str = "https://api.telegram.org"
+    poll_timeout_seconds: int = 25
+    request_timeout_seconds: int = 40
+    bot_refresh_seconds: int = 60
+    delivery_interval_seconds: float = 1.0
+    send_max_attempts: int = 5
+    send_retry_backoff_seconds: int = 30
+    invite_link_ttl_hours: int = 72
+
+
+@dataclass(frozen=True, slots=True)
 class WBApiConfig:
     """Egress budget for Wildberries. Buckets are shared across every worker through Redis."""
 
@@ -167,6 +181,7 @@ class Settings:
     rate_limit: RateLimitConfig
     worker: WorkerConfig
     wb_api: WBApiConfig
+    telegram: TelegramConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -207,6 +222,19 @@ class Settings:
         worker["job_retry_backoff_seconds"] = int(worker.get("job_retry_backoff_seconds", 300))
         worker["run_max_age_seconds"] = int(worker.get("run_max_age_seconds", 21_600))
         wb_api = {key: int(value) for key, value in dict(data.get("wb_api", {})).items()}
+        telegram = dict(data.get("telegram", {}))
+        for key in (
+            "poll_timeout_seconds",
+            "request_timeout_seconds",
+            "bot_refresh_seconds",
+            "send_max_attempts",
+            "send_retry_backoff_seconds",
+            "invite_link_ttl_hours",
+        ):
+            if key in telegram:
+                telegram[key] = int(telegram[key])
+        if "delivery_interval_seconds" in telegram:
+            telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
         security = data.get("security", {})
         keys = security.get("credential_encryption_keys", [])
         if isinstance(keys, str):
@@ -225,6 +253,7 @@ class Settings:
             rate_limit=RateLimitConfig(**rate_limit),
             worker=WorkerConfig(**worker),
             wb_api=WBApiConfig(**wb_api),
+            telegram=TelegramConfig(**telegram),
         )
         settings.validate_values()
         return settings
@@ -262,6 +291,18 @@ class Settings:
             < 1
         ):
             raise ValueError("wb_api budgets must be positive")
+        if self.telegram.poll_timeout_seconds < 1:
+            raise ValueError("telegram.poll_timeout_seconds must be positive")
+        if self.telegram.request_timeout_seconds <= self.telegram.poll_timeout_seconds:
+            # Long polling holds the connection for the whole poll timeout, so a
+            # request timeout below it would cancel every idle poll.
+            raise ValueError("telegram.request_timeout_seconds must exceed telegram.poll_timeout_seconds")
+        if self.telegram.send_max_attempts < 1:
+            raise ValueError("telegram.send_max_attempts must be positive")
+        if self.telegram.invite_link_ttl_hours < 1:
+            raise ValueError("telegram.invite_link_ttl_hours must be positive")
+        if self.telegram.delivery_interval_seconds <= 0:
+            raise ValueError("telegram.delivery_interval_seconds must be positive")
         try:
             ZoneInfo(self.worker.review_sync_timezone)
         except ZoneInfoNotFoundError as error:

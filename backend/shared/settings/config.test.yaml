@@ -47,3 +47,13 @@ wb_api:
   feedbacks_per_key: 55
   feedbacks_per_host: 55
   max_wait_seconds: 120
+telegram:
+  # Tests never reach Telegram; the base URL is here so an accidental call fails loudly.
+  api_base_url: http://telegram.invalid
+  poll_timeout_seconds: 1
+  request_timeout_seconds: 2
+  bot_refresh_seconds: 1
+  delivery_interval_seconds: 0.05
+  send_max_attempts: 3
+  send_retry_backoff_seconds: 1
+  invite_link_ttl_hours: 72

@@ -87,6 +87,9 @@ jobs:
       - name: Apply WB reviews migrations
         run: uv run alembic -n wb_reviews upgrade head
 
+      - name: Apply notification migrations
+        run: uv run alembic -n notifications upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

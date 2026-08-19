@@ -1,0 +1,116 @@
+import secrets
+import uuid
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.modules.notifications.application import templates
+from backend.modules.notifications.domain import Bot, Invite
+from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.modules.notifications.infrastructure.telegram import Update
+
+# Telegram allows up to 64 characters of [A-Za-z0-9_-] in a start payload.
+TOKEN_BYTES = 24
+
+
+class SubscriptionService:
+    """Invitations in, subscriptions out.
+
+    The link carries a random token and nothing else: it travels through
+    messengers, and a seller id inside it would leak with every forward.
+    """
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        repository: NotificationRepository,
+        *,
+        invite_ttl_hours: int = 72,
+    ) -> None:
+        self.session = session
+        self.repository = repository
+        self.invite_ttl_hours = invite_ttl_hours
+
+    async def create_invite(
+        self,
+        bot: Bot,
+        *,
+        seller_id: uuid.UUID,
+        seller_name: str,
+        created_by: uuid.UUID | None = None,
+    ) -> Invite:
+        """Issue a fresh single-use link and void the ones nobody opened."""
+        await self.repository.revoke_invites(bot.id, seller_id)
+        token = secrets.token_urlsafe(TOKEN_BYTES)
+        model = self.repository.add_invite(
+            token=token,
+            bot_id=bot.id,
+            seller_id=seller_id,
+            seller_name=seller_name,
+            created_by=created_by,
+            ttl_hours=self.invite_ttl_hours,
+        )
+        await self.session.commit()
+        return Invite(
+            token=token,
+            url=f"https://t.me/{bot.username}?start={token}",
+            expires_at=model.expires_at,
+            seller_id=seller_id,
+        )
+
+    async def handle_update(self, bot: Bot, update: Update) -> None:
+        """Answer one message. Every reply goes through the outgoing queue.
+
+        The caller commits: the poller advances its cursor in the same
+        transaction, so a crash cannot subscribe a chat and then re-read the
+        same /start with an already spent invitation.
+        """
+        command, _, argument = update.text.strip().partition(" ")
+        if command == "/start":
+            await self._start(bot, update, argument.strip())
+        elif command == "/stop":
+            await self._stop(bot, update)
+        else:
+            await self._reply(bot, update, templates.SUBSCRIPTION_NO_TOKEN, {})
+
+    async def _start(self, bot: Bot, update: Update, token: str) -> None:
+        if not token:
+            await self._reply(bot, update, templates.SUBSCRIPTION_NO_TOKEN, {})
+            return
+        invite = await self.repository.claim_invite(bot.id, token)
+        if invite is None:
+            await self._reply(bot, update, templates.SUBSCRIPTION_INVALID_LINK, {})
+            return
+        await self.repository.subscribe(
+            bot_id=bot.id,
+            chat_id=update.chat_id,
+            seller_id=invite.seller_id,
+            seller_name=invite.seller_name,
+            telegram_user_id=update.user_id,
+            username=update.username,
+            first_name=update.first_name,
+        )
+        await self._reply(
+            bot,
+            update,
+            templates.SUBSCRIPTION_CONFIRMED,
+            {"seller_name": invite.seller_name, "bot_title": bot.title or "Karbi"},
+        )
+
+    async def _stop(self, bot: Bot, update: Update) -> None:
+        active = await self.repository.subscriptions_of_chat(bot.id, update.chat_id)
+        if not active:
+            await self._reply(bot, update, templates.SUBSCRIPTION_NOTHING_TO_STOP, {})
+            return
+        sellers = ", ".join(sorted({item.seller_name for item in active if item.seller_name}))
+        await self.repository.unsubscribe_chat(bot.id, update.chat_id)
+        await self._reply(bot, update, templates.SUBSCRIPTION_STOPPED, {"sellers": sellers or "—"})
+
+    async def _reply(self, bot: Bot, update: Update, template: str, params: dict) -> None:
+        await self.repository.queue_message(
+            bot_id=bot.id,
+            chat_id=update.chat_id,
+            dedupe_key=f"reply:{bot.id}:{update.update_id}",
+            template=template,
+            params=params,
+            text=templates.render(template, params),
+        )

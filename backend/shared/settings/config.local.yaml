@@ -56,3 +56,6 @@ wb_api:
   feedbacks_per_key: 55
   feedbacks_per_host: 55
   max_wait_seconds: 120
+telegram:
+  api_base_url: https://api.telegram.org
+  invite_link_ttl_hours: 72

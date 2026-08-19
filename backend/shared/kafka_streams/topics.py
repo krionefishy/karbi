@@ -36,5 +36,15 @@ class WBReviewsTopics:
         return (cls.SYNC_REQUESTED,)
 
 
+class NotificationTopics:
+    """Outgoing notifications. The payload names the bot to speak through."""
+
+    TELEGRAM_MESSAGE_REQUESTED = validate_topic_name("notifications.telegram.message.requested")
+
+    @classmethod
+    def all(cls) -> tuple[str, ...]:
+        return (cls.TELEGRAM_MESSAGE_REQUESTED,)
+
+
 def all_topics() -> tuple[str, ...]:
-    return (*StorageTopics.all(), *WBCoreTopics.all(), *WBReviewsTopics.all())
+    return (*StorageTopics.all(), *WBCoreTopics.all(), *WBReviewsTopics.all(), *NotificationTopics.all())

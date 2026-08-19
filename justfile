@@ -43,6 +43,7 @@ test-migrate:
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n platform upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_core upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_reviews upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n notifications upgrade head
 
 test-all: test-infra-up test-migrate
     CONFIG_PATH={{ test_config }} uv run pytest
@@ -56,7 +57,10 @@ migrate-wb-core:
 migrate-wb-reviews:
     uv run alembic -n wb_reviews upgrade head
 
-migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews
+migrate-notifications:
+    uv run alembic -n notifications upgrade head
+
+migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications
 
 compose-up:
     {{ compose }} up -d --build
@@ -79,6 +83,7 @@ prod-deploy:
     @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
     @test "$({{ prod_compose }} ps --status running -q wb-reviews-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q outbox-publisher | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q notifications-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 
 # Start production containers without rebuilding images.

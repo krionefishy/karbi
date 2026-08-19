@@ -64,3 +64,12 @@ wb_api:
   feedbacks_per_key: ${WB_FEEDBACKS_PER_KEY:-55}
   feedbacks_per_host: ${WB_FEEDBACKS_PER_HOST:-55}
   max_wait_seconds: ${WB_RATE_MAX_WAIT_SECONDS:-120}
+telegram:
+  api_base_url: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+  poll_timeout_seconds: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}
+  request_timeout_seconds: ${TELEGRAM_REQUEST_TIMEOUT_SECONDS:-40}
+  bot_refresh_seconds: ${TELEGRAM_BOT_REFRESH_SECONDS:-60}
+  delivery_interval_seconds: ${TELEGRAM_DELIVERY_INTERVAL_SECONDS:-1.0}
+  send_max_attempts: ${TELEGRAM_SEND_MAX_ATTEMPTS:-5}
+  send_retry_backoff_seconds: ${TELEGRAM_SEND_RETRY_BACKOFF_SECONDS:-30}
+  invite_link_ttl_hours: ${TELEGRAM_INVITE_LINK_TTL_HOURS:-72}
