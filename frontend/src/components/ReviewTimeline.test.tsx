@@ -17,6 +17,8 @@ const product: ProductReviewHistory = {
   name: "Товар",
   imt_id: 999,
   brand: "Бренд",
+  subject_id: 1166,
+  subject_name: "Перфораторы",
   photo_url: "",
   state: "active",
   snapshots,

@@ -24,6 +24,7 @@ class Article:
     name: str
     imt_id: int | None = None
     brand: str = ""
+    subject_id: int | None = None
     subject_name: str = ""
     photo_url: str = ""
     state: str = "active"

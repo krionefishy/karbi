@@ -47,6 +47,8 @@ export interface ProductReviewHistory {
   name: string;
   imt_id: number | null;
   brand: string;
+  subject_id: number | null;
+  subject_name: string;
   photo_url: string;
   state: ArticleState;
   snapshots: DailyReviewSnapshot[];

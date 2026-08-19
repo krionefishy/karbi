@@ -23,6 +23,8 @@ class ProductHistory:
     name: str
     imt_id: int | None
     brand: str
+    subject_id: int | None
+    subject_name: str
     photo_url: str
     state: str
     snapshots: list[dict]
@@ -165,6 +167,8 @@ class ReviewSyncService:
                     name=article.name,
                     imt_id=article.imt_id,
                     brand=article.brand,
+                    subject_id=article.subject_id,
+                    subject_name=article.subject_name,
                     photo_url=article.photo_url,
                     state=article.state,
                     snapshots=self._snapshots(by_article.get(article.article, {})),

@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
+import { ArticleFilters } from "../components/ArticleFilters";
 import { ReviewTimeline } from "../components/ReviewTimeline";
 import { DeleteSellerDialog, SellerDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
@@ -17,6 +19,8 @@ import {
   startReviewSync,
   updateSeller,
 } from "../features/reviews/api";
+import { applyFilters, collectSubjects, hasActiveFilters } from "../features/reviews/filters";
+import type { ArticleFilters as Filters } from "../features/reviews/filters";
 import type { ArticleState, Seller, SellerInput } from "../features/reviews/types";
 
 const articleStateText: Record<ArticleState, string> = {
@@ -32,6 +36,18 @@ const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   error: "Ошибка",
 };
 
+function NothingFound({ onReset }: { onReset: () => void }) {
+  return (
+    <div className="empty-state">
+      <h2>Ничего не найдено</h2>
+      <p>Ни один товар не подходит под выбранный предмет и строку поиска.</p>
+      <button className="primary-button" onClick={onReset}>
+        Сбросить фильтры
+      </button>
+    </div>
+  );
+}
+
 export function ReviewsPage() {
   const queryClient = useQueryClient();
   const { data: sellers = [], isLoading } = useQuery({
@@ -44,6 +60,19 @@ export function ReviewsPage() {
         ? 3000
         : false,
   });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const filters: Filters = useMemo(
+    () => ({ query: searchParams.get("q") ?? "", subjects: searchParams.getAll("subject") }),
+    [searchParams],
+  );
+  const setFilters = (next: Filters) => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("q");
+    params.delete("subject");
+    if (next.query.trim()) params.set("q", next.query);
+    for (const subject of next.subjects) params.append("subject", subject);
+    setSearchParams(params, { replace: true });
+  };
   const [sellerId, setSellerId] = useState("");
   const [dialogSeller, setDialogSeller] = useState<Seller | "new" | null>(null);
   const [deleting, setDeleting] = useState<Seller | null>(null);
@@ -54,6 +83,22 @@ export function ReviewsPage() {
       setSellerId(sellers[0]?.id ?? "");
     }
   }, [sellerId, sellers]);
+
+  useEffect(() => {
+    // Subjects differ from seller to seller, so a chosen one stops meaning
+    // anything after switching; the typed query still does.
+    if (!sellerId) return;
+    setSearchParams(
+      (params) => {
+        if (!params.has("subject")) return params;
+        const next = new URLSearchParams(params);
+        next.delete("subject");
+        return next;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sellerId]);
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const { data: articles = [], isLoading: articlesLoading } = useQuery({
@@ -72,6 +117,14 @@ export function ReviewsPage() {
     refetchInterval: (query) =>
       query.state.data?.status === "queued" || query.state.data?.status === "running" ? 3000 : false,
   });
+  const products = history?.products ?? [];
+  const subjects = useMemo(
+    () => collectSubjects(products.length ? products : articles),
+    [products, articles],
+  );
+  const visibleProducts = useMemo(() => applyFilters(products, filters), [products, filters]);
+  const visibleArticles = useMemo(() => applyFilters(articles, filters), [articles, filters]);
+  const filtersActive = hasActiveFilters(filters);
   const processedSellers = reviewSync
     ? reviewSync.completed_sellers + reviewSync.failed_sellers
     : 0;
@@ -215,9 +268,33 @@ export function ReviewsPage() {
               <h2>Получаем товары</h2>
               <p>Синхронизация выполняется в фоне. Список обновится автоматически.</p>
             </div>
-          ) : history?.products.some((product) => product.snapshots.length) ? (
-            <ReviewTimeline products={history.products} />
+          ) : products.some((product) => product.snapshots.length) ? (
+            <>
+              <ArticleFilters
+                filters={filters}
+                subjects={subjects}
+                shown={visibleProducts.length}
+                total={products.length}
+                onChange={setFilters}
+              />
+              {visibleProducts.length ? (
+                <ReviewTimeline products={visibleProducts} />
+              ) : (
+                <NothingFound onReset={() => setFilters({ query: "", subjects: [] })} />
+              )}
+            </>
           ) : articles.length ? (
+            <>
+            <ArticleFilters
+              filters={filters}
+              subjects={subjects}
+              shown={visibleArticles.length}
+              total={articles.length}
+              onChange={setFilters}
+            />
+            {visibleArticles.length === 0 ? (
+              <NothingFound onReset={() => setFilters({ query: "", subjects: [] })} />
+            ) : (
             <section className="article-catalog">
               <div className="article-head">
                 <span>Товар</span>
@@ -225,7 +302,7 @@ export function ReviewsPage() {
                 <span>Артикул продавца</span>
                 <span>Статус</span>
               </div>
-              {articles.map((article) => (
+              {visibleArticles.map((article) => (
                 <div className="article-row" key={article.id}>
                   <div className="article-title">
                     {article.photo_url ? (
@@ -257,6 +334,8 @@ export function ReviewsPage() {
                 </div>
               ))}
             </section>
+            )}
+            </>
           ) : (
             <div className="empty-state">
               <h2>Товары не найдены</h2>

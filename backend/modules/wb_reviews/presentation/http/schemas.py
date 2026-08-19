@@ -42,6 +42,8 @@ class ProductHistoryResponse(BaseModel):
     name: str
     imt_id: int | None
     brand: str
+    subject_id: int | None
+    subject_name: str
     photo_url: str
     state: str
     snapshots: list[SnapshotResponse]

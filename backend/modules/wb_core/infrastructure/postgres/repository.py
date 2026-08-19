@@ -205,6 +205,7 @@ class SellerRepository:
             name=model.name,
             imt_id=model.imt_id,
             brand=model.brand,
+            subject_id=model.subject_id,
             subject_name=model.subject_name,
             photo_url=model.photo_url,
             state=model.state,

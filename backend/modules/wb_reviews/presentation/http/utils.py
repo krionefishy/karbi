@@ -47,6 +47,8 @@ def product_response(product: ProductHistory) -> ProductHistoryResponse:
         name=product.name,
         imt_id=product.imt_id,
         brand=product.brand,
+        subject_id=product.subject_id,
+        subject_name=product.subject_name,
         photo_url=product.photo_url,
         state=product.state,
         snapshots=[SnapshotResponse(**snapshot) for snapshot in product.snapshots],
