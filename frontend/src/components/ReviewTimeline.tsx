@@ -3,7 +3,8 @@ import { useMemo, useState } from "react";
 
 import { movementOn } from "../features/reviews/movement";
 import { averageRating, fiveStarsToTarget, pluralizeFives } from "../features/reviews/rating";
-import type { ArticleState, DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
+import type { DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
+import type { ArticleState } from "../features/sellers/types";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; latestDate?: string | null; }
 interface Selection { productId: string; date: string; }

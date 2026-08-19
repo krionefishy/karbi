@@ -1,7 +1,7 @@
-import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Search, Unplug } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { Seller } from "../features/reviews/types";
+import type { Seller } from "../features/sellers/types";
 
 interface Props {
   sellers: Seller[];
@@ -9,13 +9,14 @@ interface Props {
   onSelect: (id: string) => void;
   onAdd: () => void;
   onEdit: (seller: Seller) => void;
-  onDelete: (seller: Seller) => void;
+  /** Leaving the automation, not leaving the registry. */
+  onDetach: (seller: Seller) => void;
   onRetry: (seller: Seller) => void;
 }
 
 const statusText = { queued: "В очереди", success: "Готово", syncing: "Сбор", error: "Ошибка" } as const;
 
-export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, onDelete, onRetry }: Props) {
+export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, onDetach, onRetry }: Props) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(
     () => sellers.filter((seller) => seller.name.toLowerCase().includes(search.toLowerCase())),
@@ -25,9 +26,9 @@ export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, on
     <aside className="seller-sidebar">
       <div className="seller-search">
         <div className="seller-tools">
-          <span className="field-label">Селлеры</span>
+          <span className="field-label">Подключены</span>
           <button className="add-seller-button" onClick={onAdd}>
-            <Plus size={14} />Добавить
+            <Plus size={14} />Подключить
           </button>
         </div>
         <div className="search-input">
@@ -67,17 +68,13 @@ export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, on
               <button onClick={() => onEdit(seller)} aria-label="Редактировать селлера">
                 <Pencil size={13} />
               </button>
-              <button
-                className="danger-icon"
-                onClick={() => onDelete(seller)}
-                aria-label="Удалить селлера"
-              >
-                <Trash2 size={13} />
+              <button onClick={() => onDetach(seller)} aria-label="Отключить от автоматизации">
+                <Unplug size={13} />
               </button>
             </span>
           </div>
         ))}
-        {!filtered.length && <p className="seller-empty">Селлеры не найдены</p>}
+        {!filtered.length && <p className="seller-empty">Нет подключённых селлеров</p>}
       </div>
     </aside>
   );

@@ -1,7 +1,7 @@
 import { Eye, EyeOff, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import type { Seller, SellerInput } from "../features/reviews/types";
+import type { Seller, SellerInput } from "../features/sellers/types";
 
 interface Props {
   seller?: Seller;
@@ -87,30 +87,93 @@ export function SellerDialog({ seller, pending, error, onClose, onSubmit }: Prop
   );
 }
 
-interface DeleteProps {
-  seller: Seller;
+interface ConfirmProps {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  pendingLabel: string;
   pending: boolean;
+  danger?: boolean;
   onClose: () => void;
   onConfirm: () => void;
 }
 
-export function DeleteSellerDialog({ seller, pending, onClose, onConfirm }: DeleteProps) {
+export function ConfirmDialog({
+  title,
+  description,
+  confirmLabel,
+  pendingLabel,
+  pending,
+  danger = false,
+  onClose,
+  onConfirm,
+}: ConfirmProps) {
   return (
     <div className="modal-overlay">
-      <section className="delete-dialog" role="alertdialog" aria-modal="true">
-        <h2>Удалить селлера?</h2>
-        <p>
-          «{seller.name}», его товары, ключ и вся история отзывов будут удалены без возможности
-          восстановления.
-        </p>
+      <section className={`delete-dialog${danger ? "" : " neutral-dialog"}`} role="alertdialog" aria-modal="true">
+        <h2>{title}</h2>
+        <p>{description}</p>
         <div className="dialog-actions">
           <button className="secondary-button" onClick={onClose}>
             Отмена
           </button>
-          <button className="danger-button" disabled={pending} onClick={onConfirm}>
-            {pending ? "Удаляем…" : "Удалить"}
+          <button
+            className={danger ? "danger-button" : "primary-button"}
+            disabled={pending}
+            onClick={onConfirm}
+          >
+            {pending ? pendingLabel : confirmLabel}
           </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+interface RestoreProps {
+  seller: Seller;
+  pending: boolean;
+  error: string;
+  onClose: () => void;
+  onSubmit: (apiKey: string) => void;
+}
+
+export function RestoreSellerDialog({ seller, pending, error, onClose, onSubmit }: RestoreProps) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSubmit(String(new FormData(event.currentTarget).get("api_key")).trim());
+  }
+  return (
+    <div className="modal-overlay" role="presentation">
+      <section className="seller-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-dialog-title">
+        <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
+          <X size={18} />
+        </button>
+        <p className="eyebrow">Wildberries / восстановление</p>
+        <h2 id="restore-dialog-title">Вернуть «{seller.name}» в работу</h2>
+        <p className="muted">
+          При архивации ключ был удалён — введите его заново. История, собранная до архивации, на
+          месте, автоматизации нужно подключить заново.
+        </p>
+        <form className="seller-form" onSubmit={submit}>
+          <label>
+            <span className="field-label">WB Seller API Key</span>
+            <input name="api_key" type="password" minLength={10} required autoComplete="off" />
+          </label>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button type="button" className="secondary-button" onClick={onClose}>
+              Отмена
+            </button>
+            <button className="primary-button" disabled={pending}>
+              {pending ? "Восстанавливаем…" : "Восстановить"}
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );

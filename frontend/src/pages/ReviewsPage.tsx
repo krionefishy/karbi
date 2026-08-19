@@ -6,23 +6,26 @@ import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
 import { ArticleFilters } from "../components/ArticleFilters";
 import { ReviewTimeline } from "../components/ReviewTimeline";
-import { DeleteSellerDialog, SellerDialog } from "../components/SellerDialog";
+import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
+import { ConfirmDialog, SellerDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
+import { getLatestReviewSync, getSellerReviewHistory, startReviewSync } from "../features/reviews/api";
 import {
-  createSeller,
-  deleteSeller,
+  attachSeller,
+  detachSeller,
+  getAutomationSellers,
   getSellerArticles,
-  getSellerReviewHistory,
-  getLatestReviewSync,
   getSellers,
   retrySellerSync,
-  startReviewSync,
   updateSeller,
-} from "../features/reviews/api";
+} from "../features/sellers/api";
 import { applyFilters, collectSubjects, hasActiveFilters } from "../features/reviews/filters";
 import { latestCollectedDate, sortByMovement } from "../features/reviews/movement";
 import type { ArticleFilters as Filters } from "../features/reviews/filters";
-import type { ArticleState, Seller, SellerInput } from "../features/reviews/types";
+import type { ArticleState, Seller, SellerInput } from "../features/sellers/types";
+
+const AUTOMATION_ID = "wb-reviews";
+const AUTOMATION_TITLE = "Мониторинг отзывов Wildberries";
 
 const articleStateText: Record<ArticleState, string> = {
   active: "В продаже",
@@ -52,8 +55,8 @@ function NothingFound({ onReset }: { onReset: () => void }) {
 export function ReviewsPage() {
   const queryClient = useQueryClient();
   const { data: sellers = [], isLoading } = useQuery({
-    queryKey: ["wb-sellers"],
-    queryFn: getSellers,
+    queryKey: ["automation-sellers", AUTOMATION_ID],
+    queryFn: () => getAutomationSellers(AUTOMATION_ID),
     refetchInterval: (query) =>
       query.state.data?.some(
         (item) => item.catalog_sync_status === "queued" || item.catalog_sync_status === "syncing",
@@ -75,8 +78,9 @@ export function ReviewsPage() {
     setSearchParams(params, { replace: true });
   };
   const [sellerId, setSellerId] = useState("");
-  const [dialogSeller, setDialogSeller] = useState<Seller | "new" | null>(null);
-  const [deleting, setDeleting] = useState<Seller | null>(null);
+  const [dialogSeller, setDialogSeller] = useState<Seller | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [detaching, setDetaching] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
 
   useEffect(() => {
@@ -134,12 +138,18 @@ export function ReviewsPage() {
     ? reviewSync.completed_sellers + reviewSync.failed_sellers
     : 0;
   const syncErrors = reviewSync?.jobs.filter((job) => job.status === "error") ?? [];
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["wb-sellers"] });
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["automation-sellers", AUTOMATION_ID] });
+    await queryClient.invalidateQueries({ queryKey: ["wb-sellers"] });
+  };
+  // Only sellers the automation does not collect for yet can be connected.
+  const { data: registry = [] } = useQuery({
+    queryKey: ["wb-sellers", false],
+    queryFn: () => getSellers(),
+    enabled: connecting,
+  });
   const saveMutation = useMutation({
-    mutationFn: (payload: SellerInput | Partial<SellerInput>) =>
-      dialogSeller === "new"
-        ? createSeller(payload as SellerInput)
-        : updateSeller((dialogSeller as Seller).id, payload),
+    mutationFn: (payload: Partial<SellerInput>) => updateSeller((dialogSeller as Seller).id, payload),
     onSuccess: async (seller) => {
       setDialogSeller(null);
       setSellerId(seller.id);
@@ -149,10 +159,21 @@ export function ReviewsPage() {
     onError: (error) =>
       setFormError(error instanceof ApiError ? error.message : "Не удалось сохранить селлера"),
   });
-  const deleteMutation = useMutation({
-    mutationFn: deleteSeller,
+  const connectMutation = useMutation({
+    mutationFn: (payload: { seller_id: string } | SellerInput) => attachSeller(AUTOMATION_ID, payload),
+    onSuccess: async (seller) => {
+      setConnecting(false);
+      setFormError("");
+      setSellerId(seller.id);
+      await refresh();
+    },
+    onError: (error) =>
+      setFormError(error instanceof ApiError ? error.message : "Не удалось подключить селлера"),
+  });
+  const detachMutation = useMutation({
+    mutationFn: (seller: Seller) => detachSeller(AUTOMATION_ID, seller.id),
     onSuccess: async () => {
-      setDeleting(null);
+      setDetaching(null);
       setSellerId("");
       await refresh();
     },
@@ -172,9 +193,9 @@ export function ReviewsPage() {
     }
   }, [queryClient, reviewSync?.finished_at]);
 
-  const openNewSeller = () => {
+  const openConnectDialog = () => {
     setFormError("");
-    setDialogSeller("new");
+    setConnecting(true);
   };
 
   return (
@@ -185,12 +206,12 @@ export function ReviewsPage() {
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
-          onAdd={openNewSeller}
+          onAdd={openConnectDialog}
           onEdit={(seller) => {
             setFormError("");
             setDialogSeller(seller);
           }}
-          onDelete={setDeleting}
+          onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
         <main className="reviews-content">
@@ -261,10 +282,13 @@ export function ReviewsPage() {
             <div className="loading-block">Загружаем данные…</div>
           ) : !selected ? (
             <div className="empty-state">
-              <h2>Добавьте первого селлера</h2>
-              <p>После добавления система отправит задачу в Kafka и получит карточки Wildberries.</p>
-              <button className="primary-button" onClick={openNewSeller}>
-                Добавить селлера
+              <h2>Подключите первого селлера</h2>
+              <p>
+                Возьмите селлера из реестра или заведите нового — снимки отзывов начнут собираться
+                со следующего прогона.
+              </p>
+              <button className="primary-button" onClick={openConnectDialog}>
+                Подключить селлера
               </button>
             </div>
           ) : selected.catalog_sync_status === "queued" ||
@@ -356,19 +380,32 @@ export function ReviewsPage() {
       </div>
       {dialogSeller && (
         <SellerDialog
-          seller={dialogSeller === "new" ? undefined : dialogSeller}
+          seller={dialogSeller}
           pending={saveMutation.isPending}
           error={formError}
           onClose={() => setDialogSeller(null)}
           onSubmit={(value) => saveMutation.mutate(value)}
         />
       )}
-      {deleting && (
-        <DeleteSellerDialog
-          seller={deleting}
-          pending={deleteMutation.isPending}
-          onClose={() => setDeleting(null)}
-          onConfirm={() => deleteMutation.mutate(deleting.id)}
+      {connecting && (
+        <ConnectSellerDialog
+          automationTitle={AUTOMATION_TITLE}
+          available={registry.filter((item) => !sellers.some((enrolled) => enrolled.id === item.id))}
+          pending={connectMutation.isPending}
+          error={formError}
+          onClose={() => setConnecting(false)}
+          onConnect={(payload) => connectMutation.mutate(payload)}
+        />
+      )}
+      {detaching && (
+        <ConfirmDialog
+          title="Отключить от автоматизации?"
+          description={`«${detaching.name}» перестанет попадать в ежедневный сбор. Селлер останется в реестре, собранная история отзывов сохранится — подключить обратно можно в любой момент.`}
+          confirmLabel="Отключить"
+          pendingLabel="Отключаем…"
+          pending={detachMutation.isPending}
+          onClose={() => setDetaching(null)}
+          onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
     </div>

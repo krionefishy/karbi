@@ -29,6 +29,9 @@ export function AppHeader({ current }: AppHeaderProps) {
           <Link to="/automations">Автоматизации</Link>
           {current && <><span>/</span><span className="breadcrumb-current">{current}</span></>}
         </nav>
+        <nav className="header-nav" aria-label="Разделы">
+          <Link to="/sellers">Селлеры</Link>
+        </nav>
       </div>
       <div className="header-profile">
         <div>
