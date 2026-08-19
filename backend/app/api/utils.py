@@ -15,7 +15,12 @@ def next_run_at(settings: Settings, now: datetime | None = None) -> datetime:
     """When the worker will next create a run, from the same schedule it follows."""
     timezone = ZoneInfo(settings.worker.review_sync_timezone)
     moment = (now or datetime.now(timezone)).astimezone(timezone)
-    scheduled = moment.replace(hour=settings.worker.review_sync_hour, minute=0, second=0, microsecond=0)
+    scheduled = moment.replace(
+        hour=settings.worker.review_sync_hour,
+        minute=settings.worker.review_sync_minute,
+        second=0,
+        microsecond=0,
+    )
     return scheduled if scheduled > moment else scheduled + timedelta(days=1)
 
 

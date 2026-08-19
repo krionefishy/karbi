@@ -1,10 +1,11 @@
 import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Star, Triangle } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { movementOn } from "../features/reviews/movement";
 import { averageRating, fiveStarsToTarget, pluralizeFives } from "../features/reviews/rating";
 import type { ArticleState, DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
 
-interface ReviewTimelineProps { products: ProductReviewHistory[]; }
+interface ReviewTimelineProps { products: ProductReviewHistory[]; latestDate?: string | null; }
 interface Selection { productId: string; date: string; }
 
 const HISTORY_DAYS = 90;
@@ -106,7 +107,18 @@ function RatingDetails({ snapshot, card }: { snapshot: DailyReviewSnapshot; card
   );
 }
 
-function ProductIdentity({ product }: { product: ProductReviewHistory }) {
+function MovementBadge({ delta }: { delta: number }) {
+  const positive = delta > 0;
+  return (
+    <span className={`movement-badge movement-${positive ? "up" : "down"}`}>
+      <Triangle size={8} fill="currentColor" className={positive ? "" : "triangle-down"} />
+      {positive ? "+" : "−"}
+      {Math.abs(delta).toLocaleString("ru-RU")} за сутки
+    </span>
+  );
+}
+
+function ProductIdentity({ product, delta }: { product: ProductReviewHistory; delta: number | null }) {
   return (
     <div className="product-identity">
       {product.photo_url
@@ -125,13 +137,14 @@ function ProductIdentity({ product }: { product: ProductReviewHistory }) {
         <span className="product-tags">
           <span className={`product-state product-state-${product.state}`}>{stateLabels[product.state]}</span>
           {product.imt_id !== null && <span className="product-card-id">карточка {product.imt_id}</span>}
+          {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
         </span>
       </div>
     </div>
   );
 }
 
-export function ReviewTimeline({ products }: ReviewTimelineProps) {
+export function ReviewTimeline({ products, latestDate = null }: ReviewTimelineProps) {
   const today = moscowToday();
   const historyStart = new Date(`${today}T00:00:00Z`);
   historyStart.setUTCDate(historyStart.getUTCDate() - (HISTORY_DAYS - 1));
@@ -167,7 +180,7 @@ export function ReviewTimeline({ products }: ReviewTimelineProps) {
           const selectedSnapshot = selection?.productId === product.id ? snapshots.get(selection.date) : undefined;
           return <div className="product-block" key={product.id}>
             <div className="timeline-grid product-row">
-              <ProductIdentity product={product} />
+              <ProductIdentity product={product} delta={movementOn(product, latestDate).delta} />
               {range.map((date) => {
                 const snapshot = snapshots.get(date);
                 if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>Нет данных</div>;

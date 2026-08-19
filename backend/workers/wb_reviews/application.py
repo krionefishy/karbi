@@ -25,6 +25,7 @@ class WBReviewsWorkerApplication:
             self.database,
             self.settings.worker.poll_interval_seconds,
             self.settings.worker.review_sync_hour,
+            self.settings.worker.review_sync_minute,
             self.settings.worker.review_sync_timezone,
             self.settings.kafka.enabled,
             job_max_attempts=self.settings.worker.job_max_attempts,

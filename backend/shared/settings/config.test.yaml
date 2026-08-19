@@ -28,7 +28,8 @@ rate_limit:
   enabled: false
 worker:
   poll_interval_seconds: 1
-  review_sync_hour: 12
+  review_sync_hour: 0
+  review_sync_minute: 30
   review_sync_timezone: Europe/Moscow
   feedback_page_size: 5000
   feedback_request_interval_seconds: 0.0

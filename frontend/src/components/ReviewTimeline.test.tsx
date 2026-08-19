@@ -65,6 +65,25 @@ describe("ReviewTimeline", () => {
     expect(screen.getByText(/По карточке целиком:/)).toBeInTheDocument();
   });
 
+  it("marks a product whose review count moved overnight", () => {
+    const latest = snapshots.at(-1)!.date;
+    render(<ReviewTimeline products={[product]} latestDate={latest} />);
+
+    // The fixture grows the five-star count by one each day, so the newest day
+    // sits one review above the one before it.
+    expect(screen.getByText(/\+1 за сутки/)).toBeInTheDocument();
+  });
+
+  it("says nothing about products that did not move", () => {
+    const flat = {
+      ...product,
+      snapshots: product.snapshots.map((snapshot) => ({ ...snapshot, ratings: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 7 } })),
+    };
+    render(<ReviewTimeline products={[flat]} latestDate={flat.snapshots.at(-1)!.date} />);
+
+    expect(screen.queryByText(/за сутки/)).not.toBeInTheDocument();
+  });
+
   it("shows how many five-star reviews are still missing, per article and per card", () => {
     render(<ReviewTimeline products={[product]} />);
     fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);

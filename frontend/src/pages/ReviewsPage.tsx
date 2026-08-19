@@ -20,6 +20,7 @@ import {
   updateSeller,
 } from "../features/reviews/api";
 import { applyFilters, collectSubjects, hasActiveFilters } from "../features/reviews/filters";
+import { latestCollectedDate, sortByMovement } from "../features/reviews/movement";
 import type { ArticleFilters as Filters } from "../features/reviews/filters";
 import type { ArticleState, Seller, SellerInput } from "../features/reviews/types";
 
@@ -122,7 +123,11 @@ export function ReviewsPage() {
     () => collectSubjects(products.length ? products : articles),
     [products, articles],
   );
-  const visibleProducts = useMemo(() => applyFilters(products, filters), [products, filters]);
+  const latestDate = useMemo(() => latestCollectedDate(products), [products]);
+  const visibleProducts = useMemo(
+    () => sortByMovement(applyFilters(products, filters), latestDate),
+    [products, filters, latestDate],
+  );
   const visibleArticles = useMemo(() => applyFilters(articles, filters), [articles, filters]);
   const filtersActive = hasActiveFilters(filters);
   const processedSellers = reviewSync
@@ -278,7 +283,7 @@ export function ReviewsPage() {
                 onChange={setFilters}
               />
               {visibleProducts.length ? (
-                <ReviewTimeline products={visibleProducts} />
+                <ReviewTimeline products={visibleProducts} latestDate={latestDate} />
               ) : (
                 <NothingFound onReset={() => setFilters({ query: "", subjects: [] })} />
               )}

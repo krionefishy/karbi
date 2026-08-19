@@ -73,10 +73,12 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
 
 
 def test_next_run_is_the_worker_schedule() -> None:
-    # The worker creates a run at 12:00 Moscow time, so before noon the next one
-    # is today and after noon it has moved to tomorrow.
-    moscow = next_run_at(SETTINGS, datetime(2026, 8, 18, 8, 0, tzinfo=UTC))
-    assert (moscow.hour, moscow.day) == (SETTINGS.worker.review_sync_hour, 18)
+    # 00:30 Moscow is 21:30 UTC the day before, so a moment just after it must
+    # roll the next run forward a day.
+    expected = (SETTINGS.worker.review_sync_hour, SETTINGS.worker.review_sync_minute)
 
-    tomorrow = next_run_at(SETTINGS, datetime(2026, 8, 18, 12, 0, tzinfo=UTC))
-    assert (tomorrow.hour, tomorrow.day) == (SETTINGS.worker.review_sync_hour, 19)
+    before = next_run_at(SETTINGS, datetime(2026, 8, 18, 20, 0, tzinfo=UTC))
+    assert (before.hour, before.minute, before.day) == (*expected, 19)
+
+    after = next_run_at(SETTINGS, datetime(2026, 8, 18, 22, 0, tzinfo=UTC))
+    assert (after.hour, after.minute, after.day) == (*expected, 20)

@@ -131,7 +131,8 @@ class RateLimitConfig:
 @dataclass(frozen=True, slots=True)
 class WorkerConfig:
     poll_interval_seconds: int = 30
-    review_sync_hour: int = 12
+    review_sync_hour: int = 0
+    review_sync_minute: int = 30
     review_sync_timezone: str = "Europe/Moscow"
     feedback_page_size: int = 5000
     feedback_request_interval_seconds: float = 0.0
@@ -196,7 +197,8 @@ class Settings:
         rate_limit["window_seconds"] = int(rate_limit.get("window_seconds", 60))
         worker = dict(data.get("worker", {}))
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
-        worker["review_sync_hour"] = int(worker.get("review_sync_hour", 12))
+        worker["review_sync_hour"] = int(worker.get("review_sync_hour", 0))
+        worker["review_sync_minute"] = int(worker.get("review_sync_minute", 30))
         worker["feedback_page_size"] = int(worker.get("feedback_page_size", 5000))
         worker["feedback_request_interval_seconds"] = float(worker.get("feedback_request_interval_seconds", 0.0))
         worker["feedback_retry_wait_seconds"] = int(worker.get("feedback_retry_wait_seconds", 600))
@@ -230,6 +232,8 @@ class Settings:
     def validate_values(self) -> None:
         if not 0 <= self.worker.review_sync_hour <= 23:
             raise ValueError("worker.review_sync_hour must be between 0 and 23")
+        if not 0 <= self.worker.review_sync_minute <= 59:
+            raise ValueError("worker.review_sync_minute must be between 0 and 59")
         if not 1 <= self.worker.feedback_page_size <= 5000:
             raise ValueError("worker.feedback_page_size must be between 1 and 5000")
         if self.worker.poll_interval_seconds < 1:
