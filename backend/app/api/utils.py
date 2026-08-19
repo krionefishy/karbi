@@ -2,13 +2,18 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.app.api.schemas import AutomationResponse, AutomationRunResponse
+from backend.modules.wb_reviews.application import (
+    AUTOMATION_ID as WB_REVIEWS_ID,
+)
+from backend.modules.wb_reviews.application import (
+    DESCRIPTION as WB_REVIEWS_DESCRIPTION,
+)
+from backend.modules.wb_reviews.application import (
+    TITLE as WB_REVIEWS_TITLE,
+)
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
 from backend.shared.settings import Settings
-
-WB_REVIEWS_ID = "wb-reviews"
-WB_REVIEWS_TITLE = "Мониторинг отзывов Wildberries"
-WB_REVIEWS_DESCRIPTION = "Ежедневные снимки отзывов по всем товарам и селлерам Wildberries."
 
 
 def next_run_at(settings: Settings, now: datetime | None = None) -> datetime:

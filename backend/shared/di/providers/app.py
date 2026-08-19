@@ -5,9 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.platform.application import AuthService, PasswordService, TokenService
 from backend.modules.platform.infrastructure.postgres import UserRepository
-from backend.modules.wb_core.application import SellerService
+from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_reviews.application import ReviewSyncService
+from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.security import CredentialCipher
@@ -61,13 +61,26 @@ class SessionProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def seller_service(
-        self, session: AsyncSession, repository: SellerRepository, cipher: CredentialCipher
+        self,
+        session: AsyncSession,
+        repository: SellerRepository,
+        cipher: CredentialCipher,
+        enrollments: list[AutomationEnrollment],
     ) -> SellerService:
-        return SellerService(session, repository, cipher)
+        return SellerService(session, repository, cipher, enrollments)
 
     @provide(scope=Scope.REQUEST)
     def review_sync_repository(self, session: AsyncSession) -> ReviewSyncRepository:
         return ReviewSyncRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def reviews_enrollment(self, reviews: ReviewSyncRepository) -> ReviewsEnrollment:
+        return ReviewsEnrollment(reviews)
+
+    @provide(scope=Scope.REQUEST)
+    def automation_enrollments(self, reviews: ReviewsEnrollment) -> list[AutomationEnrollment]:
+        """Every automation a seller can be connected to. New module — new line here."""
+        return [reviews]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

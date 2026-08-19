@@ -21,6 +21,20 @@ class WBReviewsBase(DeclarativeBase):
     metadata = MetaData(schema="wb_reviews")
 
 
+class TrackedSellerModel(WBReviewsBase):
+    """Sellers this automation collects for.
+
+    Before this table membership was implicit — the run covered every seller in
+    the registry — so the only way to leave the automation was to delete the
+    seller himself.
+    """
+
+    __tablename__ = "tracked_sellers"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class DailyReviewCountModel(WBReviewsBase):
     __tablename__ = "daily_review_counts"
 

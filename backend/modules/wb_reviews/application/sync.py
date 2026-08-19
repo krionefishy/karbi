@@ -95,7 +95,7 @@ class ReviewSyncService:
             existing = await self.reviews.run_for_date(snapshot_date)
             if existing is not None:
                 return self.reviews.to_domain(existing)
-        seller_ids = [seller.id for seller in await self.sellers.list_sellers()]
+        seller_ids = await self.enrolled_seller_ids()
         run, jobs = await self.reviews.create_run(trigger, snapshot_date, seller_ids)
         for job in jobs:
             self._publish_job(run.id, job.id, job.seller_id, snapshot_date)
@@ -140,10 +140,20 @@ class ReviewSyncService:
             )
         return replace(run, jobs=tuple(jobs))
 
+    async def enrolled_seller_ids(self) -> list[uuid.UUID]:
+        """Sellers connected to this automation, archived ones left out.
+
+        Archiving detaches the seller, so the intersection normally changes
+        nothing — but it keeps a stale membership row from sending a job for a
+        seller whose API key we no longer hold.
+        """
+        tracked = await self.reviews.tracked_seller_ids()
+        return [seller.id for seller in await self.sellers.list_sellers() if seller.id in tracked]
+
     async def overview(self) -> SyncOverview:
         """Real state of the automation, assembled from the runs we recorded."""
         return SyncOverview(
-            seller_count=len(await self.sellers.list_sellers()),
+            seller_count=len(await self.enrolled_seller_ids()),
             last_run=await self.latest(),
             last_success_at=await self.reviews.last_run_finished_at(SUCCESSFUL_STATUSES),
             runs_last_24h=await self.reviews.count_runs_since(datetime.now(UTC) - timedelta(hours=24)),

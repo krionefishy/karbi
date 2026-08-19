@@ -45,6 +45,15 @@ class SellerUpdate(BaseModel):
         return self
 
 
+class SellerRestore(BaseModel):
+    api_key: SecretStr = Field(min_length=10, max_length=4096)
+
+    @field_validator("api_key")
+    @classmethod
+    def normalize_api_key(cls, value: SecretStr) -> SecretStr:
+        return SellerCreate.normalize_api_key(value)
+
+
 class SellerResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -52,6 +61,8 @@ class SellerResponse(BaseModel):
     catalog_sync_status: str
     last_catalog_sync_at: str | None
     catalog_sync_error: str | None
+    archived_at: str | None = None
+    automations: list[str] = []
 
 
 class ArticleResponse(BaseModel):

@@ -26,7 +26,7 @@ async def seller_repository() -> AsyncIterator[tuple[Database, SellerModel]]:
     settings = load_settings("backend/shared/settings/config.test.yaml")
     database = Database()
     await database.connect(settings.database.url, pool_size=1, max_overflow=0)
-    seller = SellerModel(name="Lifecycle seller", is_active=True, catalog_sync_status="success")
+    seller = SellerModel(name="Lifecycle seller", catalog_sync_status="success")
     async with database.session() as session:
         session.add(seller)
         await session.commit()

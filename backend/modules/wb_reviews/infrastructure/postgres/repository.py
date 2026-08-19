@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +11,7 @@ from backend.modules.wb_reviews.infrastructure.postgres.models import (
     DailyReviewCountModel,
     ReviewSyncJobModel,
     ReviewSyncRunModel,
+    TrackedSellerModel,
 )
 
 ACTIVE_RUN_STATUSES = ("queued", "running")
@@ -20,6 +21,23 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 class ReviewSyncRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def tracked_seller_ids(self) -> set[uuid.UUID]:
+        return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
+
+    async def track(self, seller_id: uuid.UUID) -> None:
+        statement = insert(TrackedSellerModel).values(seller_id=seller_id)
+        await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id"]))
+
+    async def untrack(self, seller_id: uuid.UUID) -> None:
+        await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
+
+    async def purge_seller(self, seller_id: uuid.UUID) -> None:
+        """Drop the collected history. Finished runs keep their jobs on purpose:
+        they record what the automation did that night, and the API already
+        renders a job whose seller is gone as «Удалённый селлер»."""
+        await self.untrack(seller_id)
+        await self.session.execute(delete(DailyReviewCountModel).where(DailyReviewCountModel.seller_id == seller_id))
 
     async def lock_run_creation(self) -> None:
         """Serialize sync-run creation across API and scheduler processes."""

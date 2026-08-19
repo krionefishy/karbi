@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, delete, func, select, text, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,19 +24,21 @@ class SellerRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def list_sellers(self) -> list[Seller]:
+    async def list_sellers(self, *, include_archived: bool = False) -> list[Seller]:
         counts = (
             select(ArticleModel.seller_id, func.count().label("count"))
             .where(ArticleModel.state == "active")
             .group_by(ArticleModel.seller_id)
             .subquery()
         )
-        rows = await self.session.execute(
+        query = (
             select(SellerModel, func.coalesce(counts.c.count, 0))
             .outerjoin(counts, counts.c.seller_id == SellerModel.id)
-            .where(SellerModel.is_active)
             .order_by(SellerModel.created_at)
         )
+        if not include_archived:
+            query = query.where(SellerModel.archived_at.is_(None))
+        rows = await self.session.execute(query)
         return [self._seller(model, int(count)) for model, count in rows.all()]
 
     async def get(self, seller_id: uuid.UUID) -> SellerModel | None:
@@ -52,7 +54,7 @@ class SellerRepository:
         return await self.session.scalar(query) is not None
 
     async def create(self, name: str, encrypted_key: str, fingerprint: str) -> SellerModel:
-        seller = SellerModel(name=name, is_active=True, catalog_sync_status="queued")
+        seller = SellerModel(name=name, catalog_sync_status="queued")
         self.session.add(seller)
         await self.session.flush()
         self.session.add(
@@ -60,13 +62,44 @@ class SellerRepository:
         )
         return seller
 
+    async def archive(self, seller_id: uuid.UUID) -> bool:
+        """Take the seller out of service without losing anything collected.
+
+        The API key goes away with him: nothing may call Wildberries for an
+        archived seller, and a lingering credential would also keep its
+        fingerprint reserved, so re-adding the same key would be refused as a
+        duplicate with no way to see why.
+        """
+        seller = await self.get(seller_id)
+        if seller is None or seller.archived_at is not None:
+            return False
+        seller.archived_at = datetime.now(UTC)
+        await self.session.execute(delete(CredentialModel).where(CredentialModel.seller_id == seller_id))
+        await self._drop_pending_sync_events(seller_id)
+        return True
+
+    async def restore(self, seller_id: uuid.UUID, encrypted_key: str, fingerprint: str) -> bool:
+        seller = await self.get(seller_id)
+        if seller is None or seller.archived_at is None:
+            return False
+        seller.archived_at = None
+        seller.catalog_sync_status = "queued"
+        seller.catalog_sync_error = None
+        self.session.add(
+            CredentialModel(seller_id=seller_id, encrypted_api_key=encrypted_key, key_fingerprint=fingerprint)
+        )
+        return True
+
     async def delete(self, seller_id: uuid.UUID) -> bool:
+        """Erase the seller himself; what automations stored is their own to drop."""
         seller = await self.get(seller_id)
         if seller is None:
             return False
-        await self.session.execute(
-            text("DELETE FROM wb_reviews.daily_review_counts WHERE seller_id = :seller_id"), {"seller_id": seller_id}
-        )
+        await self._drop_pending_sync_events(seller_id)
+        await self.session.delete(seller)
+        return True
+
+    async def _drop_pending_sync_events(self, seller_id: uuid.UUID) -> None:
         await self.session.execute(
             delete(OutboxEventModel).where(
                 OutboxEventModel.aggregate_id == seller_id,
@@ -74,8 +107,6 @@ class SellerRepository:
                 OutboxEventModel.published_at.is_(None),
             )
         )
-        await self.session.delete(seller)
-        return True
 
     async def list_articles(self, seller_id: uuid.UUID) -> list[Article]:
         """Everything we know about the seller, archived cards included.
@@ -192,7 +223,13 @@ class SellerRepository:
     @staticmethod
     def _seller(model: SellerModel, count: int) -> Seller:
         return Seller(
-            model.id, model.name, count, model.catalog_sync_status, model.last_catalog_sync_at, model.catalog_sync_error
+            model.id,
+            model.name,
+            count,
+            model.catalog_sync_status,
+            model.last_catalog_sync_at,
+            model.catalog_sync_error,
+            model.archived_at,
         )
 
     @staticmethod

@@ -1,25 +1,42 @@
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
-from backend.modules.wb_core.application import DuplicateCredentialError, SellerNotFoundError, SellerService
+from backend.modules.wb_core.application import (
+    DuplicateCredentialError,
+    SellerArchivedError,
+    SellerNotFoundError,
+    SellerService,
+)
 from backend.modules.wb_core.presentation.http.schemas import (
     ArticleResponse,
     SellerCreate,
     SellerResponse,
+    SellerRestore,
     SellerUpdate,
 )
-from backend.modules.wb_core.presentation.http.utils import article_response, not_found, seller_response
+from backend.modules.wb_core.presentation.http.utils import (
+    archived_conflict,
+    article_response,
+    not_found,
+    one_seller_response,
+    seller_response,
+    seller_responses,
+)
 
 router = APIRouter(prefix="/wb/sellers", tags=["wb-sellers"])
 
 
 @router.get("", response_model=list[SellerResponse])
 @inject
-async def list_sellers(_: CurrentPrincipal, service: FromDishka[SellerService]) -> list[SellerResponse]:
-    return [seller_response(item) for item in await service.list_sellers()]
+async def list_sellers(
+    _: CurrentPrincipal,
+    service: FromDishka[SellerService],
+    include_archived: bool = Query(default=False),
+) -> list[SellerResponse]:
+    return await seller_responses(service, await service.list_sellers(include_archived=include_archived))
 
 
 @router.post("", response_model=SellerResponse, status_code=status.HTTP_201_CREATED)
@@ -45,28 +62,58 @@ async def update_seller(
         )
     except SellerNotFoundError as error:
         raise not_found() from error
+    except SellerArchivedError as error:
+        raise archived_conflict() from error
     except DuplicateCredentialError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, "Этот API-ключ уже используется") from error
-    return seller_response(seller)
+    return await one_seller_response(service, seller)
 
 
 @router.delete("/{seller_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
-async def delete_seller(seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]) -> Response:
+async def delete_seller(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    service: FromDishka[SellerService],
+    purge: bool = Query(default=False),
+) -> Response:
+    """Archive the seller, or erase him and all collected history when purge=true."""
     try:
-        await service.delete(seller_id)
+        if purge:
+            await service.purge(seller_id)
+        else:
+            await service.archive(seller_id)
     except SellerNotFoundError as error:
         raise not_found() from error
+    except SellerArchivedError:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{seller_id}/restore", response_model=SellerResponse)
+@inject
+async def restore_seller(
+    seller_id: uuid.UUID, payload: SellerRestore, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    try:
+        seller = await service.restore(seller_id, payload.api_key.get_secret_value())
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    except DuplicateCredentialError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Этот API-ключ уже используется") from error
+    return await one_seller_response(service, seller)
 
 
 @router.post("/{seller_id}/catalog-sync", response_model=SellerResponse)
 @inject
 async def retry_sync(seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]) -> SellerResponse:
     try:
-        return seller_response(await service.request_sync(seller_id))
+        seller = await service.request_sync(seller_id)
     except SellerNotFoundError as error:
         raise not_found() from error
+    except SellerArchivedError as error:
+        raise archived_conflict() from error
+    return await one_seller_response(service, seller)
 
 
 @router.get("/{seller_id}/articles", response_model=list[ArticleResponse])

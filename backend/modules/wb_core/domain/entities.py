@@ -13,6 +13,11 @@ class Seller:
     catalog_sync_status: str
     last_catalog_sync_at: datetime | None
     catalog_sync_error: str | None
+    archived_at: datetime | None = None
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
 
 
 @dataclass(frozen=True, slots=True)

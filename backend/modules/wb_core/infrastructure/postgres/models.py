@@ -3,7 +3,6 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -27,7 +26,9 @@ class SellerModel(WBCoreBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Archiving replaces deletion: the seller leaves every automation and the
+    # collected history stays where it is.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -41,7 +42,7 @@ class SellerModel(WBCoreBase):
             "catalog_sync_status IN ('queued', 'syncing', 'success', 'error')",
             name="ck_wb_core_sellers_catalog_sync_status",
         ),
-        Index("ix_wb_core_sellers_active", "is_active"),
+        Index("ix_wb_core_sellers_archived", "archived_at"),
     )
 
 

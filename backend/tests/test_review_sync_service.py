@@ -37,8 +37,12 @@ class FakeSellers:
 
 
 class FakeReviews:
-    def __init__(self) -> None:
+    def __init__(self, tracked: list[uuid.UUID] | None = None) -> None:
         self.locked = False
+        self.tracked = set(tracked or [])
+
+    async def tracked_seller_ids(self) -> set[uuid.UUID]:
+        return set(self.tracked)
 
     async def lock_run_creation(self) -> None:
         self.locked = True
@@ -72,7 +76,7 @@ class FakeReviews:
 async def test_manual_review_sync_creates_one_outbox_event_per_seller() -> None:
     session = FakeSession()
     sellers = FakeSellers()
-    reviews = FakeReviews()
+    reviews = FakeReviews(sellers.seller_ids)
     service = ReviewSyncService(
         cast(AsyncSession, session),
         cast(SellerRepository, sellers),
@@ -141,3 +145,36 @@ async def test_history_reports_both_the_article_and_the_whole_card() -> None:
     assert [snapshot["date"] for snapshot in products["101"].card_snapshots] == ["2026-08-17", "2026-08-18"]
     # Without an imtID the card series is just the article itself.
     assert products["103"].card_snapshots == products["103"].snapshots
+
+
+async def test_only_enrolled_sellers_are_collected_for() -> None:
+    """Membership decides the run; a seller in the registry is not a subscriber."""
+    session = FakeSession()
+    sellers = FakeSellers()
+    reviews = FakeReviews([sellers.seller_ids[0]])
+    service = ReviewSyncService(
+        cast(AsyncSession, session),
+        cast(SellerRepository, sellers),
+        cast(ReviewSyncRepository, reviews),
+    )
+
+    run = await service.request("manual", date(2026, 8, 18))
+
+    events = [item for item in session.added if isinstance(item, OutboxEventModel)]
+    assert run.total_sellers == 1
+    assert {event.aggregate_id for event in events} == {sellers.seller_ids[0]}
+
+
+async def test_a_membership_left_behind_by_an_archived_seller_is_skipped() -> None:
+    session = FakeSession()
+    sellers = FakeSellers()
+    reviews = FakeReviews([*sellers.seller_ids, uuid.uuid4()])
+    service = ReviewSyncService(
+        cast(AsyncSession, session),
+        cast(SellerRepository, sellers),
+        cast(ReviewSyncRepository, reviews),
+    )
+
+    run = await service.request("manual", date(2026, 8, 18))
+
+    assert run.total_sellers == 2

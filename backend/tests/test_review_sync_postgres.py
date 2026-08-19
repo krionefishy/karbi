@@ -13,6 +13,7 @@ from backend.modules.wb_reviews.infrastructure.postgres.models import (
     DailyReviewCountModel,
     ReviewSyncJobModel,
     ReviewSyncRunModel,
+    TrackedSellerModel,
 )
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
@@ -24,13 +25,17 @@ async def test_review_sync_is_persisted_through_postgres_and_outbox() -> None:
     await database.connect(settings.database.url, pool_size=1, max_overflow=0)
     today = datetime.now(UTC).date()
     yesterday = today - timedelta(days=1)
-    seller = SellerModel(name="Review integration seller", is_active=True, catalog_sync_status="success")
+    seller = SellerModel(name="Review integration seller", catalog_sync_status="success")
 
     try:
         async with database.session() as session:
             await session.execute(delete(ReviewSyncJobModel))
             await session.execute(delete(ReviewSyncRunModel))
             session.add(seller)
+            await session.flush()
+            # The run covers whoever is enrolled, so the seller has to join the
+            # automation before he can appear in one.
+            session.add(TrackedSellerModel(seller_id=seller.id))
             await session.commit()
 
         async with database.session() as session:
@@ -64,6 +69,7 @@ async def test_review_sync_is_persisted_through_postgres_and_outbox() -> None:
             await session.execute(delete(DailyReviewCountModel).where(DailyReviewCountModel.seller_id == seller.id))
             await session.execute(delete(ReviewSyncJobModel).where(ReviewSyncJobModel.seller_id == seller.id))
             await session.execute(delete(ReviewSyncRunModel))
+            await session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller.id))
             await session.execute(delete(SellerModel).where(SellerModel.id == seller.id))
             await session.commit()
         await database.disconnect()
@@ -78,6 +84,7 @@ async def test_review_sync_http_endpoints_use_application_dependencies() -> None
         async with application.database.session() as session:
             await session.execute(delete(ReviewSyncJobModel))
             await session.execute(delete(ReviewSyncRunModel))
+            await session.execute(delete(TrackedSellerModel))
             await session.commit()
 
         token = application.token_service.issue_access(uuid.uuid4())

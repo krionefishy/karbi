@@ -22,7 +22,9 @@ auth:
   issuer: karbi
   audience: karbi-api
 security:
-  credential_encryption_keys: []
+  # Test-only Fernet key: without it nothing can create a seller, so the HTTP
+  # registry tests could not run at all.
+  credential_encryption_keys: [t4M661SyxKpmks_0sQNwk-j10CSbpUIuk_4zGSjv13M=]
   credential_fingerprint_key: test-only-fingerprint-key
 rate_limit:
   enabled: false
