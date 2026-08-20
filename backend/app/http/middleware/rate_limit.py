@@ -39,7 +39,7 @@ class RateLimitMiddleware:
         identity = resolve_client_ip(request, behind_trusted_proxy=self._behind_trusted_proxy)
         try:
             decision = await self._limiter.check(identity)
-        except RedisError:
+        except (RedisError, RuntimeError):
             logging.getLogger("rate_limit").exception("rate_limit_backend_unavailable")
             response = JSONResponse(status_code=503, content={"detail": "Service temporarily unavailable"})
             await response(scope, receive, send)

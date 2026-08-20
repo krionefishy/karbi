@@ -1,3 +1,4 @@
+import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -197,17 +198,25 @@ class NotificationRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def due_messages(self, limit: int = 50) -> list[OutgoingMessageModel]:
+    async def due_messages(self, limit: int = 50, bot_id: uuid.UUID | None = None) -> list[OutgoingMessageModel]:
+        """Messages ready to go, oldest first, optionally for one bot only.
+
+        Delivery runs a task per bot, so each one asks for its own rows; SKIP
+        LOCKED keeps those tasks from ever waiting on each other.
+        """
+        conditions = [
+            OutgoingMessageModel.status == "queued",
+            # Both sides on the database clock: next_attempt_at is written
+            # by it too, and even milliseconds of skew would hide a row
+            # that is due right now.
+            OutgoingMessageModel.next_attempt_at <= func.now(),
+        ]
+        if bot_id is not None:
+            conditions.append(OutgoingMessageModel.bot_id == bot_id)
         return list(
             await self.session.scalars(
                 select(OutgoingMessageModel)
-                .where(
-                    OutgoingMessageModel.status == "queued",
-                    # Both sides on the database clock: next_attempt_at is written
-                    # by it too, and even milliseconds of skew would hide a row
-                    # that is due right now.
-                    OutgoingMessageModel.next_attempt_at <= func.now(),
-                )
+                .where(*conditions)
                 .order_by(OutgoingMessageModel.created_at)
                 .with_for_update(skip_locked=True)
                 .limit(limit)
@@ -241,6 +250,19 @@ class NotificationRepository:
             seconds=backoff_seconds * (2 ** max(message.attempts - 1, 0))
         )
         return True
+
+    async def mark_rate_limited(self, message_id: uuid.UUID, error: str, *, retry_after_seconds: float) -> None:
+        """Reschedule for when Telegram said to come back, without spending an attempt.
+
+        A rate limit is our pace, not the message's fault: counting it against
+        max_attempts would fail perfectly good alerts within minutes.
+        """
+        delay = retry_after_seconds + random.uniform(0.1, 1.5)
+        await self.session.execute(
+            update(OutgoingMessageModel)
+            .where(OutgoingMessageModel.id == message_id)
+            .values(error=error[:1000], next_attempt_at=datetime.now(UTC) + timedelta(seconds=delay))
+        )
 
     async def mark_failed(self, message_id: uuid.UUID, error: str) -> None:
         await self.session.execute(

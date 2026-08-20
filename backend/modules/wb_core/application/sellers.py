@@ -2,6 +2,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application.enrollment import AutomationEnrollment
@@ -55,9 +56,14 @@ class SellerService:
         fingerprint = self.cipher.fingerprint(api_key)
         if await self.repository.fingerprint_exists(fingerprint):
             raise DuplicateCredentialError
-        seller = await self.repository.create(name.strip(), self.cipher.encrypt(api_key), fingerprint)
-        self._queue_sync(seller.id, "seller_created")
-        await self.session.commit()
+        try:
+            seller = await self.repository.create(name.strip(), self.cipher.encrypt(api_key), fingerprint)
+            self._queue_sync(seller.id, "seller_created")
+            await self.session.commit()
+        except IntegrityError as error:
+            # A concurrent insert slipped in between the fingerprint check and the commit.
+            await self.session.rollback()
+            raise DuplicateCredentialError from error
         return Seller(seller.id, seller.name, 0, "queued", None, None)
 
     async def update(self, seller_id: uuid.UUID, name: str | None, api_key: str | None) -> Seller:
@@ -76,7 +82,11 @@ class SellerService:
             seller.catalog_sync_status = "queued"
             seller.catalog_sync_error = None
             self._queue_sync(seller.id, "credential_updated")
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as error:
+            await self.session.rollback()
+            raise DuplicateCredentialError from error
         return await self._reload(seller_id)
 
     async def archive(self, seller_id: uuid.UUID) -> Seller:
@@ -100,7 +110,11 @@ class SellerService:
             raise DuplicateCredentialError
         await self.repository.restore(seller_id, self.cipher.encrypt(api_key), fingerprint)
         self._queue_sync(seller_id, "seller_restored")
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as error:
+            await self.session.rollback()
+            raise DuplicateCredentialError from error
         return await self._reload(seller_id)
 
     async def purge(self, seller_id: uuid.UUID) -> None:

@@ -11,6 +11,10 @@ STATISTICS_BUCKET = "statistics"
 # `dateFrom` filters by lastChangeDate and is mandatory; the stock method has no
 # history to give, so the earliest date WB accepts simply means "everything".
 ALL_TIME = "2019-06-20T00:00:00"
+# WB truncates a large orders response instead of failing it, so the method is
+# read in pages. The ceiling only guards against a page that never stops
+# bringing something new; a normal pull ends on the first repeated page.
+ORDERS_MAX_PAGES = 30
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,16 +68,31 @@ class WBStatisticsClient(WBJsonClient):
         Cancellations come back through this same window: a cancelled order is
         an order that changed, so following lastChangeDate keeps counts honest
         without re-reading everything.
+
+        One GET is not the whole answer — WB silently truncates a big response.
+        The next page starts from the lastChangeDate of the last row received
+        (inclusive, so the boundary row repeats and is deduplicated by srid),
+        and the pull stops once a page brings nothing new.
         """
+        collected: dict[str, OrderRow] = {}
+        cursor = date_from
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            payload = await self.request(
-                client,
-                "GET",
-                f"{self.base_url}/api/v1/supplier/orders",
-                api_key,
-                params={"dateFrom": date_from.strftime("%Y-%m-%dT%H:%M:%S"), "flag": 0},
-            )
-        return [row for raw in self._rows(payload) if (row := self._order(raw)) is not None]
+            for _ in range(ORDERS_MAX_PAGES):
+                payload = await self.request(
+                    client,
+                    "GET",
+                    f"{self.base_url}/api/v1/supplier/orders",
+                    api_key,
+                    params={"dateFrom": cursor.strftime("%Y-%m-%dT%H:%M:%S"), "flag": 0},
+                )
+                rows = [row for raw in self._rows(payload) if (row := self._order(raw)) is not None]
+                fresh = [row for row in rows if row.srid not in collected]
+                if not fresh:
+                    break
+                for row in fresh:
+                    collected[row.srid] = row
+                cursor = max(row.last_change_date for row in rows)
+        return list(collected.values())
 
     @staticmethod
     def _rows(payload: Any) -> list[dict]:

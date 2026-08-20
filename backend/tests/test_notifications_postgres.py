@@ -1,13 +1,17 @@
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
+from sqlalchemy import update as sa_update
 
 from backend.modules.notifications.application import BotRegistry, DispatchService, SubscriptionService
 from backend.modules.notifications.domain import Audience, Bot, MessageRequest
 from backend.modules.notifications.infrastructure.postgres import (
     BotModel,
+    InviteLinkModel,
     NotificationRepository,
     OutgoingMessageModel,
     SubscriptionModel,
@@ -15,6 +19,7 @@ from backend.modules.notifications.infrastructure.postgres import (
 from backend.modules.notifications.infrastructure.telegram import (
     TelegramClient,
     TelegramPermanentError,
+    TelegramRateLimitError,
     TelegramTemporaryError,
     Update,
 )
@@ -268,6 +273,9 @@ async def test_a_blocked_chat_is_not_retried_forever(notifications) -> None:
     async with database.session() as session:
         row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
         assert row is not None and row.status == "failed"
+        # The chat is gone for good, so the subscription goes with it.
+        subscription = await session.scalar(select(SubscriptionModel).where(SubscriptionModel.bot_id == bot.id))
+        assert subscription is not None and subscription.is_active is False
 
 
 async def test_a_telegram_outage_keeps_the_message_queued(notifications) -> None:
@@ -280,3 +288,203 @@ async def test_a_telegram_outage_keeps_the_message_queued(notifications) -> None
     async with database.session() as session:
         row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
         assert row is not None and row.status == "queued" and row.attempts == 1
+
+
+async def test_a_rate_limit_waits_out_retry_after_without_burning_attempts(notifications) -> None:
+    database, bot = notifications
+    await subscribe(database, bot, chat_id=555, update_id=1)
+
+    report = await deliver(
+        database, FakeTelegram(TelegramRateLimitError("Too Many Requests: retry after 30", retry_after=30))
+    )
+
+    assert (report.sent, report.retried, report.failed) == (0, 1, 0)
+    async with database.session() as session:
+        row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
+        assert row is not None and row.status == "queued"
+        assert row.attempts == 0
+        assert row.next_attempt_at >= datetime.now(UTC) + timedelta(seconds=25)
+    # Not due until Telegram's pause is over.
+    assert (await deliver(database, FakeTelegram())).sent == 0
+
+
+async def test_one_broken_bot_token_does_not_stop_delivery_for_the_rest(notifications) -> None:
+    database, bot = notifications
+    async with database.session() as session:
+        repository = NotificationRepository(session)
+        broken = await BotRegistry(session, repository, cipher()).register(
+            code=f"test-bot-{uuid.uuid4().hex[:8]}",
+            username="karbi_broken_bot",
+            title="Сломанный",
+            token=f"1234:{uuid.uuid4().hex}",
+        )
+    try:
+        async with database.session() as session:
+            await NotificationRepository(session).queue_message(
+                bot_id=broken.id,
+                chat_id=999,
+                dedupe_key=f"broken:{uuid.uuid4().hex}",
+                template="subscription.confirmed",
+                params={},
+                text="никогда не уйдёт",
+            )
+            await session.execute(sa_update(BotModel).where(BotModel.id == broken.id).values(encrypted_token="garbage"))
+            await session.commit()
+        await subscribe(database, bot, chat_id=555, update_id=1)
+        client = FakeTelegram()
+
+        report = await deliver(database, client)
+
+        assert (report.sent, report.failed) == (1, 1)
+        assert client.sent[0][0] == 555
+        async with database.session() as session:
+            row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == broken.id))
+            assert row is not None and row.status == "failed"
+    finally:
+        async with database.session() as session:
+            await session.execute(delete(BotModel).where(BotModel.id == broken.id))
+            await session.commit()
+
+
+async def test_a_crash_mid_batch_keeps_the_messages_already_sent(notifications) -> None:
+    database, bot = notifications
+    await subscribe(database, bot, chat_id=555, update_id=1)
+    await subscribe(database, bot, chat_id=556, update_id=2)
+
+    class CrashingTelegram(FakeTelegram):
+        async def send(self, token: str, chat_id: int, text: str) -> int | None:
+            if self.sent:
+                raise RuntimeError("the process died here")
+            return await super().send(token, chat_id, text)
+
+    with pytest.raises(RuntimeError):
+        await deliver(database, CrashingTelegram())
+
+    async with database.session() as session:
+        rows = await session.scalars(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
+        assert sorted(row.status for row in rows) == ["queued", "sent"]
+
+
+async def test_racing_invite_requests_leave_exactly_one_live_link(notifications) -> None:
+    database, bot = notifications
+    async with database.session() as session:
+        repository = NotificationRepository(session)
+        service = SubscriptionService(session, repository)
+        first = await service.create_invite(bot, seller_id=SELLER_ID, seller_name="ООО Ромашка")
+
+        # A concurrent request whose revoke ran before `first` was committed:
+        # it sees nothing to revoke, and its insert hits the partial unique index.
+        original_revoke = repository.revoke_invites
+        calls = 0
+
+        async def racy_revoke(bot_id: uuid.UUID, seller_id: uuid.UUID) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return
+            await original_revoke(bot_id, seller_id)
+
+        repository.revoke_invites = racy_revoke  # type: ignore[method-assign]
+        second = await service.create_invite(bot, seller_id=SELLER_ID, seller_name="ООО Ромашка")
+
+    assert calls == 2  # the conflict really happened and was retried
+    assert second.token != first.token
+    async with database.session() as session:
+        live = list(
+            await session.scalars(
+                select(InviteLinkModel).where(
+                    InviteLinkModel.bot_id == bot.id,
+                    InviteLinkModel.seller_id == SELLER_ID,
+                    InviteLinkModel.used_at.is_(None),
+                    InviteLinkModel.revoked_at.is_(None),
+                )
+            )
+        )
+    assert [invite.token for invite in live] == [second.token]
+
+
+async def test_group_commands_with_a_bot_suffix_are_recognized(notifications) -> None:
+    database, bot = notifications
+    async with database.session() as session:
+        invite = await SubscriptionService(session, NotificationRepository(session)).create_invite(
+            bot, seller_id=SELLER_ID, seller_name="ООО Ромашка"
+        )
+
+    await handle(database, bot, update(f"/start@{bot.username} {invite.token}", update_id=1))
+    async with database.session() as session:
+        assert await NotificationRepository(session).subscribers(bot.id, SELLER_ID) == [555]
+
+    await handle(database, bot, update(f"/stop@{bot.username}", update_id=2))
+    async with database.session() as session:
+        assert await NotificationRepository(session).subscribers(bot.id, SELLER_ID) == []
+
+
+async def test_the_same_producer_key_through_two_bots_reaches_the_chat_twice(notifications) -> None:
+    database, bot = notifications
+    await subscribe(database, bot, chat_id=555, update_id=1)
+    async with database.session() as session:
+        repository = NotificationRepository(session)
+        second_bot = await BotRegistry(session, repository, cipher()).register(
+            code=f"test-bot-{uuid.uuid4().hex[:8]}",
+            username="karbi_second_bot",
+            title="Второй",
+            token=f"1234:{uuid.uuid4().hex}",
+        )
+    try:
+        async with database.session() as session:
+            invite = await SubscriptionService(session, NotificationRepository(session)).create_invite(
+                second_bot, seller_id=SELLER_ID, seller_name="ООО Ромашка"
+            )
+        await handle(database, second_bot, update(f"/start {invite.token}", update_id=1))
+
+        first = await dispatch_queue(database, request(bot.code))
+        second = await dispatch_queue(database, request(second_bot.code))
+
+        assert (first.queued, second.queued, second.skipped) == (1, 1, 0)
+    finally:
+        async with database.session() as session:
+            await session.execute(delete(BotModel).where(BotModel.id == second_bot.id))
+            await session.commit()
+
+
+async def test_delivery_only_touches_the_bot_it_was_asked_for(notifications) -> None:
+    """Each bot's loop drains its own queue, so a stuck bot holds up only itself."""
+    database, bot = notifications
+    await subscribe(database, bot, chat_id=555, update_id=1)
+    async with database.session() as session:
+        repository = NotificationRepository(session)
+        other = await BotRegistry(session, repository, cipher()).register(
+            code=f"test-bot-{uuid.uuid4().hex[:8]}",
+            username="karbi_other_bot",
+            title="Другой",
+            token=f"1234:{uuid.uuid4().hex}",
+        )
+    try:
+        async with database.session() as session:
+            invite = await SubscriptionService(session, NotificationRepository(session)).create_invite(
+                other, seller_id=SELLER_ID, seller_name="ООО Ромашка"
+            )
+        await handle(database, other, update(f"/start {invite.token}", update_id=1))
+
+        await dispatch_queue(database, request(bot.code, dedupe_key="d1"))
+        await dispatch_queue(database, request(other.code, dedupe_key="d2"))
+
+        client = FakeTelegram()
+        async with database.session() as session:
+            repository = NotificationRepository(session)
+            service = DispatchService(session, repository, BotRegistry(session, repository, cipher()))
+            report = await service.deliver_due(client, max_attempts=3, backoff_seconds=1, bot_id=other.id)
+
+        assert report.failed == 0
+        async with database.session() as session:
+            rows = list(await session.scalars(select(OutgoingMessageModel).where(OutgoingMessageModel.chat_id == 555)))
+        statuses = {bot_id: {row.status for row in rows if row.bot_id == bot_id} for bot_id in (bot.id, other.id)}
+        # Everything of the bot we asked for went out; nothing of the other bot moved.
+        assert statuses[other.id] == {"sent"}
+        assert statuses[bot.id] == {"queued"}
+        assert report.sent == len([row for row in rows if row.bot_id == other.id])
+    finally:
+        async with database.session() as session:
+            await session.execute(delete(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == other.id))
+            await session.execute(delete(BotModel).where(BotModel.id == other.id))
+            await session.commit()

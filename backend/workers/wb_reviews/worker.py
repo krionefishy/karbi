@@ -8,6 +8,7 @@ import structlog
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_reviews.application import ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
+from backend.shared.heartbeat import touch_heartbeat
 from backend.storage.pg import Database
 
 
@@ -42,9 +43,14 @@ class WBReviewsWorker:
     async def run(self) -> None:
         self._logger.info("worker_started")
         while not self._stop.is_set():
+            touch_heartbeat()
             if self._enabled:
-                await self._recover()
-                await self._schedule_if_due()
+                # A transient database error must cost one poll, not the process.
+                try:
+                    await self._recover()
+                    await self._schedule_if_due()
+                except Exception:
+                    self._logger.exception("worker_iteration_failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._poll_interval_seconds)
             except TimeoutError:

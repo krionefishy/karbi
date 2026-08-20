@@ -5,8 +5,9 @@ from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.notifications.application import BotNotFoundError, BotRegistry
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_turnover.domain import STATUS_OK
+from backend.modules.wb_turnover.domain import STATUS_NO_STOCK, STATUS_OK
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.topics import NotificationTopics
 from backend.shared.outbox import OutboxRepository
@@ -34,6 +35,7 @@ class DigestService:
         session: AsyncSession,
         sellers: SellerRepository,
         turnover: TurnoverRepository,
+        bots: BotRegistry,
         *,
         threshold_days: int,
         bot_code: str,
@@ -41,6 +43,7 @@ class DigestService:
         self.session = session
         self.sellers = sellers
         self.turnover = turnover
+        self.bots = bots
         self.threshold_days = threshold_days
         self.bot_code = bot_code
         self.logger = logging.getLogger("wb.turnover.digest")
@@ -51,17 +54,31 @@ class DigestService:
 
     async def send(self, seller_id: uuid.UUID, day: date) -> DigestResult:
         rows = await self.turnover.turnover_on(seller_id, day)
+        # An article already at zero belongs in the digest more than any other:
+        # losing the alert the moment the shelf empties would be exactly wrong.
         alerting = [
             row
             for row in rows
-            if row.status == STATUS_OK
-            and row.days_of_cover is not None
-            and float(row.days_of_cover) < self.threshold_days
+            if row.status == STATUS_NO_STOCK
+            or (
+                row.status == STATUS_OK
+                and row.days_of_cover is not None
+                and float(row.days_of_cover) < self.threshold_days
+            )
         ]
         if not alerting:
             # Nothing to say. A daily "всё в порядке" teaches people to ignore
             # the bot, and then the real alert goes unread too.
             return DigestResult(seller_id, 0, sent=False)
+
+        try:
+            await self.bots.by_code(self.bot_code)
+        except BotNotFoundError:
+            # Without a registered bot nothing will ever be delivered. Logging
+            # the day as sent would silently burn it, so leave no trace and let
+            # a retry succeed once the bot is registered.
+            self.logger.error("turnover_digest_bot_missing", extra={"seller_id": str(seller_id), "bot": self.bot_code})
+            return DigestResult(seller_id, len(alerting), sent=False)
 
         seller = await self.sellers.get(seller_id)
         previous = {
@@ -98,6 +115,7 @@ class DigestService:
                             "stock": row.stock_total,
                             "stock_fbo": row.stock_fbo,
                             "stock_fbs": row.stock_fbs,
+                            "out_of_stock": row.status == STATUS_NO_STOCK,
                         }
                         for row in alerting
                     ],

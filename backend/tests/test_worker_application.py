@@ -1,7 +1,6 @@
 import asyncio
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 from backend.modules.notifications.domain import Bot
@@ -57,6 +56,48 @@ def test_a_daytime_schedule_still_waits_for_its_hour() -> None:
     assert noon.is_due(moment(11, 59)) is False
 
 
+def test_a_crashed_consumer_is_restarted_by_the_supervisor() -> None:
+    """A dead consumer task used to go unnoticed until the process restarted."""
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    application = WBReviewsWorkerApplication(settings)
+    application.consumer_restart_delay_seconds = 0
+    starts = []
+
+    async def scenario() -> None:
+        alive = asyncio.Event()
+
+        async def flaky_consumer() -> None:
+            starts.append(1)
+            if len(starts) == 1:
+                raise RuntimeError("CommitFailedError after a rebalance")
+            alive.set()
+            await asyncio.Event().wait()
+
+        supervisor = asyncio.create_task(application._supervise("wb-review-consumer", flaky_consumer))
+        await asyncio.wait_for(alive.wait(), timeout=5)
+        supervisor.cancel()
+        await asyncio.gather(supervisor, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert len(starts) == 2
+
+
+def test_a_transient_database_error_does_not_kill_the_worker_loop() -> None:
+    failing_worker = worker(0, 30)
+    attempts = []
+
+    async def failing_recover() -> None:
+        attempts.append(1)
+        failing_worker.stop()
+        raise RuntimeError("database is down")
+
+    failing_worker._recover = failing_recover  # type: ignore[method-assign]
+
+    # The loop swallows the error and lives on to the next poll instead of dying.
+    asyncio.run(failing_worker.run())
+    assert attempts == [1]
+
+
 def test_notifications_worker_starts_a_poller_for_every_registered_bot() -> None:
     """Bots come from the table, so adding one must not need a deploy."""
     settings = load_settings("backend/shared/settings/config.test.yaml")
@@ -65,18 +106,16 @@ def test_notifications_worker_starts_a_poller_for_every_registered_bot() -> None
     application._pollers = {}
 
     async def scenario() -> None:
-        with patch.object(NotificationsWorkerApplication, "_active_bots", AsyncMock(return_value=[])) as bots:
-            await application._sync_pollers()
-            assert application._pollers == {}
+        # The supervisor reads the bot table once and drives the pollers from it.
+        application._sync_pollers([])
+        assert application._pollers == {}
 
-            bots.return_value = [(first, "token-1"), (second, "token-2")]
-            await application._sync_pollers()
-            assert set(application._pollers) == {first.id, second.id}
+        application._sync_pollers([(first, "token-1"), (second, "token-2")])
+        assert set(application._pollers) == {first.id, second.id}
 
-            # A bot switched off in the table loses its poller on the next sweep.
-            bots.return_value = [(first, "token-1")]
-            await application._sync_pollers()
-            assert set(application._pollers) == {first.id}
+        # A bot switched off in the table loses its poller on the next sweep.
+        application._sync_pollers([(first, "token-1")])
+        assert set(application._pollers) == {first.id}
 
         for task in application._pollers.values():
             task.cancel()

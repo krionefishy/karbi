@@ -4,7 +4,11 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest_asyncio
 from sqlalchemy import delete, select
+from sqlalchemy import update as sa_update
 
+from backend.modules.notifications.application import BotRegistry
+from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.modules.notifications.infrastructure.postgres.models import BotModel
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
@@ -21,6 +25,7 @@ from backend.modules.wb_turnover.infrastructure.postgres import (
     TrackedSellerModel,
     TurnoverRepository,
 )
+from backend.modules.wb_turnover.infrastructure.postgres.repository import RECLAIM_RUNNING_AFTER
 from backend.modules.wb_turnover.infrastructure.wb import (
     OrderRow,
     StockRow,
@@ -133,6 +138,37 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
             await session.execute(delete(SellerModel).where(SellerModel.id == model.id))
             await session.commit()
         await database.disconnect()
+
+
+@pytest_asyncio.fixture
+async def digest_bot(seller) -> AsyncIterator[str]:
+    """A registered bot, because the digest refuses to burn a day without one."""
+    database, _ = seller
+    code = f"turnover-alerts-{uuid.uuid4().hex[:8]}"
+    async with database.session() as session:
+        bot = await BotRegistry(session, NotificationRepository(session), cipher()).register(
+            code=code,
+            username="karbi_turnover_bot",
+            title="Оборачиваемость",
+            token=f"1234:{uuid.uuid4().hex}",
+        )
+    try:
+        yield code
+    finally:
+        async with database.session() as session:
+            await session.execute(delete(BotModel).where(BotModel.id == bot.id))
+            await session.commit()
+
+
+def digest_service(session, bot_code: str) -> DigestService:
+    return DigestService(
+        session,
+        SellerRepository(session),
+        TurnoverRepository(session),
+        BotRegistry(session, NotificationRepository(session), cipher()),
+        threshold_days=10,
+        bot_code=bot_code,
+    )
 
 
 def collection(session, statistics, marketplace) -> CollectionService:
@@ -281,7 +317,7 @@ async def test_the_metric_is_computed_from_what_was_collected(seller) -> None:
     assert rows["102"].status == STATUS_NO_STOCK
 
 
-async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(seller) -> None:
+async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(seller, digest_bot) -> None:
     database, seller_id = seller
     await collect_stocks(database, seller_id, FakeStatistics([stock("101", 4)]), FakeMarketplace())
     await collect_orders(
@@ -293,18 +329,13 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
 
     async def send():
         async with database.session() as session:
-            service = DigestService(
-                session,
-                SellerRepository(session),
-                TurnoverRepository(session),
-                threshold_days=10,
-                bot_code="turnover-alerts",
-            )
-            return await service.send(seller_id, TODAY)
+            return await digest_service(session, digest_bot).send(seller_id, TODAY)
 
     first, second = await send(), await send()
 
-    assert (first.sent, first.articles) == (True, 1)
+    # 101 is low on cover, 102 sits at zero — the empty shelf belongs in the
+    # digest just as much as the one about to empty.
+    assert (first.sent, first.articles) == (True, 2)
     assert second.sent is False
     async with database.session() as session:
         events = list(
@@ -317,14 +348,18 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
         )
     assert len(events) == 1
     payload = events[0].payload
-    assert payload["bot"] == "turnover-alerts"
+    assert payload["bot"] == digest_bot
     assert payload["audience"] == {"type": "seller_subscribers", "seller_id": str(seller_id)}
-    assert payload["params"]["items"][0]["article"] == "101"
+    items = {item["article"]: item for item in payload["params"]["items"]}
+    assert set(items) == {"101", "102"}
+    assert items["101"]["out_of_stock"] is False
+    assert items["102"]["out_of_stock"] is True
 
 
-async def test_a_seller_with_nothing_low_gets_no_message(seller) -> None:
+async def test_a_seller_with_nothing_low_gets_no_message(seller, digest_bot) -> None:
     database, seller_id = seller
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 400)]), FakeMarketplace())
+    # Both articles well stocked: nothing low, and nothing at zero either.
+    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 400), stock("102", 400)]), FakeMarketplace())
     await collect_orders(
         database,
         seller_id,
@@ -333,13 +368,7 @@ async def test_a_seller_with_nothing_low_gets_no_message(seller) -> None:
     await calculate(database, seller_id)
 
     async with database.session() as session:
-        result = await DigestService(
-            session,
-            SellerRepository(session),
-            TurnoverRepository(session),
-            threshold_days=10,
-            bot_code="turnover-alerts",
-        ).send(seller_id, TODAY)
+        result = await digest_service(session, digest_bot).send(seller_id, TODAY)
 
     assert (result.sent, result.articles) == (False, 0)
 
@@ -356,3 +385,139 @@ async def test_a_schedule_slot_can_only_be_claimed_once(seller) -> None:
         await session.rollback()
 
     assert first is not None and repeated is None
+
+
+async def test_a_crashed_slot_can_be_claimed_again_once_it_goes_stale(seller) -> None:
+    database, _ = seller
+
+    async with database.session() as session:
+        claimed = await TurnoverRepository(session).start_run("stocks", TODAY, 1)
+        await session.commit()
+    assert claimed is not None
+    # Pretend the process died right after claiming: the run is still "running"
+    # and older than the reclaim window.
+    async with database.session() as session:
+        await session.execute(
+            sa_update(CollectionRunModel)
+            .where(CollectionRunModel.id == claimed.id)
+            .values(started_at=datetime.now(UTC) - RECLAIM_RUNNING_AFTER - timedelta(minutes=1))
+        )
+        await session.commit()
+
+    async with database.session() as session:
+        again = await TurnoverRepository(session).start_run("stocks", TODAY, 1)
+        await session.commit()
+
+    assert again is not None
+
+
+async def test_a_finished_slot_stays_claimed(seller) -> None:
+    database, _ = seller
+
+    async with database.session() as session:
+        repository = TurnoverRepository(session)
+        run = await repository.start_run("stocks", TODAY, 2)
+        assert run is not None
+        await repository.finish_run(run.id, sellers=1, failed=0)
+        await session.execute(
+            sa_update(CollectionRunModel)
+            .where(CollectionRunModel.id == run.id)
+            .values(started_at=datetime.now(UTC) - RECLAIM_RUNNING_AFTER - timedelta(hours=2))
+        )
+        await session.commit()
+
+    async with database.session() as session:
+        repeated = await TurnoverRepository(session).start_run("stocks", TODAY, 2)
+        await session.rollback()
+
+    assert repeated is None
+
+
+async def test_the_current_stock_never_mixes_two_collection_points(seller) -> None:
+    """FBO from this morning must not be added to yesterday's FBS figure."""
+    database, seller_id = seller
+    yesterday = TODAY - timedelta(days=1)
+    await collect_stocks(
+        database,
+        seller_id,
+        FakeStatistics([stock("101", 10)]),
+        FakeMarketplace(warehouse_list=[Warehouse(id=1, name="Свой")], amounts={"bar-101": 7}),
+        slot=0,
+        day=yesterday,
+    )
+    # Today only FBO is collected — the seller dropped his own warehouse.
+    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 10)]), FakeMarketplace(), slot=0)
+
+    async with database.session() as session:
+        current = await TurnoverRepository(session).latest_stock(seller_id, TODAY - timedelta(days=7))
+
+    assert current["101"].total == 10  # not 17
+
+
+async def test_orders_are_read_page_by_page_until_nothing_new_arrives() -> None:
+    pages = [
+        [order(f"a{index}", "101", date(2026, 8, 18), changed=datetime(2026, 8, 18, index)) for index in range(3)],
+        [order(f"b{index}", "101", date(2026, 8, 19), changed=datetime(2026, 8, 19, index)) for index in range(3)],
+        [],
+    ]
+
+    class Paged(WBStatisticsClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cursors: list[datetime] = []
+
+        async def request(self, client, method, url, api_key, **kwargs):  # type: ignore[override]
+            self.cursors.append(kwargs["params"]["dateFrom"])
+            return [
+                {
+                    "srid": row.srid,
+                    "nmId": int(row.article),
+                    "date": row.order_date.isoformat(),
+                    "lastChangeDate": row.last_change_date.isoformat(),
+                    "isCancel": row.is_cancel,
+                    "finishedPrice": row.price,
+                    "warehouseType": row.warehouse_type,
+                }
+                for row in pages[min(len(self.cursors) - 1, len(pages) - 1)]
+            ]
+
+    client = Paged()
+    rows = await client.orders("key", datetime(2026, 8, 18, tzinfo=UTC))
+
+    assert {row.srid for row in rows} == {"a0", "a1", "a2", "b0", "b1", "b2"}
+    assert len(client.cursors) == 3  # two pages of data, one empty page to stop
+
+
+async def test_a_repeated_srid_inside_one_pull_does_not_break_the_batch(seller) -> None:
+    database, seller_id = seller
+    # The same order twice in one response: pages overlap on their boundary row.
+    await collect_orders(
+        database,
+        seller_id,
+        FakeStatistics(
+            order_rows=[
+                order("dup", "101", date(2026, 8, 19)),
+                order("dup", "101", date(2026, 8, 19), cancelled=True),
+            ]
+        ),
+    )
+
+    async with database.session() as session:
+        rows = list(await session.scalars(select(OrderModel).where(OrderModel.seller_id == seller_id)))
+
+    assert len(rows) == 1
+    assert rows[0].is_cancel is True  # the last row wins
+
+
+async def test_a_purge_mid_flight_is_not_overwritten_by_the_write_phase(seller) -> None:
+    database, seller_id = seller
+    # The seller leaves the automation while the pull is in the air.
+    async with database.session() as session:
+        await session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
+        await session.commit()
+
+    await collect_orders(database, seller_id, FakeStatistics(order_rows=[order("o1", "101", date(2026, 8, 19))]))
+
+    async with database.session() as session:
+        rows = list(await session.scalars(select(OrderModel).where(OrderModel.seller_id == seller_id)))
+    assert rows == []

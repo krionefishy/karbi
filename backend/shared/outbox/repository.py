@@ -27,7 +27,14 @@ class OutboxRepository:
         )
         return event_id
 
-    async def claim(self, worker_id: str, limit: int = 50) -> list[OutboxEventModel]:
+    # The lock must outlive the slowest publish attempt: send_and_wait against a
+    # degraded broker can block for its full delivery timeout, and a lock that
+    # expires mid-send lets a second publisher emit the same event again.
+    DEFAULT_LOCK_SECONDS = 120
+
+    async def claim(
+        self, worker_id: str, limit: int = 50, lock_seconds: int = DEFAULT_LOCK_SECONDS
+    ) -> list[OutboxEventModel]:
         now = datetime.now(UTC)
         rows = list(
             await self.session.scalars(
@@ -44,7 +51,7 @@ class OutboxRepository:
         )
         for row in rows:
             row.locked_by = worker_id
-            row.locked_until = now + timedelta(seconds=30)
+            row.locked_until = now + timedelta(seconds=lock_seconds)
             row.attempts += 1
         await self.session.commit()
         return rows

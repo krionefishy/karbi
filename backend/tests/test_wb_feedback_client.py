@@ -4,7 +4,11 @@ import httpx
 import pytest
 import respx
 
-from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient, WBFeedbackTemporaryError
+from backend.modules.wb_reviews.infrastructure.wb import (
+    WBFeedbackClient,
+    WBFeedbackPermanentError,
+    WBFeedbackTemporaryError,
+)
 
 
 def feedback(feedback_id: str, article: int, rating: int, name: str = "Товар") -> dict:
@@ -122,3 +126,27 @@ async def test_feedback_client_retries_the_same_page_after_rate_limit(monkeypatc
     assert result.counts == {"101": (0, 0, 0, 0, 1)}
     assert active_route.call_count == 4
     assert [call.request.url.params["skip"] for call in active_route.calls] == ["0", "0", "1", "0"]
+
+
+async def test_feedback_client_fails_loudly_at_the_pagination_ceiling(monkeypatch) -> None:
+    """WB stops serving pages around 200k; a snapshot cut off there must not be
+    written to the database as if it were complete."""
+    monkeypatch.setattr(
+        "backend.modules.wb_reviews.infrastructure.wb.client.asyncio.sleep",
+        AsyncMock(),
+    )
+    monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.MAX_PAGINATION_DEPTH", 2)
+
+    with respx.mock(base_url="https://feedbacks-api.wildberries.ru") as router:
+        route = router.get("/api/v1/feedbacks").mock(
+            side_effect=[
+                page(feedback("a", 101, 5)),
+                page(feedback("b", 101, 4)),
+            ]
+        )
+
+        with pytest.raises(WBFeedbackPermanentError, match="потолок"):
+            await WBFeedbackClient(page_size=1).aggregate("secret")
+
+    # Two full pages exhaust the ceiling of two; the third request never happens.
+    assert route.call_count == 2

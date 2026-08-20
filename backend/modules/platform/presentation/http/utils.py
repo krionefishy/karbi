@@ -50,3 +50,11 @@ def unauthorized() -> HTTPException:
         detail="Неверный логин или пароль",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+def too_many_login_attempts(retry_after_seconds: int) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Слишком много неудачных попыток входа — попробуйте позже",
+        headers={"Retry-After": str(retry_after_seconds)},
+    )

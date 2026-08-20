@@ -3,16 +3,24 @@ import logging
 import uuid
 from contextlib import suppress
 
+from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.outbox.repository import OutboxRepository
 from backend.storage.pg import Database
 
 
 class OutboxPublisher:
-    def __init__(self, database: Database, producer: KafkaProducerWrapper, poll_seconds: float = 1.0) -> None:
+    def __init__(
+        self,
+        database: Database,
+        producer: KafkaProducerWrapper,
+        poll_seconds: float = 1.0,
+        lock_seconds: int = OutboxRepository.DEFAULT_LOCK_SECONDS,
+    ) -> None:
         self.database = database
         self.producer = producer
         self.poll_seconds = poll_seconds
+        self.lock_seconds = lock_seconds
         self.worker_id = f"outbox-{uuid.uuid4()}"
         self.logger = logging.getLogger("outbox.publisher")
         self._stop = asyncio.Event()
@@ -22,8 +30,9 @@ class OutboxPublisher:
 
     async def run(self) -> None:
         while not self._stop.is_set():
+            touch_heartbeat()
             async with self.database.session() as session:
-                events = await OutboxRepository(session).claim(self.worker_id)
+                events = await OutboxRepository(session).claim(self.worker_id, lock_seconds=self.lock_seconds)
             for event in events:
                 try:
                     await self.producer.send(event.topic, event.payload, key=event.message_key)

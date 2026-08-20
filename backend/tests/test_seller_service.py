@@ -5,11 +5,13 @@ from typing import cast
 
 import pytest
 from cryptography.fernet import Fernet
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import (
     AutomationEnrollment,
     AutomationNotFoundError,
+    DuplicateCredentialError,
     SellerArchivedError,
     SellerNotFoundError,
     SellerService,
@@ -24,12 +26,19 @@ class FakeSession:
     def __init__(self) -> None:
         self.added: list[object] = []
         self.commits = 0
+        self.rollbacks = 0
+        self.commit_error: Exception | None = None
 
     def add(self, value: object) -> None:
         self.added.append(value)
 
     async def commit(self) -> None:
+        if self.commit_error is not None:
+            raise self.commit_error
         self.commits += 1
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
 
 
 class FakeEnrollment(AutomationEnrollment):
@@ -256,3 +265,17 @@ async def test_purging_an_unknown_seller_is_an_error() -> None:
 
     with pytest.raises(SellerNotFoundError):
         await service.purge(uuid.uuid4())
+
+
+async def test_concurrent_duplicate_key_becomes_the_same_domain_conflict() -> None:
+    service, repository, session, _ = service_fixture()
+    await service.archive(repository.seller_id)
+    session.commit_error = IntegrityError("INSERT", {}, Exception("duplicate key value violates unique constraint"))
+
+    with pytest.raises(DuplicateCredentialError):
+        await service.create("ООО Ромашка", "wb-api-key-123456")
+    assert session.rollbacks == 1
+
+    with pytest.raises(DuplicateCredentialError):
+        await service.restore(repository.seller_id, "wb-api-key-restored")
+    assert session.rollbacks == 2

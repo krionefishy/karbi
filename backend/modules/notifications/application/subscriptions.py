@@ -1,6 +1,7 @@
 import secrets
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import templates
@@ -39,6 +40,22 @@ class SubscriptionService:
         created_by: uuid.UUID | None = None,
     ) -> Invite:
         """Issue a fresh single-use link and void the ones nobody opened."""
+        try:
+            return await self._issue_invite(bot, seller_id, seller_name, created_by)
+        except IntegrityError:
+            # Two concurrent requests raced past each other's revoke; the partial
+            # unique index on live links let only one insert through. Revoke the
+            # winner's link too and reissue once.
+            await self.session.rollback()
+            return await self._issue_invite(bot, seller_id, seller_name, created_by)
+
+    async def _issue_invite(
+        self,
+        bot: Bot,
+        seller_id: uuid.UUID,
+        seller_name: str,
+        created_by: uuid.UUID | None,
+    ) -> Invite:
         await self.repository.revoke_invites(bot.id, seller_id)
         token = secrets.token_urlsafe(TOKEN_BYTES)
         model = self.repository.add_invite(
@@ -65,6 +82,8 @@ class SubscriptionService:
         same /start with an already spent invitation.
         """
         command, _, argument = update.text.strip().partition(" ")
+        # In groups Telegram addresses the bot explicitly: /start@BotName token.
+        command = command.partition("@")[0]
         if command == "/start":
             await self._start(bot, update, argument.strip())
         elif command == "/stop":

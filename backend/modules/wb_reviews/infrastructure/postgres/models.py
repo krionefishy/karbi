@@ -54,7 +54,6 @@ class DailyReviewCountModel(WBReviewsBase):
             "AND count_rating_4 >= 0 AND count_rating_5 >= 0",
             name="ck_wb_reviews_daily_counts_non_negative",
         ),
-        Index("ix_wb_reviews_daily_seller_article_date", "seller_id", "article", "date"),
     )
 
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -83,7 +84,16 @@ class InviteLinkModel(NotificationsBase):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    __table_args__ = (Index("ix_notifications_invite_links_seller", "bot_id", "seller_id"),)
+    __table_args__ = (
+        Index("ix_notifications_invite_links_seller", "bot_id", "seller_id"),
+        Index(
+            "uq_notifications_invite_links_live",
+            "bot_id",
+            "seller_id",
+            unique=True,
+            postgresql_where=text("used_at IS NULL AND revoked_at IS NULL"),
+        ),
+    )
 
 
 class SubscriptionModel(NotificationsBase):

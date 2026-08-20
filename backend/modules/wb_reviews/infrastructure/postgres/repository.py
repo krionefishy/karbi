@@ -25,6 +25,14 @@ class ReviewSyncRepository:
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
+    async def is_tracked(self, seller_id: uuid.UUID) -> bool:
+        return (
+            await self.session.scalar(
+                select(TrackedSellerModel.seller_id).where(TrackedSellerModel.seller_id == seller_id)
+            )
+            is not None
+        )
+
     async def track(self, seller_id: uuid.UUID) -> None:
         statement = insert(TrackedSellerModel).values(seller_id=seller_id)
         await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id"]))
@@ -52,9 +60,17 @@ class ReviewSyncRepository:
         )
 
     async def run_for_date(self, snapshot_date: date) -> ReviewSyncRunModel | None:
+        """The run that already covers this date, if any.
+
+        A run that ended in error is deliberately not returned: it collected
+        nothing usable, so it must not eat the date and block a rerun.
+        """
         return await self.session.scalar(
             select(ReviewSyncRunModel)
-            .where(ReviewSyncRunModel.snapshot_date == snapshot_date)
+            .where(
+                ReviewSyncRunModel.snapshot_date == snapshot_date,
+                ReviewSyncRunModel.status != "error",
+            )
             .order_by(ReviewSyncRunModel.created_at.desc())
             .limit(1)
         )
@@ -142,9 +158,11 @@ class ReviewSyncRepository:
         )
 
     async def complete_job(self, job_id: uuid.UUID, product_count: int, feedback_count: int) -> None:
+        # Only a running job may finish: a job the reaper already closed as
+        # error must not be rewritten into a success after the fact.
         await self.session.execute(
             update(ReviewSyncJobModel)
-            .where(ReviewSyncJobModel.id == job_id)
+            .where(ReviewSyncJobModel.id == job_id, ReviewSyncJobModel.status == "running")
             .values(
                 status="success",
                 product_count=product_count,
@@ -157,9 +175,10 @@ class ReviewSyncRepository:
         )
 
     async def fail_job(self, job_id: uuid.UUID, error: str) -> None:
+        # Same guard as complete_job: a job already closed keeps its verdict.
         await self.session.execute(
             update(ReviewSyncJobModel)
-            .where(ReviewSyncJobModel.id == job_id)
+            .where(ReviewSyncJobModel.id == job_id, ReviewSyncJobModel.status.in_(("queued", "running")))
             .values(
                 status="error",
                 error=error[:1000],
@@ -284,6 +303,13 @@ class ReviewSyncRepository:
         return await self.session.get(ReviewSyncRunModel, job.run_id)
 
     async def finalize_run(self, run_id: uuid.UUID) -> None:
+        # Lock the run row first. Two consumers finishing the last two jobs at
+        # the same time would otherwise both count each other's job as pending
+        # and leave the run running forever; the second finisher now waits for
+        # the first to commit and recounts against the committed statuses.
+        await self.session.execute(
+            select(ReviewSyncRunModel.id).where(ReviewSyncRunModel.id == run_id).with_for_update()
+        )
         counts = await self.session.execute(
             select(ReviewSyncJobModel.status, func.count())
             .where(ReviewSyncJobModel.run_id == run_id)

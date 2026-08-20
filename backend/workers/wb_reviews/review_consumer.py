@@ -20,6 +20,14 @@ from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
+# Extra time on top of the job lease before Kafka considers the consumer dead.
+# The default 300s poll interval is shorter than a legitimate job, and a
+# rebalance in the middle of one means double work and a dead task.
+POLL_INTERVAL_MARGIN_MS = 60_000
+
+
+class InvalidPayloadError(Exception):
+    """The message can never be processed; retrying it would poison the partition."""
 
 
 class ReviewSyncConsumer:
@@ -58,16 +66,27 @@ class ReviewSyncConsumer:
             group_id=self.group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
-            value_deserializer=json.loads,
+            max_poll_interval_ms=self.lease_seconds * 1000 + POLL_INTERVAL_MARGIN_MS,
         )
         await consumer.start()
         try:
             while True:
                 message = await consumer.getone()
+                # Decoded here rather than by a value_deserializer: a deserializer
+                # raises inside getone(), outside every guard below, which kills
+                # the task and leaves the restart re-reading the same message.
                 try:
-                    await self.process(message.value)
+                    payload = json.loads(message.value)
+                except (TypeError, ValueError):
+                    self.logger.exception("review_sync_payload_undecodable")
+                    await consumer.commit()
+                    continue
+                try:
+                    await self.process(payload)
                 except asyncio.CancelledError:
                     raise
+                except InvalidPayloadError:
+                    self.logger.exception("review_sync_payload_invalid")
                 except Exception:
                     self.logger.exception("review_sync_message_failed")
                     consumer.seek(TopicPartition(message.topic, message.partition), message.offset)
@@ -78,11 +97,16 @@ class ReviewSyncConsumer:
             await consumer.stop()
 
     async def process(self, payload: dict) -> None:
-        event_id = uuid.UUID(payload["event_id"])
-        run_id = uuid.UUID(payload["run_id"])
-        job_id = uuid.UUID(payload["job_id"])
-        seller_id = uuid.UUID(payload["seller_id"])
-        snapshot_date = date.fromisoformat(payload["snapshot_date"])
+        # Parse before touching the database: a malformed message stays
+        # malformed forever, so it is skipped instead of retried.
+        try:
+            event_id = uuid.UUID(payload["event_id"])
+            run_id = uuid.UUID(payload["run_id"])
+            job_id = uuid.UUID(payload["job_id"])
+            seller_id = uuid.UUID(payload["seller_id"])
+            snapshot_date = date.fromisoformat(payload["snapshot_date"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise InvalidPayloadError(str(error)) from error
 
         # Phase 1: read everything needed and close the DB session before any HTTP request.
         async with self.database.session() as session:
@@ -103,7 +127,13 @@ class ReviewSyncConsumer:
                 sellers.mark_inbox(event_id, "WBReviewSyncRequested")
                 await session.commit()
                 return
-            await reviews.mark_job_running(job_id, self.lease_seconds)
+            if not await reviews.mark_job_running(job_id, self.lease_seconds):
+                # Someone else holds the job (or the reaper already closed it);
+                # going to WB anyway would double the work and the traffic.
+                sellers.mark_inbox(event_id, "WBReviewSyncRequested")
+                await session.commit()
+                self.logger.info("review_sync_job_not_claimed", extra={"job_id": str(job_id)})
+                return
             await reviews.mark_run_running(run_id)
             encrypted_key = credential.encrypted_api_key
             await session.commit()
@@ -126,6 +156,14 @@ class ReviewSyncConsumer:
             reviews = ReviewSyncRepository(session)
             if await sellers.get(seller_id) is None:
                 await reviews.fail_job(job_id, "Селлер удалён во время синхронизации")
+            elif not await reviews.is_tracked(seller_id):
+                # Detached from the automation while the job was in flight: his
+                # history was just purged, so writing counts would resurrect it.
+                await reviews.complete_job(job_id, 0, 0)
+                self.logger.info(
+                    "review_sync_seller_detached_skipped",
+                    extra={"job_id": str(job_id), "seller_id": str(seller_id)},
+                )
             else:
                 known = {article.article for article in await sellers.list_articles(seller_id)}
                 unknown = self._unknown_cards(aggregation, known)

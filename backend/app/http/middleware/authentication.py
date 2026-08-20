@@ -1,15 +1,16 @@
-import uuid
 from typing import Protocol
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.app.http.authentication import AuthenticatedPrincipal
-from backend.modules.platform.application import AuthenticationError
+from backend.modules.platform.application import AccessClaims, AuthenticationError
 
 
 class AccessTokenDecoder(Protocol):
-    def decode_access(self, token: str) -> uuid.UUID: ...
+    def decode_access_claims(self, token: str) -> AccessClaims: ...
+
+    async def is_access_revoked(self, jti: str) -> bool: ...
 
 
 class AccessTokenMiddleware:
@@ -28,9 +29,10 @@ class AccessTokenMiddleware:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() == "bearer" and token.strip():
             try:
-                user_id = self._decoder.decode_access(token.strip())
+                claims = self._decoder.decode_access_claims(token.strip())
             except AuthenticationError:
                 pass
             else:
-                scope.setdefault("state", {})["principal"] = AuthenticatedPrincipal(user_id=user_id)
+                if not await self._decoder.is_access_revoked(claims.jti):
+                    scope.setdefault("state", {})["principal"] = AuthenticatedPrincipal(user_id=claims.user_id)
         await self.app(scope, receive, send)

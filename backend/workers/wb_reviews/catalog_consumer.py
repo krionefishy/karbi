@@ -8,8 +8,13 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError
 from backend.shared.kafka_streams.topics import WBCoreTopics
-from backend.shared.security import CredentialCipher
+from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
+from backend.workers.wb_reviews.review_consumer import POLL_INTERVAL_MARGIN_MS, InvalidPayloadError
+
+# A throttled catalog fetch legitimately outlives Kafka's default 300s poll
+# interval; a rebalance in the middle of one just doubles the WB traffic.
+DEFAULT_MAX_POLL_INTERVAL_MS = 1_800_000 + POLL_INTERVAL_MARGIN_MS
 
 
 class CatalogSyncConsumer:
@@ -20,12 +25,14 @@ class CatalogSyncConsumer:
         bootstrap_servers: str,
         group_id: str,
         client: WBContentClient | None = None,
+        max_poll_interval_ms: int = DEFAULT_MAX_POLL_INTERVAL_MS,
     ) -> None:
         self.database = database
         self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
         self.client = client or WBContentClient()
+        self.max_poll_interval_ms = max_poll_interval_ms
         self.logger = logging.getLogger("wb.catalog.consumer")
 
     async def run(self) -> None:
@@ -35,16 +42,27 @@ class CatalogSyncConsumer:
             group_id=self.group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
-            value_deserializer=json.loads,
+            max_poll_interval_ms=self.max_poll_interval_ms,
         )
         await consumer.start()
         try:
             while True:
                 message = await consumer.getone()
+                # Decoded here rather than by a value_deserializer: a deserializer
+                # raises inside getone(), outside every guard below, which kills
+                # the task and leaves the restart re-reading the same message.
                 try:
-                    await self.process(message.value)
+                    payload = json.loads(message.value)
+                except (TypeError, ValueError):
+                    self.logger.exception("catalog_sync_payload_undecodable")
+                    await consumer.commit()
+                    continue
+                try:
+                    await self.process(payload)
                 except asyncio.CancelledError:
                     raise
+                except InvalidPayloadError:
+                    self.logger.exception("catalog_sync_payload_invalid")
                 except Exception:
                     self.logger.exception("catalog_sync_message_failed")
                     consumer.seek(TopicPartition(message.topic, message.partition), message.offset)
@@ -55,8 +73,12 @@ class CatalogSyncConsumer:
             await consumer.stop()
 
     async def process(self, payload: dict) -> None:
-        event_id = uuid.UUID(payload["event_id"])
-        seller_id = uuid.UUID(payload["seller_id"])
+        # A malformed message stays malformed forever: skip it, don't retry it.
+        try:
+            event_id = uuid.UUID(payload["event_id"])
+            seller_id = uuid.UUID(payload["seller_id"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise InvalidPayloadError(str(error)) from error
         async with self.database.session() as session:
             repository = SellerRepository(session)
             if await repository.inbox_processed(event_id):
@@ -71,8 +93,10 @@ class CatalogSyncConsumer:
             await session.commit()
             encrypted_key = credential.encrypted_api_key
         try:
+            # A key that cannot be decrypted is as permanent a failure as a
+            # rejected one: retrying the message forever helps nobody.
             catalog = await self.client.get_catalog(self.cipher.decrypt(encrypted_key))
-        except WBPermanentError as error:
+        except (CredentialDecryptionError, WBPermanentError) as error:
             async with self.database.session() as session:
                 repository = SellerRepository(session)
                 await repository.set_sync_status(seller_id, "error", str(error))

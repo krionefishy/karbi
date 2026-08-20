@@ -17,6 +17,10 @@ from backend.modules.wb_core.infrastructure.wb import (
 from backend.modules.wb_core.infrastructure.wb.observability import read_rate_limit
 
 FEEDBACKS_BUCKET = "feedbacks"
+# WB stops serving feedback pages somewhere around this offset. Failing loudly
+# is deliberate: a snapshot silently cut off at the ceiling would be written to
+# the database as if it were complete.
+MAX_PAGINATION_DEPTH = 200_000
 
 
 class WBFeedbackPermanentError(Exception):
@@ -100,6 +104,11 @@ class WBFeedbackClient:
     ) -> None:
         skip = 0
         while True:
+            if skip >= MAX_PAGINATION_DEPTH:
+                raise WBFeedbackPermanentError(
+                    f"WB Feedbacks API: пагинация {path} упёрлась в потолок {MAX_PAGINATION_DEPTH} отзывов, "
+                    "снапшот был бы усечён"
+                )
             response = await self._request(
                 client,
                 path,

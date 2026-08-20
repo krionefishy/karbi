@@ -41,6 +41,12 @@ class CollectionService:
         """One stock snapshot: FBO from statistics, FBS from the seller's own warehouses."""
         api_key = await self._api_key(seller_id)
         known = await self._known_articles(seller_id)
+        warehouses = await self._warehouses(seller_id, api_key)
+        barcodes = await self.sellers.list_barcodes(seller_id)
+        # The reads are done. The requests below can take minutes on a large
+        # catalog, and a transaction left open across them would hold its locks
+        # for the whole walk — collect everything first, write in one go after.
+        await self.session.commit()
 
         fbo: dict[str, list[int]] = {article: [0, 0, 0, 0] for article in known}
         for row in await self.statistics.stocks(api_key):
@@ -49,6 +55,14 @@ class CollectionService:
             values[1] += row.quantity_full
             values[2] += row.in_way_to_client
             values[3] += row.in_way_from_client
+        fbs = await self._collect_fbs(seller_id, api_key, warehouses, barcodes)
+
+        if not await self.turnover.still_tracked(seller_id):
+            # A purge landed while we were talking to WB; writing now would
+            # resurrect the very rows it deleted.
+            self.logger.warning("turnover_seller_untracked_write_skipped", extra={"seller_id": str(seller_id)})
+            await self.session.rollback()
+            return 0
         # Zero rows for everything we know: WB drops an article from the stock
         # response once it runs out, and without them the last non-zero snapshot
         # would look like the current stock forever.
@@ -59,20 +73,24 @@ class CollectionService:
             "fbo",
             {article: (values[0], values[1], values[2], values[3]) for article, values in fbo.items()},
         )
-
-        fbs = await self._collect_fbs(seller_id, api_key)
         if fbs is not None:
             await self.turnover.upsert_snapshots(seller_id, snapshot_date, slot, "fbs", fbs)
         await self.session.commit()
         return len(fbo)
 
-    async def _collect_fbs(self, seller_id: uuid.UUID, api_key: str) -> dict[str, tuple[int, int, int, int]] | None:
-        """Declared stock at the seller's warehouses, or None when he has none."""
-        warehouses = await self._warehouses(seller_id, api_key)
+    async def _collect_fbs(
+        self,
+        seller_id: uuid.UUID,
+        api_key: str,
+        warehouses: list[tuple[int, str]],
+        barcodes: dict[str, list[str]],
+    ) -> dict[str, tuple[int, int, int, int]] | None:
+        """Declared stock at the seller's warehouses, or None when it cannot be collected."""
         if not warehouses:
+            self.logger.warning("У селлера %s нет складов Marketplace — FBS-остатки в этом срезе не собраны", seller_id)
             return None
-        barcodes = await self.sellers.list_barcodes(seller_id)
         if not barcodes:
+            self.logger.warning("В каталоге селлера %s нет штрихкодов — FBS-остатки в этом срезе не собраны", seller_id)
             return None
         article_of = {barcode: article for article, skus in barcodes.items() for barcode in skus}
         amounts: dict[str, int] = defaultdict(int)
@@ -111,25 +129,35 @@ class CollectionService:
             date_from = now - timedelta(days=backfill_days)
         else:
             date_from = watermark - timedelta(hours=overlap_hours)
+        # Close the read transaction before the network walk; the write below
+        # opens its own short one.
+        await self.session.commit()
 
         rows = await self.statistics.orders(api_key, date_from.astimezone(MOSCOW))
-        if rows:
-            await self.turnover.upsert_orders(
-                seller_id,
-                [
-                    {
-                        "srid": row.srid,
-                        "article": row.article,
-                        "order_date": row.order_date,
-                        "last_change_date": self._aware(row.last_change_date),
-                        "is_cancel": row.is_cancel,
-                        "price": row.price,
-                        "warehouse_type": row.warehouse_type,
-                    }
-                    for row in rows
-                ],
-            )
-            await self.turnover.set_watermark(seller_id, max(self._aware(row.last_change_date) for row in rows))
+        if not rows:
+            return 0
+        if not await self.turnover.still_tracked(seller_id):
+            # A purge landed while we were talking to WB; writing now would
+            # resurrect the very rows it deleted.
+            self.logger.warning("turnover_seller_untracked_write_skipped", extra={"seller_id": str(seller_id)})
+            await self.session.rollback()
+            return 0
+        await self.turnover.upsert_orders(
+            seller_id,
+            [
+                {
+                    "srid": row.srid,
+                    "article": row.article,
+                    "order_date": row.order_date,
+                    "last_change_date": self._aware(row.last_change_date),
+                    "is_cancel": row.is_cancel,
+                    "price": row.price,
+                    "warehouse_type": row.warehouse_type,
+                }
+                for row in rows
+            ],
+        )
+        await self.turnover.set_watermark(seller_id, max(self._aware(row.last_change_date) for row in rows))
         await self.session.commit()
         return len(rows)
 

@@ -17,13 +17,51 @@ on:
 
 permissions:
   contents: read
+  checks: read
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
 jobs:
+  # A manual workflow_dispatch would otherwise deploy any SHA without CI ever
+  # having looked at it. Require completed, successful "ci / *" check runs for
+  # the exact commit before the deploy job may start. When this workflow is
+  # called from the orchestrator, CI already ran as a required upstream job.
+  verify-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a green CI run for the deployed SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "Called from the orchestrator after CI succeeded; nothing to verify."
+            exit 0
+          fi
+          # Job names of the reusable CI workflow appear as "ci / <job>" check runs.
+          checks=$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --paginate \
+            --jq '[.check_runs[] | select(.name | startswith("ci / "))]')
+          total=$(echo "$checks" | jq 'length')
+          green=$(echo "$checks" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')
+          echo "CI check runs for $SHA: $green successful of $total"
+          if [ "$total" -eq 0 ]; then
+            echo "::error::No CI check runs found for $SHA. Push it through CI before deploying." >&2
+            exit 1
+          fi
+          if [ "$green" -ne "$total" ]; then
+            echo "$checks" | jq -r '.[] | "\(.name): \(.status)/\(.conclusion)"'
+            echo "::error::CI is not green for $SHA; refusing to deploy." >&2
+            exit 1
+          fi
+
   deploy:
+    needs: verify-ci
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production

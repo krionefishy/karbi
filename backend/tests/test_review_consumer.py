@@ -1,3 +1,6 @@
+import asyncio
+import contextlib
+import json
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -5,18 +8,22 @@ from datetime import date
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
+
 from backend.modules.wb_core.domain import Article
-from backend.modules.wb_core.infrastructure.wb import CatalogCard
+from backend.modules.wb_core.infrastructure.wb import CatalogCard, WBContentClient
 from backend.modules.wb_reviews.infrastructure.wb import (
     FeedbackAggregation,
     FeedbackProduct,
     WBFeedbackClient,
     WBFeedbackTemporaryError,
 )
-from backend.shared.security import CredentialCipher
+from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
+from backend.workers.wb_reviews import catalog_consumer as catalog_module
 from backend.workers.wb_reviews import review_consumer as consumer_module
-from backend.workers.wb_reviews.review_consumer import ReviewSyncConsumer
+from backend.workers.wb_reviews.catalog_consumer import CatalogSyncConsumer
+from backend.workers.wb_reviews.review_consumer import InvalidPayloadError, ReviewSyncConsumer
 
 
 class FakeSession:
@@ -67,7 +74,9 @@ class FakeSellers:
 
 
 class FakeReviews:
-    def __init__(self, job_id: uuid.UUID, *, reschedules: bool = True) -> None:
+    def __init__(
+        self, job_id: uuid.UUID, *, reschedules: bool = True, claims: bool = True, tracked: bool = True
+    ) -> None:
         self.job = SimpleNamespace(id=job_id, status="queued")
         self.saved_counts: dict[str, tuple[int, int, int, int, int]] = {}
         self.completed = False
@@ -75,14 +84,21 @@ class FakeReviews:
         self.rescheduled_error: str | None = None
         self.lease_seconds: int | None = None
         self._reschedules = reschedules
+        self._claims = claims
+        self._tracked = tracked
 
     async def get_job(self, job_id: uuid.UUID):
         return self.job if job_id == self.job.id else None
 
     async def mark_job_running(self, job_id: uuid.UUID, lease_seconds: int) -> bool:
+        if not self._claims:
+            return False
         self.job.status = "running"
         self.lease_seconds = lease_seconds
         return True
+
+    async def is_tracked(self, seller_id: uuid.UUID) -> bool:
+        return self._tracked
 
     async def mark_run_running(self, run_id: uuid.UUID) -> None:
         return None
@@ -126,6 +142,11 @@ class FakeFeedbackClient:
 class RateLimitedFeedbackClient:
     async def aggregate(self, api_key: str) -> FeedbackAggregation:
         raise WBFeedbackTemporaryError("WB Feedbacks API временно недоступен после 10 минут повторов: HTTP 429")
+
+
+class MustNotBeCalledClient:
+    async def aggregate(self, api_key: str) -> FeedbackAggregation:
+        raise AssertionError("WB must not be called for an unclaimed job")
 
 
 class FakeCipher:
@@ -221,3 +242,215 @@ async def test_review_consumer_fails_the_job_once_attempts_run_out(monkeypatch) 
     assert reviews.failed_error is not None
     assert "HTTP 429" in reviews.failed_error
     assert reviews.job.status == "error"
+
+
+async def test_review_consumer_skips_a_job_it_could_not_claim(monkeypatch) -> None:
+    """Another worker already holds the job, so WB is not called a second time."""
+    seller_id, job_id, event_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    database = FakeDatabase()
+    sellers = FakeSellers(seller_id)
+    reviews = FakeReviews(job_id, claims=False)
+    monkeypatch.setattr(consumer_module, "SellerRepository", lambda session: sellers)
+    monkeypatch.setattr(consumer_module, "ReviewSyncRepository", lambda session: reviews)
+
+    await build_consumer(database, MustNotBeCalledClient()).process(payload(job_id, seller_id, event_id))
+
+    assert not reviews.completed
+    assert reviews.failed_error is None
+    # The offset is still committed: the message is spent, not poisoned.
+    assert sellers.inbox_events == [event_id]
+
+
+async def test_review_consumer_does_not_write_counts_for_a_detached_seller(monkeypatch) -> None:
+    """Detaching purges the history; a job in flight must not resurrect it."""
+    seller_id, job_id, event_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    database = FakeDatabase()
+    sellers = FakeSellers(seller_id)
+    reviews = FakeReviews(job_id, tracked=False)
+    monkeypatch.setattr(consumer_module, "SellerRepository", lambda session: sellers)
+    monkeypatch.setattr(consumer_module, "ReviewSyncRepository", lambda session: reviews)
+
+    await build_consumer(database, FakeFeedbackClient(database)).process(payload(job_id, seller_id, event_id))
+
+    assert reviews.saved_counts == {}
+    # The job still closes cleanly so the run can finish.
+    assert reviews.completed
+    assert reviews.failed_error is None
+    assert sellers.inbox_events == [event_id]
+
+
+async def test_review_consumer_raises_a_skippable_error_for_a_malformed_payload() -> None:
+    consumer = build_consumer(FakeDatabase(), MustNotBeCalledClient())
+
+    with pytest.raises(InvalidPayloadError):
+        await consumer.process({"event_id": "not-a-uuid"})
+    with pytest.raises(InvalidPayloadError):
+        await consumer.process(
+            {
+                "event_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "job_id": str(uuid.uuid4()),
+                "seller_id": str(uuid.uuid4()),
+                "snapshot_date": "вчера",
+            }
+        )
+
+
+class FakeCatalogSellers:
+    def __init__(self, seller_id: uuid.UUID) -> None:
+        self.seller_id = seller_id
+        self.inbox_events: list[uuid.UUID] = []
+        self.sync_statuses: list[tuple] = []
+
+    async def inbox_processed(self, event_id: uuid.UUID) -> bool:
+        return False
+
+    async def get(self, seller_id: uuid.UUID):
+        return SimpleNamespace(id=seller_id) if seller_id == self.seller_id else None
+
+    async def get_credential(self, seller_id: uuid.UUID):
+        return SimpleNamespace(encrypted_api_key="encrypted")
+
+    async def set_sync_status(self, seller_id: uuid.UUID, status: str, error: str | None = None) -> None:
+        self.sync_statuses.append((status, error))
+
+    def mark_inbox(self, event_id: uuid.UUID, event_type: str) -> None:
+        self.inbox_events.append(event_id)
+
+
+class BrokenCipher:
+    def decrypt(self, token: str) -> str:
+        raise CredentialDecryptionError("ни один ключ не подошёл")
+
+
+class MustNotBeCalledContentClient:
+    async def get_catalog(self, api_key: str):
+        raise AssertionError("WB must not be called with an undecryptable key")
+
+
+async def test_catalog_consumer_treats_an_undecryptable_key_as_permanent(monkeypatch) -> None:
+    """A key that no longer decrypts would otherwise be retried forever."""
+    seller_id, event_id = uuid.uuid4(), uuid.uuid4()
+    sellers = FakeCatalogSellers(seller_id)
+    monkeypatch.setattr(catalog_module, "SellerRepository", lambda session: sellers)
+    consumer = CatalogSyncConsumer(
+        cast(Database, FakeDatabase()),
+        cast(CredentialCipher, BrokenCipher()),
+        "kafka:9092",
+        "test",
+        client=cast(WBContentClient, MustNotBeCalledContentClient()),
+    )
+
+    await consumer.process({"event_id": str(event_id), "seller_id": str(seller_id)})
+
+    assert sellers.sync_statuses[-1][0] == "error"
+    assert "не подошёл" in sellers.sync_statuses[-1][1]
+    assert sellers.inbox_events == [event_id]
+
+
+async def test_catalog_consumer_raises_a_skippable_error_for_a_malformed_payload() -> None:
+    consumer = CatalogSyncConsumer(
+        cast(Database, FakeDatabase()),
+        cast(CredentialCipher, FakeCipher()),
+        "kafka:9092",
+        "test",
+        client=cast(WBContentClient, MustNotBeCalledContentClient()),
+    )
+
+    with pytest.raises(InvalidPayloadError):
+        await consumer.process({"seller_id": "not-a-uuid"})
+
+
+class StubKafkaConsumer:
+    """Hands out a fixed list of raw messages, then blocks like a real consumer."""
+
+    def __init__(self, messages: list[bytes], *args, **kwargs) -> None:
+        self._messages = list(messages)
+        self.committed = 0
+        self.seeks: list[int] = []
+        self.started = False
+        self.stopped = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def stop(self) -> None:
+        self.stopped = True
+
+    async def getone(self):
+        if not self._messages:
+            raise asyncio.CancelledError
+        return SimpleNamespace(value=self._messages.pop(0), topic="t", partition=0, offset=len(self.seeks))
+
+    async def commit(self) -> None:
+        self.committed += 1
+
+    def seek(self, partition, offset) -> None:
+        self.seeks.append(offset)
+
+
+async def test_a_non_json_message_does_not_kill_the_review_consumer(monkeypatch) -> None:
+    """A deserializer would raise inside getone(), outside every guard, and the
+    restart would re-read the very same message forever."""
+    seller_id, job_id, event_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    database = FakeDatabase()
+    sellers = FakeSellers(seller_id)
+    reviews = FakeReviews(job_id)
+    monkeypatch.setattr(consumer_module, "SellerRepository", lambda session: sellers)
+    monkeypatch.setattr(consumer_module, "ReviewSyncRepository", lambda session: reviews)
+
+    good = json.dumps(payload(job_id, seller_id, event_id)).encode()
+    stub: dict = {}
+
+    def build(*args, **kwargs):
+        stub["consumer"] = StubKafkaConsumer([b"{not json at all", good], *args, **kwargs)
+        return stub["consumer"]
+
+    monkeypatch.setattr(consumer_module, "AIOKafkaConsumer", build)
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await build_consumer(database, FakeFeedbackClient(database)).run()
+
+    consumer = stub["consumer"]
+    # Both messages were committed: the poison one skipped, the good one worked.
+    assert consumer.committed == 2
+    assert consumer.seeks == []
+    assert reviews.completed
+
+
+async def test_a_non_json_message_does_not_kill_the_catalog_consumer(monkeypatch) -> None:
+    seller_id, event_id = uuid.uuid4(), uuid.uuid4()
+    database = FakeDatabase()
+    sellers = FakeCatalogSellers(seller_id)
+    monkeypatch.setattr(catalog_module, "SellerRepository", lambda session: sellers)
+
+    good = json.dumps({"event_id": str(event_id), "seller_id": str(seller_id)}).encode()
+    stub: dict = {}
+
+    def build(*args, **kwargs):
+        stub["consumer"] = StubKafkaConsumer([b"<html>oops</html>", good], *args, **kwargs)
+        return stub["consumer"]
+
+    monkeypatch.setattr(catalog_module, "AIOKafkaConsumer", build)
+
+    class EmptyCatalog:
+        async def get_catalog(self, api_key: str):
+            return SimpleNamespace(active=[], archived=[], archived_available=[])
+
+    async def upsert_catalog(seller_id, *, active, archived, archived_available) -> None:
+        return None
+
+    sellers.upsert_catalog = upsert_catalog  # type: ignore[attr-defined]
+
+    consumer = CatalogSyncConsumer(
+        cast(Database, database),
+        cast(CredentialCipher, FakeCipher()),
+        "kafka:9092",
+        "test",
+        client=cast(WBContentClient, EmptyCatalog()),
+    )
+    with contextlib.suppress(asyncio.CancelledError):
+        await consumer.run()
+
+    assert stub["consumer"].committed == 2
+    assert stub["consumer"].seeks == []

@@ -362,10 +362,11 @@ class Settings:
             raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")
         if self.turnover.snapshot_retention_days <= self.turnover.orders_window_days:
             raise ValueError("turnover.snapshot_retention_days must exceed turnover.orders_window_days")
-        try:
-            ZoneInfo(self.turnover.timezone)
-        except ZoneInfoNotFoundError as error:
-            raise ValueError("turnover.timezone is invalid") from error
+        if self.turnover.timezone != "Europe/Moscow":
+            # WB statistics serve every date in Moscow time with no zone attached;
+            # scheduling this automation on any other clock would silently shift
+            # its day boundaries against the data.
+            raise ValueError("turnover.timezone must be Europe/Moscow: WB statistics dates are always Moscow time")
         if self.telegram.poll_timeout_seconds < 1:
             raise ValueError("telegram.poll_timeout_seconds must be positive")
         if self.telegram.request_timeout_seconds <= self.telegram.poll_timeout_seconds:

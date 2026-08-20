@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import signal
+from collections.abc import Callable, Coroutine
 
 from backend.infrastructure.logging import configure_logging
 from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBThrottle, budgets_for
@@ -16,9 +18,14 @@ from backend.workers.wb_reviews.worker import WBReviewsWorker
 
 
 class WBReviewsWorkerApplication:
+    # How long a crashed consumer waits before coming back; keeps a hard
+    # failure from turning into a busy restart loop.
+    consumer_restart_delay_seconds: float = 5.0
+
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or load_settings()
         configure_logging(self.settings.app.log_level)
+        self.logger = logging.getLogger("wb.reviews.application")
         self.database = Database()
         self.redis = RedisClient()
         self.worker = WBReviewsWorker(
@@ -111,8 +118,14 @@ class WBReviewsWorkerApplication:
                     replication_factor=self.settings.kafka.topic_replication_factor,
                 )
                 tasks = [
-                    asyncio.create_task(self.catalog_consumer.run(), name="wb-catalog-consumer"),
-                    asyncio.create_task(self.review_consumer.run(), name="wb-review-consumer"),
+                    asyncio.create_task(
+                        self._supervise("wb-catalog-consumer", self.catalog_consumer.run),
+                        name="wb-catalog-consumer",
+                    ),
+                    asyncio.create_task(
+                        self._supervise("wb-review-consumer", self.review_consumer.run),
+                        name="wb-review-consumer",
+                    ),
                 ]
             try:
                 await self.worker.run()
@@ -124,6 +137,23 @@ class WBReviewsWorkerApplication:
         finally:
             await self.redis.disconnect()
             await self.database.disconnect()
+
+    async def _supervise(self, name: str, factory: Callable[[], Coroutine[None, None, None]]) -> None:
+        """Keep a consumer alive for the life of the worker.
+
+        A consumer loop only returns by raising: a CommitFailedError after a
+        rebalance, a lost broker — without supervision that death is silent and
+        the topic simply stops being read until the process is restarted.
+        """
+        while True:
+            try:
+                await factory()
+                self.logger.error("consumer_exited_unexpectedly", extra={"consumer": name})
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger.exception("consumer_crashed", extra={"consumer": name})
+            await asyncio.sleep(self.consumer_restart_delay_seconds)
 
     def install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()

@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -18,6 +18,9 @@ from backend.modules.wb_turnover.infrastructure.postgres.models import (
 )
 
 _CHUNK = 1000
+# A run still marked running after this long has crashed mid-flight; its slot
+# may be claimed again instead of staying burnt for the rest of the day.
+RECLAIM_RUNNING_AFTER = timedelta(minutes=60)
 
 
 class TurnoverRepository:
@@ -49,6 +52,22 @@ class TurnoverRepository:
 
     async def tracked(self, seller_id: uuid.UUID) -> TrackedSellerModel | None:
         return await self.session.get(TrackedSellerModel, seller_id)
+
+    async def still_tracked(self, seller_id: uuid.UUID) -> bool:
+        """Whether the seller survived until the write phase, locking the row.
+
+        The seller list is snapshotted when a run claims its slot, so a purge
+        can land between the snapshot and the write and the write would then
+        resurrect the purged rows. FOR SHARE makes the two serialise: either
+        the purge already deleted the row and we see it gone, or its DELETE
+        waits until this transaction commits.
+        """
+        found = await self.session.scalar(
+            select(TrackedSellerModel.seller_id)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .with_for_update(read=True)
+        )
+        return found is not None
 
     async def set_watermark(self, seller_id: uuid.UUID, moment: datetime) -> None:
         await self.session.execute(
@@ -118,15 +137,26 @@ class TurnoverRepository:
             )
 
     async def latest_stock(self, seller_id: uuid.UUID, since: date) -> dict[str, ArticleStock]:
-        """The freshest snapshot of each article, split by delivery model."""
+        """The latest collected snapshot of each article, split by delivery model.
+
+        Both models come from the same date and slot — the last one taken. Picking
+        the freshest row per model independently would happily add yesterday's
+        FBS figure to this morning's FBO and call the sum the current stock.
+        """
         rows = await self.session.execute(
             text(
                 """
-                SELECT DISTINCT ON (article, delivery_model)
-                       article, delivery_model, quantity
+                WITH latest AS (
+                    SELECT snapshot_date, slot
+                      FROM wb_turnover.stock_snapshots
+                     WHERE seller_id = :seller_id AND snapshot_date >= :since
+                     ORDER BY snapshot_date DESC, slot DESC
+                     LIMIT 1
+                )
+                SELECT article, delivery_model, quantity
                   FROM wb_turnover.stock_snapshots
-                 WHERE seller_id = :seller_id AND snapshot_date >= :since
-                 ORDER BY article, delivery_model, snapshot_date DESC, slot DESC
+                  JOIN latest USING (snapshot_date, slot)
+                 WHERE seller_id = :seller_id
                 """
             ),
             {"seller_id": seller_id, "since": since},
@@ -140,11 +170,12 @@ class TurnoverRepository:
                 collected[article] = ArticleStock(article, current.fbo, int(quantity))
         return collected
 
-    async def average_stock(self, seller_id: uuid.UUID, since: date) -> dict[str, tuple[float, int]]:
+    async def average_stock(self, seller_id: uuid.UUID, since: date, until: date) -> dict[str, tuple[float, int]]:
         """Average total stock per article over the window, and how many days it covers.
 
         Averaged over collection points, not days: that is the whole reason for
-        taking several snapshots a day.
+        taking several snapshots a day. Both bounds are inclusive — the orders
+        window ends yesterday, so today's snapshots stay out of the average too.
         """
         rows = await self.session.execute(
             text(
@@ -152,7 +183,8 @@ class TurnoverRepository:
                 WITH points AS (
                     SELECT article, snapshot_date, slot, SUM(quantity) AS total
                       FROM wb_turnover.stock_snapshots
-                     WHERE seller_id = :seller_id AND snapshot_date >= :since
+                     WHERE seller_id = :seller_id
+                       AND snapshot_date >= :since AND snapshot_date <= :until
                      GROUP BY article, snapshot_date, slot
                 )
                 SELECT article, AVG(total), COUNT(DISTINCT snapshot_date)
@@ -160,20 +192,28 @@ class TurnoverRepository:
                  GROUP BY article
                 """
             ),
-            {"seller_id": seller_id, "since": since},
+            {"seller_id": seller_id, "since": since, "until": until},
         )
         return {row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in rows.all()}
 
     # --- orders -----------------------------------------------------------
 
     async def upsert_orders(self, seller_id: uuid.UUID, orders: Sequence[dict]) -> None:
-        rows = [{**order, "seller_id": seller_id, "collected_at": datetime.now(UTC)} for order in orders]
+        # One srid may arrive several times in a pull — pages overlap on their
+        # boundary row, and an order can change twice inside the window. The last
+        # row wins here, because "ON CONFLICT DO UPDATE cannot affect row a
+        # second time" would otherwise fail the whole batch.
+        deduplicated = {order["srid"]: order for order in orders}
+        rows = [{**order, "seller_id": seller_id, "collected_at": datetime.now(UTC)} for order in deduplicated.values()]
         for offset in range(0, len(rows), _CHUNK):
             statement = insert(OrderModel).values(rows[offset : offset + _CHUNK])
             await self.session.execute(
                 statement.on_conflict_do_update(
                     index_elements=["srid"],
                     set_={
+                        # seller_id too: the same cabinet reconnected under a new
+                        # seller gets its orders moved over instead of split.
+                        "seller_id": statement.excluded.seller_id,
                         "article": statement.excluded.article,
                         "order_date": statement.excluded.order_date,
                         "last_change_date": statement.excluded.last_change_date,
@@ -207,11 +247,15 @@ class TurnoverRepository:
             for row in rows.all()
         }
 
-    async def prune(self, *, snapshots_before: date, orders_before: date) -> None:
+    async def prune(
+        self, *, snapshots_before: date, orders_before: date, turnover_before: date, notifications_before: date
+    ) -> None:
         await self.session.execute(
             delete(StockSnapshotModel).where(StockSnapshotModel.snapshot_date < snapshots_before)
         )
         await self.session.execute(delete(OrderModel).where(OrderModel.order_date < orders_before))
+        await self.session.execute(delete(TurnoverDailyModel).where(TurnoverDailyModel.date < turnover_before))
+        await self.session.execute(delete(NotificationLogModel).where(NotificationLogModel.date < notifications_before))
 
     # --- metric -----------------------------------------------------------
 
@@ -284,11 +328,29 @@ class TurnoverRepository:
     async def start_run(
         self, kind: str, run_date: date, slot: int, trigger: str = "scheduled"
     ) -> CollectionRunModel | None:
-        """Claim a schedule slot. Returns None when this slot already ran."""
+        """Claim a schedule slot. Returns None when this slot already ran.
+
+        A slot whose run is still marked running after RECLAIM_RUNNING_AFTER is
+        claimed again: that run crashed before finishing, and the slot must not
+        stay burnt until the stale-run sweep. A finished run keeps its slot.
+        """
+        now = datetime.now(UTC)
         statement = (
             insert(CollectionRunModel)
             .values(id=uuid.uuid4(), kind=kind, run_date=run_date, slot=slot, trigger=trigger)
-            .on_conflict_do_nothing(constraint="uq_wb_turnover_run_slot")
+            .on_conflict_do_update(
+                constraint="uq_wb_turnover_run_slot",
+                set_={
+                    "status": "running",
+                    "sellers": 0,
+                    "failed_sellers": 0,
+                    "error": None,
+                    "started_at": now,
+                    "finished_at": None,
+                },
+                where=(CollectionRunModel.status == "running")
+                & (CollectionRunModel.started_at < now - RECLAIM_RUNNING_AFTER),
+            )
             .returning(CollectionRunModel.id)
         )
         run_id = (await self.session.execute(statement)).scalar_one_or_none()
@@ -307,6 +369,15 @@ class TurnoverRepository:
                 failed_sellers=failed,
                 error=error[:1000] if error else None,
                 finished_at=datetime.now(UTC),
+            )
+        )
+
+    async def running_runs_started_before(self, moment: datetime) -> list[CollectionRunModel]:
+        return list(
+            await self.session.scalars(
+                select(CollectionRunModel).where(
+                    CollectionRunModel.status == "running", CollectionRunModel.started_at < moment
+                )
             )
         )
 

@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from fastapi import FastAPI, Request
@@ -6,7 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.app.http.middleware import AccessTokenMiddleware, RateLimitMiddleware
-from backend.modules.platform.application import AuthenticationError
+from backend.modules.platform.application import AccessClaims, AuthenticationError
 from backend.storage.redis import RateLimitDecision, SlidingWindowRateLimiter
 
 
@@ -14,10 +15,17 @@ class FakeTokenDecoder:
     def __init__(self, user_id: uuid.UUID) -> None:
         self.user_id = user_id
 
-    def decode_access(self, token: str) -> uuid.UUID:
-        if token != "valid-token":
+    def decode_access_claims(self, token: str) -> AccessClaims:
+        if token not in {"valid-token", "revoked-token"}:
             raise AuthenticationError
-        return self.user_id
+        return AccessClaims(
+            user_id=self.user_id,
+            jti="revoked-jti" if token == "revoked-token" else "live-jti",
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+
+    async def is_access_revoked(self, jti: str) -> bool:
+        return jti == "revoked-jti"
 
 
 class FakeRateLimiter:
@@ -28,6 +36,11 @@ class FakeRateLimiter:
     async def check(self, identity: str) -> RateLimitDecision:
         self.identities.append(identity)
         return self.decision
+
+
+class BrokenRateLimiter:
+    async def check(self, identity: str) -> RateLimitDecision:
+        raise RuntimeError("Redis is not connected")
 
 
 async def test_access_token_middleware_is_passive_until_route_requires_user() -> None:
@@ -53,6 +66,22 @@ async def test_access_token_middleware_is_passive_until_route_requires_user() ->
     assert missing_response.status_code == 401
     assert invalid_response.status_code == 401
     assert valid_response.json() == {"user_id": str(user_id)}
+
+
+async def test_access_token_middleware_rejects_denylisted_tokens() -> None:
+    app = FastAPI()
+    app.add_middleware(AccessTokenMiddleware, decoder=FakeTokenDecoder(uuid.uuid4()))
+
+    @app.get("/private")
+    async def private(principal: CurrentPrincipal) -> dict[str, str]:
+        return {"user_id": str(principal.user_id)}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        revoked_response = await client.get("/private", headers={"Authorization": "Bearer revoked-token"})
+        valid_response = await client.get("/private", headers={"Authorization": "Bearer valid-token"})
+
+    assert revoked_response.status_code == 401
+    assert valid_response.status_code == 200
 
 
 async def test_rate_limit_middleware_sets_headers_and_rejects_excess_requests() -> None:
@@ -97,3 +126,23 @@ async def test_rate_limit_middleware_sets_headers_and_rejects_excess_requests() 
 
     assert rejected_response.status_code == 429
     assert rejected_response.headers["Retry-After"] == "17"
+
+
+async def test_rate_limit_middleware_answers_503_when_redis_is_not_connected() -> None:
+    app = FastAPI()
+    app.add_middleware(
+        RateLimitMiddleware,
+        limiter=cast(SlidingWindowRateLimiter, BrokenRateLimiter()),
+        enabled=True,
+        limit=30,
+        behind_trusted_proxy=False,
+    )
+
+    @app.get("/resource")
+    async def resource() -> dict[str, str]:
+        return {"status": "should-not-run"}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/resource")
+
+    assert response.status_code == 503

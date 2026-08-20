@@ -1,6 +1,7 @@
 set dotenv-load
 
-compose := "docker compose -f deploy/compose.yaml"
+# compose.yaml has no fallbacks for secrets, so local runs feed dev defaults in.
+compose := "docker compose --env-file deploy/dev.env -f deploy/compose.yaml"
 prod_compose := "sudo docker compose --env-file .env -f deploy/compose.yaml"
 test_compose := "docker compose -f deploy/compose.test.yaml"
 test_config := "backend/shared/settings/config.test.yaml"
@@ -107,3 +108,15 @@ prod-status:
 # Follow production logs for all services or one named service.
 prod-logs service="":
     {{ prod_compose }} logs --tail=200 --follow {{ service }}
+
+# Take an extra on-demand Postgres dump right now (see docs/BACKUPS.md).
+prod-backup:
+    {{ prod_compose }} exec -T pg-backup sh -c 'pg_dump --format=custom --file=/backups/karbi-manual-$(date -u +%Y%m%dT%H%M%SZ).dump && ls -lh /backups'
+
+# List the dumps available for restore.
+prod-backup-list:
+    {{ prod_compose }} exec -T pg-backup ls -lh /backups
+
+# Restore a named dump over the current database. DESTRUCTIVE: stop the app first.
+prod-restore dump:
+    {{ prod_compose }} exec -T pg-backup sh -c 'pg_restore --clean --if-exists --no-owner --dbname="$PGDATABASE" /backups/{{ dump }}'

@@ -17,6 +17,14 @@ class TelegramConflictError(TelegramTemporaryError):
     """Another poller holds getUpdates for this token."""
 
 
+class TelegramRateLimitError(TelegramTemporaryError):
+    """Telegram asks to slow down; retry_after says for how long."""
+
+    def __init__(self, description: str, retry_after: float | None = None) -> None:
+        super().__init__(description)
+        self.retry_after = retry_after
+
+
 @dataclass(frozen=True, slots=True)
 class Update:
     update_id: int
@@ -112,6 +120,11 @@ class TelegramClient:
         # 409 means a second poller took the token; 429 and 5xx pass with time.
         if response.status_code == 409:
             raise TelegramConflictError(description)
-        if response.status_code == 429 or response.status_code >= 500:
+        if response.status_code == 429:
+            retry_after = (body.get("parameters") or {}).get("retry_after")
+            raise TelegramRateLimitError(
+                description, float(retry_after) if isinstance(retry_after, int | float) else None
+            )
+        if response.status_code >= 500:
             raise TelegramTemporaryError(description)
         raise TelegramPermanentError(description)

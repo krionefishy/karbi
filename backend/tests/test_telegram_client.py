@@ -8,6 +8,7 @@ from backend.modules.notifications.infrastructure.telegram import (
     TelegramClient,
     TelegramConflictError,
     TelegramPermanentError,
+    TelegramRateLimitError,
     TelegramTemporaryError,
 )
 
@@ -98,6 +99,21 @@ async def test_rate_limits_and_outages_are_temporary_while_rejections_are_not() 
     )
     with pytest.raises(TelegramPermanentError):
         await client().send(TOKEN, 555, "привет")
+
+
+@respx.mock
+async def test_a_rate_limit_carries_telegrams_retry_after() -> None:
+    respx.post(f"{BASE}/bot{TOKEN}/sendMessage").mock(
+        return_value=httpx.Response(
+            429,
+            json={"ok": False, "description": "Too Many Requests: retry after 17", "parameters": {"retry_after": 17}},
+        )
+    )
+
+    with pytest.raises(TelegramRateLimitError) as excinfo:
+        await client().send(TOKEN, 555, "привет")
+
+    assert excinfo.value.retry_after == 17
 
 
 @respx.mock

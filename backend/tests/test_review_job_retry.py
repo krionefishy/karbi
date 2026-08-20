@@ -1,3 +1,5 @@
+import asyncio
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
@@ -160,3 +162,91 @@ async def test_a_stale_run_is_closed_so_a_new_one_can_start(sync_run) -> None:
         assert (await session.get(ReviewSyncJobModel, job.id)).status == "error"
         # A closed run no longer counts as active, so the next sync is allowed.
         assert await ReviewSyncRepository(session).active_run() is None
+
+
+@pytest.mark.asyncio
+async def test_two_workers_finishing_the_last_jobs_still_close_the_run(sync_run) -> None:
+    """Both counted the other's uncommitted job as pending before finalize_run
+    locked the run row; the race left the run running until the reaper."""
+    database, seller = sync_run
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    concurrent = Database()
+    await concurrent.connect(settings.database.url, pool_size=2, max_overflow=0)
+    try:
+        async with concurrent.session() as session:
+            run, jobs = await ReviewSyncRepository(session).create_run(
+                "manual", datetime.now(UTC).date(), [seller.id, uuid.uuid4()]
+            )
+            reviews = ReviewSyncRepository(session)
+            for job in jobs:
+                await reviews.mark_job_running(job.id, lease_seconds=600)
+            await session.commit()
+
+        async with concurrent.session() as session_a, concurrent.session() as session_b:
+            reviews_a, reviews_b = ReviewSyncRepository(session_a), ReviewSyncRepository(session_b)
+            await reviews_a.complete_job(jobs[0].id, 1, 1)
+            await reviews_a.finalize_run(run.id)
+
+            async def finish_second() -> None:
+                await reviews_b.complete_job(jobs[1].id, 1, 1)
+                await reviews_b.finalize_run(run.id)
+                await session_b.commit()
+
+            second = asyncio.create_task(finish_second())
+            await asyncio.sleep(0.3)
+            # The second finisher waits on the run row until the first commits.
+            assert not second.done()
+            await session_a.commit()
+            await asyncio.wait_for(second, timeout=5)
+
+        async with concurrent.session() as session:
+            stored = await session.get(ReviewSyncRunModel, run.id)
+            assert stored is not None
+            assert stored.status == "success"
+            assert stored.finished_at is not None
+            assert stored.completed_sellers == 2
+    finally:
+        await concurrent.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_a_job_closed_by_the_reaper_keeps_its_verdict(sync_run) -> None:
+    """A late worker must not rewrite a reaped error into a success."""
+    database, seller = sync_run
+    _, job = await create_run(database, seller)
+
+    async with database.session() as session:
+        reviews = ReviewSyncRepository(session)
+        await reviews.mark_job_running(job.id, lease_seconds=600)
+        await reviews.fail_job(job.id, "Прогон закрыт по таймауту")
+        # The worker that actually held the job comes back after the reaper.
+        await reviews.complete_job(job.id, 5, 100)
+        await session.commit()
+
+    async with database.session() as session:
+        stored = await session.get(ReviewSyncJobModel, job.id)
+        assert stored.status == "error"
+        assert stored.error == "Прогон закрыт по таймауту"
+        assert stored.product_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_scheduled_run_does_not_eat_the_date(sync_run) -> None:
+    database, seller = sync_run
+    today = datetime.now(UTC).date()
+    run, job = await create_run(database, seller)
+
+    async with database.session() as session:
+        reviews = ReviewSyncRepository(session)
+        await reviews.mark_job_running(job.id, lease_seconds=600)
+        await reviews.fail_job(job.id, RATE_LIMITED)
+        await reviews.finalize_run(run.id)
+        await session.commit()
+
+    async with database.session() as session:
+        reviews = ReviewSyncRepository(session)
+        # The errored run no longer claims the date...
+        assert await reviews.run_for_date(today) is None
+        # ...so the scheduler is allowed to try the day again.
+        retry = await ReviewSyncService(session, SellerRepository(session), reviews).request("scheduled", today)
+        assert retry.id != run.id
