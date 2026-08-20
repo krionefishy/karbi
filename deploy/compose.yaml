@@ -126,7 +126,15 @@ services:
     mem_limit: 384m
     # Exactly one replica: Telegram refuses a second getUpdates on the same token.
     command: ["python", "-m", "backend.workers.notifications.main"]
-    environment: *application-environment
+    environment:
+      <<: *application-environment
+      # api.telegram.org is blocked upstream of some hosts, this one included.
+      # httpx trusts the environment, so setting TELEGRAM_HTTPS_PROXY in .env
+      # sends Telegram calls through a proxy with no code change; left empty the
+      # variable is ignored and nothing is proxied. This worker speaks HTTP to
+      # nobody but Telegram, so the proxy can never touch Wildberries traffic.
+      HTTPS_PROXY: ${TELEGRAM_HTTPS_PROXY:-}
+      NO_PROXY: ${TELEGRAM_NO_PROXY:-db,redis,kafka,localhost,127.0.0.1}
     depends_on:
       migrate:
         condition: service_completed_successfully
