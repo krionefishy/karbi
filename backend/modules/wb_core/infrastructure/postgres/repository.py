@@ -125,6 +125,28 @@ class SellerRepository:
         )
         return [self._article(row) for row in rows]
 
+    async def list_barcodes(self, seller_id: uuid.UUID) -> dict[str, list[str]]:
+        """Barcodes per article, as the catalog sync stored them.
+
+        The FBS stock method takes barcodes, not nmIDs, and the catalog already
+        carries them — asking Wildberries again would spend a request per run.
+        """
+        rows = await self.session.scalars(
+            select(ArticleModel).where(ArticleModel.seller_id == seller_id, ArticleModel.state != "archived")
+        )
+        collected: dict[str, list[str]] = {}
+        for row in rows:
+            barcodes = [
+                str(sku)
+                for size in row.sizes or []
+                if isinstance(size, dict)
+                for sku in (size.get("skus") or [])
+                if sku
+            ]
+            if barcodes:
+                collected[row.article] = barcodes
+        return collected
+
     async def upsert_catalog(
         self,
         seller_id: uuid.UUID,

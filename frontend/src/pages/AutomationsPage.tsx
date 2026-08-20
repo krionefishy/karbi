@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, MessageSquareText } from "lucide-react";
+import { ArrowRight, Gauge, MessageSquareText } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -72,7 +72,7 @@ export function AutomationsPage() {
                 <article className="automation-card automation-active" key={automation.id}>
                   <div className="automation-card-top">
                     <span className="automation-icon">
-                      <MessageSquareText size={22} />
+                      {automation.id === "wb-turnover" ? <Gauge size={22} /> : <MessageSquareText size={22} />}
                     </span>
                     <span className={`status-badge status-${automation.status}`}>
                       <span />
@@ -115,7 +115,7 @@ export function AutomationsPage() {
                       </dd>
                     </div>
                   </dl>
-                  <Link className="primary-button card-action" to="/automations/wb-reviews">
+                  <Link className="primary-button card-action" to={`/automations/${automation.id}`}>
                     Открыть <ArrowRight size={16} />
                   </Link>
                 </article>

@@ -10,6 +10,7 @@ from backend.storage.pg import Database
 from backend.workers.notifications.application import NotificationsWorkerApplication
 from backend.workers.wb_reviews.application import WBReviewsWorkerApplication
 from backend.workers.wb_reviews.worker import WBReviewsWorker
+from backend.workers.wb_turnover.application import TurnoverWorkerApplication
 
 
 def test_worker_application_can_be_created() -> None:
@@ -82,3 +83,15 @@ def test_notifications_worker_starts_a_poller_for_every_registered_bot() -> None
         await asyncio.gather(*application._pollers.values(), return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_the_turnover_worker_runs_each_step_after_its_moment_of_the_day() -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    application = TurnoverWorkerApplication(settings)
+    worker = application.worker
+
+    assert worker.is_due(moment(3, 0), 3, 0) is True
+    assert worker.is_due(moment(2, 59), 3, 0) is False
+    # The digest waits for its own hour even though the maths ran at dawn.
+    assert worker.is_due(moment(4, 0), settings.turnover.digest_hour, settings.turnover.digest_minute) is False
+    assert worker.is_due(moment(10, 0), settings.turnover.digest_hour, settings.turnover.digest_minute) is True

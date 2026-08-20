@@ -153,7 +153,7 @@ async def test_an_unknown_automation_is_not_silently_accepted(registry) -> None:
     _, client = registry
     seller = await create_seller(client, "Реестр 404", "wb-registry-key-7")
 
-    attached = await client.post(f"{API}/automations/wb-turnover/sellers", json={"seller_id": seller["id"]})
+    attached = await client.post(f"{API}/automations/does-not-exist/sellers", json={"seller_id": seller["id"]})
 
     assert attached.status_code == 404
-    assert (await client.get(f"{API}/automations/wb-turnover/sellers")).status_code == 404
+    assert (await client.get(f"{API}/automations/does-not-exist/sellers")).status_code == 404

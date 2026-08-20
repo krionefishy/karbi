@@ -3,12 +3,16 @@ from collections.abc import AsyncIterator
 from dishka import Provider, Scope, from_context, provide
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.notifications.application import BotRegistry, SubscriptionService
+from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.platform.application import AuthService, PasswordService, TokenService
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
+from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
+from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
@@ -78,9 +82,54 @@ class SessionProvider(Provider):
         return ReviewsEnrollment(reviews)
 
     @provide(scope=Scope.REQUEST)
-    def automation_enrollments(self, reviews: ReviewsEnrollment) -> list[AutomationEnrollment]:
+    def turnover_repository(self, session: AsyncSession) -> TurnoverRepository:
+        return TurnoverRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def turnover_enrollment(self, turnover: TurnoverRepository) -> TurnoverEnrollment:
+        return TurnoverEnrollment(turnover)
+
+    @provide(scope=Scope.REQUEST)
+    def notification_repository(self, session: AsyncSession) -> NotificationRepository:
+        return NotificationRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def bot_registry(
+        self, session: AsyncSession, notifications: NotificationRepository, cipher: CredentialCipher
+    ) -> BotRegistry:
+        return BotRegistry(session, notifications, cipher)
+
+    @provide(scope=Scope.REQUEST)
+    def subscription_service(
+        self, session: AsyncSession, notifications: NotificationRepository, settings: Settings
+    ) -> SubscriptionService:
+        return SubscriptionService(session, notifications, invite_ttl_hours=settings.telegram.invite_link_ttl_hours)
+
+    @provide(scope=Scope.REQUEST)
+    def turnover_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        turnover: TurnoverRepository,
+        bots: BotRegistry,
+        subscriptions: SubscriptionService,
+        settings: Settings,
+    ) -> TurnoverService:
+        return TurnoverService(
+            session,
+            sellers,
+            turnover,
+            bots,
+            subscriptions,
+            bot_code=settings.turnover.notification_bot,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def automation_enrollments(
+        self, reviews: ReviewsEnrollment, turnover: TurnoverEnrollment
+    ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews]
+        return [reviews, turnover]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

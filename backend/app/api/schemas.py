@@ -7,6 +7,8 @@ class AutomationRunResponse(BaseModel):
     id: uuid.UUID
     trigger: str
     status: str
+    # Which piece of work ran: automations with several daily steps say so.
+    kind: str | None = None
     snapshot_date: str
     created_at: str
     started_at: str | None

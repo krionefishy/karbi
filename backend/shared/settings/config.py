@@ -144,6 +144,31 @@ class WorkerConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class TurnoverConfig:
+    """Когда собираем остатки и заказы и когда шлём дайджест. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Четыре среза в сутки: одна точка в день не отличает «лежал полный склад»
+    # от «утром распродали и вечером пополнили».
+    stock_slot_hours: tuple[int, ...] = (3, 9, 15, 21)
+    orders_hour: int = 3
+    orders_minute: int = 20
+    calculation_hour: int = 3
+    calculation_minute: int = 40
+    digest_hour: int = 10
+    digest_minute: int = 0
+    orders_window_days: int = 14
+    orders_backfill_days: int = 14
+    # Перекрытие при инкрементальной догрузке: отменённый заказ приезжает заново
+    # с новым lastChangeDate, но запас лишних суток дешевле пропущенной отмены.
+    orders_overlap_hours: int = 24
+    threshold_days: int = 10
+    snapshot_retention_days: int = 60
+    order_retention_days: int = 45
+    notification_bot: str = "turnover-alerts"
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramConfig:
     """One process polls every bot; the tokens themselves live in the database."""
 
@@ -166,6 +191,12 @@ class WBApiConfig:
     content_per_host: int = 90
     feedbacks_per_key: int = 55
     feedbacks_per_host: int = 55
+    # Statistics is the strictest category WB has; marketplace is far softer.
+    # Both are only the net until the first response brings real headers.
+    statistics_per_key: int = 6
+    statistics_per_host: int = 30
+    marketplace_per_key: int = 60
+    marketplace_per_host: int = 120
     max_wait_seconds: int = 120
 
 
@@ -182,6 +213,7 @@ class Settings:
     worker: WorkerConfig
     wb_api: WBApiConfig
     telegram: TelegramConfig
+    turnover: TurnoverConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -222,6 +254,25 @@ class Settings:
         worker["job_retry_backoff_seconds"] = int(worker.get("job_retry_backoff_seconds", 300))
         worker["run_max_age_seconds"] = int(worker.get("run_max_age_seconds", 21_600))
         wb_api = {key: int(value) for key, value in dict(data.get("wb_api", {})).items()}
+        turnover = dict(data.get("turnover", {}))
+        if "stock_slot_hours" in turnover:
+            turnover["stock_slot_hours"] = tuple(int(hour) for hour in turnover["stock_slot_hours"])
+        for key in (
+            "orders_hour",
+            "orders_minute",
+            "calculation_hour",
+            "calculation_minute",
+            "digest_hour",
+            "digest_minute",
+            "orders_window_days",
+            "orders_backfill_days",
+            "orders_overlap_hours",
+            "threshold_days",
+            "snapshot_retention_days",
+            "order_retention_days",
+        ):
+            if key in turnover:
+                turnover[key] = int(turnover[key])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -254,6 +305,7 @@ class Settings:
             worker=WorkerConfig(**worker),
             wb_api=WBApiConfig(**wb_api),
             telegram=TelegramConfig(**telegram),
+            turnover=TurnoverConfig(**turnover),
         )
         settings.validate_values()
         return settings
@@ -287,10 +339,33 @@ class Settings:
                 self.wb_api.content_per_host,
                 self.wb_api.feedbacks_per_key,
                 self.wb_api.feedbacks_per_host,
+                self.wb_api.statistics_per_key,
+                self.wb_api.statistics_per_host,
+                self.wb_api.marketplace_per_key,
+                self.wb_api.marketplace_per_host,
             )
             < 1
         ):
             raise ValueError("wb_api budgets must be positive")
+        if not self.turnover.stock_slot_hours:
+            raise ValueError("turnover.stock_slot_hours must contain at least one hour")
+        if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):
+            raise ValueError("turnover.stock_slot_hours must contain hours between 0 and 23")
+        if len(set(self.turnover.stock_slot_hours)) != len(self.turnover.stock_slot_hours):
+            raise ValueError("turnover.stock_slot_hours must not repeat an hour")
+        if self.turnover.orders_window_days < 1:
+            raise ValueError("turnover.orders_window_days must be positive")
+        if self.turnover.threshold_days < 1:
+            raise ValueError("turnover.threshold_days must be positive")
+        if self.turnover.order_retention_days <= self.turnover.orders_window_days:
+            # Pruning inside the window would erase the very orders the metric divides by.
+            raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")
+        if self.turnover.snapshot_retention_days <= self.turnover.orders_window_days:
+            raise ValueError("turnover.snapshot_retention_days must exceed turnover.orders_window_days")
+        try:
+            ZoneInfo(self.turnover.timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("turnover.timezone is invalid") from error
         if self.telegram.poll_timeout_seconds < 1:
             raise ValueError("telegram.poll_timeout_seconds must be positive")
         if self.telegram.request_timeout_seconds <= self.telegram.poll_timeout_seconds:

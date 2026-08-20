@@ -83,6 +83,22 @@ services:
       - internal
       - egress
 
+  wb-turnover-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "backend.workers.wb_turnover.main"]
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+
   notifications-worker:
     build:
       context: ..
@@ -123,7 +139,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head
+      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-karbi}:${DB_PASSWORD:-karbi}@db:5432/${DB_NAME:-karbi}
     depends_on:

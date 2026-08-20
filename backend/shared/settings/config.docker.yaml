@@ -63,6 +63,10 @@ wb_api:
   content_per_host: ${WB_CONTENT_PER_HOST:-90}
   feedbacks_per_key: ${WB_FEEDBACKS_PER_KEY:-55}
   feedbacks_per_host: ${WB_FEEDBACKS_PER_HOST:-55}
+  statistics_per_key: ${WB_STATISTICS_PER_KEY:-6}
+  statistics_per_host: ${WB_STATISTICS_PER_HOST:-30}
+  marketplace_per_key: ${WB_MARKETPLACE_PER_KEY:-60}
+  marketplace_per_host: ${WB_MARKETPLACE_PER_HOST:-120}
   max_wait_seconds: ${WB_RATE_MAX_WAIT_SECONDS:-120}
 telegram:
   api_base_url: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
@@ -73,3 +77,19 @@ telegram:
   send_max_attempts: ${TELEGRAM_SEND_MAX_ATTEMPTS:-5}
   send_retry_backoff_seconds: ${TELEGRAM_SEND_RETRY_BACKOFF_SECONDS:-30}
   invite_link_ttl_hours: ${TELEGRAM_INVITE_LINK_TTL_HOURS:-72}
+turnover:
+  timezone: Europe/Moscow
+  stock_slot_hours: [3, 9, 15, 21]
+  orders_hour: 3
+  orders_minute: 20
+  calculation_hour: 3
+  calculation_minute: 40
+  digest_hour: ${TURNOVER_DIGEST_HOUR:-10}
+  digest_minute: 0
+  orders_window_days: ${TURNOVER_ORDERS_WINDOW_DAYS:-14}
+  orders_backfill_days: 14
+  orders_overlap_hours: 24
+  threshold_days: ${TURNOVER_THRESHOLD_DAYS:-10}
+  snapshot_retention_days: 60
+  order_retention_days: 45
+  notification_bot: ${TURNOVER_NOTIFICATION_BOT:-turnover-alerts}

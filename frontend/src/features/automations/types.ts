@@ -3,6 +3,8 @@ export type AutomationStatus = "active" | "degraded" | "failed" | "running" | "i
 export interface AutomationRun {
   id: string;
   trigger: "scheduled" | "manual";
+  /** Which daily step ran, for automations that have several. */
+  kind?: string | null;
   status: "queued" | "running" | "success" | "partial_success" | "error";
   snapshot_date: string;
   created_at: string;

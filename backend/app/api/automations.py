@@ -16,6 +16,7 @@ from backend.modules.wb_core.application import (
 from backend.modules.wb_core.presentation.http.schemas import SellerResponse
 from backend.modules.wb_core.presentation.http.utils import archived_conflict, not_found, seller_responses
 from backend.modules.wb_reviews.application import ReviewSyncService
+from backend.modules.wb_turnover.application import TurnoverService
 from backend.shared.settings import Settings
 
 router = APIRouter(tags=["automations"])
@@ -30,9 +31,10 @@ def unknown_automation() -> HTTPException:
 async def automations(
     _: CurrentPrincipal,
     reviews: FromDishka[ReviewSyncService],
+    turnover: FromDishka[TurnoverService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
-    return automation_catalog(await reviews.overview(), settings)
+    return automation_catalog(await reviews.overview(), await turnover.overview(), settings)
 
 
 @router.get("/automations/{automation_id}/sellers", response_model=list[SellerResponse])

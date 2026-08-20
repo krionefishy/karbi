@@ -8,7 +8,7 @@ interface Props {
   selectedId: string;
   onSelect: (id: string) => void;
   onAdd: () => void;
-  onEdit: (seller: Seller) => void;
+  onEdit?: (seller: Seller) => void;
   /** Leaving the automation, not leaving the registry. */
   onDetach: (seller: Seller) => void;
   onRetry: (seller: Seller) => void;
@@ -65,9 +65,11 @@ export function SellerSidebar({ sellers, selectedId, onSelect, onAdd, onEdit, on
                   <RefreshCw size={13} />
                 </button>
               )}
-              <button onClick={() => onEdit(seller)} aria-label="Редактировать селлера">
-                <Pencil size={13} />
-              </button>
+              {onEdit && (
+                <button onClick={() => onEdit(seller)} aria-label="Редактировать селлера">
+                  <Pencil size={13} />
+                </button>
+              )}
               <button onClick={() => onDetach(seller)} aria-label="Отключить от автоматизации">
                 <Unplug size={13} />
               </button>

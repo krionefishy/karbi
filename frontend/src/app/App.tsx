@@ -6,6 +6,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
+import { TurnoverPage } from "../pages/TurnoverPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +25,7 @@ export function App() {
               <Route path="/automations" element={<AutomationsPage />} />
               <Route path="/sellers" element={<SellersPage />} />
               <Route path="/automations/wb-reviews" element={<ReviewsPage />} />
+              <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/automations" replace />} />
           </Routes>

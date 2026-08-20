@@ -310,3 +310,26 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .mode-switch .mode-active { color: #fff; background: var(--forest); border-color: var(--forest); }
 .seller-form select { width: 100%; height: 44px; padding: 0 11px; background: var(--surface); border: 1px solid var(--line); }
 .neutral-dialog { border-color: var(--forest); }
+
+.turnover-table { background: var(--surface); border: 1px solid var(--line); }
+.turnover-head, .turnover-row { display: grid; grid-template-columns: minmax(240px, 1fr) 120px 130px 140px 140px 150px 130px; align-items: center; min-height: 58px; border-bottom: 1px solid var(--line); }
+.turnover-row:last-child { border-bottom: 0; }
+.turnover-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
+.turnover-head > *, .turnover-row > * { padding: 0 16px; }
+.turnover-row strong { font-size: 13px; }
+.turnover-row .article-title em { display: block; margin-top: 4px; font-style: normal; }
+.stock-split { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-style: normal; }
+.cover { font-weight: 600; }
+.cover-critical { color: var(--negative); }
+.cover-warning { color: var(--gold); }
+.cover-calm { color: var(--positive); }
+.cover-neutral { color: var(--muted); }
+.turnover-state { padding: 1px 5px; border: 1px solid var(--line); font: 9px "JetBrains Mono", monospace; text-transform: uppercase; }
+.turnover-state-ok { color: var(--forest); border-color: rgba(26,60,43,.32); }
+.turnover-state-no_stock { color: var(--negative); border-color: rgba(196,62,54,.4); }
+.turnover-state-no_sales { color: var(--gold); background: var(--gold-bg); border-color: rgba(216,154,22,.4); }
+.turnover-state-insufficient_data { color: var(--muted); }
+
+.invite-banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1320px; margin: 0 auto 18px; padding: 16px 18px; background: var(--positive-bg); border: 1px solid rgba(26,60,43,.2); }
+.invite-banner code { display: block; margin: 4px 0 6px; font-size: 13px; word-break: break-all; }
+.invite-banner em { color: var(--muted); font-size: 11px; font-style: normal; }
