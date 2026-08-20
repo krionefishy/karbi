@@ -29,7 +29,7 @@ class Application:
         self.kafka_producer = KafkaProducerWrapper()
         self.s3 = self._create_s3_client()
 
-        self.app = FastAPI(title="Karbi API", version="0.1.0", lifespan=self.lifespan)
+        self.app = FastAPI(title="Marketplace Auto API", version="0.1.0", lifespan=self.lifespan)
         self.app.state.database = self.database
         self.app.state.redis = self.redis
         self.container = make_async_container(

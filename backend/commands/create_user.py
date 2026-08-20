@@ -23,7 +23,7 @@ async def create_user(username: str, password: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create a Karbi employee account")
+    parser = argparse.ArgumentParser(description="Create a Marketplace Auto employee account")
     parser.add_argument("--username", required=True)
     args = parser.parse_args()
     password = getpass.getpass("Password: ")

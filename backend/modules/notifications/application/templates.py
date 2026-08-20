@@ -20,19 +20,19 @@ def _confirmed(params: dict[str, Any]) -> str:
     return (
         "Готово — вы подписаны.\n\n"
         f"Магазин: {params.get('seller_name', '—')}\n"
-        f"Уведомления: {params.get('bot_title', 'Karbi')}\n\n"
+        f"Уведомления: {params.get('bot_title', 'Marketplace Auto')}\n\n"
         "Чтобы отписаться, отправьте /stop."
     )
 
 
 def _invalid_link(_: dict[str, Any]) -> str:
-    return "Ссылка не подошла: её уже использовали или у неё вышел срок. Попросите новую в интерфейсе Karbi."
+    return "Ссылка не подошла: её уже использовали или у неё вышел срок. Попросите новую в интерфейсе Marketplace Auto."
 
 
 def _no_token(_: dict[str, Any]) -> str:
     return (
         "Здравствуйте! Чтобы получать уведомления, откройте персональную ссылку из интерфейса "
-        "Karbi — по ней бот поймёт, о каком магазине речь."
+        "Marketplace Auto — по ней бот поймёт, о каком магазине речь."
     )
 
 
@@ -84,7 +84,8 @@ def _turnover_digest(params: dict[str, Any]) -> str:
     lines = [head, ""] + [_digest_line(item) for item in shown]
     if count > len(shown):
         hidden = count - len(shown)
-        lines.append(f"\n…и ещё {hidden} {_plural(hidden, 'товар', 'товара', 'товаров')} — весь список в Karbi.")
+        tail = _plural(hidden, "товар", "товара", "товаров")
+        lines.append(f"\n…и ещё {hidden} {tail} — весь список в Marketplace Auto.")
     return "\n".join(lines)
 
 

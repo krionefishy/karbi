@@ -36,7 +36,7 @@ export function LoginPage() {
   return (
     <main className="login-page">
       <div className="login-brand">
-        <span className="wordmark wordmark-large">KARBI</span>
+        <span className="wordmark wordmark-large">MARKETPLACE AUTO</span>
         <span className="status-badge"><span /> Внутренняя система</span>
       </div>
       <section className="login-panel">
@@ -64,7 +64,7 @@ export function LoginPage() {
         </form>
         <div className="security-note"><LockKeyhole size={15} /><span>Соединение защищено. Не передавайте данные для входа третьим лицам.</span></div>
       </section>
-      <footer className="login-footer">KARBI / INTERNAL AUTOMATION PLATFORM</footer>
+      <footer className="login-footer">MARKETPLACE AUTO / INTERNAL AUTOMATION PLATFORM</footer>
     </main>
   );
 }

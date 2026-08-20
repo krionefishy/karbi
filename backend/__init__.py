@@ -1,1 +1,1 @@
-"""Karbi backend package."""
+"""Marketplace Auto backend package."""

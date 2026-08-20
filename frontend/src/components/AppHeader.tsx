@@ -24,7 +24,7 @@ export function AppHeader({ current }: AppHeaderProps) {
   return (
     <header className="app-header">
       <div className="header-left">
-        <Link className="wordmark" to="/automations">KARBI</Link>
+        <Link className="wordmark" to="/automations">MARKETPLACE AUTO</Link>
         <nav className="breadcrumb" aria-label="Хлебные крошки">
           <Link to="/automations">Автоматизации</Link>
           {current && <><span>/</span><span className="breadcrumb-current">{current}</span></>}

@@ -112,7 +112,7 @@ class SubscriptionService:
             bot,
             update,
             templates.SUBSCRIPTION_CONFIRMED,
-            {"seller_name": invite.seller_name, "bot_title": bot.title or "Karbi"},
+            {"seller_name": invite.seller_name, "bot_title": bot.title or "Marketplace Auto"},
         )
 
     async def _stop(self, bot: Bot, update: Update) -> None:

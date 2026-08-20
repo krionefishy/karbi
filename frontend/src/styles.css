@@ -35,7 +35,7 @@ h2 { letter-spacing: -0.015em; }
 
 .eyebrow, .field-label { display: block; margin-bottom: 7px; color: var(--muted); font: 500 10px/1.2 "JetBrains Mono", monospace; letter-spacing: .09em; text-transform: uppercase; }
 .muted { color: var(--muted); }
-.wordmark { color: var(--forest); font-size: 24px; font-weight: 600; letter-spacing: -.045em; }
+.wordmark { color: var(--forest); font-size: 24px; font-weight: 600; letter-spacing: -.045em; white-space: nowrap; }
 .wordmark-large { font-size: 30px; }
 .primary-button, .secondary-button { display: inline-flex; height: 40px; align-items: center; justify-content: center; gap: 8px; padding: 0 17px; border: 1px solid var(--forest); border-radius: 2px; font-weight: 600; cursor: pointer; transition: background 150ms ease-out, color 150ms ease-out; }
 .primary-button { color: #fff; background: var(--forest); }
