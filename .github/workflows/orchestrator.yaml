@@ -6,6 +6,9 @@ on:
 
 permissions:
   contents: read
+  # deploy.yaml verifies CI check runs for the deployed SHA; a called workflow
+  # cannot request more than its caller grants.
+  checks: read
 
 concurrency:
   group: main-ci-cd
