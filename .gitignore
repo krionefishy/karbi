@@ -36,5 +36,3 @@ pg_data/
 redis_data/
 kafka_data/
 
-# Documentation is kept out of the repository
-docs/

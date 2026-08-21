@@ -1,0 +1,59 @@
+# Ротация ключей шифрования (Fernet)
+
+Секреты в базе шифруются `CredentialCipher` (`backend/shared/security/credentials.py`)
+поверх `MultiFernet`: **шифрует всегда первый ключ списка**, расшифровать может
+любой из перечисленных. Это и даёт бесшовную ротацию.
+
+## Где лежат шифротексты
+
+| Таблица | Колонка | Что внутри |
+| --- | --- | --- |
+| `wb_core.credentials` | `encrypted_api_key` | API-ключи Wildberries продавцов |
+| `notifications.bots` | `encrypted_token` | токены Telegram-ботов |
+
+Колонки `key_fingerprint` / `token_fingerprint` — это HMAC от
+`CREDENTIALS_FINGERPRINT_KEY`, к Fernet-ключам они отношения не имеют и при
+ротации ключей шифрования не меняются. (Ротация fingerprint-ключа — отдельная
+процедура: она требует перевычисления отпечатков из плейнтекста и здесь не
+описана.)
+
+## Процедура
+
+1. **Сгенерируйте новый ключ:**
+
+   ```sh
+   uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+2. **Добавьте его ПЕРВЫМ в список** в production `.env` (список через запятую,
+   старый ключ остаётся вторым — иначе существующие строки перестанут читаться):
+
+   ```
+   CREDENTIALS_ENCRYPTION_KEYS=<новый>,<старый>
+   ```
+
+3. **Перезапустите сервисы**, чтобы они подхватили новый список:
+   `just prod-up` (или полноценный деплой). С этого момента новые записи
+   шифруются новым ключом, старые читаются старым.
+
+4. **Перешифруйте существующие строки** (внутри контейнера api ключи уже в
+   окружении):
+
+   ```sh
+   sudo docker compose --env-file .env -f deploy/compose.yaml exec -T api \
+     python -m backend.commands.rotate_credentials --dry-run
+   sudo docker compose --env-file .env -f deploy/compose.yaml exec -T api \
+     python -m backend.commands.rotate_credentials
+   ```
+
+   Команда прогоняет `MultiFernet.rotate` по обеим таблицам в одной транзакции;
+   `--dry-run` делает то же, но откатывает.
+
+5. **Удалите старый ключ** из `CREDENTIALS_ENCRYPTION_KEYS` и снова
+   перезапустите сервисы. Если после этого где-то всплывает
+   `CredentialDecryptionError` — значит, шаг 4 пропустили: верните старый ключ
+   вторым в список и повторите шаги 4–5.
+
+6. Сделайте свежий бэкап (`just prod-backup`) — дампы, снятые до ротации,
+   содержат шифротексты под старым ключом, поэтому старый ключ стоит сохранить
+   в надёжном месте до истечения срока хранения этих бэкапов.
