@@ -1,4 +1,4 @@
-import { LogOut, UserRound } from "lucide-react";
+import { LogOut, Shield, UserRound } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { adminEntryUrl } from "../features/admin/entry";
@@ -32,10 +32,15 @@ export function AppHeader({ current }: AppHeaderProps) {
         </nav>
         <nav className="header-nav" aria-label="Разделы">
           <Link to="/sellers">Селлеры</Link>
-          {user?.is_admin && <a href={adminEntryUrl("/admin/users")}>Сотрудники</a>}
         </nav>
       </div>
       <div className="header-profile">
+        {user?.is_admin && (
+          <a className="section-switch" href={adminEntryUrl("/admin/users")}>
+            <Shield size={15} />
+            Админка
+          </a>
+        )}
         <div>
           <span className="eyebrow">Сотрудник</span>
           <strong>{user?.username}</strong>

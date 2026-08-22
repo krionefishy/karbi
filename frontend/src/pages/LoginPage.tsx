@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { ApiError } from "../api/http";
+import { homeRoute } from "../features/admin/entry";
 import { login } from "../features/auth/api";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -14,7 +15,7 @@ export function LoginPage() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
-  if (!isLoading && user) return <Navigate to="/automations" replace />;
+  if (!isLoading && user) return <Navigate to={homeRoute()} replace />;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -24,7 +25,7 @@ export function LoginPage() {
     try {
       const result = await login(String(form.get("username")), String(form.get("password")));
       setSession(result.user, result.access_token);
-      const destination = (location.state as { from?: string } | null)?.from ?? "/automations";
+      const destination = (location.state as { from?: string } | null)?.from ?? homeRoute();
       navigate(destination, { replace: true });
     } catch (requestError) {
       setError(requestError instanceof ApiError ? requestError.message : "Не удалось войти");
