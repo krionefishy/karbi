@@ -79,7 +79,7 @@ services:
     volumes:
       - ./relay-tls:/etc/relay:ro
     extra_hosts:
-      - "relay-nl-1.internal:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
+      - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     networks:
       - proxy
       - internal
@@ -138,7 +138,7 @@ services:
     volumes:
       - ./relay-tls:/etc/relay:ro
     extra_hosts:
-      - "relay-nl-1.internal:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
+      - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     environment:
       <<: *application-environment
       # api.telegram.org is blocked upstream of some hosts, this one included.
