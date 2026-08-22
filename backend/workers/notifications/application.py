@@ -14,13 +14,15 @@ from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
 from backend.workers.notifications.sender import NotificationSender
+from backend.workers.notifications.updates import UpdateFetcher
 
 
 class NotificationsWorkerApplication:
-    """One process: queueing from Kafka plus a delivery loop per bot.
+    """One process: queueing from Kafka, plus a delivery and a fetch loop per bot.
 
-    Polling for incoming messages is not here any more — it belongs to the relay,
-    which is the only host that can reach the messenger at all.
+    Talking to the messenger itself belongs to the relay — it is the only host
+    that can reach it. Inbound messages are fetched from the relay rather than
+    pushed here, because from abroad this server is unreachable on every port.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -38,6 +40,7 @@ class NotificationsWorkerApplication:
             send_retry_backoff_seconds=self.settings.telegram.send_retry_backoff_seconds,
         )
         self._deliveries: dict[uuid.UUID, asyncio.Task[None]] = {}
+        self._fetchers: dict[uuid.UUID, asyncio.Task[None]] = {}
         self._sender_task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self.logger = structlog.get_logger("notifications_worker")
@@ -53,6 +56,7 @@ class NotificationsWorkerApplication:
                 self._sync_sender()
                 bots = await self._active_bots()
                 self._sync_deliveries(bots)
+                self._sync_fetchers(bots)
             except Exception:
                 self.logger.exception("bot_supervisor_failed")
             try:
@@ -94,11 +98,32 @@ class NotificationsWorkerApplication:
                 )
                 self.logger.info("bot_delivery_scheduled", bot=bot.code)
 
+    def _sync_fetchers(self, bots: list[Bot]) -> None:
+        """An inbound loop per bot, kept in step with the bot table like delivery."""
+        active_ids = {bot.id for bot in bots}
+        for bot_id, task in list(self._fetchers.items()):
+            if bot_id not in active_ids or task.done():
+                task.cancel()
+                del self._fetchers[bot_id]
+        for bot in bots:
+            if bot.id not in self._fetchers:
+                fetcher = UpdateFetcher(
+                    self.database,
+                    self.client,
+                    bot,
+                    invite_ttl_hours=self.settings.telegram.invite_link_ttl_hours,
+                    wait_seconds=self.settings.relay.updates_wait_seconds,
+                )
+                self._fetchers[bot.id] = asyncio.create_task(
+                    fetcher.run_forever(), name=f"notification-updates-{bot.code}"
+                )
+                self.logger.info("bot_update_fetcher_scheduled", bot=bot.code)
+
     async def run(self) -> None:
         self.settings.validate_runtime_secrets()
-        # A delivery loop per bot plus the Kafka consumer all want a session at
-        # once; two connections were sized for a single delivery loop and would
-        # hand out pool timeouts instead.
+        # A delivery loop and a fetch loop per bot, plus the Kafka consumer, all
+        # want a session at once; two connections were sized for a single
+        # delivery loop and would hand out pool timeouts instead.
         await self.database.connect(self.settings.database.url, pool_size=5, max_overflow=10)
         try:
             if self.settings.kafka.enabled:
@@ -112,7 +137,7 @@ class NotificationsWorkerApplication:
             await self.supervise_bots()
         finally:
             sender_tasks = [self._sender_task] if self._sender_task is not None else []
-            running = [*sender_tasks, *self._deliveries.values()]
+            running = [*sender_tasks, *self._deliveries.values(), *self._fetchers.values()]
             for task in running:
                 task.cancel()
             await asyncio.gather(*running, return_exceptions=True)

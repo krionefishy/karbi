@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.api.automations import router as automations_router
-from backend.modules.notifications.presentation.http import router as notifications_internal_router
 from backend.modules.platform.presentation.http import admin_users_router
 from backend.modules.platform.presentation.http import router as auth_router
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
@@ -16,8 +15,6 @@ router.include_router(wb_sellers_router)
 router.include_router(wb_reviews_router)
 router.include_router(wb_turnover_router)
 router.include_router(automations_router)
-# Not for the internet: the public vhosts refuse this prefix outright.
-router.include_router(notifications_internal_router)
 
 
 @router.get("/health/live", include_in_schema=False)

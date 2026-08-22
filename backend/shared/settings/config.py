@@ -185,6 +185,8 @@ class RelayConfig:
     inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
     jwt_leeway_seconds: int = 30
+    # Сколько релей держит наш запрос за апдейтами, если сказать нечего.
+    updates_wait_seconds: int = 25
     # "true"/"false", or a path to the relay certificate to pin. Never disable
     # verification in production: the JWT rides on this connection.
     verify: str = "true"
@@ -311,7 +313,7 @@ class Settings:
         if "delivery_interval_seconds" in telegram:
             telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
         relay = dict(data.get("relay", {}))
-        for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "request_timeout_seconds"):
+        for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
             if key in relay:
                 relay[key] = int(relay[key])
         security = data.get("security", {})

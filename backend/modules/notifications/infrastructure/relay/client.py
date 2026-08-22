@@ -26,6 +26,23 @@ from backend.shared.settings import RelayConfig
 
 BOTS_PATH = "/api/v1/bots"
 SEND_PATH = "/api/v1/messages/send"
+UPDATES_PATH = "/api/v1/updates"
+
+
+@dataclass(frozen=True, slots=True)
+class RelayUpdate:
+    """One inbound message, already in our terms.
+
+    `recipient` and `external_id` are addresses the messenger handed the relay;
+    this side stores and echoes them without interpreting what they mean.
+    """
+
+    event_id: int
+    recipient: str
+    text: str
+    external_id: str | None
+    username: str
+    display_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +81,44 @@ class RelayClient:
             return str(reference) if reference is not None else None
         raise self._delivery_error(response, body)
 
+    async def updates(self, *, bot_code: str, after: int, wait: int, limit: int = 50) -> list[RelayUpdate]:
+        """Ask the relay for everything past our cursor.
+
+        We fetch rather than being pushed to: from abroad this server cannot be
+        reached at all, so the relay holds updates and we come for them. There is
+        no acknowledgement — `after` is the whole protocol, and the cursor behind
+        it lives in our own database.
+        """
+        response = await self._get(
+            UPDATES_PATH,
+            {"bot_code": bot_code, "after": after, "limit": limit, "wait": wait},
+            # The relay holds the request for `wait` seconds; the read timeout
+            # has to outlast that or every quiet poll dies of its own timeout.
+            timeouts=httpx.Timeout(wait + self._config.request_timeout_seconds, connect=10.0),
+        )
+        body = self._body(response)
+        if response.status_code != 200:
+            raise self._delivery_error(response, body)
+        raw = body.get("updates")
+        if not isinstance(raw, list):
+            raise TelegramTemporaryError("the relay returned no update list")
+        return [self._parse(item) for item in raw if isinstance(item, dict)]
+
+    @staticmethod
+    def _parse(item: dict[str, object]) -> RelayUpdate:
+        raw_sender = item.get("sender")
+        sender: dict[str, object] = raw_sender if isinstance(raw_sender, dict) else {}
+        external_id = sender.get("external_id")
+        event_id = item.get("event_id")
+        return RelayUpdate(
+            event_id=event_id if isinstance(event_id, int) else 0,
+            recipient=str(item.get("recipient") or ""),
+            text=str(item.get("text") or ""),
+            external_id=str(external_id) if external_id is not None else None,
+            username=str(sender.get("username") or ""),
+            display_name=str(sender.get("display_name") or ""),
+        )
+
     async def register_bot(self, *, bot_code: str, token: str) -> RelayBot:
         """Hand the token to the relay, which stores it and never gives it back."""
         response = await self._post(BOTS_PATH, {"bot_code": bot_code, "action": "upsert", "token": token})
@@ -95,6 +150,16 @@ class RelayClient:
             algorithm="HS256",
         )
         return f"Bearer {token}"
+
+    async def _get(
+        self, path: str, params: dict[str, str | int], timeouts: httpx.Timeout | None = None
+    ) -> httpx.Response:
+        url = f"{self._config.base_url.rstrip('/')}{path}"
+        try:
+            async with httpx.AsyncClient(timeout=timeouts or self._timeout, verify=self._verify) as client:
+                return await client.get(url, params=params, headers={"Authorization": self._authorization()})
+        except httpx.HTTPError as error:
+            raise TelegramTemporaryError(f"relay unreachable: {type(error).__name__}") from error
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
         url = f"{self._config.base_url.rstrip('/')}{path}"
