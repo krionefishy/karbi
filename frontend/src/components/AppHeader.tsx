@@ -1,6 +1,7 @@
 import { LogOut, UserRound } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { adminEntryUrl } from "../features/admin/entry";
 import { logout } from "../features/auth/api";
 import { useAuth } from "../features/auth/AuthContext";
 
@@ -31,6 +32,7 @@ export function AppHeader({ current }: AppHeaderProps) {
         </nav>
         <nav className="header-nav" aria-label="Разделы">
           <Link to="/sellers">Селлеры</Link>
+          {user?.is_admin && <a href={adminEntryUrl("/admin/users")}>Сотрудники</a>}
         </nav>
       </div>
       <div className="header-profile">

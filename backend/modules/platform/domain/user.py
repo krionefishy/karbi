@@ -9,5 +9,6 @@ class User:
     username: str
     password_hash: str
     is_active: bool
+    is_admin: bool
     created_at: datetime
     last_login_at: datetime | None

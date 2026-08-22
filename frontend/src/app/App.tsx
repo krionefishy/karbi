@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { AuthProvider, ProtectedRoute } from "../features/auth/AuthContext";
+import { AdminRoute, AuthProvider, ProtectedRoute } from "../features/auth/AuthContext";
+import { EmployeesPage } from "../pages/admin/EmployeesPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
@@ -26,6 +27,9 @@ export function App() {
               <Route path="/sellers" element={<SellersPage />} />
               <Route path="/automations/wb-reviews" element={<ReviewsPage />} />
               <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
+              <Route element={<AdminRoute />}>
+                <Route path="/admin/users" element={<EmployeesPage />} />
+              </Route>
             </Route>
             <Route path="*" element={<Navigate to="/automations" replace />} />
           </Routes>

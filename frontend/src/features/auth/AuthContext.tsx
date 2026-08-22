@@ -67,3 +67,13 @@ export function ProtectedRoute() {
   }
   return <Outlet />;
 }
+
+/** The section is gated here for the look of it; the API checks the flag itself
+ * on every request, so a hand-built URL gets 403 rather than a page. */
+export function AdminRoute() {
+  const { user } = useAuth();
+  if (!user?.is_admin) {
+    return <Navigate to="/automations" replace />;
+  }
+  return <Outlet />;
+}

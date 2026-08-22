@@ -333,3 +333,15 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .invite-banner { display: flex; align-items: center; justify-content: space-between; gap: 20px; max-width: 1320px; margin: 0 auto 18px; padding: 16px 18px; background: var(--positive-bg); border: 1px solid rgba(26,60,43,.2); }
 .invite-banner code { display: block; margin: 4px 0 6px; font-size: 13px; word-break: break-all; }
 .invite-banner em { color: var(--muted); font-size: 11px; font-style: normal; }
+
+.staff-head, .staff-row { display: grid; grid-template-columns: minmax(220px, 1fr) 160px 150px 200px 130px; align-items: center; min-height: 58px; border-bottom: 1px solid var(--line); }
+.staff-row:last-child { border-bottom: 0; }
+.staff-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
+.staff-head > *, .staff-row > * { padding: 0 16px; }
+.staff-row strong { font-size: 13px; }
+.staff-active { color: var(--positive); }
+.staff-blocked { color: var(--negative); }
+.registry-row-actions button:disabled { opacity: .35; cursor: not-allowed; }
+.checkbox-field { display: flex; gap: 9px; align-items: center; font-size: 13px; }
+.checkbox-field input { width: 16px; height: 16px; }
+.issued-password { margin: 4px 0 0; padding: 14px 16px; background: var(--paper); border: 1px solid var(--line); font: 15px "JetBrains Mono", monospace; letter-spacing: .5px; word-break: break-all; user-select: all; }

@@ -1,6 +1,7 @@
 export interface CurrentUser {
   id: string;
   username: string;
+  is_admin: boolean;
 }
 
 export interface TokenResponse {

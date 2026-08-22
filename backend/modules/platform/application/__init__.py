@@ -8,14 +8,28 @@ from backend.modules.platform.application.auth import (
     PasswordService,
     TokenService,
 )
+from backend.modules.platform.application.users import (
+    GENERATED_PASSWORD_LENGTH,
+    SelfLockoutError,
+    UserAdminService,
+    UsernameTakenError,
+    UserNotFoundError,
+    generate_password,
+)
 
 __all__ = [
+    "GENERATED_PASSWORD_LENGTH",
     "AccessClaims",
-    "AuthenticationError",
     "AuthService",
     "AuthSession",
+    "AuthenticationError",
     "LoginAttemptLimiter",
     "LoginRateLimitError",
     "PasswordService",
+    "SelfLockoutError",
     "TokenService",
+    "UserAdminService",
+    "UserNotFoundError",
+    "UsernameTakenError",
+    "generate_password",
 ]

@@ -10,14 +10,16 @@ from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 
-async def create_user(username: str, password: str) -> None:
+async def create_user(username: str, password: str, is_admin: bool) -> None:
     settings = load_settings()
     database = Database()
     await database.connect(settings.database.url)
     try:
         async with database.session() as session:
-            user = await UserRepository(session).create(username.strip(), PasswordService().hash(password))
-        print(f"Created user {user.username} ({user.id})")
+            user = await UserRepository(session).create(
+                username.strip(), PasswordService().hash(password), is_admin=is_admin
+            )
+        print(f"Created {'admin' if user.is_admin else 'user'} {user.username} ({user.id})")
     finally:
         await database.disconnect()
 
@@ -25,6 +27,9 @@ async def create_user(username: str, password: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a Marketplace Auto employee account")
     parser.add_argument("--username", required=True)
+    # The first administrator has to come from here: the panel that grants the
+    # flag is itself behind it.
+    parser.add_argument("--admin", action="store_true", help="grant access to the admin section")
     args = parser.parse_args()
     password = getpass.getpass("Password: ")
     confirmation = getpass.getpass("Repeat password: ")
@@ -33,7 +38,7 @@ def main() -> None:
     if password != confirmation:
         parser.error("passwords do not match")
     try:
-        asyncio.run(create_user(args.username, password))
+        asyncio.run(create_user(args.username, password, args.admin))
     except IntegrityError:
         parser.error("username already exists")
 

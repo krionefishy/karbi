@@ -82,6 +82,7 @@ def make_user(passwords: PasswordService, password: str = "correct horse battery
         username="admin",
         password_hash=passwords.hash(password),
         is_active=True,
+        is_admin=False,
         created_at=datetime.now(UTC),
         last_login_at=None,
     )

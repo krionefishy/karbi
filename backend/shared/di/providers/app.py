@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
-from backend.modules.platform.application import AuthService, PasswordService, TokenService
+from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -58,6 +58,10 @@ class SessionProvider(Provider):
         tokens: TokenService,
     ) -> AuthService:
         return AuthService(users, passwords, tokens)
+
+    @provide(scope=Scope.REQUEST)
+    def user_admin_service(self, users: UserRepository, passwords: PasswordService) -> UserAdminService:
+        return UserAdminService(users, passwords)
 
     @provide(scope=Scope.REQUEST)
     def seller_repository(self, session: AsyncSession) -> SellerRepository:

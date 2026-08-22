@@ -12,7 +12,7 @@ let refreshPromise: Promise<AuthRefreshPayload> | null = null;
 
 interface AuthRefreshPayload {
   access_token: string;
-  user: { id: string; username: string };
+  user: { id: string; username: string; is_admin: boolean };
 }
 
 interface RequestOptions {

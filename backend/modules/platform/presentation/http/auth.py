@@ -9,8 +9,14 @@ from backend.modules.platform.application import (
     AuthService,
     LoginAttemptLimiter,
     LoginRateLimitError,
+    UserAdminService,
 )
-from backend.modules.platform.presentation.http.schemas import LoginRequest, TokenResponse, UserResponse
+from backend.modules.platform.presentation.http.schemas import (
+    LoginRequest,
+    PasswordChangeRequest,
+    TokenResponse,
+    UserResponse,
+)
 from backend.modules.platform.presentation.http.utils import (
     REFRESH_COOKIE,
     clear_refresh_cookie,
@@ -94,4 +100,22 @@ async def logout(
     scheme, _, access_token = request.headers.get("authorization", "").partition(" ")
     await auth.logout(refresh_token, access_token.strip() if scheme.lower() == "bearer" else None)
     clear_refresh_cookie(response, settings)
+    return {"status": "ok"}
+
+
+@router.post("/password")
+@inject
+async def change_password(
+    payload: PasswordChangeRequest,
+    response: Response,
+    principal: CurrentPrincipal,
+    service: FromDishka[UserAdminService],
+) -> dict[str, str]:
+    """Change your own password. Other sessions keep working: refresh tokens are
+    stored by their own hash, so there is no way to find the rest of them."""
+    try:
+        await service.change_own_password(principal.user_id, payload.current_password, payload.new_password)
+    except AuthenticationError as error:
+        raise unauthorized() from error
+    response.headers["Cache-Control"] = "no-store"
     return {"status": "ok"}
