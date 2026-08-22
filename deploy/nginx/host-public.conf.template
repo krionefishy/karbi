@@ -1,12 +1,10 @@
-# Админка. Тот же бэкенд и тот же SPA, что и на основном домене, — отдельный
-# только вход: на marketplace-auto.ru префикс /api/v1/admin/ закрыт, и открыть
-# раздел можно лишь отсюда. Права всё равно проверяются в базе на каждый запрос,
-# поэтому это второй рубеж, а не единственный.
+# Шаблон: домены подставляются на сервере скриптом deploy/nginx/render-hosts.sh
+# из .env. Готовые конфиги живут только на машине.
 
 server {
     listen 80;
     listen [::]:80;
-    server_name admin.marketplace-auto.ru;
+    server_name ${PUBLIC_DOMAIN};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -20,17 +18,12 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name admin.marketplace-auto.ru;
+    server_name ${PUBLIC_DOMAIN};
 
-    ssl_certificate /etc/letsencrypt/live/admin.marketplace-auto.ru/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/admin.marketplace-auto.ru/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/${PUBLIC_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${PUBLIC_DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    # Раскомментировать, когда появится постоянный адрес: сетевой рубеж дешевле
-    # любой проверки внутри приложения.
-    # allow 203.0.113.7;
-    # deny all;
 
     client_max_body_size 25m;
 
@@ -38,12 +31,27 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # Conservative CSP for the Vite SPA:
+    # - style-src needs 'unsafe-inline' (React inline style attributes) and
+    #   fonts.googleapis.com (frontend/src/styles.css imports Google Fonts);
+    #   font-src correspondingly allows fonts.gstatic.com.
+    # - img-src allows any https host: product photos come from the WB CDN,
+    #   whose basket-NN.wbbasket.ru hostnames rotate. Tighten if that changes.
     add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+
+    # Админка живёт на ${ADMIN_DOMAIN}. Бэкенд общий, поэтому без
+    # этого запрета поддомен был бы просто другим адресом того же самого.
+    location ^~ /api/v1/admin/ {
+        return 403;
+    }
 
     # Внутренний контур: сюда ходит только релей, и только через свой
     # listener на 8443. Через публичные адреса — никогда, ни на одном домене.
     location ^~ /api/v1/internal/ {
         return 403;
+    }
+    location ^~ /admin {
+        return 301 https://${ADMIN_DOMAIN}$request_uri;
     }
 
     location / {
