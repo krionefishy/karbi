@@ -2,61 +2,55 @@ import argparse
 import asyncio
 import getpass
 
-from backend.modules.notifications.application import BotRegistry, DuplicateBotError
+from backend.modules.notifications.application import BotRegistry
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
-from backend.modules.notifications.infrastructure.telegram import TelegramClient, TelegramPermanentError
-from backend.shared.security import CredentialCipher
+from backend.modules.notifications.infrastructure.relay import RelayClient
+from backend.modules.notifications.infrastructure.telegram import TelegramPermanentError, TelegramTemporaryError
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 
 async def register_bot(code: str, title: str, token: str) -> None:
     settings = load_settings()
-    client = TelegramClient(
-        base_url=settings.telegram.api_base_url,
-        request_timeout_seconds=settings.telegram.request_timeout_seconds,
-        poll_timeout_seconds=settings.telegram.poll_timeout_seconds,
-    )
-    # Ask Telegram who this token belongs to: it validates the token and gives
-    # the username the invitation links are built from.
-    identity = await client.me(token)
-    username = str(identity.get("username") or "")
-    if not username:
-        raise SystemExit("Telegram did not return a username for this token")
+    relay = RelayClient(settings.relay)
+
+    # The token goes straight through to the relay and is never written down on
+    # this side: the relay stores it encrypted and answers with the bot's name
+    # and the template invitation links are built from.
+    identity = await relay.register_bot(bot_code=code, token=token)
+    if not identity.invite_link_template:
+        raise SystemExit("The relay returned no invite link template for this bot")
 
     database = Database()
     await database.connect(settings.database.url, pool_size=1, max_overflow=0)
     try:
         async with database.session() as session:
-            repository = NotificationRepository(session)
-            registry = BotRegistry(
-                session,
-                repository,
-                CredentialCipher(
-                    settings.security.credential_encryption_keys,
-                    settings.security.credential_fingerprint_key,
-                ),
+            registry = BotRegistry(session, NotificationRepository(session))
+            bot = await registry.register(
+                code=code,
+                title=title or identity.title,
+                invite_link_template=identity.invite_link_template,
             )
-            bot = await registry.register(code=code, username=username, title=title, token=token)
-        print(f"Registered bot {bot.code} as @{bot.username} ({bot.id})")
+        print(f"Registered bot {bot.code} ({bot.id}) through the relay")
     finally:
         await database.disconnect()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Register a Telegram bot for notifications")
+    parser = argparse.ArgumentParser(description="Register a notification bot on the relay")
     parser.add_argument("--code", required=True, help="stable id producers address, e.g. turnover-alerts")
     parser.add_argument("--title", default="", help="what subscribers see in the greeting")
     args = parser.parse_args()
+    # getpass keeps the token out of the shell history and off the process list.
     token = getpass.getpass("Bot token: ").strip()
     if not token:
         parser.error("bot token is required")
     try:
         asyncio.run(register_bot(args.code.strip(), args.title.strip(), token))
-    except DuplicateBotError as error:
-        parser.error(str(error))
     except TelegramPermanentError as error:
-        parser.error(f"Telegram rejected the token: {error}")
+        parser.error(f"the relay rejected the token: {error}")
+    except TelegramTemporaryError as error:
+        parser.error(f"the relay is unreachable or unhappy: {error}")
 
 
 if __name__ == "__main__":

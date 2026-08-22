@@ -11,16 +11,15 @@ from backend.modules.notifications.application.pacing import (
 )
 from backend.modules.notifications.domain import Bot, MessageRequest
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
-from backend.modules.notifications.infrastructure.telegram import TelegramClient
+from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.shared.kafka_streams.topics import NotificationTopics
-from backend.shared.security import CredentialCipher
 from backend.storage.pg import Database
 
 
 class NotificationSender:
     """Kafka in, rows in `outgoing_messages` out; delivery is a separate loop.
 
-    Splitting the two means a Telegram outage never blocks the partition, and a
+    Splitting the two means a relay outage never blocks the partition, and a
     committed offset always means "we owe these chats a message", not "sent".
     Delivery then runs one loop per bot, so a slow bot costs only its own queue.
     """
@@ -28,8 +27,7 @@ class NotificationSender:
     def __init__(
         self,
         database: Database,
-        cipher: CredentialCipher,
-        client: TelegramClient,
+        client: RelayClient,
         bootstrap_servers: str,
         group_id: str,
         *,
@@ -40,7 +38,6 @@ class NotificationSender:
         chat_messages_per_second: float = DEFAULT_CHAT_MESSAGES_PER_SECOND,
     ) -> None:
         self.database = database
-        self.cipher = cipher
         self.client = client
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
@@ -87,7 +84,7 @@ class NotificationSender:
             return
         async with self.database.session() as session:
             repository = NotificationRepository(session)
-            dispatch = DispatchService(session, repository, BotRegistry(session, repository, self.cipher))
+            dispatch = DispatchService(session, repository, BotRegistry(session, repository))
             result = await dispatch.queue(request)
         if result.rejected:
             self.logger.error(
@@ -102,7 +99,7 @@ class NotificationSender:
     async def deliver_forever(self, bot: Bot) -> None:
         """One bot's delivery loop; the supervisor runs one of these per bot.
 
-        A bot whose Telegram calls hang delays only its own queue — the reason
+        A bot whose relay calls hang delays only its own queue — the reason
         this is a task per bot rather than one loop over everything.
         """
         pacer = SendPacer(
@@ -121,7 +118,7 @@ class NotificationSender:
     async def deliver_once(self, bot: Bot, pacer: SendPacer | None = None) -> None:
         async with self.database.session() as session:
             repository = NotificationRepository(session)
-            dispatch = DispatchService(session, repository, BotRegistry(session, repository, self.cipher))
+            dispatch = DispatchService(session, repository, BotRegistry(session, repository))
             report = await dispatch.deliver_due(
                 self.client,
                 max_attempts=self.send_max_attempts,

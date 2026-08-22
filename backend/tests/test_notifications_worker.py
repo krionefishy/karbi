@@ -20,7 +20,6 @@ def sender(database: object = None) -> NotificationSender:
     return NotificationSender(
         database,  # type: ignore[arg-type]
         None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
         "kafka.invalid:9092",
         "test-group",
         delivery_interval_seconds=0.01,
@@ -99,7 +98,7 @@ async def test_a_dead_sender_task_is_restarted_by_the_supervisor() -> None:
 
 
 def bot(code: str = "turnover") -> Bot:
-    return Bot(id=uuid.uuid4(), code=code, username=f"{code}_bot", title=code)
+    return Bot(id=uuid.uuid4(), code=code, title=code, invite_link_template="https://t.me/bot?start={token}")
 
 
 async def test_the_pacer_keeps_a_full_second_between_two_sends_to_one_chat() -> None:
@@ -159,7 +158,7 @@ async def test_a_hanging_bot_does_not_delay_another_bots_queue() -> None:
     application = NotificationsWorkerApplication(SETTINGS)
     application.sender = Deliveries()  # type: ignore[assignment]
 
-    application._sync_deliveries([(slow, "token"), (quick, "token")])
+    application._sync_deliveries([slow, quick])
     await started.wait()
     await asyncio.sleep(0)
 
@@ -181,12 +180,12 @@ async def test_delivery_loops_follow_the_bot_table() -> None:
     application = NotificationsWorkerApplication(SETTINGS)
     application.sender = Idle()  # type: ignore[assignment]
 
-    application._sync_deliveries([(first, "token")])
+    application._sync_deliveries([first])
     assert set(application._deliveries) == {first.id}
 
     # A bot registered since the last sweep starts delivering without a deploy;
     # one deactivated since then has its loop cancelled.
-    application._sync_deliveries([(second, "token")])
+    application._sync_deliveries([second])
     assert set(application._deliveries) == {second.id}
 
     for task in application._deliveries.values():

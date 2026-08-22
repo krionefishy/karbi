@@ -24,20 +24,19 @@ class NotificationsBase(DeclarativeBase):
 
 
 class BotModel(NotificationsBase):
-    """One row per Telegram bot.
+    """One row per bot, without a single secret in it.
 
-    Bots are data, not config: tokens rotate and new bots appear without a
-    deploy. Producers address a bot by its `code`, never by token.
+    Tokens live on the relay and never reach this server. What stays here is the
+    code producers address, and the invite link template the relay handed back —
+    an opaque string this side only substitutes an invite token into.
     """
 
     __tablename__ = "bots"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    username: Mapped[str] = mapped_column(String(64), nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    encrypted_token: Mapped[str] = mapped_column(String, nullable=False)
-    token_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    invite_link_template: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -62,7 +61,7 @@ class BotCursorModel(NotificationsBase):
 
 
 class InviteLinkModel(NotificationsBase):
-    """A t.me/<bot>?start=<token> invitation.
+    """An invitation link built from the bot's template.
 
     The token is a bearer credential — whoever opens the link gets the seller's
     notifications — so it is random, single use and expires. The seller's name is
@@ -149,7 +148,7 @@ class OutgoingMessageModel(NotificationsBase):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    message_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

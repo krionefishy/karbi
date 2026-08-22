@@ -169,8 +169,27 @@ class TurnoverConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class RelayConfig:
+    """The messenger relay outside Russia: the only host allowed to reach the messenger.
+
+    No bot tokens here — they live on the relay. This side knows an address, a
+    shared JWT secret and the certificate it pins.
+    """
+
+    base_url: str = ""
+    jwt_secret: str = field(default="", repr=False)
+    issuer: str = "marketplace-auto"
+    audience: str = "relay"
+    jwt_ttl_seconds: int = 300
+    # "true"/"false", or a path to the relay certificate to pin. Never disable
+    # verification in production: the JWT rides on this connection.
+    verify: str = "true"
+    request_timeout_seconds: int = 60
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramConfig:
-    """One process polls every bot; the tokens themselves live in the database."""
+    """Delivery pacing and invite lifetimes; the messenger itself is the relay's business."""
 
     api_base_url: str = "https://api.telegram.org"
     poll_timeout_seconds: int = 25
@@ -213,6 +232,7 @@ class Settings:
     worker: WorkerConfig
     wb_api: WBApiConfig
     telegram: TelegramConfig
+    relay: RelayConfig
     turnover: TurnoverConfig
 
     @classmethod
@@ -286,6 +306,10 @@ class Settings:
                 telegram[key] = int(telegram[key])
         if "delivery_interval_seconds" in telegram:
             telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
+        relay = dict(data.get("relay", {}))
+        for key in ("jwt_ttl_seconds", "request_timeout_seconds"):
+            if key in relay:
+                relay[key] = int(relay[key])
         security = data.get("security", {})
         keys = security.get("credential_encryption_keys", [])
         if isinstance(keys, str):
@@ -305,6 +329,7 @@ class Settings:
             worker=WorkerConfig(**worker),
             wb_api=WBApiConfig(**wb_api),
             telegram=TelegramConfig(**telegram),
+            relay=RelayConfig(**relay),
             turnover=TurnoverConfig(**turnover),
         )
         settings.validate_values()
@@ -400,6 +425,12 @@ class Settings:
             invalid.append("security.credential_fingerprint_key")
         if "*" in self.app.cors_origins:
             invalid.append("app.cors_origins cannot contain '*' in production")
+        if not self.relay.base_url:
+            invalid.append("relay.base_url")
+        if len(self.relay.jwt_secret) < 32:
+            invalid.append("relay.jwt_secret")
+        if self.relay.verify.lower() in {"false", "0", "no"}:
+            invalid.append("relay.verify cannot disable TLS verification in production")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
         if invalid:

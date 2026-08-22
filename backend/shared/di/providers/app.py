@@ -98,10 +98,8 @@ class SessionProvider(Provider):
         return NotificationRepository(session)
 
     @provide(scope=Scope.REQUEST)
-    def bot_registry(
-        self, session: AsyncSession, notifications: NotificationRepository, cipher: CredentialCipher
-    ) -> BotRegistry:
-        return BotRegistry(session, notifications, cipher)
+    def bot_registry(self, session: AsyncSession, notifications: NotificationRepository) -> BotRegistry:
+        return BotRegistry(session, notifications)
 
     @provide(scope=Scope.REQUEST)
     def subscription_service(

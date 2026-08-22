@@ -1,12 +1,9 @@
 import asyncio
-import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from backend.modules.notifications.domain import Bot
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
-from backend.workers.notifications.application import NotificationsWorkerApplication
 from backend.workers.wb_reviews.application import WBReviewsWorkerApplication
 from backend.workers.wb_reviews.worker import WBReviewsWorker
 from backend.workers.wb_turnover.application import TurnoverWorkerApplication
@@ -96,32 +93,6 @@ def test_a_transient_database_error_does_not_kill_the_worker_loop() -> None:
     # The loop swallows the error and lives on to the next poll instead of dying.
     asyncio.run(failing_worker.run())
     assert attempts == [1]
-
-
-def test_notifications_worker_starts_a_poller_for_every_registered_bot() -> None:
-    """Bots come from the table, so adding one must not need a deploy."""
-    settings = load_settings("backend/shared/settings/config.test.yaml")
-    application = NotificationsWorkerApplication(settings)
-    first, second = Bot(uuid.uuid4(), "alpha", "alpha_bot", ""), Bot(uuid.uuid4(), "beta", "beta_bot", "")
-    application._pollers = {}
-
-    async def scenario() -> None:
-        # The supervisor reads the bot table once and drives the pollers from it.
-        application._sync_pollers([])
-        assert application._pollers == {}
-
-        application._sync_pollers([(first, "token-1"), (second, "token-2")])
-        assert set(application._pollers) == {first.id, second.id}
-
-        # A bot switched off in the table loses its poller on the next sweep.
-        application._sync_pollers([(first, "token-1")])
-        assert set(application._pollers) == {first.id}
-
-        for task in application._pollers.values():
-            task.cancel()
-        await asyncio.gather(*application._pollers.values(), return_exceptions=True)
-
-    asyncio.run(scenario())
 
 
 def test_the_turnover_worker_runs_each_step_after_its_moment_of_the_day() -> None:

@@ -59,3 +59,7 @@ wb_api:
 telegram:
   api_base_url: https://api.telegram.org
   invite_link_ttl_hours: 72
+relay:
+  base_url: http://localhost:8081
+  jwt_secret: local-development-relay-secret-not-a-real-one
+  verify: "false"

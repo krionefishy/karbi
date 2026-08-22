@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.domain import Bot
 from backend.modules.notifications.infrastructure.postgres import BotModel, NotificationRepository
-from backend.shared.security import CredentialCipher
 
 
 class BotNotFoundError(Exception):
@@ -16,26 +15,29 @@ class DuplicateBotError(Exception):
 
 
 class BotRegistry:
-    """Bots live in the database so a new one needs no deploy and no config edit."""
+    """Bots live in the database so a new one needs no deploy and no config edit.
 
-    def __init__(self, session: AsyncSession, repository: NotificationRepository, cipher: CredentialCipher) -> None:
+    No cipher here any more: bot tokens live on the relay, and this registry has
+    nothing left to decrypt.
+    """
+
+    def __init__(self, session: AsyncSession, repository: NotificationRepository) -> None:
         self.session = session
         self.repository = repository
-        self.cipher = cipher
 
-    async def register(self, *, code: str, username: str, title: str, token: str) -> Bot:
-        fingerprint = self.cipher.fingerprint(token)
-        if await self.repository.bot_by_code(code) is not None:
-            raise DuplicateBotError(f"Bot {code} already exists")
-        if await self.repository.fingerprint_exists(fingerprint):
-            raise DuplicateBotError("This token is already registered for another bot")
-        model = self.repository.add_bot(
-            code=code,
-            username=username.lstrip("@"),
-            title=title,
-            encrypted_token=self.cipher.encrypt(token),
-            fingerprint=fingerprint,
-        )
+    async def register(self, *, code: str, title: str, invite_link_template: str) -> Bot:
+        """Record a bot the relay has already accepted.
+
+        Idempotent on purpose: rotating a token re-registers the same code on the
+        relay, and this side must follow rather than refuse.
+        """
+        model = await self.repository.bot_by_code(code)
+        if model is None:
+            model = self.repository.add_bot(code=code, title=title, invite_link_template=invite_link_template)
+        else:
+            model.title = title
+            model.invite_link_template = invite_link_template
+            model.is_active = True
         await self.session.commit()
         return self.to_domain(model)
 
@@ -48,12 +50,12 @@ class BotRegistry:
             raise BotNotFoundError(code)
         return self.to_domain(model)
 
-    async def token(self, bot_id: uuid.UUID) -> str:
+    async def by_id(self, bot_id: uuid.UUID) -> Bot:
         model = await self.repository.bot(bot_id)
         if model is None:
             raise BotNotFoundError(str(bot_id))
-        return self.cipher.decrypt(model.encrypted_token)
+        return self.to_domain(model)
 
     @staticmethod
     def to_domain(model: BotModel) -> Bot:
-        return Bot(model.id, model.code, model.username, model.title)
+        return Bot(model.id, model.code, model.title, model.invite_link_template)

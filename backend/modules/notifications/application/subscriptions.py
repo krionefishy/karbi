@@ -69,7 +69,9 @@ class SubscriptionService:
         await self.session.commit()
         return Invite(
             token=token,
-            url=f"https://t.me/{bot.username}?start={token}",
+            # The relay handed this template over at registration; this side only
+            # substitutes its own invite token and never learns the link's shape.
+            url=bot.invite_link_template.replace("{token}", token),
             expires_at=model.expires_at,
             seller_id=seller_id,
         )

@@ -144,7 +144,7 @@ class TurnoverWorker:
                         session,
                         SellerRepository(session),
                         TurnoverRepository(session),
-                        BotRegistry(session, NotificationRepository(session), self.cipher),
+                        BotRegistry(session, NotificationRepository(session)),
                         threshold_days=self.turnover.threshold_days,
                         bot_code=self.turnover.notification_bot,
                     )

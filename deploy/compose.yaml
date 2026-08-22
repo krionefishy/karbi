@@ -59,6 +59,11 @@ services:
       CREDENTIALS_ENCRYPTION_KEYS: ${CREDENTIALS_ENCRYPTION_KEYS:?set CREDENTIALS_ENCRYPTION_KEYS in .env - no default in production}
       CREDENTIALS_FINGERPRINT_KEY: ${CREDENTIALS_FINGERPRINT_KEY:?set CREDENTIALS_FINGERPRINT_KEY in .env - no default in production}
       WB_FEEDBACK_PAGE_SIZE: ${WB_FEEDBACK_PAGE_SIZE:-5000}
+      # The relay outside Russia is the only way to the messenger. The secret is
+      # shared with it; the bot tokens themselves never come back here.
+      RELAY_BASE_URL: ${RELAY_BASE_URL:?set RELAY_BASE_URL in .env}
+      RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET in .env - no default in production}
+      RELAY_VERIFY: ${RELAY_VERIFY:-/etc/relay/relay.crt}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -71,6 +76,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+    volumes:
+      - ./relay-tls:/etc/relay:ro
+    extra_hosts:
+      - "relay-nl-1.internal:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     networks:
       - proxy
       - internal
@@ -126,6 +135,10 @@ services:
     mem_limit: 384m
     # Exactly one replica: Telegram refuses a second getUpdates on the same token.
     command: ["python", "-m", "backend.workers.notifications.main"]
+    volumes:
+      - ./relay-tls:/etc/relay:ro
+    extra_hosts:
+      - "relay-nl-1.internal:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     environment:
       <<: *application-environment
       # api.telegram.org is blocked upstream of some hosts, this one included.

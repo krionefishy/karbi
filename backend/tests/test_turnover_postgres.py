@@ -146,11 +146,10 @@ async def digest_bot(seller) -> AsyncIterator[str]:
     database, _ = seller
     code = f"turnover-alerts-{uuid.uuid4().hex[:8]}"
     async with database.session() as session:
-        bot = await BotRegistry(session, NotificationRepository(session), cipher()).register(
+        bot = await BotRegistry(session, NotificationRepository(session)).register(
             code=code,
-            username="karbi_turnover_bot",
             title="Оборачиваемость",
-            token=f"1234:{uuid.uuid4().hex}",
+            invite_link_template="https://t.me/test_bot?start={token}",
         )
     try:
         yield code
@@ -165,7 +164,7 @@ def digest_service(session, bot_code: str) -> DigestService:
         session,
         SellerRepository(session),
         TurnoverRepository(session),
-        BotRegistry(session, NotificationRepository(session), cipher()),
+        BotRegistry(session, NotificationRepository(session)),
         threshold_days=10,
         bot_code=bot_code,
     )

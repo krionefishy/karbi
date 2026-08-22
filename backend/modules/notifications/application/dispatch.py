@@ -9,15 +9,14 @@ from backend.modules.notifications.application.pacing import SendPacer
 from backend.modules.notifications.application.templates import UnknownTemplateError, render
 from backend.modules.notifications.domain import CHAT_AUDIENCE, MessageRequest
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.notifications.infrastructure.telegram import (
-    TelegramClient,
     TelegramPermanentError,
     TelegramRateLimitError,
     TelegramTemporaryError,
 )
-from backend.shared.security import CredentialDecryptionError
 
-# Descriptions Telegram uses when the chat will never receive anything again.
+# Descriptions the messenger uses when the chat will never receive anything again.
 DEAD_CHAT_MARKERS = ("bot was blocked", "chat not found", "bot was kicked", "user is deactivated")
 
 
@@ -91,7 +90,7 @@ class DispatchService:
 
     async def deliver_due(
         self,
-        client: TelegramClient,
+        client: RelayClient,
         *,
         max_attempts: int,
         backoff_seconds: int,
@@ -101,15 +100,17 @@ class DispatchService:
     ) -> DeliveryReport:
         """Send what is due, for one bot when `bot_id` is given.
 
-        A bot whose Telegram calls hang holds up nothing but its own queue: the
+        A bot whose relay calls hang holds up nothing but its own queue: the
         supervisor runs one of these per bot, each with its own session.
         """
         sent = retried = failed = 0
+        codes: dict[uuid.UUID, str] = {}
         for message in await self.repository.due_messages(limit, bot_id=bot_id):
             try:
-                token = await self.bots.token(message.bot_id)
-            except (BotNotFoundError, CredentialDecryptionError) as error:
-                # One undecryptable token must not stall every other bot's queue.
+                if message.bot_id not in codes:
+                    codes[message.bot_id] = (await self.bots.by_id(message.bot_id)).code
+            except BotNotFoundError as error:
+                # A message for a bot somebody deleted must not stall the queue.
                 await self.repository.mark_failed(message.id, str(error))
                 failed += 1
                 await self.session.commit()
@@ -120,7 +121,16 @@ class DispatchService:
                 # us either way.
                 await pacer.wait_turn(message.chat_id)
             try:
-                telegram_message_id = await client.send(token, message.chat_id, message.text)
+                # The chat id crosses as an opaque string: the relay decides what
+                # it means, this side only carries it back and forth.
+                message_ref = await client.send(
+                    bot_code=codes[message.bot_id],
+                    recipient=str(message.chat_id),
+                    text=message.text,
+                    # The queue row's own id: a retry after a lost answer is
+                    # recognised by the relay instead of reaching the chat twice.
+                    idempotency_key=str(message.id),
+                )
             except TelegramPermanentError as error:
                 # Blocked bot, deleted chat: another attempt changes nothing.
                 await self.repository.mark_failed(message.id, str(error))
@@ -140,7 +150,7 @@ class DispatchService:
                 else:
                     failed += 1
             else:
-                await self.repository.mark_sent(message.id, telegram_message_id)
+                await self.repository.mark_sent(message.id, message_ref)
                 sent += 1
             # One commit per message: a crash mid-batch can then duplicate at
             # most the message in flight, not the whole batch.

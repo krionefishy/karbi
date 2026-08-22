@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
-from sqlalchemy import update as sa_update
 
 from backend.modules.notifications.application import BotRegistry, DispatchService, SubscriptionService
 from backend.modules.notifications.domain import Audience, Bot, MessageRequest
@@ -16,8 +15,8 @@ from backend.modules.notifications.infrastructure.postgres import (
     OutgoingMessageModel,
     SubscriptionModel,
 )
+from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.notifications.infrastructure.telegram import (
-    TelegramClient,
     TelegramPermanentError,
     TelegramRateLimitError,
     TelegramTemporaryError,
@@ -35,19 +34,21 @@ def cipher() -> CredentialCipher:
     return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
 
 
-class FakeTelegram(TelegramClient):
+class FakeRelay(RelayClient):
     """Records what would have been sent, and can be told to fail."""
 
     def __init__(self, error: Exception | None = None) -> None:
-        super().__init__(base_url="http://telegram.invalid")
-        self.sent: list[tuple[int, str]] = []
+        super().__init__(SETTINGS.relay)
+        self.sent: list[tuple[str, str]] = []
+        self.keys: list[str] = []
         self.error = error
 
-    async def send(self, token: str, chat_id: int, text: str) -> int | None:
+    async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
         if self.error is not None:
             raise self.error
-        self.sent.append((chat_id, text))
-        return 100 + len(self.sent)
+        self.sent.append((recipient, text))
+        self.keys.append(idempotency_key)
+        return str(100 + len(self.sent))
 
 
 @pytest_asyncio.fixture
@@ -56,11 +57,10 @@ async def notifications() -> AsyncIterator[tuple[Database, Bot]]:
     await database.connect(SETTINGS.database.url, pool_size=2, max_overflow=0)
     async with database.session() as session:
         repository = NotificationRepository(session)
-        bot = await BotRegistry(session, repository, cipher()).register(
+        bot = await BotRegistry(session, repository).register(
             code=f"test-bot-{uuid.uuid4().hex[:8]}",
-            username="karbi_test_bot",
             title="Оборачиваемость",
-            token=f"1234:{uuid.uuid4().hex}",
+            invite_link_template="https://t.me/test_bot?start={token}",
         )
     try:
         yield database, bot
@@ -108,7 +108,7 @@ async def test_the_invite_link_carries_only_a_random_token(notifications) -> Non
             bot, seller_id=SELLER_ID, seller_name="ООО Ромашка"
         )
 
-    assert invite.url == f"https://t.me/{bot.username}?start={invite.token}"
+    assert invite.url == f"https://t.me/test_bot?start={invite.token}"
     assert str(SELLER_ID) not in invite.url
     assert len(invite.token) <= 64
 
@@ -206,14 +206,14 @@ def request(bot_code: str, dedupe_key: str = "turnover:2026-08-19", template: st
 async def dispatch_queue(database: Database, message):
     async with database.session() as session:
         repository = NotificationRepository(session)
-        service = DispatchService(session, repository, BotRegistry(session, repository, cipher()))
+        service = DispatchService(session, repository, BotRegistry(session, repository))
         return await service.queue(message)
 
 
-async def deliver(database: Database, client: TelegramClient):
+async def deliver(database: Database, client: RelayClient):
     async with database.session() as session:
         repository = NotificationRepository(session)
-        service = DispatchService(session, repository, BotRegistry(session, repository, cipher()))
+        service = DispatchService(session, repository, BotRegistry(session, repository))
         return await service.deliver_due(client, max_attempts=3, backoff_seconds=1)
 
 
@@ -253,13 +253,13 @@ async def test_an_unknown_bot_or_template_is_rejected_not_retried(notifications)
 async def test_delivery_sends_what_was_queued(notifications) -> None:
     database, bot = notifications
     await subscribe(database, bot, chat_id=555, update_id=1)
-    client = FakeTelegram()
+    client = FakeRelay()
 
     report = await deliver(database, client)
 
     # The greeting from /start goes through the very same queue.
     assert report.sent == 1
-    assert client.sent[0][0] == 555
+    assert client.sent[0][0] == "555"
     assert (await deliver(database, client)).sent == 0
 
 
@@ -267,7 +267,7 @@ async def test_a_blocked_chat_is_not_retried_forever(notifications) -> None:
     database, bot = notifications
     await subscribe(database, bot, chat_id=555, update_id=1)
 
-    report = await deliver(database, FakeTelegram(TelegramPermanentError("bot was blocked by the user")))
+    report = await deliver(database, FakeRelay(TelegramPermanentError("bot was blocked by the user")))
 
     assert (report.sent, report.failed) == (0, 1)
     async with database.session() as session:
@@ -282,7 +282,7 @@ async def test_a_telegram_outage_keeps_the_message_queued(notifications) -> None
     database, bot = notifications
     await subscribe(database, bot, chat_id=555, update_id=1)
 
-    report = await deliver(database, FakeTelegram(TelegramTemporaryError("Bad Gateway")))
+    report = await deliver(database, FakeRelay(TelegramTemporaryError("Bad Gateway")))
 
     assert (report.sent, report.retried, report.failed) == (0, 1, 0)
     async with database.session() as session:
@@ -295,7 +295,7 @@ async def test_a_rate_limit_waits_out_retry_after_without_burning_attempts(notif
     await subscribe(database, bot, chat_id=555, update_id=1)
 
     report = await deliver(
-        database, FakeTelegram(TelegramRateLimitError("Too Many Requests: retry after 30", retry_after=30))
+        database, FakeRelay(TelegramRateLimitError("Too Many Requests: retry after 30", retry_after=30))
     )
 
     assert (report.sent, report.retried, report.failed) == (0, 1, 0)
@@ -305,18 +305,22 @@ async def test_a_rate_limit_waits_out_retry_after_without_burning_attempts(notif
         assert row.attempts == 0
         assert row.next_attempt_at >= datetime.now(UTC) + timedelta(seconds=25)
     # Not due until Telegram's pause is over.
-    assert (await deliver(database, FakeTelegram())).sent == 0
+    assert (await deliver(database, FakeRelay())).sent == 0
 
 
-async def test_one_broken_bot_token_does_not_stop_delivery_for_the_rest(notifications) -> None:
+async def test_one_bot_the_relay_refuses_does_not_stop_delivery_for_the_rest(notifications) -> None:
+    """A dead bot costs its own queue and nothing else.
+
+    Tokens no longer live here, so the failure arrives as a permanent refusal
+    from the relay instead of an undecryptable column.
+    """
     database, bot = notifications
     async with database.session() as session:
         repository = NotificationRepository(session)
-        broken = await BotRegistry(session, repository, cipher()).register(
+        broken = await BotRegistry(session, repository).register(
             code=f"test-bot-{uuid.uuid4().hex[:8]}",
-            username="karbi_broken_bot",
             title="Сломанный",
-            token=f"1234:{uuid.uuid4().hex}",
+            invite_link_template="https://t.me/test_bot?start={token}",
         )
     try:
         async with database.session() as session:
@@ -328,15 +332,23 @@ async def test_one_broken_bot_token_does_not_stop_delivery_for_the_rest(notifica
                 params={},
                 text="никогда не уйдёт",
             )
-            await session.execute(sa_update(BotModel).where(BotModel.id == broken.id).values(encrypted_token="garbage"))
             await session.commit()
         await subscribe(database, bot, chat_id=555, update_id=1)
-        client = FakeTelegram()
+
+        class PickyRelay(FakeRelay):
+            async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
+                if bot_code == broken.code:
+                    raise TelegramPermanentError("bot was blocked by the user")
+                return await super().send(
+                    bot_code=bot_code, recipient=recipient, text=text, idempotency_key=idempotency_key
+                )
+
+        client = PickyRelay()
 
         report = await deliver(database, client)
 
         assert (report.sent, report.failed) == (1, 1)
-        assert client.sent[0][0] == 555
+        assert client.sent[0][0] == "555"
         async with database.session() as session:
             row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == broken.id))
             assert row is not None and row.status == "failed"
@@ -351,14 +363,16 @@ async def test_a_crash_mid_batch_keeps_the_messages_already_sent(notifications) 
     await subscribe(database, bot, chat_id=555, update_id=1)
     await subscribe(database, bot, chat_id=556, update_id=2)
 
-    class CrashingTelegram(FakeTelegram):
-        async def send(self, token: str, chat_id: int, text: str) -> int | None:
+    class CrashingRelay(FakeRelay):
+        async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
             if self.sent:
                 raise RuntimeError("the process died here")
-            return await super().send(token, chat_id, text)
+            return await super().send(
+                bot_code=bot_code, recipient=recipient, text=text, idempotency_key=idempotency_key
+            )
 
     with pytest.raises(RuntimeError):
-        await deliver(database, CrashingTelegram())
+        await deliver(database, CrashingRelay())
 
     async with database.session() as session:
         rows = await session.scalars(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
@@ -410,11 +424,11 @@ async def test_group_commands_with_a_bot_suffix_are_recognized(notifications) ->
             bot, seller_id=SELLER_ID, seller_name="ООО Ромашка"
         )
 
-    await handle(database, bot, update(f"/start@{bot.username} {invite.token}", update_id=1))
+    await handle(database, bot, update(f"/start@any_bot_name {invite.token}", update_id=1))
     async with database.session() as session:
         assert await NotificationRepository(session).subscribers(bot.id, SELLER_ID) == [555]
 
-    await handle(database, bot, update(f"/stop@{bot.username}", update_id=2))
+    await handle(database, bot, update("/stop@any_bot_name", update_id=2))
     async with database.session() as session:
         assert await NotificationRepository(session).subscribers(bot.id, SELLER_ID) == []
 
@@ -424,11 +438,10 @@ async def test_the_same_producer_key_through_two_bots_reaches_the_chat_twice(not
     await subscribe(database, bot, chat_id=555, update_id=1)
     async with database.session() as session:
         repository = NotificationRepository(session)
-        second_bot = await BotRegistry(session, repository, cipher()).register(
+        second_bot = await BotRegistry(session, repository).register(
             code=f"test-bot-{uuid.uuid4().hex[:8]}",
-            username="karbi_second_bot",
             title="Второй",
-            token=f"1234:{uuid.uuid4().hex}",
+            invite_link_template="https://t.me/test_bot?start={token}",
         )
     try:
         async with database.session() as session:
@@ -453,11 +466,10 @@ async def test_delivery_only_touches_the_bot_it_was_asked_for(notifications) -> 
     await subscribe(database, bot, chat_id=555, update_id=1)
     async with database.session() as session:
         repository = NotificationRepository(session)
-        other = await BotRegistry(session, repository, cipher()).register(
+        other = await BotRegistry(session, repository).register(
             code=f"test-bot-{uuid.uuid4().hex[:8]}",
-            username="karbi_other_bot",
             title="Другой",
-            token=f"1234:{uuid.uuid4().hex}",
+            invite_link_template="https://t.me/test_bot?start={token}",
         )
     try:
         async with database.session() as session:
@@ -469,10 +481,10 @@ async def test_delivery_only_touches_the_bot_it_was_asked_for(notifications) -> 
         await dispatch_queue(database, request(bot.code, dedupe_key="d1"))
         await dispatch_queue(database, request(other.code, dedupe_key="d2"))
 
-        client = FakeTelegram()
+        client = FakeRelay()
         async with database.session() as session:
             repository = NotificationRepository(session)
-            service = DispatchService(session, repository, BotRegistry(session, repository, cipher()))
+            service = DispatchService(session, repository, BotRegistry(session, repository))
             report = await service.deliver_due(client, max_attempts=3, backoff_seconds=1, bot_id=other.id)
 
         assert report.failed == 0

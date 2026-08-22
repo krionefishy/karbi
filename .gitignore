@@ -36,3 +36,5 @@ pg_data/
 redis_data/
 kafka_data/
 
+# Сертификат релея кладётся на сервер руками, как и host-конфиги nginx
+deploy/relay-tls/

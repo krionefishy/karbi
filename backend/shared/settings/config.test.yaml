@@ -61,3 +61,7 @@ telegram:
   send_max_attempts: 3
   send_retry_backoff_seconds: 1
   invite_link_ttl_hours: 72
+relay:
+  base_url: https://relay.invalid
+  jwt_secret: test-relay-secret-that-is-long-enough
+  verify: "false"

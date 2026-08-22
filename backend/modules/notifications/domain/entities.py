@@ -11,8 +11,8 @@ SELLER_AUDIENCE = "seller_subscribers"
 class Bot:
     id: uuid.UUID
     code: str
-    username: str
     title: str
+    invite_link_template: str
 
 
 @dataclass(frozen=True, slots=True)

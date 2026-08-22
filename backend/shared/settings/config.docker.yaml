@@ -77,6 +77,14 @@ telegram:
   send_max_attempts: ${TELEGRAM_SEND_MAX_ATTEMPTS:-5}
   send_retry_backoff_seconds: ${TELEGRAM_SEND_RETRY_BACKOFF_SECONDS:-30}
   invite_link_ttl_hours: ${TELEGRAM_INVITE_LINK_TTL_HOURS:-72}
+relay:
+  base_url: ${RELAY_BASE_URL:-}
+  jwt_secret: ${RELAY_JWT_SECRET:-}
+  issuer: ${RELAY_ISSUER:-marketplace-auto}
+  audience: ${RELAY_AUDIENCE:-relay}
+  jwt_ttl_seconds: ${RELAY_JWT_TTL_SECONDS:-300}
+  verify: ${RELAY_VERIFY:-/etc/relay/relay.crt}
+  request_timeout_seconds: ${RELAY_REQUEST_TIMEOUT_SECONDS:-60}
 turnover:
   timezone: Europe/Moscow
   stock_slot_hours: [3, 9, 15, 21]

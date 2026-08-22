@@ -30,19 +30,8 @@ class NotificationRepository:
     async def bot(self, bot_id: uuid.UUID) -> BotModel | None:
         return await self.session.get(BotModel, bot_id)
 
-    async def fingerprint_exists(self, fingerprint: str) -> bool:
-        return (
-            await self.session.scalar(select(BotModel.id).where(BotModel.token_fingerprint == fingerprint)) is not None
-        )
-
-    def add_bot(self, *, code: str, username: str, title: str, encrypted_token: str, fingerprint: str) -> BotModel:
-        bot = BotModel(
-            code=code,
-            username=username,
-            title=title,
-            encrypted_token=encrypted_token,
-            token_fingerprint=fingerprint,
-        )
+    def add_bot(self, *, code: str, title: str, invite_link_template: str) -> BotModel:
+        bot = BotModel(code=code, title=title, invite_link_template=invite_link_template)
         self.session.add(bot)
         return bot
 
@@ -223,14 +212,14 @@ class NotificationRepository:
             )
         )
 
-    async def mark_sent(self, message_id: uuid.UUID, telegram_message_id: int | None) -> None:
+    async def mark_sent(self, message_id: uuid.UUID, message_ref: str | None) -> None:
         await self.session.execute(
             update(OutgoingMessageModel)
             .where(OutgoingMessageModel.id == message_id)
             .values(
                 status="sent",
                 sent_at=datetime.now(UTC),
-                telegram_message_id=telegram_message_id,
+                message_ref=message_ref,
                 attempts=OutgoingMessageModel.attempts + 1,
                 error=None,
             )

@@ -12,7 +12,6 @@ import asyncio
 
 from sqlalchemy import select
 
-from backend.modules.notifications.infrastructure.postgres.models import BotModel
 from backend.modules.wb_core.infrastructure.postgres.models import CredentialModel
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
@@ -32,15 +31,14 @@ async def rotate_credentials(dry_run: bool) -> None:
             credentials = list(await session.scalars(select(CredentialModel)))
             for credential in credentials:
                 credential.encrypted_api_key = cipher.rotate(credential.encrypted_api_key)
-            bots = list(await session.scalars(select(BotModel)))
-            for bot in bots:
-                bot.encrypted_token = cipher.rotate(bot.encrypted_token)
+            # Bot tokens are not here any more: they live on the relay and are
+            # rotated by its own key, which this server does not know.
             if dry_run:
                 await session.rollback()
             else:
                 await session.commit()
         action = "Would rotate" if dry_run else "Rotated"
-        print(f"{action} {len(credentials)} wb_core.credentials and {len(bots)} notifications.bots rows")
+        print(f"{action} {len(credentials)} wb_core.credentials rows")
     finally:
         await database.disconnect()
 
