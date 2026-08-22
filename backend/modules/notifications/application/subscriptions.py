@@ -5,9 +5,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import templates
-from backend.modules.notifications.domain import Bot, Invite
+from backend.modules.notifications.domain import Bot, Invite, Update
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
-from backend.modules.notifications.infrastructure.telegram import Update
 
 # Telegram allows up to 64 characters of [A-Za-z0-9_-] in a start payload.
 TOKEN_BYTES = 24
@@ -76,10 +75,26 @@ class SubscriptionService:
             seller_id=seller_id,
         )
 
+    async def accept_update(self, bot: Bot, update: Update) -> bool:
+        """Handle one update at most once.
+
+        The cursor here is the source of truth, not the relay's offset: the relay
+        advances only after this call answers, so a lost answer replays the
+        update and this check is what stops a second subscription. Returns False
+        when the update was already handled.
+        """
+        last = await self.repository.cursor(bot.id)
+        if update.update_id <= last:
+            return False
+        await self.handle_update(bot, update)
+        await self.repository.save_cursor(bot.id, update.update_id)
+        await self.session.commit()
+        return True
+
     async def handle_update(self, bot: Bot, update: Update) -> None:
         """Answer one message. Every reply goes through the outgoing queue.
 
-        The caller commits: the poller advances its cursor in the same
+        The caller commits: `accept_update` advances the cursor in the same
         transaction, so a crash cannot subscribe a chat and then re-read the
         same /start with an already spent invitation.
         """

@@ -16,6 +16,22 @@ class Bot:
 
 
 @dataclass(frozen=True, slots=True)
+class Update:
+    """One inbound message, in our own terms.
+
+    `chat_id` and `user_id` are addresses the messenger handed us; this side
+    stores and echoes them without interpreting what they mean.
+    """
+
+    update_id: int
+    chat_id: int
+    text: str
+    user_id: int | None
+    username: str
+    first_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class Invite:
     token: str
     url: str

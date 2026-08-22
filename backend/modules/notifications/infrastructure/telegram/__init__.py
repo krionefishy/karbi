@@ -4,7 +4,6 @@ from backend.modules.notifications.infrastructure.telegram.client import (
     TelegramPermanentError,
     TelegramRateLimitError,
     TelegramTemporaryError,
-    Update,
 )
 
 __all__ = [
@@ -13,5 +12,4 @@ __all__ = [
     "TelegramPermanentError",
     "TelegramRateLimitError",
     "TelegramTemporaryError",
-    "Update",
 ]

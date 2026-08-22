@@ -1,8 +1,9 @@
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+from backend.modules.notifications.domain import Update
 
 
 class TelegramPermanentError(Exception):
@@ -23,16 +24,6 @@ class TelegramRateLimitError(TelegramTemporaryError):
     def __init__(self, description: str, retry_after: float | None = None) -> None:
         super().__init__(description)
         self.retry_after = retry_after
-
-
-@dataclass(frozen=True, slots=True)
-class Update:
-    update_id: int
-    chat_id: int
-    text: str
-    user_id: int | None
-    username: str
-    first_name: str
 
 
 class TelegramClient:

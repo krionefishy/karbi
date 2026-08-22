@@ -179,8 +179,12 @@ class RelayConfig:
     base_url: str = ""
     jwt_secret: str = field(default="", repr=False)
     issuer: str = "marketplace-auto"
+    # Two audiences on one secret: what we mint going out, what we accept coming
+    # back. Equal values would let a token be replayed in the other direction.
     audience: str = "relay"
+    inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
+    jwt_leeway_seconds: int = 30
     # "true"/"false", or a path to the relay certificate to pin. Never disable
     # verification in production: the JWT rides on this connection.
     verify: str = "true"
@@ -307,7 +311,7 @@ class Settings:
         if "delivery_interval_seconds" in telegram:
             telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
         relay = dict(data.get("relay", {}))
-        for key in ("jwt_ttl_seconds", "request_timeout_seconds"):
+        for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "request_timeout_seconds"):
             if key in relay:
                 relay[key] = int(relay[key])
         security = data.get("security", {})
@@ -431,6 +435,8 @@ class Settings:
             invalid.append("relay.jwt_secret")
         if self.relay.verify.lower() in {"false", "0", "no"}:
             invalid.append("relay.verify cannot disable TLS verification in production")
+        if self.relay.audience == self.relay.inbound_audience:
+            invalid.append("relay.audience and relay.inbound_audience must differ")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
         if invalid:

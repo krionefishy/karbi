@@ -7,7 +7,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 
 from backend.modules.notifications.application import BotRegistry, DispatchService, SubscriptionService
-from backend.modules.notifications.domain import Audience, Bot, MessageRequest
+from backend.modules.notifications.domain import Audience, Bot, MessageRequest, Update
 from backend.modules.notifications.infrastructure.postgres import (
     BotModel,
     InviteLinkModel,
@@ -20,7 +20,6 @@ from backend.modules.notifications.infrastructure.telegram import (
     TelegramPermanentError,
     TelegramRateLimitError,
     TelegramTemporaryError,
-    Update,
 )
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
