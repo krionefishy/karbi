@@ -3,9 +3,9 @@ import asyncio
 import getpass
 
 from backend.modules.notifications.application import BotRegistry
+from backend.modules.notifications.domain import MessengerPermanentError, MessengerTemporaryError
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.notifications.infrastructure.telegram import TelegramPermanentError, TelegramTemporaryError
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
@@ -47,9 +47,9 @@ def main() -> None:
         parser.error("bot token is required")
     try:
         asyncio.run(register_bot(args.code.strip(), args.title.strip(), token))
-    except TelegramPermanentError as error:
+    except MessengerPermanentError as error:
         parser.error(f"the relay rejected the token: {error}")
-    except TelegramTemporaryError as error:
+    except MessengerTemporaryError as error:
         parser.error(f"the relay is unreachable or unhappy: {error}")
 
 

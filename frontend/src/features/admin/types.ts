@@ -17,3 +17,18 @@ export interface EmployeeUpdate {
   is_active?: boolean;
   is_admin?: boolean;
 }
+
+/** A bot as this server knows it: no token, only the link template the relay
+ * handed back at registration. */
+export interface NotificationBot {
+  id: string;
+  code: string;
+  title: string;
+  invite_link_template: string;
+}
+
+export interface BotCreate {
+  code: string;
+  title: string;
+  token: string;
+}

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { homeRoute } from "../features/admin/entry";
 import { AdminRoute, AuthProvider, ProtectedRoute } from "../features/auth/AuthContext";
+import { BotsPage } from "../pages/admin/BotsPage";
 import { EmployeesPage } from "../pages/admin/EmployeesPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
@@ -30,6 +31,7 @@ export function App() {
               <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
               <Route element={<AdminRoute />}>
                 <Route path="/admin/users" element={<EmployeesPage />} />
+                <Route path="/admin/bots" element={<BotsPage />} />
               </Route>
             </Route>
             <Route path="*" element={<Navigate to={homeRoute()} replace />} />

@@ -6,7 +6,7 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 
 from backend.modules.notifications.application import BotRegistry, SubscriptionService
-from backend.modules.notifications.domain import Bot
+from backend.modules.notifications.domain import Bot, MessengerTemporaryError
 from backend.modules.notifications.infrastructure.postgres import (
     BotModel,
     NotificationRepository,
@@ -14,7 +14,6 @@ from backend.modules.notifications.infrastructure.postgres import (
     SubscriptionModel,
 )
 from backend.modules.notifications.infrastructure.relay import RelayUpdate
-from backend.modules.notifications.infrastructure.telegram import TelegramTemporaryError
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 from backend.workers.notifications.updates import UpdateFetcher
@@ -122,9 +121,9 @@ class TestFetching:
 
     async def test_an_unreachable_relay_leaves_the_cursor_alone(self, stand) -> None:
         database, bot = stand
-        relay = FakeRelay(error=TelegramTemporaryError("relay unreachable"))
+        relay = FakeRelay(error=MessengerTemporaryError("relay unreachable"))
 
-        with pytest.raises(TelegramTemporaryError):
+        with pytest.raises(MessengerTemporaryError):
             await fetcher(database, bot, relay).fetch_once()
 
         assert await cursor_of(database, bot) == 0

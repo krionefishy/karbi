@@ -1,10 +1,27 @@
-from fastapi import FastAPI
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from backend.app.http.middleware import AccessTokenMiddleware, RateLimitMiddleware
 from backend.modules.platform.application import TokenService
 from backend.shared.settings import Settings
 from backend.storage.redis import RedisClient, SlidingWindowRateLimiter
+
+
+async def validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
+    """Answer 422 without echoing what was sent.
+
+    FastAPI's default handler returns the offending value inside `detail`. On
+    the bot registration route that value is a messenger token, which would come
+    straight back to the caller and into any log that records response bodies.
+    """
+    errors: list[dict[str, Any]] = []
+    if isinstance(exc, RequestValidationError):
+        errors = [{"loc": list(error.get("loc", ())), "msg": error.get("msg", "invalid")} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 def setup_http_middleware(
@@ -14,6 +31,7 @@ def setup_http_middleware(
     redis: RedisClient,
     token_service: TokenService,
 ) -> None:
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_middleware(AccessTokenMiddleware, decoder=token_service)
     app.add_middleware(
         RateLimitMiddleware,

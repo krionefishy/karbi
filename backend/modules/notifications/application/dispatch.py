@@ -7,14 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.notifications.application.bots import BotNotFoundError, BotRegistry
 from backend.modules.notifications.application.pacing import SendPacer
 from backend.modules.notifications.application.templates import UnknownTemplateError, render
-from backend.modules.notifications.domain import CHAT_AUDIENCE, MessageRequest
+from backend.modules.notifications.domain import (
+    CHAT_AUDIENCE,
+    MessageRequest,
+    MessengerPermanentError,
+    MessengerRateLimitError,
+    MessengerTemporaryError,
+)
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.notifications.infrastructure.telegram import (
-    TelegramPermanentError,
-    TelegramRateLimitError,
-    TelegramTemporaryError,
-)
 
 # Descriptions the messenger uses when the chat will never receive anything again.
 DEAD_CHAT_MARKERS = ("bot was blocked", "chat not found", "bot was kicked", "user is deactivated")
@@ -131,18 +132,18 @@ class DispatchService:
                     # recognised by the relay instead of reaching the chat twice.
                     idempotency_key=str(message.id),
                 )
-            except TelegramPermanentError as error:
+            except MessengerPermanentError as error:
                 # Blocked bot, deleted chat: another attempt changes nothing.
                 await self.repository.mark_failed(message.id, str(error))
                 if any(marker in str(error).lower() for marker in DEAD_CHAT_MARKERS):
                     await self.repository.unsubscribe_chat(message.bot_id, message.chat_id)
                 failed += 1
-            except TelegramRateLimitError as error:
+            except MessengerRateLimitError as error:
                 await self.repository.mark_rate_limited(
                     message.id, str(error), retry_after_seconds=error.retry_after or backoff_seconds
                 )
                 retried += 1
-            except TelegramTemporaryError as error:
+            except MessengerTemporaryError as error:
                 if await self.repository.mark_retry(
                     message.id, str(error), max_attempts=max_attempts, backoff_seconds=backoff_seconds
                 ):

@@ -9,9 +9,11 @@
 | Таблица | Колонка | Что внутри |
 | --- | --- | --- |
 | `wb_core.credentials` | `encrypted_api_key` | API-ключи Wildberries продавцов |
-| `notifications.bots` | `encrypted_token` | токены Telegram-ботов |
 
-Колонки `key_fingerprint` / `token_fingerprint` — это HMAC от
+Токены ботов этой ротации не подлежат: они хранятся на релее и шифруются его
+собственным ключом, которого этот сервер не знает.
+
+Колонки `key_fingerprint` — это HMAC от
 `CREDENTIALS_FINGERPRINT_KEY`, к Fernet-ключам они отношения не имеют и при
 ротации ключей шифрования не меняются. (Ротация fingerprint-ключа — отдельная
 процедура: она требует перевычисления отпечатков из плейнтекста и здесь не

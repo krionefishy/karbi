@@ -17,10 +17,10 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import jwt
 
-from backend.modules.notifications.infrastructure.telegram import (
-    TelegramPermanentError,
-    TelegramRateLimitError,
-    TelegramTemporaryError,
+from backend.modules.notifications.domain import (
+    MessengerPermanentError,
+    MessengerRateLimitError,
+    MessengerTemporaryError,
 )
 from backend.shared.settings import RelayConfig
 
@@ -101,7 +101,7 @@ class RelayClient:
             raise self._delivery_error(response, body)
         raw = body.get("updates")
         if not isinstance(raw, list):
-            raise TelegramTemporaryError("the relay returned no update list")
+            raise MessengerTemporaryError("the relay returned no update list")
         return [self._parse(item) for item in raw if isinstance(item, dict)]
 
     @staticmethod
@@ -159,7 +159,7 @@ class RelayClient:
             async with httpx.AsyncClient(timeout=timeouts or self._timeout, verify=self._verify) as client:
                 return await client.get(url, params=params, headers={"Authorization": self._authorization()})
         except httpx.HTTPError as error:
-            raise TelegramTemporaryError(f"relay unreachable: {type(error).__name__}") from error
+            raise MessengerTemporaryError(f"relay unreachable: {type(error).__name__}") from error
 
     async def _post(self, path: str, payload: dict[str, object]) -> httpx.Response:
         url = f"{self._config.base_url.rstrip('/')}{path}"
@@ -168,7 +168,7 @@ class RelayClient:
                 return await client.post(url, json=payload, headers={"Authorization": self._authorization()})
         except httpx.HTTPError as error:
             # The relay being unreachable says nothing about the message itself.
-            raise TelegramTemporaryError(f"relay unreachable: {type(error).__name__}") from error
+            raise MessengerTemporaryError(f"relay unreachable: {type(error).__name__}") from error
 
     @staticmethod
     def _body(response: httpx.Response) -> dict[str, object]:
@@ -183,13 +183,13 @@ class RelayClient:
         detail = str(body.get("detail") or response.text or response.status_code)
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
-            return TelegramRateLimitError(detail, retry_after=int(retry_after) if retry_after else None)
+            return MessengerRateLimitError(detail, retry_after=int(retry_after) if retry_after else None)
         if response.status_code == 422:
             # The messenger refused for a reason another attempt cannot fix:
             # unknown chat, blocked bot. The relay passes its wording through,
             # which is what the dead-chat markers are matched against.
-            return TelegramPermanentError(detail)
+            return MessengerPermanentError(detail)
         # Everything else — 401 from a clock skew, 404 for a bot nobody
         # registered on the relay yet, 502 from the messenger — is an operator
         # problem that retrying survives once it is fixed.
-        return TelegramTemporaryError(f"relay answered {response.status_code}: {detail}")
+        return MessengerTemporaryError(f"relay answered {response.status_code}: {detail}")

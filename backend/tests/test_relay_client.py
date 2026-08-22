@@ -5,12 +5,12 @@ import pytest
 import respx
 from httpx import ConnectError, Response
 
-from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.notifications.infrastructure.telegram import (
-    TelegramPermanentError,
-    TelegramRateLimitError,
-    TelegramTemporaryError,
+from backend.modules.notifications.domain import (
+    MessengerPermanentError,
+    MessengerRateLimitError,
+    MessengerTemporaryError,
 )
+from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.shared.settings import RelayConfig
 
 CONFIG = RelayConfig(
@@ -73,11 +73,11 @@ class TestSending:
     async def test_a_refusal_is_permanent_and_keeps_the_messenger_wording(self) -> None:
         # The dispatcher matches its dead-chat markers against this text, so the
         # relay's description has to survive the trip intact.
-        with pytest.raises(TelegramPermanentError, match="bot was blocked"):
+        with pytest.raises(MessengerPermanentError, match="bot was blocked"):
             await send(Response(422, json={"detail": "bot was blocked by the user"}))
 
     async def test_rate_limiting_carries_the_wait_from_the_header(self) -> None:
-        with pytest.raises(TelegramRateLimitError) as error:
+        with pytest.raises(MessengerRateLimitError) as error:
             await send(Response(429, json={"detail": "too many"}, headers={"Retry-After": "12"}))
         assert error.value.retry_after == 12
 
@@ -94,17 +94,17 @@ class TestSending:
         # A bot nobody registered on the relay yet and a skewed clock are both
         # operator problems: failing the message would throw away a notification
         # that will go through minutes later.
-        with pytest.raises(TelegramTemporaryError):
+        with pytest.raises(MessengerTemporaryError):
             await send(Response(status, json={"detail": detail}))
 
     async def test_an_unreachable_relay_is_temporary(self) -> None:
         with respx.mock:
             respx.post(SEND).mock(side_effect=ConnectError("no route"))
-            with pytest.raises(TelegramTemporaryError, match="relay unreachable"):
+            with pytest.raises(MessengerTemporaryError, match="relay unreachable"):
                 await client().send(bot_code="b", recipient="1", text="t", idempotency_key="k")
 
     async def test_a_non_json_answer_does_not_crash_the_delivery_loop(self) -> None:
-        with pytest.raises(TelegramTemporaryError):
+        with pytest.raises(MessengerTemporaryError):
             await send(Response(502, text="<html>gateway</html>"))
 
 
@@ -131,5 +131,5 @@ class TestRegistration:
     async def test_a_token_the_relay_rejects_is_permanent(self) -> None:
         with respx.mock:
             respx.post(BOTS).mock(return_value=Response(422, json={"detail": "Unauthorized"}))
-            with pytest.raises(TelegramPermanentError):
+            with pytest.raises(MessengerPermanentError):
                 await client().register_bot(bot_code="dead", token="1234:dead")

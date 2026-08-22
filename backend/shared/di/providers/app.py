@@ -3,8 +3,9 @@ from collections.abc import AsyncIterator
 from dishka import Provider, Scope, from_context, provide
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.notifications.application import BotRegistry, SubscriptionService
+from backend.modules.notifications.application import BotAdminService, BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
@@ -96,6 +97,16 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def notification_repository(self, session: AsyncSession) -> NotificationRepository:
         return NotificationRepository(session)
+
+    @provide(scope=Scope.APP)
+    def relay_client(self, settings: Settings) -> RelayClient:
+        return RelayClient(settings.relay)
+
+    @provide(scope=Scope.REQUEST)
+    def bot_admin_service(
+        self, session: AsyncSession, notifications: NotificationRepository, relay: RelayClient
+    ) -> BotAdminService:
+        return BotAdminService(session, notifications, relay)
 
     @provide(scope=Scope.REQUEST)
     def bot_registry(self, session: AsyncSession, notifications: NotificationRepository) -> BotRegistry:

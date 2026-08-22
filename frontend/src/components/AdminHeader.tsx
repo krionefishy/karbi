@@ -27,6 +27,7 @@ export function AdminHeader() {
         <span className="admin-badge">Админка</span>
         <nav className="header-nav" aria-label="Разделы админки">
           <NavLink to="/admin/users">Сотрудники</NavLink>
+          <NavLink to="/admin/bots">Боты</NavLink>
         </nav>
       </div>
       <div className="header-profile">

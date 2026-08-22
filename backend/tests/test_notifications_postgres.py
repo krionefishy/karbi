@@ -7,7 +7,15 @@ import pytest_asyncio
 from sqlalchemy import delete, select
 
 from backend.modules.notifications.application import BotRegistry, DispatchService, SubscriptionService
-from backend.modules.notifications.domain import Audience, Bot, MessageRequest, Update
+from backend.modules.notifications.domain import (
+    Audience,
+    Bot,
+    MessageRequest,
+    MessengerPermanentError,
+    MessengerRateLimitError,
+    MessengerTemporaryError,
+    Update,
+)
 from backend.modules.notifications.infrastructure.postgres import (
     BotModel,
     InviteLinkModel,
@@ -16,11 +24,6 @@ from backend.modules.notifications.infrastructure.postgres import (
     SubscriptionModel,
 )
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.notifications.infrastructure.telegram import (
-    TelegramPermanentError,
-    TelegramRateLimitError,
-    TelegramTemporaryError,
-)
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
@@ -266,7 +269,7 @@ async def test_a_blocked_chat_is_not_retried_forever(notifications) -> None:
     database, bot = notifications
     await subscribe(database, bot, chat_id=555, update_id=1)
 
-    report = await deliver(database, FakeRelay(TelegramPermanentError("bot was blocked by the user")))
+    report = await deliver(database, FakeRelay(MessengerPermanentError("bot was blocked by the user")))
 
     assert (report.sent, report.failed) == (0, 1)
     async with database.session() as session:
@@ -281,7 +284,7 @@ async def test_a_telegram_outage_keeps_the_message_queued(notifications) -> None
     database, bot = notifications
     await subscribe(database, bot, chat_id=555, update_id=1)
 
-    report = await deliver(database, FakeRelay(TelegramTemporaryError("Bad Gateway")))
+    report = await deliver(database, FakeRelay(MessengerTemporaryError("Bad Gateway")))
 
     assert (report.sent, report.retried, report.failed) == (0, 1, 0)
     async with database.session() as session:
@@ -294,7 +297,7 @@ async def test_a_rate_limit_waits_out_retry_after_without_burning_attempts(notif
     await subscribe(database, bot, chat_id=555, update_id=1)
 
     report = await deliver(
-        database, FakeRelay(TelegramRateLimitError("Too Many Requests: retry after 30", retry_after=30))
+        database, FakeRelay(MessengerRateLimitError("Too Many Requests: retry after 30", retry_after=30))
     )
 
     assert (report.sent, report.retried, report.failed) == (0, 1, 0)
@@ -337,7 +340,7 @@ async def test_one_bot_the_relay_refuses_does_not_stop_delivery_for_the_rest(not
         class PickyRelay(FakeRelay):
             async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
                 if bot_code == broken.code:
-                    raise TelegramPermanentError("bot was blocked by the user")
+                    raise MessengerPermanentError("bot was blocked by the user")
                 return await super().send(
                     bot_code=bot_code, recipient=recipient, text=text, idempotency_key=idempotency_key
                 )

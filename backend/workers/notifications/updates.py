@@ -13,10 +13,9 @@ import asyncio
 import logging
 
 from backend.modules.notifications.application import SubscriptionService
-from backend.modules.notifications.domain import Bot, Update
+from backend.modules.notifications.domain import Bot, MessengerTemporaryError, Update
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient, RelayUpdate
-from backend.modules.notifications.infrastructure.telegram import TelegramTemporaryError
 from backend.storage.pg import Database
 
 RETRY_SECONDS = 5.0
@@ -48,7 +47,7 @@ class UpdateFetcher:
                 await self.fetch_once()
             except asyncio.CancelledError:
                 raise
-            except TelegramTemporaryError as error:
+            except MessengerTemporaryError as error:
                 # The relay being down is normal weather: it keeps the updates.
                 self.logger.warning("update_fetch_retry", extra={"bot": self.bot.code, "error": str(error)})
                 await asyncio.sleep(RETRY_SECONDS)

@@ -2,7 +2,7 @@ import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,11 @@ class NotificationRepository:
 
     async def bot(self, bot_id: uuid.UUID) -> BotModel | None:
         return await self.session.get(BotModel, bot_id)
+
+    async def delete_bot(self, bot_id: uuid.UUID) -> None:
+        # Cascades take the cursor, invites and subscriptions with it: a bot that
+        # is gone cannot deliver to the chats that pressed START on it anyway.
+        await self.session.execute(delete(BotModel).where(BotModel.id == bot_id))
 
     def add_bot(self, *, code: str, title: str, invite_link_template: str) -> BotModel:
         bot = BotModel(code=code, title=title, invite_link_template=invite_link_template)
