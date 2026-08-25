@@ -10,7 +10,7 @@ Marketplace Auto — внутренняя платформа автоматиз�
 | --- | --- |
 | [GLOSSARY.md](GLOSSARY.md) | термины: селлер, подключение, прогон, артикул, слот, watermark |
 | [architecture/](architecture/) | из чего состоит система и почему именно так |
-| [business/](business/) | предметная область: селлеры, артикулы, уведомления |
+| [business/](business/) | предметная область: селлеры, артикулы, уведомления, админка |
 | [automations/](automations/) | по одному файлу на автоматизацию |
 | [BACKUPS.md](BACKUPS.md), [KEY_ROTATION.md](KEY_ROTATION.md) | эксплуатационные процедуры |
 
@@ -26,6 +26,15 @@ Marketplace Auto — внутренняя платформа автоматиз�
 | [NETWORK_AND_EGRESS.md](architecture/NETWORK_AND_EGRESS.md) | сети, откуда какой трафик уходит наружу |
 | [WB_API.md](architecture/WB_API.md) | лимиты WB, троттлинг, ретраи |
 | [WORKERS.md](architecture/WORKERS.md) | фоновые процессы, расписание, heartbeat, повторы |
+
+### business
+
+| Файл | О чём |
+| --- | --- |
+| [SELLERS.md](business/SELLERS.md) | реестр селлеров и участие в автоматизациях |
+| [ARTICLE_LIFECYCLE.md](business/ARTICLE_LIFECYCLE.md) | чем опознаётся товар и что значат его состояния |
+| [NOTIFICATIONS.md](business/NOTIFICATIONS.md) | боты, подписки, очередь и доставка |
+| [ADMIN.md](business/ADMIN.md) | админка: сотрудники и боты |
 
 ## С чего начать
 

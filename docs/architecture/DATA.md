@@ -7,11 +7,11 @@
 ```mermaid
 flowchart TB
     subgraph db["PostgreSQL"]
-        platform["platform<br/>users"]
+        platform["platform<br/>users (+ is_admin)"]
         core["wb_core<br/>sellers, credentials, articles<br/>outbox_events, inbox_events"]
         reviews["wb_reviews<br/>tracked_sellers, daily_review_counts<br/>sync_runs, sync_run_sellers"]
         turnover["wb_turnover<br/>tracked_sellers, seller_warehouses<br/>stock_snapshots, orders, turnover_daily<br/>collection_runs, notification_log"]
-        notify["notifications<br/>bots, bot_cursors, invite_links<br/>subscriptions, outgoing_messages"]
+        notify["notifications<br/>bots (без токенов), bot_cursors<br/>invite_links, subscriptions, outgoing_messages"]
     end
 ```
 
@@ -19,11 +19,11 @@ flowchart TB
 
 | Схема | Содержание | Кто пишет |
 | --- | --- | --- |
-| `platform` | операторы: логин, хеш пароля, активность | api |
+| `platform` | сотрудники: логин, хеш пароля, активность, признак администратора | api |
 | `wb_core` | реестр селлеров, зашифрованные ключи, каталог артикулов, outbox и inbox | api, каталог-консьюмер |
 | `wb_reviews` | подключения, суточные снапшоты отзывов, прогоны и job'ы | воркер отзывов |
 | `wb_turnover` | подключения, склады, снимки остатков, заказы, метрика, лог уведомлений | воркер оборачиваемости |
-| `notifications` | боты, курсоры апдейтов, приглашения, подписки чатов, очередь исходящих | воркер уведомлений |
+| `notifications` | боты, курсоры апдейтов, приглашения, подписки чатов, очередь исходящих | воркер уведомлений, api (админка) |
 
 Схема автоматизации автономна: свои подключения (`tracked_sellers`), своя история, свои
 прогоны. Реестр в неё не заглядывает и чистит её только через порт подключения.
@@ -44,6 +44,9 @@ flowchart TB
 | --- | --- | --- |
 | Ключ API селлера | `wb_core.credentials` | Fernet-шифротекст + отпечаток HMAC |
 | Токен бота | не хранится | живёт на релее вне РФ, сюда не попадает |
+
+В `notifications.bots` от бота остались код, заголовок и шаблон ссылки-приглашения:
+колонку с токеном сняли миграцией, когда токены переехали на релей.
 
 Отпечаток нужен, чтобы отвечать на вопрос «такой ключ уже заведён?» без расшифровки; он
 уникален, и это единственная причина, по которой архивация селлера удаляет строку с
