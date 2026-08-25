@@ -14,6 +14,8 @@ backend/shared/settings/config.production.yaml
 
 # Test and tooling artifacts
 .superdesign/
+# Макеты интерфейса: исходники артбордов и собранный канвас на пару мегабайт
+design/
 .pytest_cache/
 .coverage
 htmlcov/
