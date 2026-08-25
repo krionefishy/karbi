@@ -7,6 +7,7 @@ import { movementOn } from "../features/reviews/movement";
 import { averageRating, fiveStarsToTarget, pluralizeFives } from "../features/reviews/rating";
 import type { DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
 import type { ArticleState } from "../features/sellers/types";
+import { ProductDetails } from "./ProductDetails";
 import { ReviewChart } from "./ReviewChart";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; latestDate?: string | null; }
@@ -107,33 +108,29 @@ interface ProductIdentityProps {
 
 function ProductIdentity({ product, delta, open, onToggle }: ProductIdentityProps) {
   return (
-    <div className="product-identity">
-      {product.photo_url
-        ? <img className="product-photo" src={product.photo_url} alt="" loading="lazy" />
-        : <span className="product-photo product-photo-empty" aria-hidden="true" />}
+    <div className={`product-identity product-identity-${product.state}`}>
       <div className="product-identity-text">
-        <strong>{product.name}</strong>
-        <span>
+        <strong title={product.name}>{product.name}</strong>
+        <span className="product-identity-ids">
           WB{" "}
           <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
             {product.article}
           </a>
-          {product.vendor_code && <> · продавца {product.vendor_code}</>}
-          {product.brand && <> · {product.brand}</>}
+          {product.vendor_code && <> · {product.vendor_code}</>}
         </span>
         <span className="product-tags">
           <span className={`product-state product-state-${product.state}`}>{stateLabels[product.state]}</span>
           {product.imt_id !== null && <span className="product-card-id">карточка {product.imt_id}</span>}
-          {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
         </span>
       </div>
+      {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
       <button
         type="button"
         className={`chart-toggle${open ? " chart-toggle-open" : ""}`}
         onClick={onToggle}
         aria-expanded={open}
-        aria-label={`Динамика отзывов за ${CHART_DAYS} дней: ${product.name}`}
-        title={`Динамика за ${CHART_DAYS} дней`}
+        aria-label={`Карточка и динамика за ${CHART_DAYS} дней: ${product.name}`}
+        title={`Карточка товара и динамика за ${CHART_DAYS} дней`}
       >
         <BarChart2 size={15} />
       </button>
@@ -198,7 +195,10 @@ export function ReviewTimeline({ products, latestDate = null }: ReviewTimelinePr
               })}
             </div>
             {chartOpen && (
-              <ReviewChart snapshots={product.snapshots} cardSnapshots={product.card_snapshots} endDate={today} />
+              <div className="product-panel">
+                <ProductDetails product={product} stateLabel={stateLabels} />
+                <ReviewChart snapshots={product.snapshots} cardSnapshots={product.card_snapshots} endDate={today} />
+              </div>
             )}
             {selectedSnapshot && <RatingDetails snapshot={selectedSnapshot} card={cardSnapshots.get(selectedSnapshot.date)} />}
           </div>;

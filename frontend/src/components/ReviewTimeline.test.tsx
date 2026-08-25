@@ -65,10 +65,22 @@ describe("ReviewTimeline", () => {
     expect(screen.getByText(/По карточке целиком:/)).toBeInTheDocument();
   });
 
+  it("shows the whole card in the panel, including what the row had to cut", () => {
+    render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
+    fireEvent.click(screen.getByRole("button", { name: /Карточка и динамика за 30 дней/ }));
+
+    // The row truncates the title and hides the склейка; the panel must not.
+    expect(screen.getByRole("heading", { name: "Товар" })).toBeInTheDocument();
+    expect(screen.getByText("Карточка (склейка)").nextElementSibling).toHaveTextContent("999");
+    expect(screen.getByText("Артикул продавца").nextElementSibling).toHaveTextContent("SKU-123");
+    expect(screen.getByText("Предмет").nextElementSibling).toHaveTextContent("Перфораторы");
+    expect(screen.getByText("Состояние").nextElementSibling).toHaveTextContent("В продаже");
+  });
+
   it("opens the 30-day chart from the product row", () => {
     render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
 
-    const toggle = screen.getByRole("button", { name: /Динамика отзывов за 30 дней/ });
+    const toggle = screen.getByRole("button", { name: /Карточка и динамика за 30 дней/ });
     expect(screen.queryByText(/Динамика за 30 дней/)).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
@@ -82,7 +94,7 @@ describe("ReviewTimeline", () => {
   it("shows the chart and a day's breakdown one at a time", () => {
     render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /Динамика отзывов за 30 дней/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Карточка и динамика за 30 дней/ }));
     expect(screen.getByText(/Динамика за 30 дней/)).toBeInTheDocument();
 
     // Picking a day replaces the chart rather than stacking two panels.

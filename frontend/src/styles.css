@@ -186,18 +186,23 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .product-head { padding: 0 16px; }
 .product-block + .product-block { border-top: 1px solid var(--line); }
 .product-row { min-height: 76px; }
-.product-identity { display: flex; min-width: 0; align-items: center; gap: 11px; padding: 13px 16px; border-right: 1px solid var(--line); }
-.product-identity-text { display: flex; min-width: 0; justify-content: center; flex-direction: column; }
+.product-identity { position: relative; display: flex; min-width: 0; align-items: center; gap: 9px; padding: 12px 12px 12px 17px; border-right: 1px solid var(--line); }
+.product-identity::before { position: absolute; top: 0; bottom: 0; left: 0; width: 3px; content: ""; background: var(--muted); }
+.product-identity-active::before { background: var(--positive); }
+.product-identity-archived::before { background: var(--gold); }
+.product-identity-feedback_only::before { background: var(--negative); }
+.product-identity-ids { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-identity-text { display: flex; min-width: 0; flex: 1; justify-content: center; flex-direction: column; gap: 4px; }
 .product-photo { flex: none; width: 38px; height: 50px; object-fit: cover; background: var(--paper); border: 1px solid var(--line); }
 .product-photo-empty { display: block; }
-.product-identity strong { overflow: hidden; margin-bottom: 6px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.product-identity strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .product-identity span { color: var(--muted); font: 10px "JetBrains Mono", monospace; }
-.product-tags { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
-.product-state { padding: 1px 5px; border: 1px solid var(--line); font: 9px "JetBrains Mono", monospace; text-transform: uppercase; }
+.product-tags { display: flex; min-width: 0; align-items: center; gap: 5px; margin-top: 1px; }
+.product-state { flex: none; padding: 1px 5px; border: 1px solid var(--line); font: 9px "JetBrains Mono", monospace; text-transform: uppercase; }
 .product-state-active { color: var(--forest); border-color: rgba(26,60,43,.32); }
 .product-state-archived { color: var(--gold); background: var(--gold-bg); border-color: rgba(216,154,22,.4); }
 .product-state-feedback_only { color: var(--negative); border-color: rgba(196,62,54,.4); }
-.product-card-id { color: var(--muted); }
+.product-card-id { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
 .product-identity a, .wb-article-link { color: var(--forest); text-decoration: underline; text-decoration-color: rgba(26,60,43,.35); text-underline-offset: 2px; }
 .product-identity a:hover, .wb-article-link:hover { text-decoration-color: currentColor; }
 .day-cell { position: relative; display: flex; min-width: 0; align-items: center; justify-content: center; flex-direction: column; gap: 5px; padding: 10px 4px; background: var(--surface); border: 0; border-left: 1px solid var(--line); cursor: pointer; }
@@ -232,7 +237,13 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .rating-track i { position: absolute; inset: 0 auto 0 0; background: rgba(26,60,43,.42); }
 .rating-row:first-child .rating-track i { background: var(--gold); }
 .rating-row:nth-last-child(-n+2) .rating-track i { background: rgba(196,62,54,.5); }
-.review-chart { padding: 18px 24px 22px; background: var(--paper); border-top: 1px solid var(--line); }
+.product-panel { padding: 18px 24px 22px; background: var(--paper); border-top: 1px solid var(--line); }
+.product-details-name { margin: 0 0 12px; font-family: "Space Grotesk", Inter, sans-serif; font-size: 17px; letter-spacing: -0.015em; }
+.product-details-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 22px; margin: 0 0 18px; max-width: 900px; }
+.product-details-grid > div { display: flex; min-width: 0; flex-direction: column; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.product-details-grid dt { color: var(--muted); font: 10px "JetBrains Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
+.product-details-grid dd { overflow: hidden; margin: 0; font: 12px "JetBrains Mono", monospace; text-overflow: ellipsis; }
+.review-chart { padding-top: 16px; border-top: 1px solid var(--line); }
 .chart-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
 .chart-range { display: flex; align-items: center; gap: 14px; font-size: 12px; }
 .chart-scope { display: flex; border: 1px solid var(--line); }
@@ -270,13 +281,13 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .chart-value-down { color: var(--negative); }
 .chart-value-warn { color: var(--gold); }
 .chart-note { margin: 0; padding: 11px 14px; color: var(--muted); font-size: 11px; line-height: 1.45; }
-.chart-toggle { display: inline-flex; width: 28px; height: 28px; flex: none; align-items: center; justify-content: center; margin-left: auto; color: var(--muted); background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
+.chart-toggle { display: inline-flex; width: 24px; height: 24px; flex: none; align-items: center; justify-content: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
 .chart-toggle:hover { color: var(--forest); border-color: rgba(26,60,43,.32); }
 .chart-toggle-open { color: #fff; background: var(--forest); border-color: var(--forest); }
 .loading-block { padding: 42px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); text-align: center; }
 .empty-state { max-width: 1320px; margin: 0 auto; padding: 56px; text-align: center; background: var(--surface); border: 1px solid var(--line); }
 .empty-state h2 { margin-bottom: 8px; }.empty-state p { margin-bottom: 22px; color: var(--muted); font-size: 13px; }
-.movement-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid; font: 500 10px "JetBrains Mono", monospace; letter-spacing: .02em; }
+.movement-badge { display: inline-flex; flex: none; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid; font: 500 10px "JetBrains Mono", monospace; letter-spacing: .02em; }
 .movement-up { color: var(--positive); border-color: rgba(22,132,74,.3); background: var(--positive-bg); }
 .movement-down { color: var(--negative); border-color: rgba(196,62,54,.3); background: var(--negative-bg); }
 .article-filters { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); }
