@@ -53,7 +53,7 @@ class SellerWarehouseModel(WBTurnoverBase):
 class StockSnapshotModel(WBTurnoverBase):
     """Stock of one article at one moment of the day.
 
-    Wildberries does not serve historical stock — `supplier/stocks` is always
+    Wildberries does not serve historical stock — every stock method is always
     "right now" — so the average stock over a period exists only if we keep
     taking these snapshots ourselves.
     """
