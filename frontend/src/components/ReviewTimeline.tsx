@@ -1,13 +1,20 @@
-import { ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Star, Triangle } from "lucide-react";
+import { BarChart2, ChevronDown, ChevronLeft, ChevronRight, MessageSquare, Star, Triangle } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { CHART_DAYS } from "../features/reviews/chart";
+import { daysBetween, moscowToday, previousDay, shiftDay } from "../features/reviews/days";
 import { movementOn } from "../features/reviews/movement";
 import { averageRating, fiveStarsToTarget, pluralizeFives } from "../features/reviews/rating";
 import type { DailyReviewSnapshot, ProductReviewHistory, RatingCounts } from "../features/reviews/types";
 import type { ArticleState } from "../features/sellers/types";
+import { ReviewChart } from "./ReviewChart";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; latestDate?: string | null; }
-interface Selection { productId: string; date: string; }
+
+/** One panel is open at a time: either a day's breakdown or the product's chart. */
+type Selection =
+  | { kind: "day"; productId: string; date: string }
+  | { kind: "chart"; productId: string };
 
 const HISTORY_DAYS = 90;
 const RATINGS = [5, 4, 3, 2, 1] as const;
@@ -23,34 +30,6 @@ const weekdayFormatter = new Intl.DateTimeFormat("ru-RU", { weekday: "short", ti
 
 function totalOf(ratings: RatingCounts): number {
   return RATINGS.reduce((sum, rating) => sum + ratings[rating], 0);
-}
-
-function moscowToday(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "Europe/Moscow",
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
-}
-
-function calendarDates(from: string, to: string): string[] {
-  const dates: string[] = [];
-  const cursor = new Date(`${from}T00:00:00Z`);
-  const end = new Date(`${to}T00:00:00Z`);
-  while (cursor <= end) {
-    dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-  }
-  return dates;
-}
-
-function previousDay(date: string): string {
-  const cursor = new Date(`${date}T00:00:00Z`);
-  cursor.setUTCDate(cursor.getUTCDate() - 1);
-  return cursor.toISOString().slice(0, 10);
 }
 
 function Delta({ value }: { value: number | null }) {
@@ -119,7 +98,14 @@ function MovementBadge({ delta }: { delta: number }) {
   );
 }
 
-function ProductIdentity({ product, delta }: { product: ProductReviewHistory; delta: number | null }) {
+interface ProductIdentityProps {
+  product: ProductReviewHistory;
+  delta: number | null;
+  open: boolean;
+  onToggle: () => void;
+}
+
+function ProductIdentity({ product, delta, open, onToggle }: ProductIdentityProps) {
   return (
     <div className="product-identity">
       {product.photo_url
@@ -141,15 +127,23 @@ function ProductIdentity({ product, delta }: { product: ProductReviewHistory; de
           {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
         </span>
       </div>
+      <button
+        type="button"
+        className={`chart-toggle${open ? " chart-toggle-open" : ""}`}
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={`Динамика отзывов за ${CHART_DAYS} дней: ${product.name}`}
+        title={`Динамика за ${CHART_DAYS} дней`}
+      >
+        <BarChart2 size={15} />
+      </button>
     </div>
   );
 }
 
 export function ReviewTimeline({ products, latestDate = null }: ReviewTimelineProps) {
   const today = moscowToday();
-  const historyStart = new Date(`${today}T00:00:00Z`);
-  historyStart.setUTCDate(historyStart.getUTCDate() - (HISTORY_DAYS - 1));
-  const dates = calendarDates(historyStart.toISOString().slice(0, 10), today);
+  const dates = daysBetween(shiftDay(today, -(HISTORY_DAYS - 1)), today);
   const maxOffset = Math.max(0, dates.length - 7);
   const [offset, setOffset] = useState(0);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -178,10 +172,17 @@ export function ReviewTimeline({ products, latestDate = null }: ReviewTimelinePr
         {products.map((product) => {
           const snapshots = new Map(product.snapshots.map((snapshot) => [snapshot.date, snapshot]));
           const cardSnapshots = new Map(product.card_snapshots.map((snapshot) => [snapshot.date, snapshot]));
-          const selectedSnapshot = selection?.productId === product.id ? snapshots.get(selection.date) : undefined;
+          const openHere = selection?.productId === product.id ? selection : null;
+          const selectedSnapshot = openHere?.kind === "day" ? snapshots.get(openHere.date) : undefined;
+          const chartOpen = openHere?.kind === "chart";
           return <div className="product-block" key={product.id}>
             <div className="timeline-grid product-row">
-              <ProductIdentity product={product} delta={movementOn(product, latestDate).delta} />
+              <ProductIdentity
+                product={product}
+                delta={movementOn(product, latestDate).delta}
+                open={chartOpen}
+                onToggle={() => setSelection(chartOpen ? null : { kind: "chart", productId: product.id })}
+              />
               {range.map((date) => {
                 const snapshot = snapshots.get(date);
                 if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>Нет данных</div>;
@@ -190,12 +191,15 @@ export function ReviewTimeline({ products, latestDate = null }: ReviewTimelinePr
                 // A missing previous day is not a zero — leave the delta blank
                 // so a gap in the series never reads as "reviews disappeared".
                 const delta = previous ? total - totalOf(previous.ratings) : null;
-                const selected = selection?.productId === product.id && selection.date === snapshot.date;
-                return <button className={`day-cell ${date === today ? "today-cell" : ""} ${selected ? "day-selected" : ""}`} onClick={() => setSelection(selected ? null : { productId: product.id, date: snapshot.date })} key={snapshot.date} aria-expanded={selected}>
+                const selected = openHere?.kind === "day" && openHere.date === snapshot.date;
+                return <button className={`day-cell ${date === today ? "today-cell" : ""} ${selected ? "day-selected" : ""}`} onClick={() => setSelection(selected ? null : { kind: "day", productId: product.id, date: snapshot.date })} key={snapshot.date} aria-expanded={selected} aria-label={`Отзывы за ${dateFormatter.format(new Date(`${date}T00:00:00Z`))}`}>
                   <span className="review-count"><MessageSquare size={11} />{total.toLocaleString("ru-RU")}</span><Delta value={delta} /><ChevronDown size={12} className="expand-chevron" />
                 </button>;
               })}
             </div>
+            {chartOpen && (
+              <ReviewChart snapshots={product.snapshots} cardSnapshots={product.card_snapshots} endDate={today} />
+            )}
             {selectedSnapshot && <RatingDetails snapshot={selectedSnapshot} card={cardSnapshots.get(selectedSnapshot.date)} />}
           </div>;
         })}

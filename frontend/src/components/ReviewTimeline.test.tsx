@@ -60,9 +60,35 @@ describe("ReviewTimeline", () => {
 
   it("opens the full rating breakdown for a selected day", () => {
     render(<ReviewTimeline products={[product]} />);
-    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
     expect(screen.getByText(/Всего отзывов:/)).toBeInTheDocument();
     expect(screen.getByText(/По карточке целиком:/)).toBeInTheDocument();
+  });
+
+  it("opens the 30-day chart from the product row", () => {
+    render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
+
+    const toggle = screen.getByRole("button", { name: /Динамика отзывов за 30 дней/ });
+    expect(screen.queryByText(/Динамика за 30 дней/)).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Динамика за 30 дней/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Изменение количества отзывов/ })).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByText(/Динамика за 30 дней/)).not.toBeInTheDocument();
+  });
+
+  it("shows the chart and a day's breakdown one at a time", () => {
+    render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Динамика отзывов за 30 дней/ }));
+    expect(screen.getByText(/Динамика за 30 дней/)).toBeInTheDocument();
+
+    // Picking a day replaces the chart rather than stacking two panels.
+    fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
+    expect(screen.queryByText(/Динамика за 30 дней/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Всего отзывов:/)).toBeInTheDocument();
   });
 
   it("marks a product whose review count moved overnight", () => {
@@ -86,7 +112,7 @@ describe("ReviewTimeline", () => {
 
   it("shows how many five-star reviews are still missing, per article and per card", () => {
     render(<ReviewTimeline products={[product]} />);
-    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
 
     // Which day opens depends on the Moscow date, so the arithmetic itself is
     // covered in rating.test.ts; here we only check both rows are wired up.
@@ -102,7 +128,7 @@ describe("ReviewTimeline", () => {
       card_snapshots: [],
     };
     render(<ReviewTimeline products={[perfect]} />);
-    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
     expect(screen.getByText("оценка 5,0 достигнута")).toBeInTheDocument();
   });
 
