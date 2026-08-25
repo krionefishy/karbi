@@ -2,10 +2,12 @@ import asyncio
 import signal
 
 from backend.infrastructure.logging import configure_logging
-from backend.modules.wb_core.infrastructure.wb import WBThrottle, budgets_for
+from backend.modules.wb_core.infrastructure.wb import WBThrottle, budgets_for, key_bucket
 from backend.modules.wb_turnover.infrastructure.wb import (
+    ANALYTICS_BUCKET,
     MARKETPLACE_BUCKET,
     STATISTICS_BUCKET,
+    WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
 )
@@ -38,6 +40,7 @@ class TurnoverWorkerApplication:
             self.database,
             cipher,
             WBStatisticsClient(throttle=throttle),
+            WBAnalyticsClient(throttle=throttle),
             WBMarketplaceClient(throttle=throttle),
             self.settings,
         )
@@ -58,9 +61,18 @@ class TurnoverWorkerApplication:
                     per_host=wb_api.marketplace_per_host,
                     window_seconds=wb_api.window_seconds,
                 ),
+                **budgets_for(
+                    ANALYTICS_BUCKET,
+                    per_key=wb_api.analytics_per_key,
+                    per_host=wb_api.analytics_per_host,
+                    window_seconds=wb_api.window_seconds,
+                ),
             },
             redis_client=self.redis,
             max_wait_seconds=wb_api.max_wait_seconds,
+            # The stock report rejects back-to-back calls even inside its
+            # minute budget, so pages and sellers are spaced by a hard floor.
+            min_intervals={key_bucket(ANALYTICS_BUCKET): float(wb_api.analytics_min_interval_seconds)},
         )
 
     async def run(self) -> None:

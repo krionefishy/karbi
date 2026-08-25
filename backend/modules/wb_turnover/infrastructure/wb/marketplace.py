@@ -7,8 +7,8 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
 
 MARKETPLACE_BUCKET = "marketplace"
-# WB accepts at most a thousand barcodes per stock request.
-SKU_CHUNK = 1000
+# WB accepts at most a thousand identifiers per stock request.
+CHRT_CHUNK = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,45 +22,54 @@ class WBMarketplaceClient(WBJsonClient):
 
     bucket = MARKETPLACE_BUCKET
     api_name = "WB Marketplace API"
+    category = "Маркетплейс"
     base_url = "https://marketplace-api.wildberries.ru"
 
     async def warehouses(self, api_key: str) -> list[Warehouse]:
+        """Warehouses that can hold stock. Ones being deleted are skipped."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             payload = await self.request(client, "GET", f"{self.base_url}/api/v3/warehouses", api_key)
         if payload is None:
             return []
         if not isinstance(payload, list):
-            raise WBPermanentError("WB Marketplace API вернул не список складов")
+            raise WBPermanentError(f"{self.api_name}: список складов пришёл не списком")
         return [
             Warehouse(int(row["id"]), str(row.get("name") or ""))
             for row in payload
-            if isinstance(row, dict) and isinstance(row.get("id"), int)
+            if isinstance(row, dict) and isinstance(row.get("id"), int) and not row.get("isDeleting")
         ]
 
-    async def stocks(self, api_key: str, warehouse_id: int, skus: list[str]) -> dict[str, int]:
-        """Declared amount per barcode. Barcodes WB does not answer for count as zero."""
-        collected: dict[str, int] = {}
-        if not skus:
+    async def stocks(self, api_key: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
+        """Declared amount per size.
+
+        Asked by `chrtId`, not by barcode: the catalog already keys sizes that
+        way, and one size can carry several barcodes. WB answers only for sizes
+        that have stock, so a missing id means zero — the caller decides that,
+        because «нет строки» and «ноль» must not be confused here either.
+        """
+        collected: dict[int, int] = {}
+        if not chrt_ids:
             return collected
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for offset in range(0, len(skus), SKU_CHUNK):
-                chunk = skus[offset : offset + SKU_CHUNK]
+            for offset in range(0, len(chrt_ids), CHRT_CHUNK):
+                chunk = chrt_ids[offset : offset + CHRT_CHUNK]
                 payload = await self.request(
                     client,
                     "POST",
                     f"{self.base_url}/api/v3/stocks/{warehouse_id}",
                     api_key,
-                    json={"skus": chunk},
+                    json={"chrtIds": chunk},
                 )
                 for row in self._stock_rows(payload):
-                    collected[str(row["sku"])] = int(row.get("amount") or 0)
+                    chrt_id = row.get("chrtId")
+                    if isinstance(chrt_id, int):
+                        collected[chrt_id] = int(row.get("amount") or 0)
         return collected
 
-    @staticmethod
-    def _stock_rows(payload: Any) -> list[dict]:
+    def _stock_rows(self, payload: Any) -> list[dict]:
         if payload is None:
             return []
         rows = payload.get("stocks") if isinstance(payload, dict) else payload
         if not isinstance(rows, list):
-            raise WBPermanentError("WB Marketplace API вернул неожиданный ответ по остаткам")
-        return [row for row in rows if isinstance(row, dict) and row.get("sku")]
+            raise WBPermanentError(f"{self.api_name}: неожиданный ответ по остаткам")
+        return [row for row in rows if isinstance(row, dict)]

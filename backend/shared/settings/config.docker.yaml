@@ -67,6 +67,9 @@ wb_api:
   statistics_per_host: ${WB_STATISTICS_PER_HOST:-30}
   marketplace_per_key: ${WB_MARKETPLACE_PER_KEY:-60}
   marketplace_per_host: ${WB_MARKETPLACE_PER_HOST:-120}
+  analytics_per_key: ${WB_ANALYTICS_PER_KEY:-3}
+  analytics_per_host: ${WB_ANALYTICS_PER_HOST:-30}
+  analytics_min_interval_seconds: ${WB_ANALYTICS_MIN_INTERVAL_SECONDS:-20}
   max_wait_seconds: ${WB_RATE_MAX_WAIT_SECONDS:-120}
 telegram:
   api_base_url: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}

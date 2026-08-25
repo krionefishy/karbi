@@ -7,6 +7,7 @@ from backend.modules.wb_core.infrastructure.wb import (
     WBThrottle,
     WBThrottleTimeout,
     budgets_for,
+    key_bucket,
     scope_for_key,
 )
 from backend.modules.wb_core.infrastructure.wb.observability import RateLimitSnapshot
@@ -112,3 +113,43 @@ async def test_throttle_keeps_separate_budgets_per_scope() -> None:
 async def test_throttle_ignores_buckets_it_was_not_given() -> None:
     throttle = WBThrottle(budgets={})
     await asyncio.wait_for(throttle.acquire(("content:key", "seller")), timeout=1)
+
+
+async def test_a_minimum_interval_holds_back_a_second_call(monkeypatch) -> None:
+    """A per-minute budget says nothing about two calls back to back, and the
+    WB stock report refuses them."""
+    slept: list[float] = []
+
+    async def record(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record)
+    throttle = WBThrottle(
+        budgets=budgets_for("analytics", per_key=10, per_host=10, window_seconds=60),
+        min_intervals={key_bucket("analytics"): 20.0},
+    )
+
+    await throttle.acquire(("analytics:key", "seller"))
+    await throttle.acquire(("analytics:key", "seller"))
+
+    assert slept and 19.0 <= slept[0] <= 20.0
+
+
+async def test_the_interval_never_shortens_what_wb_asked_for(monkeypatch) -> None:
+    slept: list[float] = []
+
+    async def record(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record)
+    throttle = WBThrottle(
+        budgets=budgets_for("analytics", per_key=10, per_host=10, window_seconds=60),
+        min_intervals={key_bucket("analytics"): 5.0},
+    )
+
+    await throttle.acquire(("analytics:key", "seller"))
+    # WB asked for a minute; our five-second floor must not overrule it.
+    throttle.observe("analytics:key", "seller", RateLimitSnapshot(retry=60.0))
+    await throttle.acquire(("analytics:key", "seller"))
+
+    assert slept and slept[0] > 55.0

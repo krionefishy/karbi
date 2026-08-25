@@ -1,23 +1,33 @@
+from backend.modules.wb_turnover.infrastructure.wb.analytics import (
+    ANALYTICS_BUCKET,
+    MAX_PAGES,
+    PAGE_LIMIT,
+    FBOStockRow,
+    WBAnalyticsClient,
+)
 from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
 from backend.modules.wb_turnover.infrastructure.wb.marketplace import (
+    CHRT_CHUNK,
     MARKETPLACE_BUCKET,
-    SKU_CHUNK,
     Warehouse,
     WBMarketplaceClient,
 )
 from backend.modules.wb_turnover.infrastructure.wb.statistics import (
     STATISTICS_BUCKET,
     OrderRow,
-    StockRow,
     WBStatisticsClient,
 )
 
 __all__ = [
+    "ANALYTICS_BUCKET",
+    "CHRT_CHUNK",
     "MARKETPLACE_BUCKET",
-    "SKU_CHUNK",
+    "MAX_PAGES",
+    "PAGE_LIMIT",
     "STATISTICS_BUCKET",
+    "FBOStockRow",
     "OrderRow",
-    "StockRow",
+    "WBAnalyticsClient",
     "WBJsonClient",
     "WBMarketplaceClient",
     "WBStatisticsClient",

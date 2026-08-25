@@ -68,8 +68,14 @@ class WBThrottle:
         budgets: dict[str, WBBudget],
         redis_client: RedisClient | None = None,
         max_wait_seconds: float = 120.0,
+        min_intervals: dict[str, float] | None = None,
     ) -> None:
         self._budgets = budgets
+        # Some WB methods refuse a burst even when the minute budget allows it:
+        # a per-minute allowance says nothing about two calls back to back.
+        # Keyed by full bucket name — normally the per-key one, since WB counts
+        # per token and two different sellers may still call at the same moment.
+        self._min_intervals = min_intervals or {}
         self._max_wait_seconds = max_wait_seconds
         self._logger = logging.getLogger("wb.throttle")
         self._local: dict[str, deque[float]] = {}
@@ -91,10 +97,15 @@ class WBThrottle:
         """Record what WB just said and decide when the next call may go out."""
         identity = f"{bucket}:{scope}"
         delay = self._delay_from(snapshot)
-        if delay is None:
+        floor = self._min_intervals.get(bucket)
+        if delay is None and floor is None:
             self._next_allowed.pop(identity, None)
             return
-        self._next_allowed[identity] = time.monotonic() + delay
+        self._hold_until(identity, time.monotonic() + max(delay or 0.0, floor or 0.0))
+
+    def _hold_until(self, identity: str, moment: float) -> None:
+        """Keep the later of the two waits: WB's own pacing and our floor."""
+        self._next_allowed[identity] = max(self._next_allowed.get(identity, 0.0), moment)
 
     @staticmethod
     def _delay_from(snapshot: RateLimitSnapshot) -> float | None:
@@ -118,10 +129,18 @@ class WBThrottle:
         waited = await self._wait_for_wb(bucket, identity)
         budget = self._budgets.get(bucket)
         if budget is None:
+            floor = self._min_intervals.get(bucket)
+            if floor is not None:
+                self._hold_until(identity, time.monotonic() + floor)
             return
         while True:
             delay = await self._try_acquire(bucket, identity, budget)
             if delay is None:
+                floor = self._min_intervals.get(bucket)
+                if floor is not None:
+                    # Stamped on the way out: the next call waits even if the
+                    # response carries no rate-limit headers at all.
+                    self._hold_until(identity, time.monotonic() + floor)
                 return
             self._require_budget(bucket, waited + delay)
             self._logger.info("wb_throttle_wait", extra={"bucket": bucket, "delay_seconds": round(delay, 2)})

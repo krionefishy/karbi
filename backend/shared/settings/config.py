@@ -222,6 +222,11 @@ class WBApiConfig:
     statistics_per_host: int = 30
     marketplace_per_key: int = 60
     marketplace_per_host: int = 120
+    analytics_per_key: int = 3
+    analytics_per_host: int = 30
+    # The stock report refuses a burst even inside its minute budget, so pages
+    # are spaced by a hard floor rather than by the window alone.
+    analytics_min_interval_seconds: int = 20
     max_wait_seconds: int = 120
 
 
@@ -364,6 +369,8 @@ class Settings:
             raise ValueError("worker.run_max_age_seconds must exceed worker.job_lease_seconds")
         if self.wb_api.window_seconds < 1:
             raise ValueError("wb_api.window_seconds must be positive")
+        if self.wb_api.analytics_min_interval_seconds < 0:
+            raise ValueError("wb_api.analytics_min_interval_seconds cannot be negative")
         if (
             min(
                 self.wb_api.content_per_key,
@@ -374,6 +381,8 @@ class Settings:
                 self.wb_api.statistics_per_host,
                 self.wb_api.marketplace_per_key,
                 self.wb_api.marketplace_per_host,
+                self.wb_api.analytics_per_key,
+                self.wb_api.analytics_per_host,
             )
             < 1
         ):

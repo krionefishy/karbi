@@ -16,6 +16,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     OutboxEventModel,
     SellerModel,
 )
+from backend.modules.wb_core.infrastructure.wb import WBTemporaryError
 from backend.modules.wb_turnover.application import CalculationService, CollectionService, DigestService
 from backend.modules.wb_turnover.domain import STATUS_NO_STOCK, STATUS_OK
 from backend.modules.wb_turnover.infrastructure.postgres import (
@@ -27,9 +28,10 @@ from backend.modules.wb_turnover.infrastructure.postgres import (
 )
 from backend.modules.wb_turnover.infrastructure.postgres.repository import RECLAIM_RUNNING_AFTER
 from backend.modules.wb_turnover.infrastructure.wb import (
+    FBOStockRow,
     OrderRow,
-    StockRow,
     Warehouse,
+    WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
 )
@@ -47,41 +49,64 @@ def cipher() -> CredentialCipher:
 
 
 class FakeStatistics(WBStatisticsClient):
-    def __init__(self, stock_rows=(), order_rows=()) -> None:
+    def __init__(self, order_rows=()) -> None:
         super().__init__()
-        self.stock_rows = list(stock_rows)
         self.order_rows = list(order_rows)
         self.requested_from: datetime | None = None
-
-    async def stocks(self, api_key: str) -> list[StockRow]:
-        return list(self.stock_rows)
 
     async def orders(self, api_key: str, date_from: datetime) -> list[OrderRow]:
         self.requested_from = date_from
         return list(self.order_rows)
 
 
+class FakeAnalytics(WBAnalyticsClient):
+    def __init__(self, stock_rows=(), error: Exception | None = None) -> None:
+        super().__init__()
+        self.stock_rows = list(stock_rows)
+        self.error = error
+
+    async def stocks(self, api_key: str) -> list[FBOStockRow]:
+        if self.error is not None:
+            raise self.error
+        return list(self.stock_rows)
+
+
 class FakeMarketplace(WBMarketplaceClient):
-    def __init__(self, warehouse_list=(), amounts=None) -> None:
+    """Amounts are keyed by (warehouse_id, chrt_id), so several warehouses can
+    hold the same size."""
+
+    def __init__(self, warehouse_list=(), amounts=None, error: Exception | None = None) -> None:
         super().__init__()
         self.warehouse_list = list(warehouse_list)
         self.amounts = amounts or {}
+        self.error = error
+        self.asked: list[tuple[int, tuple[int, ...]]] = []
 
     async def warehouses(self, api_key: str) -> list[Warehouse]:
+        if self.error is not None:
+            raise self.error
         return list(self.warehouse_list)
 
-    async def stocks(self, api_key: str, warehouse_id: int, skus: list[str]) -> dict[str, int]:
-        return {sku: amount for sku, amount in self.amounts.items() if sku in skus}
+    async def stocks(self, api_key: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
+        if self.error is not None:
+            raise self.error
+        self.asked.append((warehouse_id, tuple(chrt_ids)))
+        return {
+            chrt_id: amount
+            for (warehouse, chrt_id), amount in self.amounts.items()
+            if warehouse == warehouse_id and chrt_id in chrt_ids
+        }
 
 
-def stock(article: str, quantity: int, warehouse: str = "Коледино") -> StockRow:
-    return StockRow(
+def stock(article: str, quantity: int, chrt_id: int = 0, in_way: int = 0) -> FBOStockRow:
+    return FBOStockRow(
         article=article,
-        barcode=f"bar-{article}",
-        warehouse_name=warehouse,
+        chrt_id=chrt_id or int(article),
+        warehouse_id=-999999,
+        warehouse_name="Склад WB",
+        region_name="Склад WB",
         quantity=quantity,
-        quantity_full=quantity,
-        in_way_to_client=0,
+        in_way_to_client=in_way,
         in_way_from_client=0,
     )
 
@@ -113,14 +138,17 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
                 key_fingerprint=uuid.uuid4().hex,
             )
         )
-        for article, size_skus in (("101", ["bar-101"]), ("102", ["bar-102"])):
+        for article, chrt_ids in (("101", (1011, 1012)), ("102", (1021,))):
             session.add(
                 ArticleModel(
                     seller_id=model.id,
                     article=article,
                     vendor_code=f"SKU-{article}",
                     name=f"Товар {article}",
-                    sizes=[{"chrt_id": 1, "tech_size": "0", "skus": size_skus}],
+                    sizes=[
+                        {"chrt_id": chrt_id, "tech_size": str(index), "skus": [f"bar-{chrt_id}"]}
+                        for index, chrt_id in enumerate(chrt_ids)
+                    ],
                     state="active",
                 )
             )
@@ -170,20 +198,26 @@ def digest_service(session, bot_code: str) -> DigestService:
     )
 
 
-def collection(session, statistics, marketplace) -> CollectionService:
+def collection(session, analytics, marketplace, statistics=None) -> CollectionService:
     return CollectionService(
-        session, SellerRepository(session), TurnoverRepository(session), cipher(), statistics, marketplace
+        session,
+        SellerRepository(session),
+        TurnoverRepository(session),
+        cipher(),
+        statistics or FakeStatistics(),
+        analytics,
+        marketplace,
     )
 
 
-async def collect_stocks(database, seller_id, statistics, marketplace, slot=0, day=TODAY) -> None:
+async def collect_stocks(database, seller_id, analytics, marketplace, slot=0, day=TODAY):
     async with database.session() as session:
-        await collection(session, statistics, marketplace).collect_stocks(seller_id, day, slot)
+        return await collection(session, analytics, marketplace).collect_stocks(seller_id, day, slot)
 
 
 async def collect_orders(database, seller_id, statistics, now=None) -> None:
     async with database.session() as session:
-        await collection(session, statistics, FakeMarketplace()).collect_orders(
+        await collection(session, FakeAnalytics(), FakeMarketplace(), statistics).collect_orders(
             seller_id,
             now or datetime(2026, 8, 20, 3, 20, tzinfo=UTC),
             backfill_days=WINDOW,
@@ -202,9 +236,9 @@ async def test_stock_of_an_article_wb_stopped_listing_is_written_as_zero(seller)
     """WB drops a sold-out article from the response; without a zero row the
     last non-zero snapshot would pass for the current stock forever."""
     database, seller_id = seller
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 40), stock("102", 5)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 40), stock("102", 5)]), FakeMarketplace())
 
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 30)]), FakeMarketplace(), slot=1)
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 30)]), FakeMarketplace(), slot=1)
 
     async with database.session() as session:
         rows = await session.scalars(
@@ -220,8 +254,8 @@ async def test_stock_from_both_delivery_models_lands_in_one_snapshot(seller) -> 
     await collect_stocks(
         database,
         seller_id,
-        FakeStatistics([stock("101", 12)]),
-        FakeMarketplace([Warehouse(1, "Свой склад")], {"bar-101": 30}),
+        FakeAnalytics([stock("101", 12)]),
+        FakeMarketplace([Warehouse(1, "Свой склад")], {(1, 1011): 30}),
     )
 
     async with database.session() as session:
@@ -234,8 +268,8 @@ async def test_stock_from_both_delivery_models_lands_in_one_snapshot(seller) -> 
 async def test_the_same_slot_collected_twice_stays_one_point(seller) -> None:
     database, seller_id = seller
 
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 40)]), FakeMarketplace())
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 10)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 40)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 10)]), FakeMarketplace())
 
     async with database.session() as session:
         rows = list(
@@ -302,7 +336,7 @@ async def test_a_failed_pull_does_not_move_the_watermark(seller) -> None:
 
 async def test_the_metric_is_computed_from_what_was_collected(seller) -> None:
     database, seller_id = seller
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 42), stock("102", 0)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 42), stock("102", 0)]), FakeMarketplace())
     await collect_orders(
         database,
         seller_id,
@@ -318,7 +352,7 @@ async def test_the_metric_is_computed_from_what_was_collected(seller) -> None:
 
 async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(seller, digest_bot) -> None:
     database, seller_id = seller
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 4)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 4)]), FakeMarketplace())
     await collect_orders(
         database,
         seller_id,
@@ -358,7 +392,7 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
 async def test_a_seller_with_nothing_low_gets_no_message(seller, digest_bot) -> None:
     database, seller_id = seller
     # Both articles well stocked: nothing low, and nothing at zero either.
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 400), stock("102", 400)]), FakeMarketplace())
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 400), stock("102", 400)]), FakeMarketplace())
     await collect_orders(
         database,
         seller_id,
@@ -439,13 +473,13 @@ async def test_the_current_stock_never_mixes_two_collection_points(seller) -> No
     await collect_stocks(
         database,
         seller_id,
-        FakeStatistics([stock("101", 10)]),
-        FakeMarketplace(warehouse_list=[Warehouse(id=1, name="Свой")], amounts={"bar-101": 7}),
+        FakeAnalytics([stock("101", 10)]),
+        FakeMarketplace(warehouse_list=[Warehouse(id=1, name="Свой")], amounts={(1, 1011): 7}),
         slot=0,
         day=yesterday,
     )
     # Today only FBO is collected — the seller dropped his own warehouse.
-    await collect_stocks(database, seller_id, FakeStatistics([stock("101", 10)]), FakeMarketplace(), slot=0)
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 10)]), FakeMarketplace(), slot=0)
 
     async with database.session() as session:
         current = await TurnoverRepository(session).latest_stock(seller_id, TODAY - timedelta(days=7))
@@ -520,3 +554,82 @@ async def test_a_purge_mid_flight_is_not_overwritten_by_the_write_phase(seller) 
     async with database.session() as session:
         rows = list(await session.scalars(select(OrderModel).where(OrderModel.seller_id == seller_id)))
     assert rows == []
+
+
+async def test_fbs_is_summed_over_every_size_and_every_warehouse(seller) -> None:
+    """One товар lives under several chrtId at several addresses."""
+    database, seller_id = seller
+
+    await collect_stocks(
+        database,
+        seller_id,
+        FakeAnalytics([stock("101", 0)]),
+        FakeMarketplace(
+            [Warehouse(1, "Москва"), Warehouse(2, "Казань")],
+            {(1, 1011): 10, (1, 1012): 5, (2, 1011): 3},
+        ),
+    )
+
+    async with database.session() as session:
+        current = await TurnoverRepository(session).latest_stock(seller_id, TODAY - timedelta(days=1))
+    assert current["101"].fbs == 18
+
+
+async def test_a_marketplace_outage_keeps_the_wb_stock_and_the_previous_fbs(seller) -> None:
+    """An FBS failure must not discard a good FBO reading, and must not write
+    zeros that would read as «товар кончился»."""
+    database, seller_id = seller
+    await collect_stocks(
+        database,
+        seller_id,
+        FakeAnalytics([stock("101", 10)]),
+        FakeMarketplace([Warehouse(1, "Москва")], {(1, 1011): 7}),
+        slot=0,
+    )
+
+    result = await collect_stocks(
+        database,
+        seller_id,
+        FakeAnalytics([stock("101", 12)]),
+        FakeMarketplace(error=WBTemporaryError("Bad Gateway")),
+        slot=1,
+    )
+
+    assert result.fbs_failed is True
+    async with database.session() as session:
+        rows = await session.scalars(
+            select(StockSnapshotModel).where(StockSnapshotModel.seller_id == seller_id, StockSnapshotModel.slot == 1)
+        )
+        by_model = {row.delivery_model: row.quantity for row in rows if row.article == "101"}
+    # The new slot holds the fresh FBO figure and no FBS row at all.
+    assert by_model == {"fbo": 12}
+
+
+async def test_a_seller_without_own_warehouses_is_not_a_failure(seller) -> None:
+    database, seller_id = seller
+
+    result = await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 10)]), FakeMarketplace())
+
+    assert (result.fbs, result.fbs_failed) == ("absent", False)
+    assert result.articles == 2
+
+
+async def test_goods_in_transit_stay_out_of_the_stock_that_is_counted(seller) -> None:
+    """inWayToClient is not on the shelf: counting it would delay the alarm."""
+    database, seller_id = seller
+
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 3, in_way=400)]), FakeMarketplace())
+
+    async with database.session() as session:
+        current = await TurnoverRepository(session).latest_stock(seller_id, TODAY - timedelta(days=1))
+        row = await session.scalar(
+            select(StockSnapshotModel).where(
+                StockSnapshotModel.seller_id == seller_id,
+                StockSnapshotModel.article == "101",
+                StockSnapshotModel.delivery_model == "fbo",
+            )
+        )
+    assert current["101"].total == 3
+    assert row is not None and row.in_way_to_client == 400
+    # quantity_full is derived now that WB stopped sending it.
+    assert row.quantity_full == 403

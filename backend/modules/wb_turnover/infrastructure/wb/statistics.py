@@ -8,24 +8,10 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
 
 STATISTICS_BUCKET = "statistics"
-# `dateFrom` filters by lastChangeDate and is mandatory; the stock method has no
-# history to give, so the earliest date WB accepts simply means "everything".
-ALL_TIME = "2019-06-20T00:00:00"
 # WB truncates a large orders response instead of failing it, so the method is
 # read in pages. The ceiling only guards against a page that never stops
 # bringing something new; a normal pull ends on the first repeated page.
 ORDERS_MAX_PAGES = 30
-
-
-@dataclass(frozen=True, slots=True)
-class StockRow:
-    article: str
-    barcode: str
-    warehouse_name: str
-    quantity: int
-    quantity_full: int
-    in_way_to_client: int
-    in_way_from_client: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,27 +26,16 @@ class OrderRow:
 
 
 class WBStatisticsClient(WBJsonClient):
-    """Stocks and orders. The tightest category WB has, and the only source of both."""
+    """Orders. Stock used to live here too, until WB closed the method.
+
+    `/api/v1/supplier/stocks` answers 404 «This method is deprecated» — current
+    stock now comes from the Analytics API, see `analytics.py`.
+    """
 
     bucket = STATISTICS_BUCKET
     api_name = "WB Statistics API"
+    category = "Статистика"
     base_url = "https://statistics-api.wildberries.ru"
-
-    async def stocks(self, api_key: str) -> list[StockRow]:
-        """Everything the account holds at WB warehouses right now.
-
-        This is FBO only — stock at the seller's own warehouses lives behind the
-        Marketplace API and is collected separately.
-        """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            payload = await self.request(
-                client,
-                "GET",
-                f"{self.base_url}/api/v1/supplier/stocks",
-                api_key,
-                params={"dateFrom": ALL_TIME},
-            )
-        return [row for raw in self._rows(payload) if (row := self._stock(raw)) is not None]
 
     async def orders(self, api_key: str, date_from: datetime) -> list[OrderRow]:
         """Orders whose lastChangeDate is at or after `date_from`.
@@ -101,21 +76,6 @@ class WBStatisticsClient(WBJsonClient):
         if not isinstance(payload, list):
             raise WBPermanentError("WB Statistics API вернул не список")
         return [row for row in payload if isinstance(row, dict)]
-
-    @staticmethod
-    def _stock(raw: dict) -> StockRow | None:
-        article = raw.get("nmId")
-        if not isinstance(article, int):
-            return None
-        return StockRow(
-            article=str(article),
-            barcode=str(raw.get("barcode") or ""),
-            warehouse_name=str(raw.get("warehouseName") or ""),
-            quantity=int(raw.get("quantity") or 0),
-            quantity_full=int(raw.get("quantityFull") or 0),
-            in_way_to_client=int(raw.get("inWayToClient") or 0),
-            in_way_from_client=int(raw.get("inWayFromClient") or 0),
-        )
 
     @classmethod
     def _order(cls, raw: dict) -> OrderRow | None:

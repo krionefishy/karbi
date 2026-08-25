@@ -50,6 +50,10 @@ wb_api:
   statistics_per_host: 30
   marketplace_per_key: 60
   marketplace_per_host: 120
+  analytics_per_key: 3
+  analytics_per_host: 30
+  # Tests must not sit through the production spacing.
+  analytics_min_interval_seconds: 0
   max_wait_seconds: 120
 telegram:
   # Tests never reach Telegram; the base URL is here so an accidental call fails loudly.

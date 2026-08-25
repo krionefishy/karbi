@@ -29,6 +29,10 @@ class WBJsonClient:
 
     bucket = "statistics"
     api_name = "WB API"
+    # Category of the WB token this client needs. A key is issued per category,
+    # so "недействителен" is the wrong thing to tell someone whose key simply
+    # lacks one checkbox.
+    category = ""
 
     def __init__(self, timeout_seconds: float = 60.0, throttle: WBThrottle | None = None) -> None:
         self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
@@ -61,7 +65,7 @@ class WBJsonClient:
             if self.throttle is not None:
                 self.throttle.observe(key_bucket(self.bucket), scope, snapshot)
             if response.status_code in {401, 403}:
-                raise WBPermanentError(f"{self.api_name}: ключ недействителен или не имеет доступа")
+                raise WBPermanentError(self._access_error())
             if response.status_code == 404:
                 raise WBPermanentError(f"{self.api_name} не знает метод {url}")
             if response.status_code == 429 or response.status_code >= 500:
@@ -73,6 +77,11 @@ class WBJsonClient:
                 raise WBPermanentError(f"{self.api_name} отклонил запрос: HTTP {response.status_code}")
             return self._payload(response)
         raise RuntimeError("WB request retry loop exhausted")
+
+    def _access_error(self) -> str:
+        if self.category:
+            return f"{self.api_name}: ключ не имеет доступа к категории «{self.category}»"
+        return f"{self.api_name}: ключ недействителен или не имеет доступа"
 
     async def _pace(self, scope: str) -> None:
         if self.throttle is None:

@@ -12,7 +12,11 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_turnover.application import CalculationService, CollectionService, DigestService
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
-from backend.modules.wb_turnover.infrastructure.wb import WBMarketplaceClient, WBStatisticsClient
+from backend.modules.wb_turnover.infrastructure.wb import (
+    WBAnalyticsClient,
+    WBMarketplaceClient,
+    WBStatisticsClient,
+)
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
@@ -40,6 +44,7 @@ class TurnoverWorker:
         database: Database,
         cipher: CredentialCipher,
         statistics: WBStatisticsClient,
+        analytics: WBAnalyticsClient,
         marketplace: WBMarketplaceClient,
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
@@ -47,6 +52,7 @@ class TurnoverWorker:
         self.database = database
         self.cipher = cipher
         self.statistics = statistics
+        self.analytics = analytics
         self.marketplace = marketplace
         self.settings = settings
         self.turnover = settings.turnover
@@ -97,10 +103,22 @@ class TurnoverWorker:
         return (now.hour, now.minute) >= (hour, minute)
 
     async def collect_stocks(self, day: date, slot: int) -> None:
-        async def collect(seller_id: uuid.UUID, service: CollectionService) -> None:
-            await service.collect_stocks(seller_id, day, slot)
+        degraded: list[uuid.UUID] = []
 
-        await self._for_each_seller("stocks", day, slot, collect)
+        async def collect(seller_id: uuid.UUID, service: CollectionService) -> None:
+            result = await service.collect_stocks(seller_id, day, slot)
+            if result.fbs_failed:
+                # The WB half is in; only the seller's own warehouses are missing.
+                # Worth recording, but not worth failing the slot over.
+                degraded.append(seller_id)
+
+        await self._for_each_seller("stocks", day, slot, collect, note=lambda: self._fbs_note(degraded))
+
+    @staticmethod
+    def _fbs_note(degraded: list[uuid.UUID]) -> str | None:
+        if not degraded:
+            return None
+        return f"FBS-остатки не собраны у {len(degraded)} селлеров, FBO записан"
 
     async def collect_orders(self, now: datetime) -> None:
         async def collect(seller_id: uuid.UUID, service: CollectionService) -> None:
@@ -157,7 +175,7 @@ class TurnoverWorker:
                 self.logger.exception("turnover_digest_failed", seller_id=str(seller_id))
         await self._finish(run_id, len(seller_ids), failed, error)
 
-    async def _for_each_seller(self, kind: str, day: date, slot: int, action) -> None:
+    async def _for_each_seller(self, kind: str, day: date, slot: int, action, note=None) -> None:
         run_id, seller_ids = await self._claim(kind, day, slot)
         if run_id is None:
             return
@@ -171,6 +189,7 @@ class TurnoverWorker:
                         TurnoverRepository(session),
                         self.cipher,
                         self.statistics,
+                        self.analytics,
                         self.marketplace,
                     )
                     await action(seller_id, service)
@@ -185,7 +204,12 @@ class TurnoverWorker:
                 error = str(failure)
                 self.logger.exception("turnover_collection_crashed", seller_id=str(seller_id))
         self.logger.info("turnover_collected", kind=kind, sellers=len(seller_ids), failed=failed)
-        await self._finish(run_id, len(seller_ids), failed, error)
+        # A partial slot has to say so: «собрали ноль товаров» and «остатки не
+        # получили» look the same in the numbers and mean opposite things.
+        remark = note() if note is not None else None
+        if remark:
+            self.logger.warning("turnover_collection_degraded", kind=kind, detail=remark)
+        await self._finish(run_id, len(seller_ids), failed, error or remark)
 
     async def _claim(self, kind: str, day: date, slot: int) -> tuple[uuid.UUID | None, list[uuid.UUID]]:
         async with self.database.session() as session:

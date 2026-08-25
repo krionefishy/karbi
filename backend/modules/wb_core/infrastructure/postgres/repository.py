@@ -125,26 +125,23 @@ class SellerRepository:
         )
         return [self._article(row) for row in rows]
 
-    async def list_barcodes(self, seller_id: uuid.UUID) -> dict[str, list[str]]:
-        """Barcodes per article, as the catalog sync stored them.
+    async def list_chrt_articles(self, seller_id: uuid.UUID) -> dict[int, str]:
+        """Size id → article, as the catalog sync stored it.
 
-        The FBS stock method takes barcodes, not nmIDs, and the catalog already
-        carries them — asking Wildberries again would spend a request per run.
+        The FBS stock method is asked by `chrtId`: one size can carry several
+        barcodes, so barcodes made the mapping ambiguous and cost an extra step.
         """
         rows = await self.session.scalars(
             select(ArticleModel).where(ArticleModel.seller_id == seller_id, ArticleModel.state != "archived")
         )
-        collected: dict[str, list[str]] = {}
+        collected: dict[int, str] = {}
         for row in rows:
-            barcodes = [
-                str(sku)
-                for size in row.sizes or []
-                if isinstance(size, dict)
-                for sku in (size.get("skus") or [])
-                if sku
-            ]
-            if barcodes:
-                collected[row.article] = barcodes
+            for size in row.sizes or []:
+                if not isinstance(size, dict):
+                    continue
+                chrt_id = size.get("chrt_id")
+                if isinstance(chrt_id, int):
+                    collected[chrt_id] = row.article
         return collected
 
     async def upsert_catalog(
