@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_fbs_distribution.domain import Region, SellerEnrollment, StockLine
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
+    AllocationItemModel,
+    AllocationPlanModel,
+    AllocationSkipModel,
     DistributionSettingsModel,
     OfficeRegionModel,
     PoolSellerShareModel,
@@ -484,4 +487,78 @@ class FbsDistributionRepository:
                 )
                 for seller_id, share in shares.items()
             ]
+        )
+
+    # --- планы -----------------------------------------------------------
+
+    async def save_plan(
+        self,
+        *,
+        seller_id: uuid.UUID,
+        snapshot_id: uuid.UUID | None,
+        created_at: datetime,
+        reserve_units: int,
+        priority_regions: int,
+        warehouses: int,
+        items: Sequence[tuple[int, dict[int, int]]],
+        skips: Sequence[tuple[int, str, str, str]],
+    ) -> uuid.UUID:
+        """Сохранить расчёт как есть. План неизменяем: новый расчёт — новая строка."""
+        plan_id = uuid.uuid4()
+        self.session.add(
+            AllocationPlanModel(
+                id=plan_id,
+                seller_id=seller_id,
+                snapshot_id=snapshot_id,
+                created_at=created_at,
+                reserve_units=reserve_units,
+                priority_regions=priority_regions,
+                warehouses=warehouses,
+                items=len(items),
+                units=sum(sum(amounts.values()) for _, amounts in items),
+                skipped=len(skips),
+            )
+        )
+        self.session.add_all(
+            [
+                AllocationItemModel(plan_id=plan_id, chrt_id=chrt_id, warehouse_id=warehouse_id, amount=amount)
+                for chrt_id, amounts in items
+                for warehouse_id, amount in amounts.items()
+            ]
+        )
+        self.session.add_all(
+            [
+                AllocationSkipModel(
+                    plan_id=plan_id,
+                    chrt_id=chrt_id,
+                    item_id=item_id,
+                    characteristic=characteristic,
+                    reason=reason,
+                )
+                for chrt_id, item_id, characteristic, reason in skips
+            ]
+        )
+        await self.session.flush()
+        return plan_id
+
+    async def latest_plan(self, seller_id: uuid.UUID) -> AllocationPlanModel | None:
+        return await self.session.scalar(
+            select(AllocationPlanModel)
+            .where(AllocationPlanModel.seller_id == seller_id)
+            .order_by(AllocationPlanModel.created_at.desc())
+            .limit(1)
+        )
+
+    async def plan_items(self, plan_id: uuid.UUID) -> list[AllocationItemModel]:
+        return list(
+            await self.session.scalars(
+                select(AllocationItemModel)
+                .where(AllocationItemModel.plan_id == plan_id)
+                .order_by(AllocationItemModel.chrt_id, AllocationItemModel.warehouse_id)
+            )
+        )
+
+    async def plan_skips(self, plan_id: uuid.UUID) -> list[AllocationSkipModel]:
+        return list(
+            await self.session.scalars(select(AllocationSkipModel).where(AllocationSkipModel.plan_id == plan_id))
         )

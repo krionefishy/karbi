@@ -17,6 +17,7 @@ from backend.modules.wb_fbs_distribution.application import (
     MappingService,
     MirrorService,
     PlacementService,
+    PlanningService,
     SnapshotService,
     StockSnapshotSource,
 )
@@ -162,6 +163,15 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def fbs_placement_service(self, session: AsyncSession, distribution: FbsDistributionRepository) -> PlacementService:
         return PlacementService(session, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_planning_service(
+        self,
+        session: AsyncSession,
+        distribution: FbsDistributionRepository,
+        placement: PlacementService,
+    ) -> PlanningService:
+        return PlanningService(session, distribution, placement)
 
     @provide(scope=Scope.REQUEST)
     def fbs_mirror_service(

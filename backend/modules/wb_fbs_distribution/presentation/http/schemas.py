@@ -171,3 +171,47 @@ class PoolShareRequest(BaseModel):
     characteristic: str = Field(default="", max_length=255)
     """Пусто — правило снимается, и пул снова считается неразделённым."""
     shares: dict[uuid.UUID, int] = Field(default_factory=dict)
+
+
+class PlanAmountResponse(BaseModel):
+    warehouse_id: int
+    name: str
+    city: str
+    region_code: str | None
+    amount: int
+
+
+class PlanItemResponse(BaseModel):
+    chrt_id: int
+    item_id: str
+    characteristic: str
+    name: str
+    barcode: str
+    on_hand: int
+    available: int
+    units: int
+    amounts: list[PlanAmountResponse]
+
+
+class PlanSkipResponse(BaseModel):
+    chrt_id: int
+    item_id: str
+    characteristic: str
+    name: str
+    reason: str
+    text: str
+
+
+class PlanResponse(BaseModel):
+    """Рассчитанный план. Ничего в Wildberries не отправлено."""
+
+    id: uuid.UUID
+    seller_id: uuid.UUID
+    snapshot_id: uuid.UUID | None
+    created_at: str
+    reserve_units: int
+    priority_regions: int
+    warehouses: int
+    units: int
+    items: list[PlanItemResponse]
+    skips: list[PlanSkipResponse]

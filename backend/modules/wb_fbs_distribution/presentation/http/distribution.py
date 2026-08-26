@@ -15,6 +15,8 @@ from backend.modules.wb_fbs_distribution.application import (
     MappingState,
     MirrorService,
     PlacementService,
+    Plan,
+    PlanningService,
     QueueEntry,
     SellerOverview,
     SetupOverview,
@@ -33,6 +35,10 @@ from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     OfficeRegionRequest,
     OfficeResponse,
     PlacementRequest,
+    PlanAmountResponse,
+    PlanItemResponse,
+    PlanResponse,
+    PlanSkipResponse,
     PoolResponse,
     PoolShareRequest,
     QueueEntryResponse,
@@ -432,3 +438,74 @@ async def set_pool_shares(
     except InvalidShareError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     return mapping_response(state)
+
+
+@router.post("/sellers/{seller_id}/plan", response_model=PlanResponse)
+@inject
+async def build_plan(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    overview_service: FromDishka[FbsDistributionService],
+    placement: FromDishka[PlacementService],
+    planning: FromDishka[PlanningService],
+) -> PlanResponse:
+    """Посчитать распределение по кабинету. В Wildberries ничего не уходит."""
+    try:
+        await overview_service.seller_overview(seller_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    plan = await planning.build(seller_id)
+    return await plan_response(plan, placement)
+
+
+async def plan_response(plan: Plan, placement: PlacementService) -> PlanResponse:
+    queue = {entry.warehouse_id: entry for entry in await placement.queue(plan.seller_id)}
+    order = {warehouse_id: index for index, warehouse_id in enumerate(queue)}
+    return PlanResponse(
+        id=plan.id,
+        seller_id=plan.seller_id,
+        snapshot_id=plan.snapshot_id,
+        created_at=plan.created_at.isoformat(),
+        reserve_units=plan.reserve_units,
+        priority_regions=plan.priority_regions,
+        warehouses=plan.warehouses,
+        units=plan.units,
+        items=[
+            PlanItemResponse(
+                chrt_id=item.chrt_id,
+                item_id=item.item_id,
+                characteristic=item.characteristic,
+                name=item.name,
+                barcode=item.barcode,
+                on_hand=item.on_hand,
+                available=item.available,
+                units=item.units,
+                amounts=[
+                    PlanAmountResponse(
+                        warehouse_id=warehouse_id,
+                        name=queue[warehouse_id].name if warehouse_id in queue else "",
+                        city=queue[warehouse_id].city if warehouse_id in queue else "",
+                        region_code=queue[warehouse_id].region_code if warehouse_id in queue else None,
+                        amount=amount,
+                    )
+                    # В порядке очереди распределения, а не по номеру склада:
+                    # оператор читает план сверху вниз как приоритет.
+                    for warehouse_id, amount in sorted(
+                        item.amounts.items(), key=lambda pair: order.get(pair[0], len(order))
+                    )
+                ],
+            )
+            for item in plan.items
+        ],
+        skips=[
+            PlanSkipResponse(
+                chrt_id=skip.chrt_id,
+                item_id=skip.item_id,
+                characteristic=skip.characteristic,
+                name=skip.name,
+                reason=skip.reason,
+                text=skip.text,
+            )
+            for skip in plan.skips
+        ],
+    )

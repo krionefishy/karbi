@@ -243,3 +243,56 @@ class PoolSellerShareModel(WBFbsDistributionBase):
     share_bp: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (CheckConstraint("share_bp BETWEEN 0 AND 10000", name="ck_wb_fbs_pool_share"),)
+
+
+class AllocationPlanModel(WBFbsDistributionBase):
+    """Неизменяемый результат одного расчёта.
+
+    Неизменяемый, потому что это единственный способ через полгода ответить,
+    почему вчера на складе было опубликовано 47: план хранит и входной снимок,
+    и версию чисел, по которым считался.
+    """
+
+    __tablename__ = "allocation_plans"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    reserve_units: Mapped[int] = mapped_column(Integer, nullable=False)
+    priority_regions: Mapped[int] = mapped_column(Integer, nullable=False)
+    warehouses: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    items: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    skipped: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    __table_args__ = (Index("ix_wb_fbs_plans_seller", "seller_id", "created_at"),)
+
+
+class AllocationItemModel(WBFbsDistributionBase):
+    """Сколько единиц одного размера план кладёт на один склад."""
+
+    __tablename__ = "allocation_items"
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (CheckConstraint("amount >= 0", name="ck_wb_fbs_item_amount"),)
+
+
+class AllocationSkipModel(WBFbsDistributionBase):
+    """Почему размер в план не попал.
+
+    Пропуск без причины неотличим от «товара нет», а это разные вещи: одно
+    чинится закупкой, другое — настройкой.
+    """
+
+    __tablename__ = "allocation_skips"
+
+    plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    characteristic: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    reason: Mapped[str] = mapped_column(String(64), nullable=False)

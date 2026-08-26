@@ -1,4 +1,7 @@
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
+    AllocationItemModel,
+    AllocationPlanModel,
+    AllocationSkipModel,
     DistributionSettingsModel,
     OfficeRegionModel,
     PoolSellerShareModel,
@@ -14,6 +17,9 @@ from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.repository import FbsDistributionRepository
 
 __all__ = [
+    "AllocationItemModel",
+    "AllocationPlanModel",
+    "AllocationSkipModel",
     "DistributionSettingsModel",
     "FbsDistributionRepository",
     "OfficeRegionModel",

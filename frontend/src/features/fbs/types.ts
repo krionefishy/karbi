@@ -132,3 +132,45 @@ export interface FbsMatchResult {
   catalog_sizes: number;
   pools: number;
 }
+
+export interface FbsPlanAmount {
+  warehouse_id: number;
+  name: string;
+  city: string;
+  region_code: string | null;
+  amount: number;
+}
+
+export interface FbsPlanItem {
+  chrt_id: number;
+  item_id: string;
+  characteristic: string;
+  name: string;
+  barcode: string;
+  on_hand: number;
+  available: number;
+  units: number;
+  amounts: FbsPlanAmount[];
+}
+
+export interface FbsPlanSkip {
+  chrt_id: number;
+  item_id: string;
+  characteristic: string;
+  name: string;
+  reason: string;
+  text: string;
+}
+
+export interface FbsPlan {
+  id: string;
+  seller_id: string;
+  snapshot_id: string | null;
+  created_at: string;
+  reserve_units: number;
+  priority_regions: number;
+  warehouses: number;
+  units: number;
+  items: FbsPlanItem[];
+  skips: FbsPlanSkip[];
+}

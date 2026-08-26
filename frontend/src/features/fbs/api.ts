@@ -2,6 +2,7 @@ import { apiRequest } from "../../api/http";
 import type {
   FbsMappingState,
   FbsMatchResult,
+  FbsPlan,
   FbsPool,
   FbsQueueEntry,
   FbsSetup,
@@ -85,3 +86,7 @@ export const setPoolShares = (payload: {
   characteristic: string;
   shares: Record<string, number>;
 }) => apiRequest<FbsMappingState>("/api/v1/wb/fbs/mapping/shares", { method: "PUT", body: JSON.stringify(payload) });
+
+/** Считает распределение и сохраняет план. В Wildberries ничего не уходит. */
+export const buildPlan = (sellerId: string) =>
+  apiRequest<FbsPlan>(`/api/v1/wb/fbs/sellers/${sellerId}/plan`, { method: "POST" });
