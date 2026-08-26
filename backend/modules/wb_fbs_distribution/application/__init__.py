@@ -46,6 +46,12 @@ from backend.modules.wb_fbs_distribution.application.snapshots import (
     SnapshotState,
     StockSnapshotSource,
 )
+from backend.modules.wb_fbs_distribution.application.warehouses import (
+    CreatedWarehouse,
+    WarehouseAdminService,
+    WarehouseConflictError,
+    WriteNotAllowedError,
+)
 
 __all__ = [
     "ACCEPTED",
@@ -56,6 +62,7 @@ __all__ = [
     "REJECTED",
     "DESCRIPTION",
     "TITLE",
+    "CreatedWarehouse",
     "DisconnectedSource",
     "DistributionCatalogOverview",
     "FbsDistributionEnrollment",
@@ -84,5 +91,8 @@ __all__ = [
     "StockSnapshotSource",
     "SetupOverview",
     "UnmappedPool",
+    "WarehouseAdminService",
+    "WarehouseConflictError",
     "WarehouseRow",
+    "WriteNotAllowedError",
 ]

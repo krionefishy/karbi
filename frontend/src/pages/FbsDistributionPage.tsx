@@ -9,6 +9,7 @@ import { FbsMappingPanel } from "../components/FbsMappingPanel";
 import { FbsPlanPanel } from "../components/FbsPlanPanel";
 import { FbsSetupPanel } from "../components/FbsSetupPanel";
 import { FbsStockPanel } from "../components/FbsStockPanel";
+import { FbsWarehouseAdmin } from "../components/FbsWarehouseAdmin";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
 import { getQueue, getSellerOverview, setPlacement, setWriteEnabled, syncMirror } from "../features/fbs/api";
@@ -293,6 +294,8 @@ export function FbsDistributionPage() {
                   </div>
                 ))}
               </section>
+
+              <FbsWarehouseAdmin sellerId={selected.id} writeEnabled={writing} warehouses={warehouses} />
 
               {queue.length > 0 && (
                 <>

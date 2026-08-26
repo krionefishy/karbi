@@ -20,9 +20,14 @@ from backend.modules.wb_fbs_distribution.application import (
     PlanningService,
     SnapshotService,
     StockSnapshotSource,
+    WarehouseAdminService,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
-from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, marketplace_throttle
+from backend.modules.wb_fbs_distribution.infrastructure.wb import (
+    WBFbsMarketplaceClient,
+    WBFbsWarehouseWriter,
+    marketplace_throttle,
+)
 from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
@@ -71,6 +76,11 @@ class AppProvider(Provider):
         лимит кабинета в обход фоновых запросов.
         """
         return WBFbsMarketplaceClient(throttle=marketplace_throttle(settings, redis))
+
+    @provide(scope=Scope.APP)
+    def fbs_warehouse_writer(self, settings: Settings, redis: RedisClient) -> WBFbsWarehouseWriter:
+        """Клиент команд, меняющих кабинет. Отдельный от читающего намеренно."""
+        return WBFbsWarehouseWriter(throttle=marketplace_throttle(settings, redis))
 
 
 class SessionProvider(Provider):
@@ -163,6 +173,18 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def fbs_placement_service(self, session: AsyncSession, distribution: FbsDistributionRepository) -> PlacementService:
         return PlacementService(session, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_warehouse_admin_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        distribution: FbsDistributionRepository,
+        marketplace: WBFbsMarketplaceClient,
+        writer: WBFbsWarehouseWriter,
+        cipher: CredentialCipher,
+    ) -> WarehouseAdminService:
+        return WarehouseAdminService(session, sellers, distribution, marketplace, writer, cipher)
 
     @provide(scope=Scope.REQUEST)
     def fbs_planning_service(

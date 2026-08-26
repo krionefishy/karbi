@@ -1,7 +1,7 @@
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
@@ -23,10 +23,15 @@ from backend.modules.wb_fbs_distribution.application import (
     SnapshotRejected,
     SnapshotService,
     SnapshotState,
+    WarehouseAdminService,
+    WarehouseConflictError,
+    WriteNotAllowedError,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.onec import SnapshotFormatError, parse_snapshot
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
+    CreatedWarehouseResponse,
+    CreateWarehouseRequest,
     DistributionOverviewResponse,
     MappingStateResponse,
     MatchResponse,
@@ -42,6 +47,7 @@ from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     PoolResponse,
     PoolShareRequest,
     QueueEntryResponse,
+    RebindWarehouseRequest,
     RegionOrderRequest,
     RegionResponse,
     SettingsRequest,
@@ -509,3 +515,80 @@ async def plan_response(plan: Plan, placement: PlacementService) -> PlanResponse
             for skip in plan.skips
         ],
     )
+
+
+def write_refused(error: WriteNotAllowedError) -> HTTPException:
+    return HTTPException(status.HTTP_409_CONFLICT, str(error))
+
+
+@router.post(
+    "/sellers/{seller_id}/warehouses",
+    response_model=CreatedWarehouseResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+@inject
+async def create_warehouse(
+    seller_id: uuid.UUID,
+    payload: CreateWarehouseRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[WarehouseAdminService],
+) -> CreatedWarehouseResponse:
+    """Создать виртуальный склад под объектом WB. Меняет живой кабинет."""
+    try:
+        created = await service.create(seller_id, payload.office_id, payload.name)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    except WriteNotAllowedError as error:
+        raise write_refused(error) from error
+    except WarehouseConflictError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBPermanentError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBTemporaryError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+    return CreatedWarehouseResponse(warehouse_id=created.warehouse_id, office_id=created.office_id, name=created.name)
+
+
+@router.put("/sellers/{seller_id}/warehouses/{warehouse_id}/binding", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def rebind_warehouse(
+    seller_id: uuid.UUID,
+    warehouse_id: int,
+    payload: RebindWarehouseRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[WarehouseAdminService],
+) -> Response:
+    """Переименовать склад или сменить его объект. WB разрешает раз в сутки."""
+    try:
+        await service.rebind(seller_id, warehouse_id, name=payload.name, office_id=payload.office_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    except WriteNotAllowedError as error:
+        raise write_refused(error) from error
+    except WarehouseConflictError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBTemporaryError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/sellers/{seller_id}/warehouses/{warehouse_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def delete_warehouse(
+    seller_id: uuid.UUID,
+    warehouse_id: int,
+    _: CurrentPrincipal,
+    service: FromDishka[WarehouseAdminService],
+) -> Response:
+    """Удалить склад. Необратимо: WB не возвращает удалённые склады."""
+    try:
+        await service.delete(seller_id, warehouse_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    except WriteNotAllowedError as error:
+        raise write_refused(error) from error
+    except WarehouseConflictError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBTemporaryError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

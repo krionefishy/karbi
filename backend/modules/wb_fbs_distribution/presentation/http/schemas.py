@@ -215,3 +215,19 @@ class PlanResponse(BaseModel):
     units: int
     items: list[PlanItemResponse]
     skips: list[PlanSkipResponse]
+
+
+class CreateWarehouseRequest(BaseModel):
+    office_id: int
+    name: str = Field(min_length=1, max_length=200)
+
+
+class RebindWarehouseRequest(BaseModel):
+    office_id: int
+    name: str = Field(min_length=1, max_length=200)
+
+
+class CreatedWarehouseResponse(BaseModel):
+    warehouse_id: int
+    office_id: int
+    name: str

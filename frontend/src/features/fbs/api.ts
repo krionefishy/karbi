@@ -90,3 +90,13 @@ export const setPoolShares = (payload: {
 /** Считает распределение и сохраняет план. В Wildberries ничего не уходит. */
 export const buildPlan = (sellerId: string) =>
   apiRequest<FbsPlan>(`/api/v1/wb/fbs/sellers/${sellerId}/plan`, { method: "POST" });
+
+/** Creates a virtual warehouse in the live cabinet. Needs write permission. */
+export const createWarehouse = (sellerId: string, payload: { office_id: number; name: string }) =>
+  apiRequest<{ warehouse_id: number; office_id: number; name: string }>(
+    `/api/v1/wb/fbs/sellers/${sellerId}/warehouses`,
+    { method: "POST", body: JSON.stringify(payload) },
+  );
+
+export const deleteWarehouse = (sellerId: string, warehouseId: number) =>
+  apiRequest<void>(`/api/v1/wb/fbs/sellers/${sellerId}/warehouses/${warehouseId}`, { method: "DELETE" });
