@@ -99,3 +99,36 @@ export interface FbsPool {
   on_hand: number;
   available: number;
 }
+
+export interface FbsUnmappedPool {
+  item_id: string;
+  characteristic: string;
+  barcode: string;
+  name: string;
+  on_hand: number;
+}
+
+export interface FbsSharedPool {
+  item_id: string;
+  characteristic: string;
+  barcode: string;
+  name: string;
+  on_hand: number;
+  sellers: string[];
+  shares: Record<string, number>;
+  rule_ready: boolean;
+}
+
+export interface FbsMappingState {
+  pools: number;
+  mapped_pools: number;
+  shared_without_rule: number;
+  unmapped: FbsUnmappedPool[];
+  shared: FbsSharedPool[];
+}
+
+export interface FbsMatchResult {
+  matched: number;
+  catalog_sizes: number;
+  pools: number;
+}

@@ -202,3 +202,44 @@ class StockPoolModel(WBFbsDistributionBase):
         CheckConstraint("quantity >= 0", name="ck_wb_fbs_pool_quantity"),
         Index("ix_wb_fbs_pools_barcode", "barcode"),
     )
+
+
+class ProductMappingModel(WBFbsDistributionBase):
+    """Связь пула 1С с размером карточки WB.
+
+    Ключ — `(seller_id, chrt_id)`: остатки WB пишутся по размеру, и одна и та же
+    номенклатура 1С может быть заведена в нескольких кабинетах. Баркод хранится
+    рядом как то, чем связь была найдена, но ключом расчёта не служит: у размера
+    их может быть несколько.
+    """
+
+    __tablename__ = "product_mappings"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    characteristic: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    barcode: Mapped[str] = mapped_column(String(64), nullable=False)
+    article: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
+    matched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("ix_wb_fbs_mappings_pool", "item_id", "characteristic"),)
+
+
+class PoolSellerShareModel(WBFbsDistributionBase):
+    """Как один физический пул делится между кабинетами.
+
+    Нужна, только когда один баркод заведён в нескольких кабинетах. Делить
+    поровну по умолчанию нельзя: без правила каждый кабинет получил бы весь
+    остаток, и WB пообещали бы кратное количество. Пока правила нет, пул из
+    расчёта исключается и виден оператору как ошибка.
+    """
+
+    __tablename__ = "pool_seller_shares"
+
+    item_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    characteristic: Mapped[str] = mapped_column(String(255), primary_key=True, server_default="")
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    share_bp: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (CheckConstraint("share_bp BETWEEN 0 AND 10000", name="ck_wb_fbs_pool_share"),)

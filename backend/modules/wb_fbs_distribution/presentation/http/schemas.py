@@ -131,3 +131,43 @@ class PoolResponse(BaseModel):
     name: str
     on_hand: int
     available: int
+
+
+class MatchResponse(BaseModel):
+    matched: int
+    catalog_sizes: int
+    pools: int
+
+
+class UnmappedPoolResponse(BaseModel):
+    item_id: str
+    characteristic: str
+    barcode: str
+    name: str
+    on_hand: int
+
+
+class SharedPoolResponse(BaseModel):
+    item_id: str
+    characteristic: str
+    barcode: str
+    name: str
+    on_hand: int
+    sellers: list[uuid.UUID]
+    shares: dict[uuid.UUID, int]
+    rule_ready: bool
+
+
+class MappingStateResponse(BaseModel):
+    pools: int
+    mapped_pools: int
+    shared_without_rule: int
+    unmapped: list[UnmappedPoolResponse]
+    shared: list[SharedPoolResponse]
+
+
+class PoolShareRequest(BaseModel):
+    item_id: str = Field(min_length=1, max_length=128)
+    characteristic: str = Field(default="", max_length=255)
+    """Пусто — правило снимается, и пул снова считается неразделённым."""
+    shares: dict[uuid.UUID, int] = Field(default_factory=dict)

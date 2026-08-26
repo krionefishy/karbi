@@ -14,6 +14,7 @@ from backend.modules.wb_fbs_distribution.application import (
     DisconnectedSource,
     FbsDistributionEnrollment,
     FbsDistributionService,
+    MappingService,
     MirrorService,
     PlacementService,
     SnapshotService,
@@ -140,6 +141,15 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
     ) -> FbsDistributionService:
         return FbsDistributionService(session, sellers, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_mapping_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        distribution: FbsDistributionRepository,
+    ) -> MappingService:
+        return MappingService(session, sellers, distribution)
 
     @provide(scope=Scope.REQUEST)
     def fbs_snapshot_service(

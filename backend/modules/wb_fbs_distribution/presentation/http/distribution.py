@@ -10,6 +10,9 @@ from backend.modules.wb_fbs_distribution.application import (
     MANUAL,
     FbsDistributionService,
     InvalidPlacementError,
+    InvalidShareError,
+    MappingService,
+    MappingState,
     MirrorService,
     PlacementService,
     QueueEntry,
@@ -23,19 +26,24 @@ from backend.modules.wb_fbs_distribution.infrastructure.onec import SnapshotForm
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     DistributionOverviewResponse,
+    MappingStateResponse,
+    MatchResponse,
     MirrorSyncResponse,
     ModeRequest,
     OfficeRegionRequest,
     OfficeResponse,
     PlacementRequest,
     PoolResponse,
+    PoolShareRequest,
     QueueEntryResponse,
     RegionOrderRequest,
     RegionResponse,
     SettingsRequest,
     SetupResponse,
+    SharedPoolResponse,
     SnapshotHistoryItem,
     SnapshotStateResponse,
+    UnmappedPoolResponse,
     WarehouseResponse,
 )
 
@@ -354,3 +362,73 @@ async def stock_pools(
         )
         for pool in await snapshots.pools(search=search)
     ]
+
+
+def mapping_response(state: MappingState) -> MappingStateResponse:
+    return MappingStateResponse(
+        pools=state.pools,
+        mapped_pools=state.mapped_pools,
+        shared_without_rule=state.shared_without_rule,
+        unmapped=[
+            UnmappedPoolResponse(
+                item_id=pool.item_id,
+                characteristic=pool.characteristic,
+                barcode=pool.barcode,
+                name=pool.name,
+                on_hand=pool.on_hand,
+            )
+            for pool in state.unmapped
+        ],
+        shared=[
+            SharedPoolResponse(
+                item_id=pool.item_id,
+                characteristic=pool.characteristic,
+                barcode=pool.barcode,
+                name=pool.name,
+                on_hand=pool.on_hand,
+                sellers=pool.sellers,
+                shares=pool.shares,
+                rule_ready=pool.rule_ready,
+            )
+            for pool in state.shared
+        ],
+    )
+
+
+@router.get("/mapping", response_model=MappingStateResponse)
+@inject
+async def mapping_state(_: CurrentPrincipal, service: FromDishka[MappingService]) -> MappingStateResponse:
+    """Что сопоставилось с карточками WB, что нет и что делят несколько кабинетов."""
+    return mapping_response(await service.state())
+
+
+@router.post("/sellers/{seller_id}/mapping", response_model=MatchResponse)
+@inject
+async def rematch(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    overview_service: FromDishka[FbsDistributionService],
+    service: FromDishka[MappingService],
+) -> MatchResponse:
+    """Пересобрать связи кабинета по текущему каталогу WB и текущему снимку 1С."""
+    try:
+        await overview_service.seller_overview(seller_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    result = await service.rematch(seller_id)
+    return MatchResponse(matched=result.matched, catalog_sizes=result.catalog_sizes, pools=result.pools)
+
+
+@router.put("/mapping/shares", response_model=MappingStateResponse)
+@inject
+async def set_pool_shares(
+    payload: PoolShareRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[MappingService],
+) -> MappingStateResponse:
+    """Как один физический пул делится между кабинетами."""
+    try:
+        state = await service.set_shares(payload.item_id, payload.characteristic, payload.shares)
+    except InvalidShareError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return mapping_response(state)

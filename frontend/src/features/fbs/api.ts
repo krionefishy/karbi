@@ -1,5 +1,7 @@
 import { apiRequest } from "../../api/http";
 import type {
+  FbsMappingState,
+  FbsMatchResult,
   FbsPool,
   FbsQueueEntry,
   FbsSetup,
@@ -71,3 +73,15 @@ export const getStockHistory = () => apiRequest<FbsSnapshotRecord[]>("/api/v1/wb
 
 export const getPools = (search: string) =>
   apiRequest<FbsPool[]>(`/api/v1/wb/fbs/stock/pools?search=${encodeURIComponent(search)}`);
+
+export const getMapping = () => apiRequest<FbsMappingState>("/api/v1/wb/fbs/mapping");
+
+/** Rebuild this cabinet's links from the current WB catalogue and 1C snapshot. */
+export const rematchSeller = (sellerId: string) =>
+  apiRequest<FbsMatchResult>(`/api/v1/wb/fbs/sellers/${sellerId}/mapping`, { method: "POST" });
+
+export const setPoolShares = (payload: {
+  item_id: string;
+  characteristic: string;
+  shares: Record<string, number>;
+}) => apiRequest<FbsMappingState>("/api/v1/wb/fbs/mapping/shares", { method: "PUT", body: JSON.stringify(payload) });

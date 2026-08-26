@@ -144,6 +144,32 @@ class SellerRepository:
                     collected[chrt_id] = row.article
         return collected
 
+    async def list_barcode_sizes(self, seller_id: uuid.UUID) -> dict[str, tuple[int, str]]:
+        """Barcode → (size id, article) for the seller's live cards.
+
+        The FBS stock method is asked by `chrtId`, but 1C knows a good by its
+        barcode, so the mapping between the two has to start here. One size can
+        carry several barcodes; the same barcode never belongs to two sizes of
+        one seller, and if WB ever returns that, the later one is a data error
+        the caller must see rather than a silent overwrite.
+        """
+        rows = await self.session.scalars(
+            select(ArticleModel).where(ArticleModel.seller_id == seller_id, ArticleModel.state != "archived")
+        )
+        collected: dict[str, tuple[int, str]] = {}
+        for row in rows:
+            for size in row.sizes or []:
+                if not isinstance(size, dict):
+                    continue
+                chrt_id = size.get("chrt_id")
+                if not isinstance(chrt_id, int):
+                    continue
+                for sku in size.get("skus") or []:
+                    barcode = str(sku).strip()
+                    if barcode:
+                        collected.setdefault(barcode, (chrt_id, row.article))
+        return collected
+
     async def upsert_catalog(
         self,
         seller_id: uuid.UUID,

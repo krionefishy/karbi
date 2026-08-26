@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
+import { FbsMappingPanel } from "../components/FbsMappingPanel";
 import { FbsSetupPanel } from "../components/FbsSetupPanel";
 import { FbsStockPanel } from "../components/FbsStockPanel";
 import { ConfirmDialog } from "../components/SellerDialog";
@@ -34,7 +35,7 @@ export function FbsDistributionPage() {
   const [enablingWrite, setEnablingWrite] = useState(false);
   const [formError, setFormError] = useState("");
   const [syncError, setSyncError] = useState("");
-  const [tab, setTab] = useState<"cabinet" | "setup" | "stock">("cabinet");
+  const [tab, setTab] = useState<"cabinet" | "setup" | "stock" | "mapping">("cabinet");
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -148,11 +149,15 @@ export function FbsDistributionPage() {
               <button className={tab === "stock" ? "mode-active" : ""} onClick={() => setTab("stock")}>
                 Остаток 1С
               </button>
+              <button className={tab === "mapping" ? "mode-active" : ""} onClick={() => setTab("mapping")}>
+                Сопоставление
+              </button>
             </span>
           </div>
 
           {tab === "setup" && <FbsSetupPanel />}
           {tab === "stock" && <FbsStockPanel />}
+          {tab === "mapping" && <FbsMappingPanel sellers={sellers} />}
 
           {tab === "cabinet" && (isLoading ? (
             <div className="loading-block">Загружаем кабинеты…</div>

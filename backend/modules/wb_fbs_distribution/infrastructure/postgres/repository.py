@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,8 @@ from backend.modules.wb_fbs_distribution.domain import Region, SellerEnrollment,
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
     DistributionSettingsModel,
     OfficeRegionModel,
+    PoolSellerShareModel,
+    ProductMappingModel,
     RegionModel,
     SellerWarehouseModel,
     StockPoolModel,
@@ -394,3 +396,92 @@ class FbsDistributionRepository:
                 | StockPoolModel.item_id.ilike(pattern)
             )
         return list(await self.session.scalars(statement.limit(limit)))
+
+    # --- сопоставление товаров -------------------------------------------
+
+    async def replace_mappings(
+        self, seller_id: uuid.UUID, rows: Sequence[dict], *, now: datetime | None = None
+    ) -> None:
+        """Переписать связи кабинета целиком.
+
+        Целиком, а не по одной: пропавший баркод должен исчезнуть из связей, а
+        не остаться указывать на размер, которого в каталоге больше нет.
+        """
+        stamp = now or datetime.now(UTC)
+        await self.session.execute(delete(ProductMappingModel).where(ProductMappingModel.seller_id == seller_id))
+        if not rows:
+            return
+        self.session.add_all(
+            [
+                ProductMappingModel(
+                    seller_id=seller_id,
+                    chrt_id=row["chrt_id"],
+                    item_id=row["item_id"],
+                    characteristic=row["characteristic"],
+                    barcode=row["barcode"],
+                    article=row["article"],
+                    matched_at=stamp,
+                )
+                for row in rows
+            ]
+        )
+
+    async def mappings(self, seller_id: uuid.UUID | None = None) -> list[ProductMappingModel]:
+        statement = select(ProductMappingModel)
+        if seller_id is not None:
+            statement = statement.where(ProductMappingModel.seller_id == seller_id)
+        return list(await self.session.scalars(statement.order_by(ProductMappingModel.item_id)))
+
+    async def mapped_pool_keys(self) -> set[tuple[str, str]]:
+        rows = await self.session.execute(
+            select(ProductMappingModel.item_id, ProductMappingModel.characteristic).distinct()
+        )
+        return {(item_id, characteristic) for item_id, characteristic in rows}
+
+    async def pools_by_key(self, keys: Sequence[tuple[str, str]]) -> list[StockPoolModel]:
+        if not keys:
+            return []
+        condition = tuple_(StockPoolModel.item_id, StockPoolModel.characteristic).in_(keys)
+        return list(await self.session.scalars(select(StockPoolModel).where(condition)))
+
+    async def unmapped_pools(self, *, limit: int = 200) -> list[StockPoolModel]:
+        """Пулы, которым не нашлось ни одного размера ни в одном кабинете."""
+        mapped = select(ProductMappingModel.item_id, ProductMappingModel.characteristic)
+        condition = tuple_(StockPoolModel.item_id, StockPoolModel.characteristic).not_in(mapped)
+        return list(
+            await self.session.scalars(
+                select(StockPoolModel).where(condition).order_by(StockPoolModel.name).limit(limit)
+            )
+        )
+
+    async def pool_seller_counts(self) -> dict[tuple[str, str], int]:
+        """Сколько кабинетов расходуют каждый пул."""
+        rows = await self.session.execute(
+            select(
+                ProductMappingModel.item_id,
+                ProductMappingModel.characteristic,
+                func.count(ProductMappingModel.seller_id.distinct()),
+            ).group_by(ProductMappingModel.item_id, ProductMappingModel.characteristic)
+        )
+        return {(item_id, characteristic): count for item_id, characteristic, count in rows}
+
+    async def pool_shares(self) -> dict[tuple[str, str], dict[uuid.UUID, int]]:
+        shares: dict[tuple[str, str], dict[uuid.UUID, int]] = {}
+        for row in await self.session.scalars(select(PoolSellerShareModel)):
+            shares.setdefault((row.item_id, row.characteristic), {})[row.seller_id] = row.share_bp
+        return shares
+
+    async def save_pool_shares(self, item_id: str, characteristic: str, shares: dict[uuid.UUID, int]) -> None:
+        await self.session.execute(
+            delete(PoolSellerShareModel).where(
+                (PoolSellerShareModel.item_id == item_id) & (PoolSellerShareModel.characteristic == characteristic)
+            )
+        )
+        self.session.add_all(
+            [
+                PoolSellerShareModel(
+                    item_id=item_id, characteristic=characteristic, seller_id=seller_id, share_bp=share
+                )
+                for seller_id, share in shares.items()
+            ]
+        )

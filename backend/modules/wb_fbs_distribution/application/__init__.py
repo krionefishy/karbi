@@ -4,6 +4,14 @@ from backend.modules.wb_fbs_distribution.application.enrollment import (
     TITLE,
     FbsDistributionEnrollment,
 )
+from backend.modules.wb_fbs_distribution.application.mapping import (
+    InvalidShareError,
+    MappingService,
+    MappingState,
+    MatchResult,
+    SharedPool,
+    UnmappedPool,
+)
 from backend.modules.wb_fbs_distribution.application.mirror import MirrorResult, MirrorService
 from backend.modules.wb_fbs_distribution.application.overview import (
     DistributionCatalogOverview,
@@ -45,6 +53,10 @@ __all__ = [
     "FbsDistributionEnrollment",
     "FbsDistributionService",
     "InvalidPlacementError",
+    "InvalidShareError",
+    "MappingService",
+    "MappingState",
+    "MatchResult",
     "MirrorResult",
     "MirrorService",
     "OfficeRow",
@@ -53,10 +65,12 @@ __all__ = [
     "PoolRow",
     "QueueEntry",
     "SellerOverview",
+    "SharedPool",
     "SnapshotRejected",
     "SnapshotService",
     "SnapshotState",
     "StockSnapshotSource",
     "SetupOverview",
+    "UnmappedPool",
     "WarehouseRow",
 ]

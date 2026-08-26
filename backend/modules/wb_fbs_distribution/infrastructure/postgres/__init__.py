@@ -1,6 +1,8 @@
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
     DistributionSettingsModel,
     OfficeRegionModel,
+    PoolSellerShareModel,
+    ProductMappingModel,
     RegionModel,
     SellerWarehouseModel,
     StockPoolModel,
@@ -15,6 +17,8 @@ __all__ = [
     "DistributionSettingsModel",
     "FbsDistributionRepository",
     "OfficeRegionModel",
+    "PoolSellerShareModel",
+    "ProductMappingModel",
     "RegionModel",
     "SellerWarehouseModel",
     "StockPoolModel",
