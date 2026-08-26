@@ -1,7 +1,10 @@
 import { apiRequest } from "../../api/http";
 import type {
+  FbsPool,
   FbsQueueEntry,
   FbsSetup,
+  FbsSnapshotRecord,
+  FbsStockState,
   MirrorSyncResult,
   SellerDistributionOverview,
 } from "./types";
@@ -50,3 +53,21 @@ export const setPlacement = (
     method: "PUT",
     body: JSON.stringify(payload),
   });
+
+export const getStockState = () => apiRequest<FbsStockState>("/api/v1/wb/fbs/stock");
+
+/**
+ * Абсолютный снимок остатков целиком: CSV или JSON текстом. Тем же телом пойдёт
+ * будущий обмен с 1С, поэтому здесь нет ни формы, ни обёртки.
+ */
+export const uploadStock = (body: string) =>
+  apiRequest<FbsStockState>("/api/v1/wb/fbs/stock", {
+    method: "POST",
+    body,
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+
+export const getStockHistory = () => apiRequest<FbsSnapshotRecord[]>("/api/v1/wb/fbs/stock/history");
+
+export const getPools = (search: string) =>
+  apiRequest<FbsPool[]>(`/api/v1/wb/fbs/stock/pools?search=${encodeURIComponent(search)}`);

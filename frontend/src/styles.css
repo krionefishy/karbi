@@ -407,6 +407,12 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .fbs-office-head > *, .fbs-office-row > * { padding: 0 16px; }
 .fbs-office-row select { width: 100%; height: 32px; padding: 0 8px; background: var(--paper); border: 1px solid var(--line); }
 
+.fbs-pool-table { background: var(--surface); border: 1px solid var(--line); overflow-x: auto; }
+.fbs-pool-head, .fbs-pool-row { display: grid; grid-template-columns: minmax(240px, 1fr) 160px 180px 120px 120px; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); }
+.fbs-pool-row:last-child { border-bottom: 0; }
+.fbs-pool-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
+.fbs-pool-head > *, .fbs-pool-row > * { padding: 0 16px; }
+
 .fbs-queue { margin: 0; padding: 8px 16px; list-style: none; background: var(--surface); border: 1px solid var(--line); }
 .fbs-queue li { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .fbs-queue li:last-child { border-bottom: 0; }

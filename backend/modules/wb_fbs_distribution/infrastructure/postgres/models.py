@@ -151,3 +151,54 @@ class DistributionSettingsModel(WBFbsDistributionBase):
         CheckConstraint("reserve_units >= 0", name="ck_wb_fbs_settings_reserve"),
         CheckConstraint("priority_regions >= 1", name="ck_wb_fbs_settings_priority"),
     )
+
+
+class StockSnapshotModel(WBFbsDistributionBase):
+    """Журнал принятых и отклонённых выгрузок 1С.
+
+    Отклонённые тоже хранятся: «сегодня расчёт не менялся» и «сегодня приехал
+    битый файл» — разные события, и оператор должен видеть второе.
+    """
+
+    __tablename__ = "stock_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Когда данные сформировала 1С, а не когда мы их получили: устаревание
+    # считается от первого.
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lines: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('accepted', 'rejected')", name="ck_wb_fbs_snapshot_status"),
+        Index("ix_wb_fbs_snapshots_received", "received_at"),
+    )
+
+
+class StockPoolModel(WBFbsDistributionBase):
+    """Физический пул одной номенклатуры 1С.
+
+    Ключ — номенклатура и характеристика: у товара с размерами каждый размер
+    лежит и продаётся отдельно. Баркод хранится рядом, потому что именно им пул
+    потом сопоставляется с размером карточки WB.
+    """
+
+    __tablename__ = "stock_pools"
+
+    item_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    characteristic: Mapped[str] = mapped_column(String(255), primary_key=True, server_default="")
+    barcode: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
+    name: Mapped[str] = mapped_column(String(512), nullable=False, server_default="")
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Снимок, который последним назвал это число. Пул, которого в свежем снимке
+    # не было, обнуляется, но строка остаётся: на ней держится сопоставление.
+    snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("quantity >= 0", name="ck_wb_fbs_pool_quantity"),
+        Index("ix_wb_fbs_pools_barcode", "barcode"),
+    )

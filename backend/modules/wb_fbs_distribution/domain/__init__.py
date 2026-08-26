@@ -11,6 +11,11 @@ from backend.modules.wb_fbs_distribution.domain.regions import (
     priority_order,
     shares_are_whole,
 )
+from backend.modules.wb_fbs_distribution.domain.stock import (
+    StockLine,
+    StockSnapshot,
+    available_units,
+)
 
 __all__ = [
     "BASIS_POINTS",
@@ -19,7 +24,10 @@ __all__ = [
     "MODE_WRITE",
     "Region",
     "SellerEnrollment",
+    "StockLine",
+    "StockSnapshot",
     "WarehouseSlot",
+    "available_units",
     "priority_order",
     "shares_are_whole",
 ]

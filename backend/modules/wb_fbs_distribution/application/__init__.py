@@ -19,11 +19,28 @@ from backend.modules.wb_fbs_distribution.application.placement import (
     QueueEntry,
     SetupOverview,
 )
+from backend.modules.wb_fbs_distribution.application.snapshots import (
+    ACCEPTED,
+    DISCONNECTED,
+    MANUAL,
+    REJECTED,
+    DisconnectedSource,
+    PoolRow,
+    SnapshotRejected,
+    SnapshotService,
+    SnapshotState,
+    StockSnapshotSource,
+)
 
 __all__ = [
+    "ACCEPTED",
     "AUTOMATION_ID",
+    "DISCONNECTED",
+    "MANUAL",
+    "REJECTED",
     "DESCRIPTION",
     "TITLE",
+    "DisconnectedSource",
     "DistributionCatalogOverview",
     "FbsDistributionEnrollment",
     "FbsDistributionService",
@@ -33,8 +50,13 @@ __all__ = [
     "OfficeRow",
     "PlacementService",
     "PlacementSettings",
+    "PoolRow",
     "QueueEntry",
     "SellerOverview",
+    "SnapshotRejected",
+    "SnapshotService",
+    "SnapshotState",
+    "StockSnapshotSource",
     "SetupOverview",
     "WarehouseRow",
 ]

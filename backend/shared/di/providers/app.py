@@ -11,10 +11,13 @@ from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_fbs_distribution.application import (
+    DisconnectedSource,
     FbsDistributionEnrollment,
     FbsDistributionService,
     MirrorService,
     PlacementService,
+    SnapshotService,
+    StockSnapshotSource,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, marketplace_throttle
@@ -47,6 +50,16 @@ class AppProvider(Provider):
         return CredentialCipher(
             settings.security.credential_encryption_keys, settings.security.credential_fingerprint_key
         )
+
+    @provide(scope=Scope.APP)
+    def fbs_stock_source(self) -> StockSnapshotSource:
+        """Источник остатка 1С.
+
+        Обмена ещё нет, поэтому стоит заглушка: она честно отвечает «нечего
+        взять», автоматизация не считает распределение, а оператор пока грузит
+        снимок файлом. Появится обмен — здесь поменяется одна строка.
+        """
+        return DisconnectedSource()
 
     @provide(scope=Scope.APP)
     def fbs_marketplace_client(self, settings: Settings, redis: RedisClient) -> WBFbsMarketplaceClient:
@@ -127,6 +140,14 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
     ) -> FbsDistributionService:
         return FbsDistributionService(session, sellers, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_snapshot_service(
+        self, session: AsyncSession, distribution: FbsDistributionRepository, settings: Settings
+    ) -> SnapshotService:
+        return SnapshotService(
+            session, distribution, max_age_minutes=settings.fbs_distribution.snapshot_max_age_minutes
+        )
 
     @provide(scope=Scope.REQUEST)
     def fbs_placement_service(self, session: AsyncSession, distribution: FbsDistributionRepository) -> PlacementService:

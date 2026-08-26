@@ -97,3 +97,37 @@ class DistributionOverviewResponse(BaseModel):
 class MirrorSyncResponse(BaseModel):
     offices: int
     warehouses: int
+
+
+class SnapshotStateResponse(BaseModel):
+    """Состояние остатка 1С: чем именно сейчас можно считать."""
+
+    snapshot_id: uuid.UUID | None
+    source: str
+    generated_at: str | None
+    received_at: str | None
+    lines: int
+    stale: bool
+    pools: int
+    on_hand_total: int
+    available_total: int
+    reserve_units: int
+
+
+class SnapshotHistoryItem(BaseModel):
+    id: uuid.UUID
+    source: str
+    generated_at: str
+    received_at: str
+    lines: int
+    status: str
+    error: str | None
+
+
+class PoolResponse(BaseModel):
+    item_id: str
+    characteristic: str
+    barcode: str
+    name: str
+    on_hand: int
+    available: int

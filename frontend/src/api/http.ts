@@ -26,7 +26,9 @@ export function setAccessToken(token: string | null) {
 async function send(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  if (init?.body) {
+  // JSON по умолчанию, но не поверх явно заданного: выгрузка 1С уезжает
+  // текстом, и подменять ей тип нельзя.
+  if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (accessToken) {

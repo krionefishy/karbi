@@ -67,3 +67,35 @@ export interface FbsQueueEntry {
   region_code: string | null;
   region_title: string;
 }
+
+export interface FbsStockState {
+  snapshot_id: string | null;
+  source: string;
+  generated_at: string | null;
+  received_at: string | null;
+  lines: number;
+  stale: boolean;
+  pools: number;
+  on_hand_total: number;
+  available_total: number;
+  reserve_units: number;
+}
+
+export interface FbsSnapshotRecord {
+  id: string;
+  source: string;
+  generated_at: string;
+  received_at: string;
+  lines: number;
+  status: "accepted" | "rejected";
+  error: string | null;
+}
+
+export interface FbsPool {
+  item_id: string;
+  characteristic: string;
+  barcode: string;
+  name: string;
+  on_hand: number;
+  available: number;
+}

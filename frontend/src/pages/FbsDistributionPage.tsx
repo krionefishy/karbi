@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { FbsSetupPanel } from "../components/FbsSetupPanel";
+import { FbsStockPanel } from "../components/FbsStockPanel";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
 import { getQueue, getSellerOverview, setPlacement, setWriteEnabled, syncMirror } from "../features/fbs/api";
@@ -33,7 +34,7 @@ export function FbsDistributionPage() {
   const [enablingWrite, setEnablingWrite] = useState(false);
   const [formError, setFormError] = useState("");
   const [syncError, setSyncError] = useState("");
-  const [tab, setTab] = useState<"cabinet" | "setup">("cabinet");
+  const [tab, setTab] = useState<"cabinet" | "setup" | "stock">("cabinet");
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -144,10 +145,14 @@ export function FbsDistributionPage() {
               <button className={tab === "setup" ? "mode-active" : ""} onClick={() => setTab("setup")}>
                 Схема распределения
               </button>
+              <button className={tab === "stock" ? "mode-active" : ""} onClick={() => setTab("stock")}>
+                Остаток 1С
+              </button>
             </span>
           </div>
 
           {tab === "setup" && <FbsSetupPanel />}
+          {tab === "stock" && <FbsStockPanel />}
 
           {tab === "cabinet" && (isLoading ? (
             <div className="loading-block">Загружаем кабинеты…</div>

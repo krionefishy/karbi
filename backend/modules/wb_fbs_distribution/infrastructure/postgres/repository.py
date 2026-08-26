@@ -6,12 +6,14 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_fbs_distribution.domain import Region, SellerEnrollment
+from backend.modules.wb_fbs_distribution.domain import Region, SellerEnrollment, StockLine
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
     DistributionSettingsModel,
     OfficeRegionModel,
     RegionModel,
     SellerWarehouseModel,
+    StockPoolModel,
+    StockSnapshotModel,
     TrackedSellerModel,
     WBOfficeModel,
 )
@@ -278,3 +280,117 @@ class FbsDistributionRepository:
             )
         )
         return await self.settings()
+
+    # --- снимки 1С и пулы -------------------------------------------------
+
+    async def record_snapshot(
+        self,
+        *,
+        source: str,
+        generated_at: datetime,
+        received_at: datetime,
+        lines: int,
+        status: str,
+        error: str | None,
+    ) -> uuid.UUID:
+        snapshot_id = uuid.uuid4()
+        self.session.add(
+            StockSnapshotModel(
+                id=snapshot_id,
+                source=source,
+                generated_at=generated_at,
+                received_at=received_at,
+                lines=lines,
+                status=status,
+                error=error,
+            )
+        )
+        await self.session.flush()
+        return snapshot_id
+
+    async def latest_snapshot(self) -> StockSnapshotModel | None:
+        """Последний принятый снимок. Отклонённые в расчёт не идут."""
+        return await self.session.scalar(
+            select(StockSnapshotModel)
+            .where(StockSnapshotModel.status == "accepted")
+            .order_by(StockSnapshotModel.received_at.desc())
+            .limit(1)
+        )
+
+    async def snapshot_history(self, limit: int = 20) -> list[StockSnapshotModel]:
+        return list(
+            await self.session.scalars(
+                select(StockSnapshotModel).order_by(StockSnapshotModel.received_at.desc()).limit(limit)
+            )
+        )
+
+    async def replace_pools(
+        self, lines: Sequence[StockLine], *, snapshot_id: uuid.UUID, now: datetime | None = None
+    ) -> None:
+        """Привести пулы к абсолютному снимку.
+
+        Пул, которого в снимке нет, обнуляется, а не удаляется: в 1С товара
+        больше нет, значит на WB его должно стать ноль, но строка держит на себе
+        сопоставление с карточкой, и терять его при каждой пропаже нельзя.
+        """
+        stamp = now or datetime.now(UTC)
+        if lines:
+            rows = [
+                {
+                    "item_id": line.item_id,
+                    "characteristic": line.characteristic,
+                    "barcode": line.barcode,
+                    "name": line.name,
+                    "quantity": line.quantity,
+                    "snapshot_id": snapshot_id,
+                    "updated_at": stamp,
+                }
+                for line in lines
+            ]
+            statement = insert(StockPoolModel).values(rows)
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["item_id", "characteristic"],
+                    set_={
+                        column: statement.excluded[column]
+                        for column in ("barcode", "name", "quantity", "snapshot_id", "updated_at")
+                    },
+                )
+            )
+        await self.session.execute(
+            update(StockPoolModel)
+            .where(StockPoolModel.snapshot_id.is_distinct_from(snapshot_id))
+            .values(quantity=0, snapshot_id=snapshot_id, updated_at=stamp)
+        )
+
+    async def pool_totals(self, *, reserve_units: int) -> tuple[int, int, int]:
+        """Сколько пулов, сколько всего единиц и сколько из них раздаётся.
+
+        Доступное считается тем же выражением, что и в домене: сумму по всей
+        номенклатуре незачем тянуть в питон построчно.
+        """
+        available = func.least(
+            StockPoolModel.quantity,
+            func.greatest(reserve_units, StockPoolModel.quantity - reserve_units),
+        )
+        row = (
+            await self.session.execute(
+                select(
+                    func.count(),
+                    func.coalesce(func.sum(StockPoolModel.quantity), 0),
+                    func.coalesce(func.sum(available), 0),
+                )
+            )
+        ).one()
+        return int(row[0]), int(row[1]), int(row[2])
+
+    async def pools(self, *, limit: int = 200, search: str = "") -> list[StockPoolModel]:
+        statement = select(StockPoolModel).order_by(StockPoolModel.name, StockPoolModel.characteristic)
+        if search:
+            pattern = f"%{search.strip()}%"
+            statement = statement.where(
+                StockPoolModel.name.ilike(pattern)
+                | StockPoolModel.barcode.ilike(pattern)
+                | StockPoolModel.item_id.ilike(pattern)
+            )
+        return list(await self.session.scalars(statement.limit(limit)))

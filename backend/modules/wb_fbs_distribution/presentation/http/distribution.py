@@ -1,12 +1,13 @@
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_fbs_distribution.application import (
+    MANUAL,
     FbsDistributionService,
     InvalidPlacementError,
     MirrorService,
@@ -14,7 +15,12 @@ from backend.modules.wb_fbs_distribution.application import (
     QueueEntry,
     SellerOverview,
     SetupOverview,
+    SnapshotRejected,
+    SnapshotService,
+    SnapshotState,
 )
+from backend.modules.wb_fbs_distribution.infrastructure.onec import SnapshotFormatError, parse_snapshot
+from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     DistributionOverviewResponse,
     MirrorSyncResponse,
@@ -22,11 +28,14 @@ from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     OfficeRegionRequest,
     OfficeResponse,
     PlacementRequest,
+    PoolResponse,
     QueueEntryResponse,
     RegionOrderRequest,
     RegionResponse,
     SettingsRequest,
     SetupResponse,
+    SnapshotHistoryItem,
+    SnapshotStateResponse,
     WarehouseResponse,
 )
 
@@ -104,7 +113,7 @@ def queue_response(entries: list[QueueEntry]) -> list[QueueEntryResponse]:
 
 
 def invalid(error: InvalidPlacementError) -> HTTPException:
-    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error))
 
 
 @router.get("/sellers/{seller_id}/overview", response_model=DistributionOverviewResponse)
@@ -250,3 +259,98 @@ async def set_placement(
     except InvalidPlacementError as error:
         raise invalid(error) from error
     return queue_response(entries)
+
+
+def snapshot_response(state: SnapshotState, reserve_units: int) -> SnapshotStateResponse:
+    return SnapshotStateResponse(
+        snapshot_id=state.snapshot_id,
+        source=state.source,
+        generated_at=state.generated_at.isoformat() if state.generated_at else None,
+        received_at=state.received_at.isoformat() if state.received_at else None,
+        lines=state.lines,
+        stale=state.stale,
+        pools=state.pools,
+        on_hand_total=state.on_hand_total,
+        available_total=state.available_total,
+        reserve_units=reserve_units,
+    )
+
+
+@router.get("/stock", response_model=SnapshotStateResponse)
+@inject
+async def stock_state(
+    _: CurrentPrincipal,
+    snapshots: FromDishka[SnapshotService],
+    placement: FromDishka[PlacementService],
+) -> SnapshotStateResponse:
+    """Чем сейчас можно считать: какой снимок принят и насколько он свежий."""
+    setup = await placement.setup()
+    return snapshot_response(await snapshots.state(), setup.settings.reserve_units)
+
+
+@router.post("/stock", response_model=SnapshotStateResponse)
+@inject
+async def upload_stock(
+    request: Request,
+    _: CurrentPrincipal,
+    snapshots: FromDishka[SnapshotService],
+    placement: FromDishka[PlacementService],
+) -> SnapshotStateResponse:
+    """Принять абсолютный снимок остатков 1С: тело запроса — CSV или JSON.
+
+    Пока обмена с 1С нет, снимок грузит оператор файлом. Тем же телом сможет
+    ходить и будущий адаптер: сырое тело, а не форма, чтобы у обмена с 1С не
+    было лишнего обёртывания.
+    """
+    payload = await request.body()
+    try:
+        snapshot = parse_snapshot(payload)
+    except SnapshotFormatError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    try:
+        state = await snapshots.accept(snapshot, source=MANUAL)
+    except SnapshotRejected as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    setup = await placement.setup()
+    return snapshot_response(state, setup.settings.reserve_units)
+
+
+@router.get("/stock/history", response_model=list[SnapshotHistoryItem])
+@inject
+async def stock_history(
+    _: CurrentPrincipal,
+    repository: FromDishka[FbsDistributionRepository],
+) -> list[SnapshotHistoryItem]:
+    """Журнал выгрузок, включая отклонённые: битый файл — тоже событие."""
+    return [
+        SnapshotHistoryItem(
+            id=row.id,
+            source=row.source,
+            generated_at=row.generated_at.isoformat(),
+            received_at=row.received_at.isoformat(),
+            lines=row.lines,
+            status=row.status,
+            error=row.error,
+        )
+        for row in await repository.snapshot_history()
+    ]
+
+
+@router.get("/stock/pools", response_model=list[PoolResponse])
+@inject
+async def stock_pools(
+    _: CurrentPrincipal,
+    snapshots: FromDishka[SnapshotService],
+    search: str = Query("", max_length=128),
+) -> list[PoolResponse]:
+    return [
+        PoolResponse(
+            item_id=pool.item_id,
+            characteristic=pool.characteristic,
+            barcode=pool.barcode,
+            name=pool.name,
+            on_hand=pool.on_hand,
+            available=pool.available,
+        )
+        for pool in await snapshots.pools(search=search)
+    ]
