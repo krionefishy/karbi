@@ -5,6 +5,7 @@ from backend.modules.wb_core.infrastructure.wb.client import (
     WBPermanentError,
     WBTemporaryError,
 )
+from backend.modules.wb_core.infrastructure.wb.json_client import ATTEMPTS, WBJsonClient
 from backend.modules.wb_core.infrastructure.wb.throttle import (
     WBBudget,
     WBThrottle,
@@ -16,10 +17,12 @@ from backend.modules.wb_core.infrastructure.wb.throttle import (
 )
 
 __all__ = [
+    "ATTEMPTS",
     "CatalogCard",
     "CatalogSnapshot",
     "WBBudget",
     "WBContentClient",
+    "WBJsonClient",
     "WBPermanentError",
     "WBTemporaryError",
     "WBThrottle",

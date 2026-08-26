@@ -3,8 +3,7 @@ from typing import Any
 
 import httpx
 
-from backend.modules.wb_core.infrastructure.wb import WBPermanentError
-from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
+from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 ANALYTICS_BUCKET = "analytics"
 # WB accepts this page size; every seller we have fits in a single page.

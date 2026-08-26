@@ -5,22 +5,21 @@ from typing import Any
 
 import httpx
 
-from backend.modules.wb_core.infrastructure.wb import (
-    WBPermanentError,
-    WBTemporaryError,
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb.observability import read_rate_limit
+from backend.modules.wb_core.infrastructure.wb.throttle import (
     WBThrottle,
     WBThrottleTimeout,
     host_bucket,
     key_bucket,
     scope_for_key,
 )
-from backend.modules.wb_core.infrastructure.wb.observability import read_rate_limit
 
 ATTEMPTS = 5
 
 
 class WBJsonClient:
-    """Shared request loop for the JSON APIs this automation reads.
+    """Shared request loop for the JSON APIs the automations call.
 
     Same rules as the catalog and feedback clients: pace from the
     `X-Ratelimit-*` headers of every response, wait exactly as long as WB asked,

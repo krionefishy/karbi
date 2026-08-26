@@ -6,14 +6,13 @@ import httpx
 import pytest
 import respx
 
-from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb import ATTEMPTS, WBPermanentError, WBTemporaryError
 from backend.modules.wb_turnover.infrastructure.wb import (
     PAGE_LIMIT,
     WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.modules.wb_turnover.infrastructure.wb.base import ATTEMPTS
 
 STATISTICS = "https://statistics-api.wildberries.ru"
 MARKETPLACE = "https://marketplace-api.wildberries.ru"
@@ -173,7 +172,7 @@ async def test_an_unexpected_report_shape_is_permanent() -> None:
 @respx.mock
 async def test_a_key_without_the_analytics_category_says_so(monkeypatch) -> None:
     """«Неверный ключ» sends someone to reissue a key that is in fact fine."""
-    monkeypatch.setattr("backend.modules.wb_turnover.infrastructure.wb.base.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
     respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(403, json={}))
 
     with pytest.raises(WBPermanentError, match="Аналитика"):
@@ -182,7 +181,7 @@ async def test_a_key_without_the_analytics_category_says_so(monkeypatch) -> None
 
 @respx.mock
 async def test_the_report_is_retried_while_wb_is_unwell(monkeypatch) -> None:
-    monkeypatch.setattr("backend.modules.wb_turnover.infrastructure.wb.base.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
     route = respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(429, json={}))
 
     with pytest.raises(WBTemporaryError):
@@ -193,7 +192,7 @@ async def test_the_report_is_retried_while_wb_is_unwell(monkeypatch) -> None:
 @respx.mock
 async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary(monkeypatch) -> None:
     # The retry backoff is the point of the loop, not of this test.
-    monkeypatch.setattr("backend.modules.wb_turnover.infrastructure.wb.base.asyncio.sleep", AsyncMock())
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
     respx.get(f"{STATISTICS}/api/v1/supplier/orders").mock(return_value=httpx.Response(401, json={}))
     with pytest.raises(WBPermanentError, match="Статистика"):
         await WBStatisticsClient().orders(KEY, datetime(2026, 8, 6))

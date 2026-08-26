@@ -4,8 +4,7 @@ from typing import Any
 
 import httpx
 
-from backend.modules.wb_core.infrastructure.wb import WBPermanentError
-from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
+from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 STATISTICS_BUCKET = "statistics"
 # WB truncates a large orders response instead of failing it, so the method is

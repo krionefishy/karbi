@@ -5,7 +5,6 @@ from backend.modules.wb_turnover.infrastructure.wb.analytics import (
     FBOStockRow,
     WBAnalyticsClient,
 )
-from backend.modules.wb_turnover.infrastructure.wb.base import WBJsonClient
 from backend.modules.wb_turnover.infrastructure.wb.marketplace import (
     CHRT_CHUNK,
     MARKETPLACE_BUCKET,
@@ -28,7 +27,6 @@ __all__ = [
     "FBOStockRow",
     "OrderRow",
     "WBAnalyticsClient",
-    "WBJsonClient",
     "WBMarketplaceClient",
     "WBStatisticsClient",
     "Warehouse",
