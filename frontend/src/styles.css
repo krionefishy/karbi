@@ -405,3 +405,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .admin-badge { padding: 4px 9px; color: var(--muted); background: var(--paper); border: 1px solid var(--line); font: 500 10px/1.2 "JetBrains Mono", monospace; letter-spacing: .09em; text-transform: uppercase; }
 .section-switch { display: inline-flex; gap: 7px; align-items: center; height: 38px; padding: 0 13px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); font-size: 13px; white-space: nowrap; }
 .section-switch:hover { color: var(--text); background: var(--paper); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinning { animation: spin 1.1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spinning { animation: none; } }

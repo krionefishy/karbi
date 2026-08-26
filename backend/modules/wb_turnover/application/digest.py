@@ -56,10 +56,13 @@ class DigestService:
         rows = await self.turnover.turnover_on(seller_id, day)
         # An article already at zero belongs in the digest more than any other:
         # losing the alert the moment the shelf empties would be exactly wrong.
+        # But only if it was actually selling — «нет остатка и не заказывали ни
+        # разу за две недели» is the assortment tail, not news. For one seller
+        # that split was 28 against 927.
         alerting = [
             row
             for row in rows
-            if row.status == STATUS_NO_STOCK
+            if (row.status == STATUS_NO_STOCK and row.orders_count > 0)
             or (
                 row.status == STATUS_OK
                 and row.days_of_cover is not None

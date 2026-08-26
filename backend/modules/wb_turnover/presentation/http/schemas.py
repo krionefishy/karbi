@@ -29,3 +29,13 @@ class TurnoverArticlesResponse(BaseModel):
 class InviteLinkResponse(BaseModel):
     url: str
     expires_at: str
+
+
+class RefreshResponse(BaseModel):
+    """State of the «обновить данные» request the interface polls."""
+
+    status: str
+    in_progress: bool
+    requested_at: str
+    finished_at: str | None
+    error: str | None

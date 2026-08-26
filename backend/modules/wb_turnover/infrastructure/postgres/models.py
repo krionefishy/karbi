@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -181,3 +182,34 @@ class NotificationLogModel(WBTurnoverBase):
     articles_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     message_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class RefreshRequestModel(WBTurnoverBase):
+    """A «обновить сейчас» press, waiting for the worker to pick it up.
+
+    The API never talks to Wildberries itself — it only records the wish. One
+    active request per seller: pressing the button twice must not double the
+    load on a rate-limited API.
+    """
+
+    __tablename__ = "refresh_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('queued', 'running', 'success', 'error')", name="ck_wb_turnover_refresh_status"),
+        Index("ix_wb_turnover_refresh_seller", "seller_id", "requested_at"),
+        Index(
+            "uq_wb_turnover_refresh_active",
+            "seller_id",
+            unique=True,
+            postgresql_where=text("status IN ('queued', 'running')"),
+        ),
+    )

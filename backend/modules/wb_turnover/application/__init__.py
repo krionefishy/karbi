@@ -10,6 +10,7 @@ from backend.modules.wb_turnover.application.enrollment import (
 from backend.modules.wb_turnover.application.overview import (
     ArticleTurnover,
     NotificationBotMissingError,
+    RefreshRequest,
     TurnoverOverview,
     TurnoverService,
     TurnoverSnapshot,
@@ -25,6 +26,7 @@ __all__ = [
     "DigestResult",
     "DigestService",
     "NotificationBotMissingError",
+    "RefreshRequest",
     "TurnoverEnrollment",
     "TurnoverOverview",
     "TurnoverSnapshot",

@@ -96,6 +96,64 @@ class TurnoverWorker:
             await self.calculate(now.date())
         if self.is_due(now, self.turnover.digest_hour, self.turnover.digest_minute):
             await self.send_digests(now.date())
+        await self.serve_refresh_requests(now)
+
+    async def serve_refresh_requests(self, now: datetime) -> None:
+        """Collect out of schedule for whoever pressed the button.
+
+        The manual snapshot lands in the slot the schedule is currently in, so
+        it replaces that point of the day instead of adding an extra one and
+        skewing the average. No digest is sent: that stays a once-a-day thing.
+        """
+        async with self.database.session() as session:
+            requests = [
+                (request.id, request.seller_id) for request in await TurnoverRepository(session).claim_refreshes()
+            ]
+            await session.commit()
+        if not requests:
+            return
+        due = [slot for slot, hour in enumerate(self.turnover.stock_slot_hours) if self.is_due(now, hour, 0)]
+        slot = due[-1] if due else 0
+        for request_id, seller_id in requests:
+            error: str | None = None
+            try:
+                async with self.database.session() as session:
+                    await self._collection(session).collect_stocks(seller_id, now.date(), slot)
+                async with self.database.session() as session:
+                    await self._collection(session).collect_orders(
+                        seller_id,
+                        now.astimezone(UTC),
+                        backfill_days=self.turnover.orders_backfill_days,
+                        overlap_hours=self.turnover.orders_overlap_hours,
+                    )
+                async with self.database.session() as session:
+                    await CalculationService(
+                        session,
+                        SellerRepository(session),
+                        TurnoverRepository(session),
+                        window_days=self.turnover.orders_window_days,
+                    ).calculate(seller_id, now.date())
+            except (WBPermanentError, WBTemporaryError) as failure:
+                error = str(failure)
+                self.logger.warning("turnover_refresh_failed", seller_id=str(seller_id), error=str(failure))
+            except Exception as failure:
+                error = str(failure)
+                self.logger.exception("turnover_refresh_crashed", seller_id=str(seller_id))
+            async with self.database.session() as session:
+                await TurnoverRepository(session).finish_refresh(request_id, error)
+                await session.commit()
+            self.logger.info("turnover_refresh_served", seller_id=str(seller_id), failed=bool(error))
+
+    def _collection(self, session) -> CollectionService:
+        return CollectionService(
+            session,
+            SellerRepository(session),
+            TurnoverRepository(session),
+            self.cipher,
+            self.statistics,
+            self.analytics,
+            self.marketplace,
+        )
 
     @staticmethod
     def is_due(now: datetime, hour: int, minute: int) -> bool:
@@ -140,7 +198,12 @@ class TurnoverWorker:
             try:
                 async with self.database.session() as session:
                     turnover = TurnoverRepository(session)
-                    service = CalculationService(session, turnover, window_days=self.turnover.orders_window_days)
+                    service = CalculationService(
+                        session,
+                        SellerRepository(session),
+                        turnover,
+                        window_days=self.turnover.orders_window_days,
+                    )
                     rows = await service.calculate(seller_id, day)
                 self.logger.info("turnover_calculated", seller_id=str(seller_id), articles=len(rows))
             except Exception as failure:

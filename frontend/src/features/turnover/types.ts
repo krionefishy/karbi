@@ -29,3 +29,11 @@ export interface InviteLink {
   url: string;
   expires_at: string;
 }
+
+export interface RefreshState {
+  status: "queued" | "running" | "success" | "error";
+  in_progress: boolean;
+  requested_at: string;
+  finished_at: string | null;
+  error: string | null;
+}

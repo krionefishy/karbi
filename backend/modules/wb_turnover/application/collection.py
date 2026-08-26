@@ -237,9 +237,14 @@ class CollectionService:
         return moment if moment.tzinfo is not None else moment.replace(tzinfo=MOSCOW)
 
     async def _known_articles(self, seller_id: uuid.UUID) -> set[str]:
-        return {
-            article.article for article in await self.sellers.list_articles(seller_id) if article.state != "archived"
-        }
+        """Cards WB still lists, and only those.
+
+        An archived card is one the seller withdrew; a `feedback_only` card is
+        one WB no longer returns in the catalog at all. Neither can be
+        restocked, so a turnover row for them is noise — for one seller they
+        were 243 of 1035 rows, every one of them «нет остатка».
+        """
+        return {article.article for article in await self.sellers.list_articles(seller_id) if article.state == "active"}
 
     async def _api_key(self, seller_id: uuid.UUID) -> str:
         credential = await self.sellers.get_credential(seller_id)

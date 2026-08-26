@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
 
 import pytest_asyncio
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy import update as sa_update
 
 from backend.modules.notifications.application import BotRegistry
@@ -22,6 +22,7 @@ from backend.modules.wb_turnover.domain import STATUS_NO_STOCK, STATUS_OK
 from backend.modules.wb_turnover.infrastructure.postgres import (
     CollectionRunModel,
     OrderModel,
+    RefreshRequestModel,
     StockSnapshotModel,
     TrackedSellerModel,
     TurnoverRepository,
@@ -158,6 +159,7 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
         yield database, model.id
     finally:
         async with database.session() as session:
+            await session.execute(delete(RefreshRequestModel).where(RefreshRequestModel.seller_id == model.id))
             await TurnoverRepository(session).purge_seller(model.id)
             # Runs are not per seller, and their slot key is unique, so leaving
             # one behind would make the next test run see the slot as taken.
@@ -227,9 +229,9 @@ async def collect_orders(database, seller_id, statistics, now=None) -> None:
 
 async def calculate(database, seller_id, day=TODAY):
     async with database.session() as session:
-        return await CalculationService(session, TurnoverRepository(session), window_days=WINDOW).calculate(
-            seller_id, day
-        )
+        return await CalculationService(
+            session, SellerRepository(session), TurnoverRepository(session), window_days=WINDOW
+        ).calculate(seller_id, day)
 
 
 async def test_stock_of_an_article_wb_stopped_listing_is_written_as_zero(seller) -> None:
@@ -366,9 +368,9 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
 
     first, second = await send(), await send()
 
-    # 101 is low on cover, 102 sits at zero — the empty shelf belongs in the
-    # digest just as much as the one about to empty.
-    assert (first.sent, first.articles) == (True, 2)
+    # Only 101: it is about to run out. 102 sits at zero as well, but nobody
+    # ordered it in two weeks — that is the assortment tail, not an alert.
+    assert (first.sent, first.articles) == (True, 1)
     assert second.sent is False
     async with database.session() as session:
         events = list(
@@ -384,9 +386,8 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
     assert payload["bot"] == digest_bot
     assert payload["audience"] == {"type": "seller_subscribers", "seller_id": str(seller_id)}
     items = {item["article"]: item for item in payload["params"]["items"]}
-    assert set(items) == {"101", "102"}
+    assert set(items) == {"101"}
     assert items["101"]["out_of_stock"] is False
-    assert items["102"]["out_of_stock"] is True
 
 
 async def test_a_seller_with_nothing_low_gets_no_message(seller, digest_bot) -> None:
@@ -633,3 +634,109 @@ async def test_goods_in_transit_stay_out_of_the_stock_that_is_counted(seller) ->
     assert row is not None and row.in_way_to_client == 400
     # quantity_full is derived now that WB stopped sending it.
     assert row.quantity_full == 403
+
+
+async def test_an_empty_shelf_is_reported_only_for_a_товар_that_was_selling(seller, digest_bot) -> None:
+    """«Кончился то, что продавалось» is the alert. «Нет остатка и не заказывали»
+    is the assortment tail — for one live seller it was 927 rows against 28."""
+    database, seller_id = seller
+    # Both articles are at zero; only 102 has been selling.
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 0), stock("102", 0)]), FakeMarketplace())
+    await collect_orders(
+        database,
+        seller_id,
+        FakeStatistics(order_rows=[order(f"o{index}", "102", date(2026, 8, 19)) for index in range(5)]),
+    )
+    await calculate(database, seller_id)
+
+    async with database.session() as session:
+        result = await digest_service(session, digest_bot).send(seller_id, TODAY)
+
+    assert (result.sent, result.articles) == (True, 1)
+    async with database.session() as session:
+        event = await session.scalar(
+            select(OutboxEventModel).where(
+                OutboxEventModel.aggregate_id == seller_id,
+                OutboxEventModel.event_type == "TurnoverDigestRequested",
+            )
+        )
+    assert event is not None
+    assert [item["article"] for item in event.payload["params"]["items"]] == ["102"]
+
+
+async def test_cards_wb_no_longer_lists_are_left_out_of_the_metric(seller) -> None:
+    """A feedback_only or archived card cannot be restocked, so its turnover is
+    meaningless — and it is where most of the zero rows came from."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await session.execute(
+            update(ArticleModel)
+            .where(ArticleModel.seller_id == seller_id, ArticleModel.article == "102")
+            .values(state="feedback_only")
+        )
+        await session.commit()
+
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 5), stock("102", 7)]), FakeMarketplace())
+    rows = await calculate(database, seller_id)
+
+    assert [row.article for row in rows] == ["101"]
+
+
+async def test_pressing_refresh_twice_asks_wildberries_once(seller) -> None:
+    """The button is a wish, not a call: two presses must not double the walk
+    over a rate-limited API."""
+    database, seller_id = seller
+
+    async with database.session() as session:
+        repository = TurnoverRepository(session)
+        first = await repository.request_refresh(seller_id, None)
+        second = await repository.request_refresh(seller_id, None)
+        await session.commit()
+
+    assert first.id == second.id
+    async with database.session() as session:
+        queued = await TurnoverRepository(session).claim_refreshes()
+        await session.commit()
+    assert [request.seller_id for request in queued] == [seller_id]
+
+
+async def test_a_claimed_request_is_not_handed_out_again(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await TurnoverRepository(session).request_refresh(seller_id, None)
+        await session.commit()
+
+    async with database.session() as session:
+        await TurnoverRepository(session).claim_refreshes()
+        await session.commit()
+    async with database.session() as session:
+        second_round = await TurnoverRepository(session).claim_refreshes()
+        await session.commit()
+
+    assert second_round == []
+
+
+async def test_a_refresh_that_failed_says_so_instead_of_hanging(seller) -> None:
+    """A request left «running» would block the button for that seller forever."""
+    database, seller_id = seller
+    async with database.session() as session:
+        repository = TurnoverRepository(session)
+        request = await repository.request_refresh(seller_id, None)
+        request_id = request.id
+        await session.commit()
+    async with database.session() as session:
+        await TurnoverRepository(session).claim_refreshes()
+        await session.commit()
+
+    async with database.session() as session:
+        await TurnoverRepository(session).finish_refresh(request_id, "WB Analytics API: ключ не имеет доступа")
+        await session.commit()
+
+    async with database.session() as session:
+        repository = TurnoverRepository(session)
+        latest = await repository.latest_refresh(seller_id)
+        assert latest is not None
+        assert latest.status == "error"
+        assert latest.finished_at is not None
+        # And the seller can ask again.
+        assert await repository.active_refresh(seller_id) is None

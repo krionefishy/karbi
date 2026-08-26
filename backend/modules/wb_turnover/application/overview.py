@@ -8,7 +8,11 @@ from backend.modules.notifications.application import BotNotFoundError, BotRegis
 from backend.modules.notifications.domain import Invite
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_turnover.infrastructure.postgres import CollectionRunModel, TurnoverRepository
+from backend.modules.wb_turnover.infrastructure.postgres import (
+    CollectionRunModel,
+    RefreshRequestModel,
+    TurnoverRepository,
+)
 
 SUCCESSFUL = ("success", "partial_success")
 
@@ -32,6 +36,20 @@ class ArticleTurnover:
     turnover_days: float | None
     stock_days: int
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshRequest:
+    """State of a «обновить сейчас» press, as the interface polls it."""
+
+    status: str
+    requested_at: datetime
+    finished_at: datetime | None
+    error: str | None
+
+    @property
+    def in_progress(self) -> bool:
+        return self.status in ("queued", "running")
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +99,38 @@ class TurnoverService:
         self.bots = bots
         self.subscriptions = subscriptions
         self.bot_code = bot_code
+
+    async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None = None) -> RefreshRequest:
+        """Queue an out-of-schedule collection for this seller.
+
+        The API only records the wish: talking to Wildberries from a web request
+        would tie a rate-limited walk over every warehouse to someone's browser.
+        """
+        await self._enrolled(seller_id)
+        request = await self.turnover.request_refresh(seller_id, requested_by)
+        await self.session.commit()
+        return self._refresh(request)
+
+    async def refresh_state(self, seller_id: uuid.UUID) -> RefreshRequest | None:
+        await self._enrolled(seller_id)
+        request = await self.turnover.latest_refresh(seller_id)
+        return self._refresh(request) if request else None
+
+    async def _enrolled(self, seller_id: uuid.UUID) -> None:
+        seller = await self.sellers.get(seller_id)
+        if seller is None or seller.archived_at is not None:
+            raise SellerNotFoundError
+        if seller_id not in await self.turnover.tracked_seller_ids():
+            raise SellerNotFoundError
+
+    @staticmethod
+    def _refresh(request: RefreshRequestModel) -> "RefreshRequest":
+        return RefreshRequest(
+            status=request.status,
+            requested_at=request.requested_at,
+            finished_at=request.finished_at,
+            error=request.error,
+        )
 
     async def overview(self) -> TurnoverOverview:
         tracked = await self.turnover.tracked_seller_ids()

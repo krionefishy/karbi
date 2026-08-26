@@ -11,6 +11,7 @@ from backend.modules.wb_turnover.infrastructure.postgres.models import (
     CollectionRunModel,
     NotificationLogModel,
     OrderModel,
+    RefreshRequestModel,
     SellerWarehouseModel,
     StockSnapshotModel,
     TrackedSellerModel,
@@ -405,6 +406,64 @@ class TurnoverRepository:
                 select(func.count()).select_from(CollectionRunModel).where(CollectionRunModel.started_at >= moment)
             )
             or 0
+        )
+
+    # --- manual refresh --------------------------------------------------
+
+    async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
+        """Ask for an out-of-schedule collection, or hand back the one already waiting."""
+        pending = await self.active_refresh(seller_id)
+        if pending is not None:
+            return pending
+        request = RefreshRequestModel(seller_id=seller_id, requested_by=requested_by)
+        self.session.add(request)
+        await self.session.flush()
+        return request
+
+    async def active_refresh(self, seller_id: uuid.UUID) -> RefreshRequestModel | None:
+        return await self.session.scalar(
+            select(RefreshRequestModel)
+            .where(
+                RefreshRequestModel.seller_id == seller_id,
+                RefreshRequestModel.status.in_(("queued", "running")),
+            )
+            .order_by(RefreshRequestModel.requested_at)
+            .limit(1)
+        )
+
+    async def latest_refresh(self, seller_id: uuid.UUID) -> RefreshRequestModel | None:
+        return await self.session.scalar(
+            select(RefreshRequestModel)
+            .where(RefreshRequestModel.seller_id == seller_id)
+            .order_by(RefreshRequestModel.requested_at.desc())
+            .limit(1)
+        )
+
+    async def claim_refreshes(self, limit: int = 5) -> list[RefreshRequestModel]:
+        """Take waiting requests. Skips locked rows so two ticks cannot collide."""
+        requests = list(
+            await self.session.scalars(
+                select(RefreshRequestModel)
+                .where(RefreshRequestModel.status == "queued")
+                .order_by(RefreshRequestModel.requested_at)
+                .with_for_update(skip_locked=True)
+                .limit(limit)
+            )
+        )
+        for request in requests:
+            request.status = "running"
+            request.started_at = datetime.now(UTC)
+        return requests
+
+    async def finish_refresh(self, request_id: uuid.UUID, error: str | None = None) -> None:
+        await self.session.execute(
+            update(RefreshRequestModel)
+            .where(RefreshRequestModel.id == request_id)
+            .values(
+                status="error" if error else "success",
+                error=error[:1000] if error else None,
+                finished_at=datetime.now(UTC),
+            )
         )
 
     async def notification_logged(self, seller_id: uuid.UUID, day: date) -> bool:

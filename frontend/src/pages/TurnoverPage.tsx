@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Link2 } from "lucide-react";
+import { Copy, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -15,7 +15,12 @@ import {
   retrySellerSync,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
-import { createInviteLink, getTurnoverArticles } from "../features/turnover/api";
+import {
+  createInviteLink,
+  getRefreshState,
+  getTurnoverArticles,
+  requestRefresh,
+} from "../features/turnover/api";
 import { belowThreshold, coverLabel } from "../features/turnover/cover";
 import type { TurnoverStatus } from "../features/turnover/types";
 
@@ -89,6 +94,26 @@ export function TurnoverPage() {
     },
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refresh });
+  // While a collection is running the state is polled; the table refreshes by
+  // itself the moment it finishes, so nobody has to guess when to reload.
+  const { data: refreshState } = useQuery({
+    queryKey: ["turnover-refresh", sellerId],
+    queryFn: () => getRefreshState(sellerId),
+    enabled: Boolean(sellerId),
+    refetchInterval: (query) => (query.state.data?.in_progress ? 3000 : false),
+  });
+  const refreshing = Boolean(refreshState?.in_progress);
+  useEffect(() => {
+    if (refreshState?.status === "success") {
+      void queryClient.invalidateQueries({ queryKey: ["turnover-articles", sellerId] });
+    }
+  }, [queryClient, refreshState?.status, refreshState?.finished_at, sellerId]);
+  const refreshMutation = useMutation({
+    mutationFn: () => requestRefresh(sellerId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["turnover-refresh", sellerId] });
+    },
+  });
   const inviteMutation = useMutation({
     mutationFn: () => createInviteLink(sellerId),
     onSuccess: (link) => {
@@ -139,6 +164,15 @@ export function TurnoverPage() {
                   <strong>{turnover?.date ? dateFormatter.format(new Date(turnover.date)) : "—"}</strong>
                 </div>
                 <button
+                  className="secondary-button"
+                  disabled={refreshing || refreshMutation.isPending}
+                  onClick={() => refreshMutation.mutate()}
+                  title="Собрать остатки и заказы прямо сейчас"
+                >
+                  <RefreshCw size={15} className={refreshing ? "spinning" : undefined} />
+                  {refreshing ? "Обновляем…" : "Обновить данные"}
+                </button>
+                <button
                   className="primary-button"
                   disabled={inviteMutation.isPending}
                   onClick={() => inviteMutation.mutate()}
@@ -150,6 +184,9 @@ export function TurnoverPage() {
             )}
           </div>
 
+          {refreshState?.status === "error" && !refreshing && (
+            <div className="inline-error">Обновление не удалось: {refreshState.error ?? "неизвестная ошибка"}</div>
+          )}
           {inviteMutation.isError && (
             <div className="inline-error">
               {inviteMutation.error instanceof ApiError
