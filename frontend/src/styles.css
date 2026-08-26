@@ -375,6 +375,12 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .turnover-row strong { font-size: 13px; }
 .turnover-row .article-title em { display: block; margin-top: 4px; font-style: normal; }
 .stock-split { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-style: normal; }
+
+.fbs-table { background: var(--surface); border: 1px solid var(--line); overflow-x: auto; }
+.fbs-head, .fbs-row { display: grid; grid-template-columns: minmax(220px, 1fr) 140px 220px 200px 110px 120px; align-items: center; min-height: 58px; border-bottom: 1px solid var(--line); }
+.fbs-row:last-child { border-bottom: 0; }
+.fbs-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
+.fbs-head > *, .fbs-row > * { padding: 0 16px; }
 .cover { font-weight: 600; }
 .cover-critical { color: var(--negative); }
 .cover-warning { color: var(--gold); }

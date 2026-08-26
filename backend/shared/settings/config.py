@@ -169,6 +169,17 @@ class TurnoverConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FbsDistributionConfig:
+    """Когда автоматизация распределения сверяет склады. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Справочник объектов и склады кабинета меняются редко: раз в сутки хватает,
+    # а внеплановую сверку оператор запускает кнопкой.
+    mirror_hour: int = 4
+    mirror_minute: int = 30
+
+
+@dataclass(frozen=True, slots=True)
 class RelayConfig:
     """The messenger relay outside Russia: the only host allowed to reach the messenger.
 
@@ -245,6 +256,7 @@ class Settings:
     telegram: TelegramConfig
     relay: RelayConfig
     turnover: TurnoverConfig
+    fbs_distribution: FbsDistributionConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -304,6 +316,10 @@ class Settings:
         ):
             if key in turnover:
                 turnover[key] = int(turnover[key])
+        fbs_distribution = dict(data.get("fbs_distribution", {}))
+        for key in ("mirror_hour", "mirror_minute"):
+            if key in fbs_distribution:
+                fbs_distribution[key] = int(fbs_distribution[key])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -342,6 +358,7 @@ class Settings:
             telegram=TelegramConfig(**telegram),
             relay=RelayConfig(**relay),
             turnover=TurnoverConfig(**turnover),
+            fbs_distribution=FbsDistributionConfig(**fbs_distribution),
         )
         settings.validate_values()
         return settings
@@ -402,6 +419,14 @@ class Settings:
             raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")
         if self.turnover.snapshot_retention_days <= self.turnover.orders_window_days:
             raise ValueError("turnover.snapshot_retention_days must exceed turnover.orders_window_days")
+        if not 0 <= self.fbs_distribution.mirror_hour <= 23:
+            raise ValueError("fbs_distribution.mirror_hour must be between 0 and 23")
+        if not 0 <= self.fbs_distribution.mirror_minute <= 59:
+            raise ValueError("fbs_distribution.mirror_minute must be between 0 and 59")
+        try:
+            ZoneInfo(self.fbs_distribution.timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("fbs_distribution.timezone must be a known timezone") from error
         if self.turnover.timezone != "Europe/Moscow":
             # WB statistics serve every date in Moscow time with no zone attached;
             # scheduling this automation on any other clock would silently shift

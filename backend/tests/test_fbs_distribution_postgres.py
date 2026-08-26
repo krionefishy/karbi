@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
@@ -8,9 +9,14 @@ from sqlalchemy import delete
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import CredentialModel, OutboxEventModel, SellerModel
-from backend.modules.wb_fbs_distribution.application import FbsDistributionEnrollment, FbsDistributionService
+from backend.modules.wb_fbs_distribution.application import (
+    FbsDistributionEnrollment,
+    FbsDistributionService,
+    MirrorService,
+)
 from backend.modules.wb_fbs_distribution.domain import MODE_DRY_RUN, MODE_WRITE
-from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
+from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository, WBOfficeModel
+from backend.modules.wb_fbs_distribution.infrastructure.wb import Office, SellerWarehouse, WBFbsMarketplaceClient
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
@@ -20,6 +26,57 @@ SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 
 def cipher() -> CredentialCipher:
     return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
+
+
+def office(office_id: int, city: str = "Москва", cargo_type: int = 1) -> Office:
+    return Office(
+        office_id=office_id,
+        name=f"{city} ({office_id})",
+        city=city,
+        address=f"РФ, {city}",
+        federal_district="Центральный федеральный округ",
+        longitude=37.6,
+        latitude=55.7,
+        cargo_type=cargo_type,
+        delivery_type=1,
+        selected=True,
+    )
+
+
+def warehouse(warehouse_id: int, office_id: int, *, processing: bool = False) -> SellerWarehouse:
+    return SellerWarehouse(
+        warehouse_id=warehouse_id,
+        office_id=office_id,
+        store_id=warehouse_id * 10,
+        name=f"Склад {warehouse_id}",
+        cargo_type=1,
+        delivery_type=1,
+        is_deleting=False,
+        is_processing=processing,
+    )
+
+
+class FakeMarketplace(WBFbsMarketplaceClient):
+    def __init__(self, offices=(), warehouses=()) -> None:
+        super().__init__()
+        self.office_rows = list(offices)
+        self.warehouse_rows = list(warehouses)
+
+    async def offices(self, api_key: str):
+        return list(self.office_rows)
+
+    async def warehouses(self, api_key: str):
+        return list(self.warehouse_rows)
+
+
+def mirror(session, marketplace: FakeMarketplace) -> MirrorService:
+    return MirrorService(
+        session,
+        SellerRepository(session),
+        FbsDistributionRepository(session),
+        marketplace,
+        cipher(),
+    )
 
 
 @pytest_asyncio.fixture
@@ -43,6 +100,9 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     finally:
         async with database.session() as session:
             await FbsDistributionRepository(session).purge_seller(model.id)
+            # Справочник объектов общий, не по селлеру: без уборки он утёк бы
+            # в следующий тест и подменил бы то, что тот проверяет.
+            await session.execute(delete(WBOfficeModel))
             await session.execute(delete(OutboxEventModel).where(OutboxEventModel.aggregate_id == model.id))
             await session.execute(delete(SellerModel).where(SellerModel.id == model.id))
             await session.commit()
@@ -131,3 +191,159 @@ async def test_the_catalog_counts_only_connected_cabinets(seller) -> None:
     async with database.session() as session:
         service = FbsDistributionService(session, SellerRepository(session), FbsDistributionRepository(session))
         assert (await service.overview()).seller_count == before + 1
+
+
+async def test_a_sync_mirrors_both_the_catalogue_and_the_cabinet(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+
+    marketplace = FakeMarketplace(
+        offices=[office(3103350), office(204, "Краснодар")],
+        warehouses=[warehouse(2035130, 3103350)],
+    )
+    async with database.session() as session:
+        result = await mirror(session, marketplace).sync_seller(seller_id)
+    assert (result.offices, result.warehouses) == (2, 1)
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        assert {row.office_id for row in await distribution.offices()} == {3103350, 204}
+        [row] = await distribution.warehouses(seller_id)
+        assert (row.warehouse_id, row.office_id, row.store_id) == (2035130, 3103350, 20351300)
+        tracked = await distribution.tracked_row(seller_id)
+        assert tracked is not None and tracked.warehouses_synced_at is not None
+
+
+async def test_a_warehouse_gone_from_wb_leaves_the_mirror(seller) -> None:
+    """Keeping it would let the next calculation put stock on a warehouse the
+    cabinet no longer has."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+
+    async with database.session() as session:
+        await mirror(
+            session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1), warehouse(11, 1)])
+        ).sync_seller(seller_id)
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
+            seller_id
+        )
+
+    async with database.session() as session:
+        rows = await FbsDistributionRepository(session).warehouses(seller_id)
+        assert [row.warehouse_id for row in rows] == [10]
+
+
+async def test_an_office_missing_from_the_answer_is_kept(seller) -> None:
+    """Warehouses point at offices; dropping one because a single answer omitted
+    it would blank the address of a warehouse that still works."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1), office(2)], warehouses=[])).sync_seller(seller_id)
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[])).sync_seller(seller_id)
+
+    async with database.session() as session:
+        assert {row.office_id for row in await FbsDistributionRepository(session).offices()} == {1, 2}
+
+
+async def test_a_cabinet_detached_mid_walk_is_not_resurrected(seller) -> None:
+    database, seller_id = seller
+
+    async with database.session() as session:
+        result = await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
+            seller_id
+        )
+
+    assert (result.offices, result.warehouses) == (0, 0)
+    async with database.session() as session:
+        assert await FbsDistributionRepository(session).warehouses(seller_id) == []
+
+
+async def test_the_overview_pairs_a_warehouse_with_its_office(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(
+            session,
+            FakeMarketplace(offices=[office(204, "Краснодар")], warehouses=[warehouse(2085061, 204, processing=True)]),
+        ).sync_seller(seller_id)
+
+    async with database.session() as session:
+        service = FbsDistributionService(session, SellerRepository(session), FbsDistributionRepository(session))
+        overview = await service.seller_overview(seller_id)
+
+    [row] = overview.warehouses
+    assert (row.city, row.federal_district) == ("Краснодар", "Центральный федеральный округ")
+    assert row.is_processing is True
+    assert overview.warehouses_synced_at is not None
+
+
+async def test_a_warehouse_on_an_unknown_office_still_shows_up(seller) -> None:
+    """The two answers are independent; a warehouse must not vanish because the
+    catalogue this key returned did not mention its office."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[], warehouses=[warehouse(10, 999_999)])).sync_seller(seller_id)
+
+    async with database.session() as session:
+        service = FbsDistributionService(session, SellerRepository(session), FbsDistributionRepository(session))
+        overview = await service.seller_overview(seller_id)
+
+    [row] = overview.warehouses
+    assert (row.warehouse_id, row.office_id, row.city) == (10, 999_999, "")
+
+
+async def test_only_cabinets_whose_mirror_went_stale_are_due(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC))
+
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
+            seller_id
+        )
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        assert seller_id not in await distribution.sellers_due_for_sync(datetime.now(UTC) - timedelta(hours=1))
+        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC) + timedelta(hours=1))
+
+
+async def test_purging_a_cabinet_takes_its_warehouses(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
+            seller_id
+        )
+
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).purge(seller_id)
+        await session.commit()
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        assert await distribution.warehouses(seller_id) == []
+        # Справочник объектов общий и переживает отключение кабинета.
+        assert {row.office_id for row in await distribution.offices()} == {1}

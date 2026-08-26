@@ -10,8 +10,13 @@ from backend.modules.platform.application import AuthService, PasswordService, T
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_fbs_distribution.application import FbsDistributionEnrollment, FbsDistributionService
+from backend.modules.wb_fbs_distribution.application import (
+    FbsDistributionEnrollment,
+    FbsDistributionService,
+    MirrorService,
+)
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
+from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, marketplace_throttle
 from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
@@ -41,6 +46,15 @@ class AppProvider(Provider):
         return CredentialCipher(
             settings.security.credential_encryption_keys, settings.security.credential_fingerprint_key
         )
+
+    @provide(scope=Scope.APP)
+    def fbs_marketplace_client(self, settings: Settings, redis: RedisClient) -> WBFbsMarketplaceClient:
+        """Читающий клиент складов WB для действий оператора.
+
+        Тот же Redis-бюджет, что у воркеров: ручная сверка не должна выедать
+        лимит кабинета в обход фоновых запросов.
+        """
+        return WBFbsMarketplaceClient(throttle=marketplace_throttle(settings, redis))
 
 
 class SessionProvider(Provider):
@@ -112,6 +126,17 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
     ) -> FbsDistributionService:
         return FbsDistributionService(session, sellers, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_mirror_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        distribution: FbsDistributionRepository,
+        marketplace: WBFbsMarketplaceClient,
+        cipher: CredentialCipher,
+    ) -> MirrorService:
+        return MirrorService(session, sellers, distribution, marketplace, cipher)
 
     @provide(scope=Scope.REQUEST)
     def notification_repository(self, session: AsyncSession) -> NotificationRepository:

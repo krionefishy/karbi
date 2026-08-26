@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,10 +24,33 @@ class DistributionCatalogOverview:
 
 
 @dataclass(frozen=True, slots=True)
+class WarehouseRow:
+    """Виртуальный склад кабинета вместе с объектом, к которому он привязан.
+
+    Объект может быть неизвестен: справочник и склады приезжают двумя разными
+    запросами, и WB волен вернуть склад на объект, которого в справочнике этого
+    ключа нет. Пустые поля объекта честнее, чем пропущенная строка.
+    """
+
+    warehouse_id: int
+    office_id: int
+    name: str
+    city: str
+    address: str
+    federal_district: str
+    cargo_type: int
+    is_processing: bool
+    is_deleting: bool
+
+
+@dataclass(frozen=True, slots=True)
 class SellerOverview:
     """Состояние автоматизации по одному кабинету."""
 
     enrollment: SellerEnrollment
+    warehouses_synced_at: datetime | None
+    offices_known: int
+    warehouses: list[WarehouseRow]
 
 
 class FbsDistributionService:
@@ -51,7 +75,30 @@ class FbsDistributionService:
         enrollment = await self.distribution.enrollment(seller_id)
         if enrollment is None:
             raise SellerNotFoundError(str(seller_id))
-        return SellerOverview(enrollment=enrollment)
+        offices = {office.office_id: office for office in await self.distribution.offices()}
+        rows = []
+        for warehouse in await self.distribution.warehouses(seller_id):
+            office = offices.get(warehouse.office_id)
+            rows.append(
+                WarehouseRow(
+                    warehouse_id=warehouse.warehouse_id,
+                    office_id=warehouse.office_id,
+                    name=warehouse.name,
+                    city=office.city if office else "",
+                    address=office.address if office else "",
+                    federal_district=office.federal_district if office else "",
+                    cargo_type=warehouse.cargo_type,
+                    is_processing=warehouse.is_processing,
+                    is_deleting=warehouse.is_deleting,
+                )
+            )
+        tracked = await self.distribution.tracked_row(seller_id)
+        return SellerOverview(
+            enrollment=enrollment,
+            warehouses_synced_at=tracked.warehouses_synced_at if tracked else None,
+            offices_known=len(offices),
+            warehouses=rows,
+        )
 
     async def set_write_enabled(self, seller_id: uuid.UUID, enabled: bool) -> SellerOverview:
         """Разрешить или запретить автоматизации писать остатки в кабинет.

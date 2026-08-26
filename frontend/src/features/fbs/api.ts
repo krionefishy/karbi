@@ -1,5 +1,5 @@
 import { apiRequest } from "../../api/http";
-import type { SellerDistributionOverview } from "./types";
+import type { MirrorSyncResult, SellerDistributionOverview } from "./types";
 
 export const getSellerOverview = (sellerId: string) =>
   apiRequest<SellerDistributionOverview>(`/api/v1/wb/fbs/sellers/${sellerId}/overview`);
@@ -10,3 +10,7 @@ export const setWriteEnabled = (sellerId: string, writeEnabled: boolean) =>
     method: "PUT",
     body: JSON.stringify({ write_enabled: writeEnabled }),
   });
+
+/** Re-read the WB office catalogue and the cabinet's warehouses right now. */
+export const syncMirror = (sellerId: string) =>
+  apiRequest<MirrorSyncResult>(`/api/v1/wb/fbs/sellers/${sellerId}/sync`, { method: "POST" });
