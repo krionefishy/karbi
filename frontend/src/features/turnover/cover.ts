@@ -22,3 +22,12 @@ export function coverLabel(article: ArticleTurnover, threshold: number): CoverLa
 export function belowThreshold(articles: ArticleTurnover[], threshold: number): ArticleTurnover[] {
   return articles.filter((item) => item.days_of_cover !== null && item.days_of_cover < threshold);
 }
+
+/**
+ * A товар with nothing on the shelf and nothing ordered in two weeks is the
+ * assortment tail. It stays in the data — «не считали» and «нечего считать»
+ * must remain distinguishable — but it has no business filling the table.
+ */
+export function isDormant(article: ArticleTurnover): boolean {
+  return article.stock_total === 0 && article.orders_count === 0;
+}

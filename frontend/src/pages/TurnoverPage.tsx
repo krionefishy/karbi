@@ -21,7 +21,7 @@ import {
   getTurnoverArticles,
   requestRefresh,
 } from "../features/turnover/api";
-import { belowThreshold, coverLabel } from "../features/turnover/cover";
+import { belowThreshold, coverLabel, isDormant } from "../features/turnover/cover";
 import type { TurnoverStatus } from "../features/turnover/types";
 
 const AUTOMATION_ID = "wb-turnover";
@@ -44,6 +44,7 @@ export function TurnoverPage() {
   const [formError, setFormError] = useState("");
   const [invite, setInvite] = useState<string>("");
   const [copied, setCopied] = useState(false);
+  const [showDormant, setShowDormant] = useState(false);
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -124,7 +125,9 @@ export function TurnoverPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const threshold = turnover?.threshold_days ?? 10;
-  const articles = turnover?.articles ?? [];
+  const allArticles = turnover?.articles ?? [];
+  const dormant = allArticles.filter(isDormant);
+  const articles = showDormant ? allArticles : allArticles.filter((item) => !isDormant(item));
   const alerting = belowThreshold(articles, threshold);
 
   return (
@@ -236,7 +239,7 @@ export function TurnoverPage() {
                 Подключить селлера
               </button>
             </div>
-          ) : articles.length === 0 ? (
+          ) : allArticles.length === 0 ? (
             <div className="empty-state">
               <h2>Данных пока нет</h2>
               <p>
@@ -245,6 +248,17 @@ export function TurnoverPage() {
               </p>
             </div>
           ) : (
+            <>
+            {dormant.length > 0 && (
+              <label className="dormant-toggle">
+                <input
+                  type="checkbox"
+                  checked={showDormant}
+                  onChange={(event) => setShowDormant(event.target.checked)}
+                />
+                Показывать товары без остатка и без заказов ({dormant.length})
+              </label>
+            )}
             <section className="turnover-table">
               <div className="turnover-head">
                 <span>Товар</span>
@@ -303,6 +317,7 @@ export function TurnoverPage() {
                 );
               })}
             </section>
+            </>
           )}
         </main>
       </div>

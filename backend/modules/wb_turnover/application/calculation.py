@@ -66,5 +66,8 @@ class CalculationService:
             await self.session.rollback()
             return []
         await self.turnover.upsert_turnover(rows)
+        dropped = await self.turnover.drop_turnover_except(seller_id, day, {row.article for row in rows})
+        if dropped:
+            self.logger.info("turnover_rows_dropped", extra={"seller_id": str(seller_id), "dropped": dropped})
         await self.session.commit()
         return rows

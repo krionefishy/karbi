@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { belowThreshold, coverLabel } from "./cover";
+import { belowThreshold, coverLabel, isDormant } from "./cover";
 import type { ArticleTurnover } from "./types";
 
 function article(days: number | null): ArticleTurnover {
@@ -37,5 +37,15 @@ describe("cover", () => {
 
     expect(listed).toHaveLength(1);
     expect(listed[0].days_of_cover).toBe(3);
+  });
+
+  it("separates the assortment tail from goods that are actually moving", () => {
+    const dead = { ...article(null), stock_total: 0, orders_count: 0 };
+    const soldOut = { ...article(null), stock_total: 0, orders_count: 5 };
+    const stocked = { ...article(12), stock_total: 40, orders_count: 0 };
+
+    expect(isDormant(dead)).toBe(true);
+    expect(isDormant(soldOut)).toBe(false);
+    expect(isDormant(stocked)).toBe(false);
   });
 });

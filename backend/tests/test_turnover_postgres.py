@@ -740,3 +740,23 @@ async def test_a_refresh_that_failed_says_so_instead_of_hanging(seller) -> None:
         assert latest.finished_at is not None
         # And the seller can ask again.
         assert await repository.active_refresh(seller_id) is None
+
+
+async def test_a_recalculation_takes_away_what_it_no_longer_counts(seller) -> None:
+    """A товар that left the catalog must not keep its last computed row."""
+    database, seller_id = seller
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 5), stock("102", 5)]), FakeMarketplace())
+    assert {row.article for row in await calculate(database, seller_id)} == {"101", "102"}
+
+    async with database.session() as session:
+        await session.execute(
+            update(ArticleModel)
+            .where(ArticleModel.seller_id == seller_id, ArticleModel.article == "102")
+            .values(state="archived")
+        )
+        await session.commit()
+    await calculate(database, seller_id)
+
+    async with database.session() as session:
+        left = await TurnoverRepository(session).turnover_on(seller_id, TODAY)
+    assert [row.article for row in left] == ["101"]

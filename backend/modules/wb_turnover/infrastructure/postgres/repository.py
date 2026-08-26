@@ -310,6 +310,21 @@ class TurnoverRepository:
                 )
             )
 
+    async def drop_turnover_except(self, seller_id: uuid.UUID, day: date, articles: set[str]) -> int:
+        """Remove rows this day's calculation no longer produces.
+
+        Without it a товар that left the catalog — or that a rule change now
+        excludes — would keep its last computed row and go on being shown and
+        alerted on.
+        """
+        statement = delete(TurnoverDailyModel).where(
+            TurnoverDailyModel.seller_id == seller_id, TurnoverDailyModel.date == day
+        )
+        if articles:
+            statement = statement.where(TurnoverDailyModel.article.not_in(articles))
+        removed = await self.session.execute(statement.returning(TurnoverDailyModel.article))
+        return len(removed.all())
+
     async def turnover_on(self, seller_id: uuid.UUID, day: date) -> list[TurnoverDailyModel]:
         return list(
             await self.session.scalars(
