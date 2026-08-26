@@ -127,6 +127,24 @@ services:
       - internal
       - egress
 
+  wb-fbs-distribution-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["python", "-m", "backend.workers.wb_fbs_distribution.main"]
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck: *worker-healthcheck
+    networks:
+      - internal
+      - egress
+
   notifications-worker:
     build:
       context: ..
@@ -184,7 +202,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head
+      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-karbi}:${DB_PASSWORD:?set DB_PASSWORD in .env - no default in production}@db:5432/${DB_NAME:-karbi}
     depends_on:

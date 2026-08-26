@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Gauge, MessageSquareText } from "lucide-react";
+import { ArrowRight, Gauge, MessageSquareText, Warehouse } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -25,6 +25,12 @@ const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", 
 
 function momentLabel(value: string | null, fallback = "—") {
   return value ? momentFormatter.format(new Date(value)) : fallback;
+}
+
+function automationIcon(id: string) {
+  if (id === "wb-turnover") return <Gauge size={22} />;
+  if (id === "wb-fbs-distribution") return <Warehouse size={22} />;
+  return <MessageSquareText size={22} />;
 }
 
 function durationLabel(seconds: number | null) {
@@ -72,7 +78,7 @@ export function AutomationsPage() {
                 <article className="automation-card automation-active" key={automation.id}>
                   <div className="automation-card-top">
                     <span className="automation-icon">
-                      {automation.id === "wb-turnover" ? <Gauge size={22} /> : <MessageSquareText size={22} />}
+                      {automationIcon(automation.id)}
                     </span>
                     <span className={`status-badge status-${automation.status}`}>
                       <span />

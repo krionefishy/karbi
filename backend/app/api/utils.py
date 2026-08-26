@@ -2,6 +2,16 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.app.api.schemas import AutomationResponse, AutomationRunResponse
+from backend.modules.wb_fbs_distribution.application import (
+    AUTOMATION_ID as WB_FBS_ID,
+)
+from backend.modules.wb_fbs_distribution.application import (
+    DESCRIPTION as WB_FBS_DESCRIPTION,
+)
+from backend.modules.wb_fbs_distribution.application import (
+    TITLE as WB_FBS_TITLE,
+)
+from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
 from backend.modules.wb_reviews.application import (
     AUTOMATION_ID as WB_REVIEWS_ID,
 )
@@ -94,7 +104,10 @@ def collection_run_response(run: CollectionRunModel) -> AutomationRunResponse:
 
 
 def automation_catalog(
-    reviews: SyncOverview, turnover: TurnoverOverview, settings: Settings
+    reviews: SyncOverview,
+    turnover: TurnoverOverview,
+    fbs_distribution: DistributionCatalogOverview,
+    settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
     return [
@@ -119,5 +132,17 @@ def automation_catalog(
             last_run=collection_run_response(turnover.last_run) if turnover.last_run else None,
             last_success_at=turnover.last_success_at.isoformat() if turnover.last_success_at else None,
             next_run_at=next_turnover_run_at(settings).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_FBS_ID,
+            title=WB_FBS_TITLE,
+            description=WB_FBS_DESCRIPTION,
+            status=fbs_distribution.status,
+            seller_count=fbs_distribution.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=None,
+            # Расписания ещё нет: модуль подключает селлеров, но ничего не запускает.
+            next_run_at=None,
         ),
     ]

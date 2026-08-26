@@ -9,6 +9,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
+import { FbsDistributionPage } from "../pages/FbsDistributionPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
 
 const queryClient = new QueryClient({
@@ -29,6 +30,7 @@ export function App() {
               <Route path="/sellers" element={<SellersPage />} />
               <Route path="/automations/wb-reviews" element={<ReviewsPage />} />
               <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
+              <Route path="/automations/wb-fbs-distribution" element={<FbsDistributionPage />} />
               <Route element={<AdminRoute />}>
                 <Route path="/admin/users" element={<EmployeesPage />} />
                 <Route path="/admin/bots" element={<BotsPage />} />

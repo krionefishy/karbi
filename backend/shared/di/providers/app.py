@@ -10,6 +10,8 @@ from backend.modules.platform.application import AuthService, PasswordService, T
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_fbs_distribution.application import FbsDistributionEnrollment, FbsDistributionService
+from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
@@ -95,6 +97,23 @@ class SessionProvider(Provider):
         return TurnoverEnrollment(turnover)
 
     @provide(scope=Scope.REQUEST)
+    def fbs_distribution_repository(self, session: AsyncSession) -> FbsDistributionRepository:
+        return FbsDistributionRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_distribution_enrollment(self, distribution: FbsDistributionRepository) -> FbsDistributionEnrollment:
+        return FbsDistributionEnrollment(distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_distribution_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        distribution: FbsDistributionRepository,
+    ) -> FbsDistributionService:
+        return FbsDistributionService(session, sellers, distribution)
+
+    @provide(scope=Scope.REQUEST)
     def notification_repository(self, session: AsyncSession) -> NotificationRepository:
         return NotificationRepository(session)
 
@@ -139,10 +158,13 @@ class SessionProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def automation_enrollments(
-        self, reviews: ReviewsEnrollment, turnover: TurnoverEnrollment
+        self,
+        reviews: ReviewsEnrollment,
+        turnover: TurnoverEnrollment,
+        fbs_distribution: FbsDistributionEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover]
+        return [reviews, turnover, fbs_distribution]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(
