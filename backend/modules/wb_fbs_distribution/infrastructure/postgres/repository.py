@@ -6,8 +6,11 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_fbs_distribution.domain import SellerEnrollment
+from backend.modules.wb_fbs_distribution.domain import Region, SellerEnrollment
 from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
+    DistributionSettingsModel,
+    OfficeRegionModel,
+    RegionModel,
     SellerWarehouseModel,
     TrackedSellerModel,
     WBOfficeModel,
@@ -198,3 +201,80 @@ class FbsDistributionRepository:
                 .order_by(SellerWarehouseModel.name)
             )
         )
+
+    # --- регионы, разметка и настройки -----------------------------------
+
+    async def regions(self) -> list[Region]:
+        rows = await self.session.scalars(select(RegionModel).order_by(RegionModel.position))
+        return [Region(code=row.code, title=row.title, position=row.position, share_bp=row.share_bp) for row in rows]
+
+    async def save_regions(self, regions: Sequence[Region]) -> None:
+        """Переписать порядок и доли направлений.
+
+        Направления не создаются и не удаляются: их шесть, они заданы миграцией.
+        Меняются только место в приоритете и доля.
+        """
+        for region in regions:
+            await self.session.execute(
+                update(RegionModel)
+                .where(RegionModel.code == region.code)
+                .values(position=region.position, share_bp=region.share_bp)
+            )
+
+    async def offices_in_use(self) -> dict[int, int]:
+        """Сколько подключённых кабинетов уже имеют склад под каждым объектом.
+
+        Оператору важно видеть, какие объекты уже освоены, а какие в справочнике
+        есть, но никем не заняты.
+        """
+        rows = await self.session.execute(
+            select(SellerWarehouseModel.office_id, func.count()).group_by(SellerWarehouseModel.office_id)
+        )
+        return {office_id: count for office_id, count in rows}
+
+    async def office_regions(self) -> dict[int, str]:
+        rows = await self.session.execute(select(OfficeRegionModel.office_id, OfficeRegionModel.region_code))
+        return {office_id: region_code for office_id, region_code in rows}
+
+    async def assign_office_region(self, office_id: int, region_code: str | None) -> None:
+        """Отнести объект к направлению или снять разметку."""
+        if region_code is None:
+            await self.session.execute(delete(OfficeRegionModel).where(OfficeRegionModel.office_id == office_id))
+            return
+        statement = insert(OfficeRegionModel).values(office_id=office_id, region_code=region_code)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["office_id"], set_={"region_code": statement.excluded.region_code}
+            )
+        )
+
+    async def set_warehouse_placement(
+        self, seller_id: uuid.UUID, warehouse_id: int, *, participates: bool, position: int
+    ) -> bool:
+        result = await self.session.execute(
+            update(SellerWarehouseModel)
+            .where((SellerWarehouseModel.seller_id == seller_id) & (SellerWarehouseModel.warehouse_id == warehouse_id))
+            .values(participates=participates, position=position)
+            .returning(SellerWarehouseModel.warehouse_id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def settings(self) -> DistributionSettingsModel:
+        row = await self.session.get(DistributionSettingsModel, 1)
+        if row is None:
+            # Строку заводит миграция; её отсутствие означает недокатанную базу,
+            # а не повод считать по молчаливым умолчаниям.
+            raise RuntimeError("Настройки распределения не заведены: не докатана миграция модуля")
+        return row
+
+    async def save_settings(self, *, reserve_units: int, priority_regions: int) -> DistributionSettingsModel:
+        await self.session.execute(
+            update(DistributionSettingsModel)
+            .where(DistributionSettingsModel.id == 1)
+            .values(
+                reserve_units=reserve_units,
+                priority_regions=priority_regions,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return await self.settings()

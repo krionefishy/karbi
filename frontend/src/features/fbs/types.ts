@@ -11,6 +11,9 @@ export interface FbsWarehouse {
   cargo_type: number;
   is_processing: boolean;
   is_deleting: boolean;
+  participates: boolean;
+  position: number;
+  region_code: string | null;
 }
 
 export interface SellerDistributionOverview {
@@ -26,4 +29,41 @@ export interface SellerDistributionOverview {
 export interface MirrorSyncResult {
   offices: number;
   warehouses: number;
+}
+
+export interface FbsRegion {
+  code: string;
+  title: string;
+  position: number;
+  /** Доля в сотых долях процента: 4000 — это 40%. */
+  share_bp: number;
+}
+
+export interface FbsOffice {
+  office_id: number;
+  name: string;
+  city: string;
+  address: string;
+  federal_district: string;
+  cargo_type: number;
+  region_code: string | null;
+  used_by_cabinets: number;
+}
+
+export interface FbsSetup {
+  regions: FbsRegion[];
+  shares_ready: boolean;
+  reserve_units: number;
+  priority_regions: number;
+  offices: FbsOffice[];
+  unassigned_offices: number;
+}
+
+export interface FbsQueueEntry {
+  place: number;
+  warehouse_id: number;
+  name: string;
+  city: string;
+  region_code: string | null;
+  region_title: string;
 }

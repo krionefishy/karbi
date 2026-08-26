@@ -5,9 +5,10 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
+import { FbsSetupPanel } from "../components/FbsSetupPanel";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
-import { getSellerOverview, setWriteEnabled, syncMirror } from "../features/fbs/api";
+import { getQueue, getSellerOverview, setPlacement, setWriteEnabled, syncMirror } from "../features/fbs/api";
 import { cargoLabel, warehouseState } from "../features/fbs/cargo";
 import {
   attachSeller,
@@ -32,6 +33,7 @@ export function FbsDistributionPage() {
   const [enablingWrite, setEnablingWrite] = useState(false);
   const [formError, setFormError] = useState("");
   const [syncError, setSyncError] = useState("");
+  const [tab, setTab] = useState<"cabinet" | "setup">("cabinet");
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -45,6 +47,11 @@ export function FbsDistributionPage() {
   const { data: overview } = useQuery({
     queryKey: ["fbs-overview", sellerId],
     queryFn: () => getSellerOverview(sellerId),
+    enabled: Boolean(sellerId),
+  });
+  const { data: queue = [] } = useQuery({
+    queryKey: ["fbs-queue", sellerId],
+    queryFn: () => getQueue(sellerId),
     enabled: Boolean(sellerId),
   });
 
@@ -82,9 +89,18 @@ export function FbsDistributionPage() {
     onSuccess: async () => {
       setSyncError("");
       await queryClient.invalidateQueries({ queryKey: ["fbs-overview", sellerId] });
+      await queryClient.invalidateQueries({ queryKey: ["fbs-queue", sellerId] });
     },
     onError: (error) =>
       setSyncError(error instanceof ApiError ? error.message : "Не удалось сверить склады с Wildberries"),
+  });
+  const placementMutation = useMutation({
+    mutationFn: ({ warehouseId, participates, position }: { warehouseId: number; participates: boolean; position: number }) =>
+      setPlacement(sellerId, warehouseId, { participates, position }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["fbs-overview", sellerId] });
+      await queryClient.invalidateQueries({ queryKey: ["fbs-queue", sellerId] });
+    },
   });
   const modeMutation = useMutation({
     mutationFn: (enabled: boolean) => setWriteEnabled(sellerId, enabled),
@@ -121,9 +137,19 @@ export function FbsDistributionPage() {
                 Делит физический остаток товара между виртуальными FBS-складами кабинета.
               </p>
             </div>
+            <span className="mode-switch">
+              <button className={tab === "cabinet" ? "mode-active" : ""} onClick={() => setTab("cabinet")}>
+                Кабинет
+              </button>
+              <button className={tab === "setup" ? "mode-active" : ""} onClick={() => setTab("setup")}>
+                Схема распределения
+              </button>
+            </span>
           </div>
 
-          {isLoading ? (
+          {tab === "setup" && <FbsSetupPanel />}
+
+          {tab === "cabinet" && (isLoading ? (
             <div className="loading-block">Загружаем кабинеты…</div>
           ) : !selected ? (
             <div className="loading-block">Подключите кабинет, чтобы настроить распределение.</div>
@@ -172,9 +198,9 @@ export function FbsDistributionPage() {
                 </dd>
               </div>
             </section>
-          )}
+          ))}
 
-          {selected && (
+          {tab === "cabinet" && selected && (
             <>
               <div className="reviews-heading">
                 <div>
@@ -199,28 +225,78 @@ export function FbsDistributionPage() {
                 <div className="fbs-head">
                   <span>Склад</span>
                   <span>Город</span>
-                  <span>Округ</span>
-                  <span>Объект WB</span>
+                  <span>Направление</span>
                   <span>Груз</span>
-                  <span>Состояние</span>
+                  <span>Место</span>
+                  <span>Участвует</span>
                 </div>
                 {warehouses.map((warehouse) => (
                   <div className="fbs-row" key={warehouse.warehouse_id}>
                     <span>
                       {warehouse.name}
-                      <em className="stock-split">склад {warehouse.warehouse_id}</em>
+                      <em className="stock-split">
+                        склад {warehouse.warehouse_id} · объект {warehouse.office_id} · {warehouseState(warehouse)}
+                      </em>
                     </span>
                     <span>{warehouse.city || "—"}</span>
-                    <span>{warehouse.federal_district || "—"}</span>
-                    <span>
-                      {warehouse.office_id}
-                      {warehouse.address && <em className="stock-split">{warehouse.address}</em>}
-                    </span>
+                    <span>{warehouse.region_code ?? "не размечено"}</span>
                     <span>{cargoLabel(warehouse.cargo_type)}</span>
-                    <span>{warehouseState(warehouse)}</span>
+                    <span>
+                      <input
+                        aria-label={`Место склада ${warehouse.warehouse_id} внутри направления`}
+                        type="number"
+                        min={0}
+                        defaultValue={warehouse.position}
+                        onBlur={(event) =>
+                          placementMutation.mutate({
+                            warehouseId: warehouse.warehouse_id,
+                            participates: warehouse.participates,
+                            position: Number(event.target.value),
+                          })
+                        }
+                      />
+                    </span>
+                    <span>
+                      <input
+                        aria-label={`Склад ${warehouse.warehouse_id} участвует в распределении`}
+                        type="checkbox"
+                        checked={warehouse.participates}
+                        onChange={(event) =>
+                          placementMutation.mutate({
+                            warehouseId: warehouse.warehouse_id,
+                            participates: event.target.checked,
+                            position: warehouse.position,
+                          })
+                        }
+                      />
+                    </span>
                   </div>
                 ))}
               </section>
+
+              {queue.length > 0 && (
+                <>
+                  <div className="reviews-heading">
+                    <div>
+                      <h2>Очередь распределения</h2>
+                      <p className="muted">
+                        В этом порядке расчёт берёт склады: по одному из каждого направления, затем второй круг.
+                      </p>
+                    </div>
+                  </div>
+                  <ol className="fbs-queue">
+                    {queue.map((entry) => (
+                      <li key={entry.warehouse_id}>
+                        <b>{entry.place}</b> {entry.name}
+                        <em className="stock-split">
+                          {entry.region_title}
+                          {entry.city && ` · ${entry.city}`}
+                        </em>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
             </>
           )}
         </main>

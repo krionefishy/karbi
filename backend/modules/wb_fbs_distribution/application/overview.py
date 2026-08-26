@@ -41,6 +41,9 @@ class WarehouseRow:
     cargo_type: int
     is_processing: bool
     is_deleting: bool
+    participates: bool
+    position: int
+    region_code: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +79,7 @@ class FbsDistributionService:
         if enrollment is None:
             raise SellerNotFoundError(str(seller_id))
         offices = {office.office_id: office for office in await self.distribution.offices()}
+        assignment = await self.distribution.office_regions()
         rows = []
         for warehouse in await self.distribution.warehouses(seller_id):
             office = offices.get(warehouse.office_id)
@@ -90,6 +94,9 @@ class FbsDistributionService:
                     cargo_type=warehouse.cargo_type,
                     is_processing=warehouse.is_processing,
                     is_deleting=warehouse.is_deleting,
+                    participates=warehouse.participates,
+                    position=warehouse.position,
+                    region_code=assignment.get(warehouse.office_id),
                 )
             )
         tracked = await self.distribution.tracked_row(seller_id)

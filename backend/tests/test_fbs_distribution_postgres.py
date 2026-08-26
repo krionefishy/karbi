@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete
+from sqlalchemy import update as sa_update
 
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -12,10 +13,22 @@ from backend.modules.wb_core.infrastructure.postgres.models import CredentialMod
 from backend.modules.wb_fbs_distribution.application import (
     FbsDistributionEnrollment,
     FbsDistributionService,
+    InvalidPlacementError,
     MirrorService,
+    PlacementService,
 )
-from backend.modules.wb_fbs_distribution.domain import MODE_DRY_RUN, MODE_WRITE
-from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository, WBOfficeModel
+from backend.modules.wb_fbs_distribution.domain import (
+    BASIS_POINTS,
+    DEFAULT_REGIONS,
+    MODE_DRY_RUN,
+    MODE_WRITE,
+)
+from backend.modules.wb_fbs_distribution.infrastructure.postgres import (
+    FbsDistributionRepository,
+    OfficeRegionModel,
+    RegionModel,
+    WBOfficeModel,
+)
 from backend.modules.wb_fbs_distribution.infrastructure.wb import Office, SellerWarehouse, WBFbsMarketplaceClient
 from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
@@ -103,6 +116,14 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
             # Справочник объектов общий, не по селлеру: без уборки он утёк бы
             # в следующий тест и подменил бы то, что тот проверяет.
             await session.execute(delete(WBOfficeModel))
+            await session.execute(delete(OfficeRegionModel))
+            # Порядок и доли направлений общие; тест, который их менял, не должен
+            # решать за следующий, с чего тот начнёт.
+            for position, (code, _) in enumerate(DEFAULT_REGIONS):
+                await session.execute(
+                    sa_update(RegionModel).where(RegionModel.code == code).values(position=position, share_bp=0)
+                )
+            await FbsDistributionRepository(session).save_settings(reserve_units=20, priority_regions=3)
             await session.execute(delete(OutboxEventModel).where(OutboxEventModel.aggregate_id == model.id))
             await session.execute(delete(SellerModel).where(SellerModel.id == model.id))
             await session.commit()
@@ -347,3 +368,164 @@ async def test_purging_a_cabinet_takes_its_warehouses(seller) -> None:
         assert await distribution.warehouses(seller_id) == []
         # Справочник объектов общий и переживает отключение кабинета.
         assert {row.office_id for row in await distribution.offices()} == {1}
+
+
+async def placement(session) -> PlacementService:
+    return PlacementService(session, FbsDistributionRepository(session))
+
+
+async def test_directions_arrive_already_ordered_and_without_invented_shares(seller) -> None:
+    """The order is confirmed business; the percentages are not, and a made-up
+    share would quietly hand stock to the wrong region."""
+    database, _ = seller
+    async with database.session() as session:
+        setup = await (await placement(session)).setup()
+
+    assert [region.code for region in setup.regions] == [code for code, _ in DEFAULT_REGIONS]
+    assert all(region.share_bp == 0 for region in setup.regions)
+    assert setup.shares_ready is False
+    assert (setup.settings.reserve_units, setup.settings.priority_regions) == (20, 3)
+
+
+async def test_shares_are_kept_only_when_they_make_a_whole_hundred(seller) -> None:
+    database, _ = seller
+    codes = [code for code, _ in DEFAULT_REGIONS]
+
+    async with database.session() as session:
+        service = await placement(session)
+        with pytest.raises(InvalidPlacementError):
+            await service.save_regions([(code, 1000) for code in codes])
+
+    async with database.session() as session:
+        service = await placement(session)
+        setup = await service.save_regions(list(zip(codes, (4000, 2000, 1200, 1300, 1000, 500), strict=True)))
+
+    assert setup.shares_ready is True
+    assert [region.share_bp for region in setup.regions] == [4000, 2000, 1200, 1300, 1000, 500]
+
+
+async def test_reordering_directions_keeps_their_shares(seller) -> None:
+    database, _ = seller
+    codes = [code for code, _ in DEFAULT_REGIONS]
+    async with database.session() as session:
+        service = await placement(session)
+        await service.save_regions(list(zip(codes, (4000, 2000, 1200, 1300, 1000, 500), strict=True)))
+
+    async with database.session() as session:
+        service = await placement(session)
+        setup = await service.save_regions(list(zip(reversed(codes), (500, 1000, 1300, 1200, 2000, 4000), strict=True)))
+
+    assert [region.code for region in setup.regions] == list(reversed(codes))
+    assert setup.shares_ready is True
+
+
+async def test_a_direction_cannot_be_invented_or_dropped(seller) -> None:
+    database, _ = seller
+    async with database.session() as session:
+        service = await placement(session)
+        with pytest.raises(InvalidPlacementError):
+            await service.save_regions([("moscow", BASIS_POINTS)])
+        with pytest.raises(InvalidPlacementError):
+            await service.save_regions([(code, 0) for code, _ in DEFAULT_REGIONS] + [("mars", 0)])
+
+
+async def test_marking_an_office_survives_a_sync_with_wb(seller) -> None:
+    """The mirror is overwritten by whatever WB answers; the operator's own
+    marking is ours and must outlive it."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(204, "Краснодар")], warehouses=[])).sync_seller(seller_id)
+
+    async with database.session() as session:
+        setup = await (await placement(session)).assign_office(204, "krasnodar")
+    assert setup.unassigned_offices == 0
+
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(204, "Краснодар")], warehouses=[])).sync_seller(seller_id)
+
+    async with database.session() as session:
+        assert (await FbsDistributionRepository(session).office_regions())[204] == "krasnodar"
+
+
+async def test_the_queue_walks_the_directions_in_turn(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(
+            session,
+            FakeMarketplace(
+                offices=[office(1, "Москва"), office(2, "Москва"), office(3, "Казань")],
+                warehouses=[warehouse(10, 1), warehouse(11, 2), warehouse(12, 3)],
+            ),
+        ).sync_seller(seller_id)
+    async with database.session() as session:
+        service = await placement(session)
+        await service.assign_office(1, "moscow")
+        await service.assign_office(2, "moscow")
+        await service.assign_office(3, "volga")
+
+    async with database.session() as session:
+        entries = await (await placement(session)).queue(seller_id)
+
+    assert [entry.warehouse_id for entry in entries] == [10, 12, 11]
+    assert [entry.region_title for entry in entries] == ["Москва", "Приволжье", "Москва"]
+
+
+async def test_a_warehouse_taken_out_of_the_scheme_leaves_the_queue(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(
+            session,
+            FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1), warehouse(11, 1)]),
+        ).sync_seller(seller_id)
+    async with database.session() as session:
+        await (await placement(session)).assign_office(1, "moscow")
+
+    async with database.session() as session:
+        entries = await (await placement(session)).set_placement(seller_id, 11, participates=False, position=0)
+
+    assert [entry.warehouse_id for entry in entries] == [10]
+
+
+async def test_the_operator_order_survives_a_sync_with_wb(seller) -> None:
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    rows = FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1), warehouse(11, 1)])
+    async with database.session() as session:
+        await mirror(session, rows).sync_seller(seller_id)
+    async with database.session() as session:
+        await (await placement(session)).assign_office(1, "moscow")
+    async with database.session() as session:
+        await (await placement(session)).set_placement(seller_id, 11, participates=True, position=0)
+        await (await placement(session)).set_placement(seller_id, 10, participates=True, position=1)
+
+    async with database.session() as session:
+        await mirror(session, rows).sync_seller(seller_id)
+
+    async with database.session() as session:
+        entries = await (await placement(session)).queue(seller_id)
+    assert [entry.warehouse_id for entry in entries] == [11, 10]
+
+
+async def test_settings_are_checked_before_they_reach_the_calculation(seller) -> None:
+    database, _ = seller
+    async with database.session() as session:
+        service = await placement(session)
+        with pytest.raises(InvalidPlacementError):
+            await service.save_settings(reserve_units=-1, priority_regions=3)
+        with pytest.raises(InvalidPlacementError):
+            await service.save_settings(reserve_units=20, priority_regions=0)
+
+    async with database.session() as session:
+        setup = await (await placement(session)).save_settings(reserve_units=15, priority_regions=4)
+    assert (setup.settings.reserve_units, setup.settings.priority_regions) == (15, 4)

@@ -1,7 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, Index, Integer, MetaData, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -77,5 +89,65 @@ class SellerWarehouseModel(WBFbsDistributionBase):
     is_deleting: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_processing: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Участие и место в очереди ставит оператор, поэтому сверка с WB их не
+    # трогает: она обновляет только то, что приехало из ответа.
+    participates: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     __table_args__ = (Index("ix_wb_fbs_warehouses_office", "seller_id", "office_id"),)
+
+
+class RegionModel(WBFbsDistributionBase):
+    """Шесть логистических направлений: порядок приоритета и доля.
+
+    Доля в сотых долях процента, а не дробью: расчёт целочисленный, и «сумма
+    долей ровно 100%» проверяется точно, без накопленной ошибки float.
+    """
+
+    __tablename__ = "regions"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    share_bp: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
+    __table_args__ = (CheckConstraint("share_bp BETWEEN 0 AND 10000", name="ck_wb_fbs_region_share"),)
+
+
+class OfficeRegionModel(WBFbsDistributionBase):
+    """К какому направлению отнесён объект WB.
+
+    Отдельной таблицей, а не колонкой в зеркале: зеркало перезаписывается
+    ответом WB, а разметка принадлежит нам и переживать сверку обязана.
+    """
+
+    __tablename__ = "office_regions"
+
+    office_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    region_code: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    __table_args__ = (Index("ix_wb_fbs_office_regions_region", "region_code"),)
+
+
+class DistributionSettingsModel(WBFbsDistributionBase):
+    """Числа расчёта, которые бизнес меняет без правки кода.
+
+    Одна строка: пока политика общая для всех кабинетов и товаров. Когда
+    понадобится своя на селлера или категорию, у таблицы появится область
+    действия, а не вторая таблица рядом.
+    """
+
+    __tablename__ = "distribution_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Резерв на брак. Вычитается один раз на товар, до любого деления.
+    reserve_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
+    # K для малого остатка. Считается в регионах, не в складах.
+    priority_regions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_wb_fbs_settings_single_row"),
+        CheckConstraint("reserve_units >= 0", name="ck_wb_fbs_settings_reserve"),
+        CheckConstraint("priority_regions >= 1", name="ck_wb_fbs_settings_priority"),
+    )

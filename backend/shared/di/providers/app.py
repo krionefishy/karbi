@@ -14,6 +14,7 @@ from backend.modules.wb_fbs_distribution.application import (
     FbsDistributionEnrollment,
     FbsDistributionService,
     MirrorService,
+    PlacementService,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, marketplace_throttle
@@ -126,6 +127,10 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
     ) -> FbsDistributionService:
         return FbsDistributionService(session, sellers, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_placement_service(self, session: AsyncSession, distribution: FbsDistributionRepository) -> PlacementService:
+        return PlacementService(session, distribution)
 
     @provide(scope=Scope.REQUEST)
     def fbs_mirror_service(

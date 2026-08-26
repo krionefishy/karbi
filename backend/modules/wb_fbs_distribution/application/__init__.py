@@ -11,6 +11,14 @@ from backend.modules.wb_fbs_distribution.application.overview import (
     SellerOverview,
     WarehouseRow,
 )
+from backend.modules.wb_fbs_distribution.application.placement import (
+    InvalidPlacementError,
+    OfficeRow,
+    PlacementService,
+    PlacementSettings,
+    QueueEntry,
+    SetupOverview,
+)
 
 __all__ = [
     "AUTOMATION_ID",
@@ -19,8 +27,14 @@ __all__ = [
     "DistributionCatalogOverview",
     "FbsDistributionEnrollment",
     "FbsDistributionService",
+    "InvalidPlacementError",
     "MirrorResult",
     "MirrorService",
+    "OfficeRow",
+    "PlacementService",
+    "PlacementSettings",
+    "QueueEntry",
     "SellerOverview",
+    "SetupOverview",
     "WarehouseRow",
 ]

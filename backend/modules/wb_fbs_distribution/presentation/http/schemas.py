@@ -1,10 +1,72 @@
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ModeRequest(BaseModel):
     write_enabled: bool
+
+
+class RegionResponse(BaseModel):
+    code: str
+    title: str
+    position: int
+    """Доля в сотых долях процента: 4000 — это 40%."""
+    share_bp: int
+
+
+class RegionOrderItem(BaseModel):
+    code: str
+    share_bp: int = Field(ge=0, le=10_000)
+
+
+class RegionOrderRequest(BaseModel):
+    """Порядок направлений задаётся порядком элементов списка."""
+
+    regions: list[RegionOrderItem] = Field(min_length=1)
+
+
+class OfficeRegionRequest(BaseModel):
+    region_code: str | None = None
+
+
+class SettingsRequest(BaseModel):
+    reserve_units: int = Field(ge=0)
+    priority_regions: int = Field(ge=1)
+
+
+class OfficeResponse(BaseModel):
+    office_id: int
+    name: str
+    city: str
+    address: str
+    federal_district: str
+    cargo_type: int
+    region_code: str | None
+    used_by_cabinets: int
+
+
+class SetupResponse(BaseModel):
+    regions: list[RegionResponse]
+    shares_ready: bool
+    reserve_units: int
+    priority_regions: int
+    offices: list[OfficeResponse]
+    unassigned_offices: int
+
+
+class PlacementRequest(BaseModel):
+    participates: bool
+    position: int = Field(ge=0)
+
+
+class QueueEntryResponse(BaseModel):
+    place: int
+    warehouse_id: int
+    name: str
+    city: str
+    region_code: str | None
+    region_title: str
 
 
 class WarehouseResponse(BaseModel):
@@ -17,6 +79,9 @@ class WarehouseResponse(BaseModel):
     cargo_type: int
     is_processing: bool
     is_deleting: bool
+    participates: bool
+    position: int
+    region_code: str | None
 
 
 class DistributionOverviewResponse(BaseModel):
