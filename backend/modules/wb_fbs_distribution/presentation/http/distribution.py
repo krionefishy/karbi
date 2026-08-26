@@ -14,9 +14,11 @@ from backend.modules.wb_fbs_distribution.application import (
     MappingService,
     MappingState,
     MirrorService,
+    NothingToPublishError,
     PlacementService,
     Plan,
     PlanningService,
+    PublicationService,
     QueueEntry,
     SellerOverview,
     SetupOverview,
@@ -46,6 +48,8 @@ from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     PlanSkipResponse,
     PoolResponse,
     PoolShareRequest,
+    PublicationHistoryItem,
+    PublicationResponse,
     QueueEntryResponse,
     RebindWarehouseRequest,
     RegionOrderRequest,
@@ -56,6 +60,7 @@ from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     SnapshotHistoryItem,
     SnapshotStateResponse,
     UnmappedPoolResponse,
+    WarehouseOutcomeResponse,
     WarehouseResponse,
 )
 
@@ -592,3 +597,67 @@ async def delete_warehouse(
     except WBTemporaryError as error:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/sellers/{seller_id}/publish", response_model=PublicationResponse)
+@inject
+async def publish_stocks(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    service: FromDishka[PublicationService],
+) -> PublicationResponse:
+    """Привести остатки кабинета в Wildberries к последнему плану.
+
+    Уходят только изменившиеся пары «склад + баркод». После записи каждая пачка
+    перечитывается: ответ `204` сам по себе не значит, что число опубликовано.
+    """
+    try:
+        result = await service.publish(seller_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, NOT_ENROLLED) from error
+    except WriteNotAllowedError as error:
+        raise write_refused(error) from error
+    except NothingToPublishError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBPermanentError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except WBTemporaryError as error:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(error)) from error
+    return PublicationResponse(
+        plan_id=result.plan_id,
+        sent=result.sent,
+        drift=result.drift,
+        failed=result.failed,
+        outcomes=[
+            WarehouseOutcomeResponse(
+                warehouse_id=outcome.warehouse_id,
+                sent=outcome.sent,
+                drift=outcome.drift,
+                status=outcome.status,
+                error=outcome.error,
+            )
+            for outcome in result.outcomes
+        ],
+    )
+
+
+@router.get("/sellers/{seller_id}/publications", response_model=list[PublicationHistoryItem])
+@inject
+async def publication_history(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    repository: FromDishka[FbsDistributionRepository],
+) -> list[PublicationHistoryItem]:
+    return [
+        PublicationHistoryItem(
+            id=row.id,
+            plan_id=row.plan_id,
+            warehouse_id=row.warehouse_id,
+            created_at=row.created_at.isoformat(),
+            rows=row.rows,
+            status=row.status,
+            drift=row.drift,
+            error=row.error,
+        )
+        for row in await repository.publication_history(seller_id)
+    ]

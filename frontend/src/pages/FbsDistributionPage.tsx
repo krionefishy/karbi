@@ -165,7 +165,7 @@ export function FbsDistributionPage() {
           {tab === "mapping" && <FbsMappingPanel sellers={sellers} />}
           {tab === "plan" &&
             (selected ? (
-              <FbsPlanPanel sellerId={selected.id} sellerName={selected.name} />
+              <FbsPlanPanel sellerId={selected.id} sellerName={selected.name} writeEnabled={writing} />
             ) : (
               <div className="loading-block">Выберите кабинет слева, чтобы посчитать план.</div>
             ))}

@@ -1,20 +1,22 @@
 import { useMutation } from "@tanstack/react-query";
-import { Calculator } from "lucide-react";
+import { Calculator, Upload } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
-import { buildPlan } from "../features/fbs/api";
-import type { FbsPlan } from "../features/fbs/types";
+import { buildPlan, publishStocks } from "../features/fbs/api";
+import type { FbsPlan, FbsPublication } from "../features/fbs/types";
 
 interface Props {
   sellerId: string;
   sellerName: string;
+  writeEnabled: boolean;
 }
 
 const moment = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
-export function FbsPlanPanel({ sellerId, sellerName }: Props) {
+export function FbsPlanPanel({ sellerId, sellerName, writeEnabled }: Props) {
   const [plan, setPlan] = useState<FbsPlan | null>(null);
+  const [published, setPublished] = useState<FbsPublication | null>(null);
   const [error, setError] = useState("");
   const [opened, setOpened] = useState<number | null>(null);
 
@@ -23,8 +25,19 @@ export function FbsPlanPanel({ sellerId, sellerName }: Props) {
     onSuccess: (result) => {
       setError("");
       setPlan(result);
+      setPublished(null);
     },
     onError: (raised) => setError(raised instanceof ApiError ? raised.message : "Не удалось посчитать план"),
+  });
+
+  const publish = useMutation({
+    mutationFn: () => publishStocks(sellerId),
+    onSuccess: (result) => {
+      setError("");
+      setPublished(result);
+    },
+    onError: (raised) =>
+      setError(raised instanceof ApiError ? raised.message : "Не удалось опубликовать остатки"),
   });
 
   return (
@@ -40,8 +53,46 @@ export function FbsPlanPanel({ sellerId, sellerName }: Props) {
           <Calculator size={16} />
           {build.isPending ? "Считаем…" : "Посчитать"}
         </button>
+        <button
+          className="primary-button"
+          disabled={!writeEnabled || !plan || publish.isPending}
+          title={writeEnabled ? undefined : "Кабинету не разрешена запись в Wildberries"}
+          onClick={() => publish.mutate()}
+        >
+          <Upload size={16} />
+          {publish.isPending ? "Публикуем…" : "Отправить в Wildberries"}
+        </button>
       </div>
       {error && <div className="form-error">{error}</div>}
+
+      {published && (
+        <section className="automation-meta" aria-label="Итоги публикации">
+          <div>
+            <dt>Отправлено строк</dt>
+            <dd>
+              {published.sent}
+              <span className="automation-run-detail">по {published.outcomes.length} складам</span>
+            </dd>
+          </div>
+          <div>
+            <dt>Расхождений после вычитки</dt>
+            <dd>
+              {published.drift}
+              <span className="automation-run-detail">
+                {published.drift ? "Wildberries принял не всё" : "всё совпало с планом"}
+              </span>
+            </dd>
+          </div>
+          <div>
+            <dt>Складов с ошибкой</dt>
+            <dd>{published.failed}</dd>
+          </div>
+          <div>
+            <dt>Ничего не изменилось</dt>
+            <dd>{published.outcomes.length ? "—" : "план уже опубликован"}</dd>
+          </div>
+        </section>
+      )}
 
       {plan && (
         <>

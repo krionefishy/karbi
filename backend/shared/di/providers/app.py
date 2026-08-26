@@ -18,6 +18,7 @@ from backend.modules.wb_fbs_distribution.application import (
     MirrorService,
     PlacementService,
     PlanningService,
+    PublicationService,
     SnapshotService,
     StockSnapshotSource,
     WarehouseAdminService,
@@ -25,6 +26,7 @@ from backend.modules.wb_fbs_distribution.application import (
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsMarketplaceClient,
+    WBFbsStockWriter,
     WBFbsWarehouseWriter,
     marketplace_throttle,
 )
@@ -81,6 +83,10 @@ class AppProvider(Provider):
     def fbs_warehouse_writer(self, settings: Settings, redis: RedisClient) -> WBFbsWarehouseWriter:
         """Клиент команд, меняющих кабинет. Отдельный от читающего намеренно."""
         return WBFbsWarehouseWriter(throttle=marketplace_throttle(settings, redis))
+
+    @provide(scope=Scope.APP)
+    def fbs_stock_writer(self, settings: Settings, redis: RedisClient) -> WBFbsStockWriter:
+        return WBFbsStockWriter(throttle=marketplace_throttle(settings, redis))
 
 
 class SessionProvider(Provider):
@@ -173,6 +179,18 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def fbs_placement_service(self, session: AsyncSession, distribution: FbsDistributionRepository) -> PlacementService:
         return PlacementService(session, distribution)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_publication_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        distribution: FbsDistributionRepository,
+        marketplace: WBFbsMarketplaceClient,
+        writer: WBFbsStockWriter,
+        cipher: CredentialCipher,
+    ) -> PublicationService:
+        return PublicationService(session, sellers, distribution, marketplace, writer, cipher)
 
     @provide(scope=Scope.REQUEST)
     def fbs_warehouse_admin_service(

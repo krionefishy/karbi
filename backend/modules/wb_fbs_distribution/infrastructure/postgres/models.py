@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Float,
+    Identity,
     Index,
     Integer,
     MetaData,
@@ -256,6 +257,11 @@ class AllocationPlanModel(WBFbsDistributionBase):
     __tablename__ = "allocation_plans"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Возрастающий номер: по нему и определяется «последний план». Двух
+    # расчётов в одну отметку времени достаточно, чтобы порядок по времени стал
+    # произвольным, а произвольный порядок здесь означает публикацию устаревшего
+    # плана.
+    sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=False), nullable=False, unique=True)
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -296,3 +302,43 @@ class AllocationSkipModel(WBFbsDistributionBase):
     item_id: Mapped[str] = mapped_column(String(128), nullable=False)
     characteristic: Mapped[str] = mapped_column(String(255), nullable=False, server_default="")
     reason: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class PublishedStockModel(WBFbsDistributionBase):
+    """Последнее подтверждённое чтением значение на складе WB.
+
+    Отдельно от плана: план — это желаемое, а здесь фактическое. Ответ `204` на
+    запись не делает число опубликованным — документация WB предупреждает, что
+    запрос с неверными именами полей вернёт успех, ничего не изменив. Строка
+    появляется только после контрольной вычитки.
+    """
+
+    __tablename__ = "published_stocks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    sku: Mapped[str] = mapped_column(String(64), primary_key=True)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class StockPublicationModel(WBFbsDistributionBase):
+    """Одна попытка привести склад к плану."""
+
+    __tablename__ = "stock_publications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    plan_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    rows: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Сколько строк после вычитки не совпало с планом.
+    drift: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('verified', 'drift', 'failed')", name="ck_wb_fbs_publication_status"),
+        Index("ix_wb_fbs_publications_seller", "seller_id", "created_at"),
+    )

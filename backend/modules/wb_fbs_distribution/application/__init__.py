@@ -34,6 +34,15 @@ from backend.modules.wb_fbs_distribution.application.planning import (
     PlanningService,
     PlanSkip,
 )
+from backend.modules.wb_fbs_distribution.application.publication import (
+    DRIFT,
+    FAILED,
+    VERIFIED,
+    NothingToPublishError,
+    PublicationResult,
+    PublicationService,
+    WarehouseOutcome,
+)
 from backend.modules.wb_fbs_distribution.application.snapshots import (
     ACCEPTED,
     DISCONNECTED,
@@ -55,6 +64,9 @@ from backend.modules.wb_fbs_distribution.application.warehouses import (
 
 __all__ = [
     "ACCEPTED",
+    "DRIFT",
+    "FAILED",
+    "VERIFIED",
     "REASON_TEXT",
     "AUTOMATION_ID",
     "DISCONNECTED",
@@ -74,12 +86,15 @@ __all__ = [
     "MatchResult",
     "MirrorResult",
     "MirrorService",
+    "NothingToPublishError",
     "OfficeRow",
     "Plan",
     "PlacementService",
     "PlanItem",
     "PlanSkip",
     "PlanningService",
+    "PublicationResult",
+    "PublicationService",
     "PlacementSettings",
     "PoolRow",
     "QueueEntry",
@@ -92,6 +107,7 @@ __all__ = [
     "SetupOverview",
     "UnmappedPool",
     "WarehouseAdminService",
+    "WarehouseOutcome",
     "WarehouseConflictError",
     "WarehouseRow",
     "WriteNotAllowedError",

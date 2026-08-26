@@ -3,6 +3,7 @@ import type {
   FbsMappingState,
   FbsMatchResult,
   FbsPlan,
+  FbsPublication,
   FbsPool,
   FbsQueueEntry,
   FbsSetup,
@@ -100,3 +101,10 @@ export const createWarehouse = (sellerId: string, payload: { office_id: number; 
 
 export const deleteWarehouse = (sellerId: string, warehouseId: number) =>
   apiRequest<void>(`/api/v1/wb/fbs/sellers/${sellerId}/warehouses/${warehouseId}`, { method: "DELETE" });
+
+/**
+ * Приводит остатки кабинета в Wildberries к последнему плану. Уходят только
+ * изменившиеся пары «склад + баркод», каждая пачка перечитывается после записи.
+ */
+export const publishStocks = (sellerId: string) =>
+  apiRequest<FbsPublication>(`/api/v1/wb/fbs/sellers/${sellerId}/publish`, { method: "POST" });

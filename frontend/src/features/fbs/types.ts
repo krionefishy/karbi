@@ -174,3 +174,19 @@ export interface FbsPlan {
   items: FbsPlanItem[];
   skips: FbsPlanSkip[];
 }
+
+export interface FbsWarehouseOutcome {
+  warehouse_id: number;
+  sent: number;
+  drift: number;
+  status: "verified" | "drift" | "failed";
+  error: string | null;
+}
+
+export interface FbsPublication {
+  plan_id: string;
+  sent: number;
+  drift: number;
+  failed: number;
+  outcomes: FbsWarehouseOutcome[];
+}

@@ -15,9 +15,11 @@ from backend.modules.wb_fbs_distribution.infrastructure.postgres.models import (
     OfficeRegionModel,
     PoolSellerShareModel,
     ProductMappingModel,
+    PublishedStockModel,
     RegionModel,
     SellerWarehouseModel,
     StockPoolModel,
+    StockPublicationModel,
     StockSnapshotModel,
     TrackedSellerModel,
     WBOfficeModel,
@@ -42,7 +44,24 @@ class FbsDistributionRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        await self.session.execute(delete(SellerWarehouseModel).where(SellerWarehouseModel.seller_id == seller_id))
+        """Стереть всё, что модуль знает о кабинете.
+
+        Список полный намеренно: реестр селлеров зовёт этот метод и не знает,
+        что у нас внутри. Забытая здесь таблица не уронит ничего сразу — она
+        просто тихо переживёт удаление кабинета.
+        """
+        plans = select(AllocationPlanModel.id).where(AllocationPlanModel.seller_id == seller_id)
+        for child in (AllocationItemModel, AllocationSkipModel):
+            await self.session.execute(delete(child).where(child.plan_id.in_(plans)))
+        for model in (
+            AllocationPlanModel,
+            PoolSellerShareModel,
+            ProductMappingModel,
+            PublishedStockModel,
+            SellerWarehouseModel,
+            StockPublicationModel,
+        ):
+            await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
 
     async def tracked_row(self, seller_id: uuid.UUID) -> TrackedSellerModel | None:
@@ -542,10 +561,16 @@ class FbsDistributionRepository:
         return plan_id
 
     async def latest_plan(self, seller_id: uuid.UUID) -> AllocationPlanModel | None:
+        """Самый свежий план кабинета.
+
+        Порядок по возрастающему номеру, а не по времени: два расчёта могут
+        попасть в одну отметку, и тогда «последним» оказался бы произвольный —
+        то есть в WB уехал бы устаревший план.
+        """
         return await self.session.scalar(
             select(AllocationPlanModel)
             .where(AllocationPlanModel.seller_id == seller_id)
-            .order_by(AllocationPlanModel.created_at.desc())
+            .order_by(AllocationPlanModel.sequence.desc())
             .limit(1)
         )
 
@@ -561,4 +586,84 @@ class FbsDistributionRepository:
     async def plan_skips(self, plan_id: uuid.UUID) -> list[AllocationSkipModel]:
         return list(
             await self.session.scalars(select(AllocationSkipModel).where(AllocationSkipModel.plan_id == plan_id))
+        )
+
+    # --- публикация остатков ---------------------------------------------
+
+    async def published(self, seller_id: uuid.UUID) -> dict[tuple[int, str], int]:
+        """Последнее подтверждённое чтением состояние складов кабинета."""
+        rows = await self.session.execute(
+            select(PublishedStockModel.warehouse_id, PublishedStockModel.sku, PublishedStockModel.amount).where(
+                PublishedStockModel.seller_id == seller_id
+            )
+        )
+        return {(warehouse_id, sku): amount for warehouse_id, sku, amount in rows}
+
+    async def confirm_published(
+        self,
+        seller_id: uuid.UUID,
+        warehouse_id: int,
+        amounts: dict[str, int],
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Записать то, что WB подтвердил вычиткой, а не то, что мы отправили."""
+        stamp = now or datetime.now(UTC)
+        if not amounts:
+            return
+        rows = [
+            {
+                "seller_id": seller_id,
+                "warehouse_id": warehouse_id,
+                "sku": sku,
+                "amount": amount,
+                "confirmed_at": stamp,
+            }
+            for sku, amount in amounts.items()
+        ]
+        statement = insert(PublishedStockModel).values(rows)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "warehouse_id", "sku"],
+                set_={"amount": statement.excluded.amount, "confirmed_at": statement.excluded.confirmed_at},
+            )
+        )
+
+    async def record_publication(
+        self,
+        *,
+        seller_id: uuid.UUID,
+        plan_id: uuid.UUID | None,
+        warehouse_id: int,
+        created_at: datetime,
+        rows: int,
+        status: str,
+        drift: int = 0,
+        error: str | None = None,
+    ) -> uuid.UUID:
+        publication_id = uuid.uuid4()
+        self.session.add(
+            StockPublicationModel(
+                id=publication_id,
+                seller_id=seller_id,
+                plan_id=plan_id,
+                warehouse_id=warehouse_id,
+                created_at=created_at,
+                rows=rows,
+                status=status,
+                drift=drift,
+                error=error,
+            )
+        )
+        await self.session.flush()
+        return publication_id
+
+    async def publication_history(self, seller_id: uuid.UUID, limit: int = 50) -> list[StockPublicationModel]:
+        return list(
+            await self.session.scalars(
+                select(StockPublicationModel)
+                .where(StockPublicationModel.seller_id == seller_id)
+                .order_by(StockPublicationModel.created_at.desc())
+                .limit(limit)
+            )
         )

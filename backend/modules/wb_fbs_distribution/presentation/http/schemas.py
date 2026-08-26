@@ -231,3 +231,30 @@ class CreatedWarehouseResponse(BaseModel):
     warehouse_id: int
     office_id: int
     name: str
+
+
+class WarehouseOutcomeResponse(BaseModel):
+    warehouse_id: int
+    sent: int
+    drift: int
+    status: str
+    error: str | None
+
+
+class PublicationResponse(BaseModel):
+    plan_id: uuid.UUID
+    sent: int
+    drift: int
+    failed: int
+    outcomes: list[WarehouseOutcomeResponse]
+
+
+class PublicationHistoryItem(BaseModel):
+    id: uuid.UUID
+    plan_id: uuid.UUID | None
+    warehouse_id: int
+    created_at: str
+    rows: int
+    status: str
+    drift: int
+    error: str | None

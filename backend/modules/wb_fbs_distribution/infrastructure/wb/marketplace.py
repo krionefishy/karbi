@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -6,6 +7,8 @@ import httpx
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 MARKETPLACE_BUCKET = "marketplace"
+# WB принимает не больше тысячи позиций за запрос остатков.
+SKU_CHUNK = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +68,38 @@ class WBFbsMarketplaceClient(WBJsonClient):
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             payload = await self.request(client, "GET", f"{self.base_url}/api/v3/warehouses", api_key)
         return [self._warehouse(row) for row in self._rows(payload, "список складов")]
+
+    async def stocks(self, api_key: str, warehouse_id: int, skus: Sequence[str]) -> dict[str, int]:
+        """Что WB сейчас показывает на складе. Спрашивается по `sku`.
+
+        Фильтр WB учитывает, поэтому спрашиваем ровно то, что публиковали.
+        В ответе приходят и `sku`, и `chrtId`, но ключом остаётся `sku`: именно
+        им остаток и пишется.
+
+        Строки нет — значит ноль. Решает это вызывающий: «нет строки» и «ноль»
+        путать здесь нельзя.
+        """
+        collected: dict[str, int] = {}
+        if not skus:
+            return collected
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for offset in range(0, len(skus), SKU_CHUNK):
+                payload = await self.request(
+                    client,
+                    "POST",
+                    f"{self.base_url}/api/v3/stocks/{warehouse_id}",
+                    api_key,
+                    json={"skus": list(skus[offset : offset + SKU_CHUNK])},
+                )
+                rows = payload.get("stocks") if isinstance(payload, dict) else payload
+                if rows is None:
+                    continue
+                if not isinstance(rows, list):
+                    raise WBPermanentError(f"{self.api_name}: неожиданный ответ по остаткам")
+                for row in rows:
+                    if isinstance(row, dict) and row.get("sku"):
+                        collected[str(row["sku"])] = int(row.get("amount") or 0)
+        return collected
 
     def _rows(self, payload: Any, what: str) -> list[dict]:
         if payload is None:
