@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -12,7 +12,14 @@ import { FbsStockPanel } from "../components/FbsStockPanel";
 import { FbsWarehouseAdmin } from "../components/FbsWarehouseAdmin";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
-import { getQueue, getSellerOverview, setPlacement, setWriteEnabled, syncMirror } from "../features/fbs/api";
+import {
+  getQueue,
+  getSellerOverview,
+  getSetup,
+  setPlacement,
+  setWriteEnabled,
+  syncMirror,
+} from "../features/fbs/api";
 import { cargoLabel, warehouseState } from "../features/fbs/cargo";
 import {
   attachSeller,
@@ -25,6 +32,8 @@ import type { Seller, SellerInput } from "../features/sellers/types";
 
 const AUTOMATION_ID = "wb-fbs-distribution";
 const AUTOMATION_TITLE = "Распределение остатков FBS";
+// Отдельное значение фильтра: пустая строка уже занята под «все».
+const NO_REGION = "__none";
 
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" });
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -38,6 +47,8 @@ export function FbsDistributionPage() {
   const [formError, setFormError] = useState("");
   const [syncError, setSyncError] = useState("");
   const [tab, setTab] = useState<"cabinet" | "setup" | "stock" | "mapping" | "plan">("cabinet");
+  const [region, setRegion] = useState("");
+  const [queueOpen, setQueueOpen] = useState(false);
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -58,6 +69,8 @@ export function FbsDistributionPage() {
     queryFn: () => getQueue(sellerId),
     enabled: Boolean(sellerId),
   });
+  // Тот же ключ, что у вкладки со схемой: названия направлений приезжают один раз на обе.
+  const { data: setup } = useQuery({ queryKey: ["fbs-setup"], queryFn: getSetup });
 
   useEffect(() => {
     if (!sellers.some((item) => item.id === sellerId)) {
@@ -116,7 +129,14 @@ export function FbsDistributionPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const writing = Boolean(overview?.write_enabled);
-  const warehouses = overview?.warehouses ?? [];
+  const allWarehouses = overview?.warehouses ?? [];
+  const warehouses = allWarehouses.filter((warehouse) =>
+    region === "" ? true : region === NO_REGION ? !warehouse.region_code : warehouse.region_code === region,
+  );
+  // Направления берутся из самих складов, а не из справочника: показывать в
+  // фильтре то, чего в кабинете нет, — значит предлагать пустой результат.
+  const regionsInCabinet = [...new Set(allWarehouses.map((item) => item.region_code).filter(Boolean))] as string[];
+  const regionTitles = new Map((setup?.regions ?? []).map((item) => [item.code, item.title]));
 
   return (
     <div className="app-page reviews-shell">
@@ -224,7 +244,11 @@ export function FbsDistributionPage() {
                 <div>
                   <h2>Виртуальные склады</h2>
                   <p className="muted">
-                    {warehouses.length ? `${warehouses.length} складов в кабинете.` : "Складов нет."}
+                    {allWarehouses.length
+                      ? region
+                        ? `${warehouses.length} из ${allWarehouses.length} складов.`
+                        : `${allWarehouses.length} складов в кабинете.`
+                      : "Складов нет."}
                   </p>
                 </div>
                 <button
@@ -237,6 +261,33 @@ export function FbsDistributionPage() {
                 </button>
               </div>
               {syncError && <div className="form-error">{syncError}</div>}
+              {allWarehouses.length > 0 && (
+                <div className="fbs-office-tools">
+                  <span className="mode-switch" style={{ margin: 0, flexWrap: "wrap" }}>
+                    <button className={region === "" ? "mode-active" : ""} onClick={() => setRegion("")}>
+                      Все · {allWarehouses.length}
+                    </button>
+                    {regionsInCabinet.map((code) => (
+                      <button
+                        key={code}
+                        className={region === code ? "mode-active" : ""}
+                        onClick={() => setRegion(code)}
+                      >
+                        {regionTitles.get(code) ?? code} ·{" "}
+                        {allWarehouses.filter((item) => item.region_code === code).length}
+                      </button>
+                    ))}
+                    {allWarehouses.some((item) => !item.region_code) && (
+                      <button
+                        className={region === NO_REGION ? "mode-active" : ""}
+                        onClick={() => setRegion(NO_REGION)}
+                      >
+                        Без направления · {allWarehouses.filter((item) => !item.region_code).length}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
               <section className="fbs-table" aria-label="Виртуальные склады кабинета">
                 <div className="fbs-head">
                   <span>Склад</span>
@@ -288,6 +339,7 @@ export function FbsDistributionPage() {
                     </span>
                   </div>
                 ))}
+                {!warehouses.length && <div className="fbs-row-empty">Складов этого направления нет.</div>}
               </section>
 
               <FbsWarehouseAdmin sellerId={selected.id} writeEnabled={writing} warehouses={warehouses} />
@@ -298,18 +350,24 @@ export function FbsDistributionPage() {
                     <div>
                       <h2>Очередь распределения</h2>
                     </div>
+                    <button className="secondary-button" onClick={() => setQueueOpen(!queueOpen)}>
+                      {queueOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      {queueOpen ? "Свернуть" : `Показать · ${queue.length}`}
+                    </button>
                   </div>
-                  <ol className="fbs-queue">
-                    {queue.map((entry) => (
-                      <li key={entry.warehouse_id}>
-                        <b>{entry.place}</b> {entry.name}
-                        <em className="stock-split">
-                          {entry.region_title}
-                          {entry.city && ` · ${entry.city}`}
-                        </em>
-                      </li>
-                    ))}
-                  </ol>
+                  {queueOpen && (
+                    <ol className="fbs-queue">
+                      {queue.map((entry) => (
+                        <li key={entry.warehouse_id}>
+                          <b>{entry.place}</b> {entry.name}
+                          <em className="stock-split">
+                            {entry.region_title}
+                            {entry.city && ` · ${entry.city}`}
+                          </em>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </>
               )}
             </>
