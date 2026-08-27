@@ -403,7 +403,34 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .fbs-head > *, .fbs-row > * { padding: 0 16px; }
 .fbs-row input[type="number"] { width: 72px; height: 32px; padding: 0 8px; background: var(--surface); border: 1px solid var(--line); }
 
-.fbs-regions { background: var(--surface); border: 1px solid var(--line); }
+/* Карточка с шапкой: заголовок и его кнопка живут внутри блока, к которому
+   относятся, — им некуда «уезжать» от содержимого на любой ширине. */
+.card { margin-bottom: 26px; background: var(--surface); border: 1px solid var(--line); }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 58px; padding: 0 18px; border-bottom: 1px solid var(--line); }
+.card-head h2 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+.card-head-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.card-head-title .muted { font-size: 12px; white-space: nowrap; }
+.card-head-action { height: 36px; font-size: 13px; flex: 0 0 auto; }
+.card-toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 18px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.card-toolbar .card-search { min-width: 220px; }
+.card-search { position: relative; display: flex; flex: 1; align-items: center; }
+.card-search svg { position: absolute; left: 11px; color: var(--muted); }
+.card-search input { width: 100%; height: 38px; padding: 0 11px 0 34px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 2px; }
+.card-body { padding: 16px 18px; }
+.card-foot { margin: 0; padding: 12px 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.card-foot-error { color: var(--negative); }
+.card-scroll { overflow-x: auto; }
+.card-empty { display: grid; gap: 12px; justify-items: center; padding: 44px 18px; text-align: center; }
+.card-empty strong { font-size: 14px; }
+.card-empty p { margin: 0; max-width: 460px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.seg { display: inline-flex; }
+.seg button { height: 38px; padding: 0 14px; color: var(--muted); background: var(--surface); border: 1px solid var(--line); border-right: 0; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.seg button:last-child { border-right: 1px solid var(--line); }
+.seg .seg-active { color: #fff; background: var(--forest); border-color: var(--forest); }
+.fbs-settings-fields { display: flex; gap: 24px; }
+.fbs-settings-fields label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; }
+.fbs-settings-fields input { width: 160px; height: 38px; padding: 0 10px; color: var(--text); background: var(--paper); border: 1px solid var(--line); }
+
 .fbs-region-row { display: grid; grid-template-columns: 48px 1fr 140px 72px; align-items: center; min-height: 52px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 .fbs-region-row:last-of-type { border-bottom: 0; }
 .fbs-region-place { color: var(--muted); font: 11px "JetBrains Mono", monospace; }
@@ -420,7 +447,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 
 .fbs-office-tools { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
 .fbs-office-tools input { flex: 1; height: 38px; padding: 0 11px; background: var(--surface); border: 1px solid var(--line); }
-.fbs-office-table { background: var(--surface); border: 1px solid var(--line); overflow-x: auto; }
 .fbs-office-head, .fbs-office-row { display: grid; grid-template-columns: minmax(220px, 1fr) 150px 220px 100px 120px 180px; align-items: center; min-height: 52px; border-bottom: 1px solid var(--line); }
 .fbs-office-row:last-child { border-bottom: 0; }
 .fbs-office-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }

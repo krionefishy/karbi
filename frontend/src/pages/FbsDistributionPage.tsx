@@ -177,7 +177,7 @@ export function FbsDistributionPage() {
             </span>
           </div>
 
-          {tab === "setup" && <FbsSetupPanel />}
+          {tab === "setup" && <FbsSetupPanel onOpenCabinet={() => setTab("cabinet")} />}
           {tab === "stock" && <FbsStockPanel />}
           {tab === "mapping" && <FbsMappingPanel sellers={sellers} />}
           {tab === "plan" &&

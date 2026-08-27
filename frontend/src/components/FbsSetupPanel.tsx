@@ -1,16 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
 import { assignOffice, getSetup, saveRegions, saveSettings } from "../features/fbs/api";
-import { cargoLabel } from "../features/fbs/cargo";
+import { cargoLabel, officesLabel } from "../features/fbs/cargo";
 import { fromPercent, sharesAcceptable, sharesTotal, toPercent } from "../features/fbs/shares";
 import type { FbsRegion } from "../features/fbs/types";
 
 type OfficeFilter = "all" | "unassigned" | "used";
 
-export function FbsSetupPanel() {
+const FILTER_LABELS: Record<OfficeFilter, string> = {
+  all: "Все",
+  unassigned: "Без направления",
+  used: "С нашими складами",
+};
+
+interface Props {
+  /** Переход на вкладку «Кабинет» — оттуда запускается первая сверка с WB. */
+  onOpenCabinet: () => void;
+}
+
+export function FbsSetupPanel({ onOpenCabinet }: Props) {
   const queryClient = useQueryClient();
   const { data: setup, isLoading } = useQuery({ queryKey: ["fbs-setup"], queryFn: getSetup });
   const [regions, setRegions] = useState<FbsRegion[]>([]);
@@ -82,19 +93,17 @@ export function FbsSetupPanel() {
     <>
       {error && <div className="form-error">{error}</div>}
 
-      <div className="reviews-heading">
-        <div>
+      <section className="card" aria-label="Логистические направления">
+        <div className="card-head">
           <h2>Направления</h2>
+          <button
+            className="primary-button card-head-action"
+            disabled={!acceptable || regionsMutation.isPending}
+            onClick={() => regionsMutation.mutate()}
+          >
+            {regionsMutation.isPending ? "Сохраняем…" : "Сохранить направления"}
+          </button>
         </div>
-        <button
-          className="primary-button"
-          disabled={!acceptable || regionsMutation.isPending}
-          onClick={() => regionsMutation.mutate()}
-        >
-          {regionsMutation.isPending ? "Сохраняем…" : "Сохранить направления"}
-        </button>
-      </div>
-      <section className="fbs-regions" aria-label="Логистические направления">
         {regions.map((region, index) => (
           <div className="fbs-region-row" key={region.code}>
             <span className="fbs-region-place">{index + 1}</span>
@@ -125,98 +134,125 @@ export function FbsSetupPanel() {
             </span>
           </div>
         ))}
-        <p className={acceptable ? "muted" : "form-error"}>
+        <p className={`card-foot ${acceptable ? "" : "card-foot-error"}`}>
           {total === 0 ? "Доли не заданы." : `Сумма долей ${toPercent(total)}% из 100%.`}
         </p>
       </section>
 
-      <div className="reviews-heading">
-        <div>
+      <section className="card" aria-label="Числа расчёта">
+        <div className="card-head">
           <h2>Числа расчёта</h2>
+          <button
+            className="primary-button card-head-action"
+            disabled={settingsMutation.isPending}
+            onClick={() => settingsMutation.mutate()}
+          >
+            {settingsMutation.isPending ? "Сохраняем…" : "Сохранить числа"}
+          </button>
         </div>
-        <button className="primary-button" disabled={settingsMutation.isPending} onClick={() => settingsMutation.mutate()}>
-          {settingsMutation.isPending ? "Сохраняем…" : "Сохранить числа"}
-        </button>
-      </div>
-      <section className="fbs-settings" aria-label="Числа расчёта">
-        <label>
-          Резерв на брак, штук
-          <input type="number" min={0} value={reserve} onChange={(event) => setReserve(Number(event.target.value))} />
-        </label>
-        <label>
-          Приоритетных направлений
-          <input type="number" min={1} value={priority} onChange={(event) => setPriority(Number(event.target.value))} />
-        </label>
+        <div className="card-body fbs-settings-fields">
+          <label>
+            Резерв на брак, штук
+            <input type="number" min={0} value={reserve} onChange={(event) => setReserve(Number(event.target.value))} />
+          </label>
+          <label>
+            Приоритетных направлений
+            <input type="number" min={1} value={priority} onChange={(event) => setPriority(Number(event.target.value))} />
+          </label>
+        </div>
       </section>
 
-      <div className="reviews-heading">
-        <div>
-          <h2>Объекты Wildberries</h2>
-          <p className="muted">
-            {setup.offices.length} объектов, без направления {setup.unassigned_offices}.
-          </p>
-        </div>
-      </div>
-      <div className="fbs-office-tools">
-        <input
-          aria-label="Поиск объекта"
-          placeholder="Город, название или id"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <span className="mode-switch">
-          {(["all", "unassigned", "used"] as OfficeFilter[]).map((value) => (
-            <button
-              key={value}
-              className={filter === value ? "mode-active" : ""}
-              onClick={() => setFilter(value)}
-            >
-              {value === "all" ? "Все" : value === "unassigned" ? "Без направления" : "С нашими складами"}
-            </button>
-          ))}
-        </span>
-      </div>
-      <section className="fbs-office-table" aria-label="Объекты Wildberries">
-        <div className="fbs-office-head">
-          <span>Объект</span>
-          <span>Город</span>
-          <span>Округ</span>
-          <span>Груз</span>
-          <span>Наши склады</span>
-          <span>Направление</span>
-        </div>
-        {offices.map((office) => (
-          <div className="fbs-office-row" key={office.office_id}>
-            <span>
-              {office.name}
-              <em className="stock-split">объект {office.office_id}</em>
-            </span>
-            <span>{office.city || "—"}</span>
-            <span>{office.federal_district || "—"}</span>
-            <span>{cargoLabel(office.cargo_type)}</span>
-            <span>{office.used_by_cabinets || "—"}</span>
-            <span>
-              <select
-                aria-label={`Направление объекта ${office.office_id}`}
-                value={office.region_code ?? ""}
-                onChange={(event) =>
-                  officeMutation.mutate({
-                    officeId: office.office_id,
-                    regionCode: event.target.value || null,
-                  })
-                }
-              >
-                <option value="">без направления</option>
-                {setup.regions.map((region) => (
-                  <option key={region.code} value={region.code}>
-                    {region.title}
-                  </option>
-                ))}
-              </select>
+      <section className="card" aria-label="Объекты Wildberries">
+        <div className="card-head">
+          <div className="card-head-title">
+            <h2>Объекты Wildberries</h2>
+            <span className="muted">
+              {setup.offices.length
+                ? `${officesLabel(setup.offices.length)} · без направления ${setup.unassigned_offices}`
+                : "0 объектов"}
             </span>
           </div>
-        ))}
-        {!offices.length && <div className="fbs-office-row">Ничего не нашлось.</div>}
+        </div>
+        {setup.offices.length > 0 && (
+          <div className="card-toolbar">
+            <span className="card-search">
+              <Search size={15} />
+              <input
+                aria-label="Поиск объекта"
+                placeholder="Город, название или id"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </span>
+            <span className="seg">
+              {(Object.keys(FILTER_LABELS) as OfficeFilter[]).map((value) => (
+                <button
+                  key={value}
+                  className={filter === value ? "seg-active" : ""}
+                  onClick={() => setFilter(value)}
+                >
+                  {FILTER_LABELS[value]}
+                </button>
+              ))}
+            </span>
+          </div>
+        )}
+        {setup.offices.length === 0 ? (
+          <div className="card-empty">
+            <strong>Справочник ещё не загружался</strong>
+            <p>
+              Объекты появятся после первой сверки с Wildberries: подключите кабинет на вкладке «Кабинет» и
+              нажмите «Сверить с Wildberries».
+            </p>
+            <button className="secondary-button" onClick={onOpenCabinet}>
+              <RefreshCw size={15} />
+              Открыть вкладку «Кабинет»
+            </button>
+          </div>
+        ) : (
+          <div className="card-scroll">
+            <div className="fbs-office-head">
+              <span>Объект</span>
+              <span>Город</span>
+              <span>Округ</span>
+              <span>Груз</span>
+              <span>Наши склады</span>
+              <span>Направление</span>
+            </div>
+            {offices.map((office) => (
+              <div className="fbs-office-row" key={office.office_id}>
+                <span>
+                  {office.name}
+                  <em className="stock-split">объект {office.office_id}</em>
+                </span>
+                <span>{office.city || "—"}</span>
+                <span>{office.federal_district || "—"}</span>
+                <span>{cargoLabel(office.cargo_type)}</span>
+                <span>{office.used_by_cabinets || "—"}</span>
+                <span>
+                  <select
+                    aria-label={`Направление объекта ${office.office_id}`}
+                    value={office.region_code ?? ""}
+                    onChange={(event) =>
+                      officeMutation.mutate({
+                        officeId: office.office_id,
+                        regionCode: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">без направления</option>
+                    {setup.regions.map((region) => (
+                      <option key={region.code} value={region.code}>
+                        {region.title}
+                      </option>
+                    ))}
+                  </select>
+                </span>
+              </div>
+            ))}
+            {!offices.length && <div className="fbs-row-empty">Ничего не нашлось.</div>}
+          </div>
+        )}
       </section>
     </>
   );
