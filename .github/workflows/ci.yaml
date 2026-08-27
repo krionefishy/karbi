@@ -93,6 +93,9 @@ jobs:
       - name: Apply WB turnover migrations
         run: uv run alembic -n wb_turnover upgrade head
 
+      - name: Apply WB FBS distribution migrations
+        run: uv run alembic -n wb_fbs_distribution upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

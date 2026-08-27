@@ -107,7 +107,8 @@ jobs:
             if [ "$ready" != "true" ]; then
               sudo docker compose --env-file .env -f deploy/compose.yaml ps
               sudo docker compose --env-file .env -f deploy/compose.yaml logs \
-                --tail=200 migrate api wb-reviews-worker wb-turnover-worker notifications-worker outbox-publisher nginx
+                --tail=200 migrate api wb-reviews-worker wb-turnover-worker \
+                wb-fbs-distribution-worker notifications-worker outbox-publisher nginx
               exit 1
             fi
 
@@ -119,6 +120,8 @@ jobs:
               ps --status running -q notifications-worker | wc -l | tr -d ' ')" = "1"
             test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
               ps --status running -q wb-turnover-worker | wc -l | tr -d ' ')" = "1"
+            test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
+              ps --status running -q wb-fbs-distribution-worker | wc -l | tr -d ' ')" = "1"
 
             sudo docker compose --env-file .env -f deploy/compose.yaml ps
             sudo docker image prune --force
