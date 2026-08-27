@@ -35,6 +35,8 @@ from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
+# Порог «давно не пробовали»: в этих проверках попытки не мешают.
+LATER = datetime.now(UTC) + timedelta(days=1)
 
 
 def cipher() -> CredentialCipher:
@@ -336,7 +338,7 @@ async def test_only_cabinets_whose_mirror_went_stale_are_due(seller) -> None:
 
     async with database.session() as session:
         distribution = FbsDistributionRepository(session)
-        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC))
+        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC), retry_after=LATER)
 
     async with database.session() as session:
         await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
@@ -345,8 +347,12 @@ async def test_only_cabinets_whose_mirror_went_stale_are_due(seller) -> None:
 
     async with database.session() as session:
         distribution = FbsDistributionRepository(session)
-        assert seller_id not in await distribution.sellers_due_for_sync(datetime.now(UTC) - timedelta(hours=1))
-        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC) + timedelta(hours=1))
+        assert seller_id not in await distribution.sellers_due_for_sync(
+            datetime.now(UTC) - timedelta(hours=1), retry_after=LATER
+        )
+        assert seller_id in await distribution.sellers_due_for_sync(
+            datetime.now(UTC) + timedelta(hours=1), retry_after=LATER
+        )
 
 
 async def test_purging_a_cabinet_takes_its_warehouses(seller) -> None:
@@ -529,3 +535,52 @@ async def test_settings_are_checked_before_they_reach_the_calculation(seller) ->
     async with database.session() as session:
         setup = await (await placement(session)).save_settings(reserve_units=15, priority_regions=4)
     assert (setup.settings.reserve_units, setup.settings.priority_regions) == (15, 4)
+
+
+async def test_a_cabinet_whose_sync_just_failed_is_not_asked_again_at_once(seller) -> None:
+    """Иначе кабинет с отозванным ключом переспрашивал бы WB каждый оборот
+    воркера, а бюджет запросов общий со всеми модулями."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        await distribution.record_sync_attempt(seller_id, now=datetime.now(UTC))
+        await session.commit()
+
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        # Попытка только что была: минуту назад спрашивать снова нечего.
+        assert seller_id not in await distribution.sellers_due_for_sync(
+            datetime.now(UTC), retry_after=datetime.now(UTC) - timedelta(minutes=15)
+        )
+        # А когда отсрочка вышла, кабинет снова в очереди.
+        assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC), retry_after=LATER)
+
+
+async def test_a_warehouse_gone_from_wb_takes_its_published_stock_with_it(seller) -> None:
+    """Осталась бы строка — публикация вечно слала бы на удалённый склад ноль,
+    WB отказывал бы, и каждая выгрузка навсегда оставалась бы с ошибкой."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await FbsDistributionEnrollment(FbsDistributionRepository(session)).attach(seller_id)
+        await session.commit()
+    async with database.session() as session:
+        await mirror(
+            session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1), warehouse(11, 1)])
+        ).sync_seller(seller_id)
+    async with database.session() as session:
+        distribution = FbsDistributionRepository(session)
+        await distribution.confirm_published(seller_id, 10, {"2000": 5})
+        await distribution.confirm_published(seller_id, 11, {"2000": 7})
+        await session.commit()
+
+    async with database.session() as session:
+        await mirror(session, FakeMarketplace(offices=[office(1)], warehouses=[warehouse(10, 1)])).sync_seller(
+            seller_id
+        )
+
+    async with database.session() as session:
+        assert await FbsDistributionRepository(session).published(seller_id) == {(10, "2000"): 5}

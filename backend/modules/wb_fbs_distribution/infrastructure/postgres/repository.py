@@ -156,10 +156,14 @@ class FbsDistributionRepository:
         """
         stamp = now or datetime.now(UTC)
         keep = [warehouse.warehouse_id for warehouse in warehouses]
-        condition = SellerWarehouseModel.seller_id == seller_id
-        if keep:
-            condition = condition & SellerWarehouseModel.warehouse_id.not_in(keep)
-        await self.session.execute(delete(SellerWarehouseModel).where(condition))
+        for model in (SellerWarehouseModel, PublishedStockModel):
+            condition = model.seller_id == seller_id
+            if keep:
+                condition = condition & model.warehouse_id.not_in(keep)
+            # Опубликованное состояние уходит вместе со складом. Иначе
+            # публикация продолжала бы слать на него ноль, WB отказывал бы, и
+            # каждая выгрузка навсегда оставалась бы с ошибкой.
+            await self.session.execute(delete(model).where(condition))
         if not warehouses:
             return
         rows = [
@@ -202,21 +206,32 @@ class FbsDistributionRepository:
             .values(warehouses_synced_at=stamp)
         )
 
-    async def sellers_due_for_sync(self, before: datetime) -> list[uuid.UUID]:
+    async def sellers_due_for_sync(self, before: datetime, *, retry_after: datetime) -> list[uuid.UUID]:
         """Кабинеты, чьё зеркало старше очередного срока сверки.
 
         Условие по времени, а не журнал занятых слотов: сверка идемпотентна,
         и повтор после перезапуска ничего не портит.
+
+        `retry_after` отсекает кабинет, попытка по которому только что не
+        удалась. Иначе кабинет с отозванным ключом переспрашивал бы WB каждый
+        оборот воркера — а бюджет запросов общий со всеми модулями.
         """
+        stale = (TrackedSellerModel.warehouses_synced_at.is_(None)) | (TrackedSellerModel.warehouses_synced_at < before)
+        cooled = (TrackedSellerModel.warehouses_sync_attempted_at.is_(None)) | (
+            TrackedSellerModel.warehouses_sync_attempted_at < retry_after
+        )
         return list(
             await self.session.scalars(
-                select(TrackedSellerModel.seller_id)
-                .where(
-                    (TrackedSellerModel.warehouses_synced_at.is_(None))
-                    | (TrackedSellerModel.warehouses_synced_at < before)
-                )
-                .order_by(TrackedSellerModel.enrolled_at)
+                select(TrackedSellerModel.seller_id).where(stale & cooled).order_by(TrackedSellerModel.enrolled_at)
             )
+        )
+
+    async def record_sync_attempt(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> None:
+        """Отметить попытку сверки независимо от того, чем она кончилась."""
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(warehouses_sync_attempted_at=now or datetime.now(UTC))
         )
 
     async def warehouses(self, seller_id: uuid.UUID) -> list[SellerWarehouseModel]:

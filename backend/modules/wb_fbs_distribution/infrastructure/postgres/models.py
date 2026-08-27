@@ -37,6 +37,10 @@ class TrackedSellerModel(WBFbsDistributionBase):
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     write_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     warehouses_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Последняя попытка, удачная или нет. Успех отмечает `warehouses_synced_at`,
+    # а эта колонка не даёт переспрашивать WB каждый оборот воркера, пока
+    # причина отказа никуда не делась.
+    warehouses_sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class WBOfficeModel(WBFbsDistributionBase):

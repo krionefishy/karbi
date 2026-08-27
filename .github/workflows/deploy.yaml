@@ -122,6 +122,10 @@ jobs:
               ps --status running -q wb-turnover-worker | wc -l | tr -d ' ')" = "1"
             test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
               ps --status running -q wb-fbs-distribution-worker | wc -l | tr -d ' ')" = "1"
+            # Фронт проверяется наравне с воркерами: без этого выкат зелёный,
+            # даже когда интерфейс остался от прошлой сборки.
+            test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
+              ps --status running -q frontend | wc -l | tr -d ' ')" = "1"
 
             sudo docker compose --env-file .env -f deploy/compose.yaml ps
             sudo docker image prune --force

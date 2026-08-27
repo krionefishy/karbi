@@ -80,8 +80,9 @@ class FbsDistributionWorker:
 
     async def sync_mirror(self, now: datetime) -> int:
         since = self.due_since(now)
+        retry_after = now.astimezone(UTC) - timedelta(minutes=self.config.mirror_retry_minutes)
         async with self.database.session() as session:
-            due = await FbsDistributionRepository(session).sellers_due_for_sync(since)
+            due = await FbsDistributionRepository(session).sellers_due_for_sync(since, retry_after=retry_after)
         synced = 0
         for seller_id in due:
             if self._stop.is_set():
@@ -91,6 +92,11 @@ class FbsDistributionWorker:
         return synced
 
     async def _sync_seller(self, seller_id: uuid.UUID) -> bool:
+        # Попытка отмечается до сети: упавший процесс не должен превращаться в
+        # кабинет, который спрашивают снова и снова.
+        async with self.database.session() as session:
+            await FbsDistributionRepository(session).record_sync_attempt(seller_id)
+            await session.commit()
         async with self.database.session() as session:
             service = MirrorService(
                 session,

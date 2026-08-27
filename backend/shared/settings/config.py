@@ -180,6 +180,8 @@ class FbsDistributionConfig:
     # Сколько снимок 1С считается пригодным для расчёта. Обмен планируется раз
     # в 15 минут, час даёт запас на несколько пропущенных циклов.
     snapshot_max_age_minutes: int = 60
+    # Через сколько повторять сверку кабинета после неудачной попытки.
+    mirror_retry_minutes: int = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,7 +322,7 @@ class Settings:
             if key in turnover:
                 turnover[key] = int(turnover[key])
         fbs_distribution = dict(data.get("fbs_distribution", {}))
-        for key in ("mirror_hour", "mirror_minute", "snapshot_max_age_minutes"):
+        for key in ("mirror_hour", "mirror_minute", "snapshot_max_age_minutes", "mirror_retry_minutes"):
             if key in fbs_distribution:
                 fbs_distribution[key] = int(fbs_distribution[key])
         telegram = dict(data.get("telegram", {}))
@@ -428,6 +430,8 @@ class Settings:
             raise ValueError("fbs_distribution.mirror_minute must be between 0 and 59")
         if self.fbs_distribution.snapshot_max_age_minutes < 1:
             raise ValueError("fbs_distribution.snapshot_max_age_minutes must be positive")
+        if self.fbs_distribution.mirror_retry_minutes < 1:
+            raise ValueError("fbs_distribution.mirror_retry_minutes must be positive")
         try:
             ZoneInfo(self.fbs_distribution.timezone)
         except ZoneInfoNotFoundError as error:
