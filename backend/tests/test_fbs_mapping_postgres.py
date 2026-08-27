@@ -9,7 +9,7 @@ from sqlalchemy import delete
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import ArticleModel, OutboxEventModel, SellerModel
 from backend.modules.wb_fbs_distribution.application import (
-    MANUAL,
+    ONEC,
     InvalidShareError,
     MappingService,
     SnapshotService,
@@ -73,7 +73,7 @@ async def cabinets() -> AsyncIterator[tuple[Database, uuid.UUID, uuid.UUID]]:
 async def load(database, *lines: StockLine) -> None:
     async with database.session() as session:
         service = SnapshotService(session, FbsDistributionRepository(session), max_age_minutes=60)
-        await service.accept(StockSnapshot(generated_at=NOW, lines=tuple(lines)), source=MANUAL, now=NOW)
+        await service.accept(StockSnapshot(generated_at=NOW, lines=tuple(lines)), source=ONEC, now=NOW)
 
 
 def mapping(session) -> MappingService:

@@ -85,10 +85,6 @@ export function FbsSetupPanel() {
       <div className="reviews-heading">
         <div>
           <h2>Направления</h2>
-          <p className="muted">
-            Порядок задаёт приоритет: при малом остатке товар уходит в первые направления. Доли применяются,
-            когда остатка хватает на все разрешённые склады.
-          </p>
         </div>
         <button
           className="primary-button"
@@ -130,19 +126,13 @@ export function FbsSetupPanel() {
           </div>
         ))}
         <p className={acceptable ? "muted" : "form-error"}>
-          {total === 0
-            ? "Доли ещё не заданы — логист их не назвал. Пока их нет, полное покрытие считать нечем."
-            : `Сумма долей ${toPercent(total)}% из 100%.`}
+          {total === 0 ? "Доли не заданы." : `Сумма долей ${toPercent(total)}% из 100%.`}
         </p>
       </section>
 
       <div className="reviews-heading">
         <div>
           <h2>Числа расчёта</h2>
-          <p className="muted">
-            Резерв вычитается один раз на товар. Приоритетных направлений — сколько задействовать, когда
-            остатка меньше, чем разрешённых складов.
-          </p>
         </div>
         <button className="primary-button" disabled={settingsMutation.isPending} onClick={() => settingsMutation.mutate()}>
           {settingsMutation.isPending ? "Сохраняем…" : "Сохранить числа"}
@@ -163,8 +153,7 @@ export function FbsSetupPanel() {
         <div>
           <h2>Объекты Wildberries</h2>
           <p className="muted">
-            {setup.offices.length} объектов в справочнике, без направления {setup.unassigned_offices}. Объект без
-            направления в распределении не участвует.
+            {setup.offices.length} объектов, без направления {setup.unassigned_offices}.
           </p>
         </div>
       </div>

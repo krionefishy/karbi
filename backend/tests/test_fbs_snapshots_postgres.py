@@ -7,7 +7,7 @@ import pytest_asyncio
 from sqlalchemy import delete
 
 from backend.modules.wb_fbs_distribution.application import (
-    MANUAL,
+    ONEC,
     DisconnectedSource,
     SnapshotRejected,
     SnapshotService,
@@ -69,7 +69,7 @@ async def test_the_stub_source_admits_it_has_nothing(database) -> None:
 async def test_an_accepted_snapshot_becomes_pools(database) -> None:
     async with database.session() as session:
         state = await service(session).accept(
-            snapshot(line("A1", "2000", 150), line("A1", "2001", 8, "L")), source=MANUAL, now=NOW
+            snapshot(line("A1", "2000", 150), line("A1", "2001", 8, "L")), source=ONEC, now=NOW
         )
 
     assert (state.pools, state.on_hand_total) == (2, 158)
@@ -82,9 +82,9 @@ async def test_a_line_gone_from_the_snapshot_is_zeroed_not_forgotten(database) -
     """Deleting the row would drop the mapping to the WB card with it; leaving
     the old quantity would keep selling stock 1C no longer has."""
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 10), line("A2", "2001", 5)), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 10), line("A2", "2001", 5)), source=ONEC, now=NOW)
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 7)), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 7)), source=ONEC, now=NOW)
 
     async with database.session() as session:
         pools = {pool.item_id: pool.quantity for pool in await FbsDistributionRepository(session).pools()}
@@ -95,9 +95,9 @@ async def test_the_same_snapshot_twice_does_not_double_anything(database) -> Non
     """An absolute snapshot is what makes a repeated delivery safe."""
     twice = snapshot(line("A1", "2000", 10))
     async with database.session() as session:
-        await service(session).accept(twice, source=MANUAL, now=NOW)
+        await service(session).accept(twice, source=ONEC, now=NOW)
     async with database.session() as session:
-        state = await service(session).accept(twice, source=MANUAL, now=NOW)
+        state = await service(session).accept(twice, source=ONEC, now=NOW)
 
     assert (state.pools, state.on_hand_total) == (1, 10)
 
@@ -106,13 +106,11 @@ async def test_a_negative_quantity_is_refused_whole(database) -> None:
     """Partly accepting would mix fresh and yesterday's rows, and the published
     number would stop being explainable."""
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 10)), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 10)), source=ONEC, now=NOW)
 
     async with database.session() as session:
         with pytest.raises(SnapshotRejected, match="Отрицательный"):
-            await service(session).accept(
-                snapshot(line("A1", "2000", 5), line("A2", "2001", -1)), source=MANUAL, now=NOW
-            )
+            await service(session).accept(snapshot(line("A1", "2000", 5), line("A2", "2001", -1)), source=ONEC, now=NOW)
 
     async with database.session() as session:
         pools = {pool.item_id: pool.quantity for pool in await FbsDistributionRepository(session).pools()}
@@ -124,26 +122,22 @@ async def test_a_repeated_barcode_is_refused(database) -> None:
     moment they are mapped."""
     async with database.session() as session:
         with pytest.raises(SnapshotRejected, match="Баркод"):
-            await service(session).accept(
-                snapshot(line("A1", "2000", 5), line("A2", "2000", 3)), source=MANUAL, now=NOW
-            )
+            await service(session).accept(snapshot(line("A1", "2000", 5), line("A2", "2000", 3)), source=ONEC, now=NOW)
 
 
 async def test_the_same_item_and_characteristic_twice_is_refused(database) -> None:
     async with database.session() as session:
         with pytest.raises(SnapshotRejected, match="дважды"):
-            await service(session).accept(
-                snapshot(line("A1", "2000", 5), line("A1", "2001", 3)), source=MANUAL, now=NOW
-            )
+            await service(session).accept(snapshot(line("A1", "2000", 5), line("A1", "2001", 3)), source=ONEC, now=NOW)
 
 
 async def test_an_empty_snapshot_never_wipes_the_pools(database) -> None:
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 10)), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 10)), source=ONEC, now=NOW)
 
     async with database.session() as session:
         with pytest.raises(SnapshotRejected):
-            await service(session).accept(snapshot(), source=MANUAL, now=NOW)
+            await service(session).accept(snapshot(), source=ONEC, now=NOW)
 
     async with database.session() as session:
         assert (await service(session).state(now=NOW)).on_hand_total == 10
@@ -153,7 +147,7 @@ async def test_a_snapshot_from_the_future_is_refused(database) -> None:
     async with database.session() as session:
         with pytest.raises(SnapshotRejected, match="будущем"):
             await service(session).accept(
-                snapshot(line("A1", "2000", 5), generated_at=NOW + timedelta(hours=1)), source=MANUAL, now=NOW
+                snapshot(line("A1", "2000", 5), generated_at=NOW + timedelta(hours=1)), source=ONEC, now=NOW
             )
 
 
@@ -162,7 +156,7 @@ async def test_a_refusal_is_written_down_too(database) -> None:
     события, и второе оператор обязан видеть."""
     async with database.session() as session:
         with pytest.raises(SnapshotRejected):
-            await service(session).accept(snapshot(line("A1", "2000", -5)), source=MANUAL, now=NOW)
+            await service(session).accept(snapshot(line("A1", "2000", -5)), source=ONEC, now=NOW)
 
     async with database.session() as session:
         [record] = await FbsDistributionRepository(session).snapshot_history()
@@ -173,7 +167,7 @@ async def test_a_refusal_is_written_down_too(database) -> None:
 async def test_a_stale_snapshot_is_reported_as_stale(database) -> None:
     old = NOW - timedelta(minutes=SETTINGS.fbs_distribution.snapshot_max_age_minutes + 1)
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 10), generated_at=old), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 10), generated_at=old), source=ONEC, now=NOW)
 
     async with database.session() as session:
         assert (await service(session).state(now=NOW)).stale is True
@@ -190,11 +184,11 @@ async def test_without_a_snapshot_the_state_says_disconnected(database) -> None:
 
 async def test_only_accepted_snapshots_are_the_current_one(database) -> None:
     async with database.session() as session:
-        await service(session).accept(snapshot(line("A1", "2000", 10)), source=MANUAL, now=NOW)
+        await service(session).accept(snapshot(line("A1", "2000", 10)), source=ONEC, now=NOW)
     later = NOW + timedelta(minutes=1)
     async with database.session() as session:
         with pytest.raises(SnapshotRejected):
-            await service(session).accept(snapshot(line("A1", "2000", -1)), source=MANUAL, now=later)
+            await service(session).accept(snapshot(line("A1", "2000", -1)), source=ONEC, now=later)
 
     async with database.session() as session:
         state = await service(session).state(now=later)
@@ -206,7 +200,7 @@ async def test_only_accepted_snapshots_are_the_current_one(database) -> None:
 async def test_pools_can_be_searched_by_barcode_or_name(database) -> None:
     async with database.session() as session:
         await service(session).accept(
-            snapshot(line("A1", "2000000000017", 10), line("A2", "2000000000024", 5)), source=MANUAL, now=NOW
+            snapshot(line("A1", "2000000000017", 10), line("A2", "2000000000024", 5)), source=ONEC, now=NOW
         )
 
     async with database.session() as session:

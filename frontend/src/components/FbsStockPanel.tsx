@@ -1,85 +1,61 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { PlugZap } from "lucide-react";
 
-import { ApiError } from "../api/http";
-import { getPools, getStockHistory, getStockState, uploadStock } from "../features/fbs/api";
+import { getPools, getStockHistory, getStockState } from "../features/fbs/api";
 
 const moment = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
 const sourceLabels: Record<string, string> = {
-  manual: "загружен вручную",
-  disconnected: "обмена с 1С нет",
+  "1c": "обмен с 1С",
+  disconnected: "1С не подключена",
 };
 
 export function FbsStockPanel() {
-  const queryClient = useQueryClient();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [search, setSearch] = useState("");
-  const [error, setError] = useState("");
-
   const { data: state } = useQuery({ queryKey: ["fbs-stock"], queryFn: getStockState });
   const { data: history = [] } = useQuery({ queryKey: ["fbs-stock-history"], queryFn: getStockHistory });
-  const { data: pools = [] } = useQuery({ queryKey: ["fbs-pools", search], queryFn: () => getPools(search) });
+  const { data: pools = [] } = useQuery({ queryKey: ["fbs-pools", ""], queryFn: () => getPools("") });
 
-  const upload = useMutation({
-    mutationFn: uploadStock,
-    onSuccess: async () => {
-      setError("");
-      await queryClient.invalidateQueries({ queryKey: ["fbs-stock"] });
-      await queryClient.invalidateQueries({ queryKey: ["fbs-stock-history"] });
-      await queryClient.invalidateQueries({ queryKey: ["fbs-pools"] });
-    },
-    onError: (raised) => setError(raised instanceof ApiError ? raised.message : "Снимок не принят"),
-  });
-
-  async function choose(file: File | undefined) {
-    if (!file) return;
-    upload.mutate(await file.text());
-    if (fileInput.current) fileInput.current.value = "";
-  }
+  const connected = Boolean(state?.snapshot_id);
+  const dash = (value: number | undefined) => (connected ? String(value ?? 0) : "—");
 
   return (
     <>
       <div className="reviews-heading">
         <div>
           <h2>Остаток 1С</h2>
-          <p className="muted">
-            Обмена с 1С пока нет: снимок загружается файлом. Принимается абсолютный остаток целиком — CSV или
-            JSON. Повторная загрузка того же файла ничего не задваивает.
-          </p>
         </div>
-        <button className="primary-button" disabled={upload.isPending} onClick={() => fileInput.current?.click()}>
-          <Upload size={16} />
-          {upload.isPending ? "Принимаем…" : "Загрузить снимок"}
-        </button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".csv,.json,.txt,text/csv,application/json"
-          hidden
-          aria-label="Файл выгрузки 1С"
-          onChange={(event) => void choose(event.target.files?.[0])}
-        />
       </div>
-      {error && <div className="form-error">{error}</div>}
 
-      <section className="automation-meta" aria-label="Состояние остатка 1С">
+      {!connected && (
+        <section className="fbs-notice" aria-label="Состояние обмена с 1С">
+          <span className="fbs-notice-mark" aria-hidden="true">
+            <PlugZap size={24} />
+          </span>
+          <div>
+            <strong>1С ещё не подключена</strong>
+            <p>
+              Обмена нет, поэтому распределение не считается. Когда обмен появится, остаток будет приходить сюда
+              сам, и этот экран заполнится: сверху — свежесть снимка и сколько единиц доступно после резерва, ниже
+              — позиции и журнал обменов.
+            </p>
+          </div>
+        </section>
+      )}
+
+      <dl className="automation-meta">
         <div>
           <dt>Источник</dt>
           <dd>
             {sourceLabels[state?.source ?? "disconnected"] ?? state?.source}
             <span className="automation-run-detail">
-              {state?.generated_at
-                ? `сформирован ${moment.format(new Date(state.generated_at))}`
-                : "снимок ещё не принимался"}
+              {state?.generated_at ? `сформирован ${moment.format(new Date(state.generated_at))}` : "—"}
             </span>
           </dd>
         </div>
         <div>
           <dt>Свежесть</dt>
           <dd>
-            {state?.stale ? "устарел" : "актуален"}
+            {connected ? (state?.stale ? "устарел" : "актуален") : "—"}
             <span className="automation-run-detail">
               {state?.received_at ? `принят ${moment.format(new Date(state.received_at))}` : "—"}
             </span>
@@ -88,32 +64,23 @@ export function FbsStockPanel() {
         <div>
           <dt>Физический остаток</dt>
           <dd>
-            {state?.on_hand_total ?? 0}
-            <span className="automation-run-detail">{state?.pools ?? 0} позиций</span>
+            {dash(state?.on_hand_total)}
+            <span className="automation-run-detail">{dash(state?.pools)} позиций</span>
           </dd>
         </div>
         <div>
           <dt>Доступно после резерва</dt>
           <dd>
-            {state?.available_total ?? 0}
+            {dash(state?.available_total)}
             <span className="automation-run-detail">резерв {state?.reserve_units ?? 0} на товар</span>
           </dd>
         </div>
-      </section>
+      </dl>
 
       <div className="reviews-heading">
         <div>
           <h2>Позиции</h2>
-          <p className="muted">Остаток каждой номенклатуры и сколько из него уйдёт на склады.</p>
         </div>
-      </div>
-      <div className="fbs-office-tools">
-        <input
-          aria-label="Поиск позиции"
-          placeholder="Наименование, баркод или код 1С"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
       </div>
       <section className="fbs-pool-table" aria-label="Позиции 1С">
         <div className="fbs-pool-head">
@@ -135,29 +102,31 @@ export function FbsStockPanel() {
             <span>{pool.available}</span>
           </div>
         ))}
-        {!pools.length && <div className="fbs-pool-row">Позиций нет — загрузите снимок.</div>}
+        {!pools.length && <div className="fbs-pool-row fbs-row-empty">Появятся, когда 1С отдаст первый остаток.</div>}
       </section>
 
-      {history.length > 0 && (
-        <>
-          <div className="reviews-heading">
-            <div>
-              <h2>Журнал выгрузок</h2>
-              <p className="muted">Отклонённые тоже здесь: битый файл — это событие, а не тишина.</p>
-            </div>
-          </div>
-          <ol className="fbs-queue">
-            {history.map((record) => (
-              <li key={record.id}>
-                <b>{record.status === "accepted" ? "принят" : "отклонён"}</b> {moment.format(new Date(record.received_at))}
-                <em className="stock-split">
-                  {record.lines} строк · сформирован {moment.format(new Date(record.generated_at))}
-                  {record.error && ` · ${record.error}`}
-                </em>
-              </li>
-            ))}
-          </ol>
-        </>
+      <div className="reviews-heading">
+        <div>
+          <h2>Журнал обменов</h2>
+        </div>
+      </div>
+      {history.length ? (
+        <ol className="fbs-queue">
+          {history.map((record) => (
+            <li key={record.id}>
+              <b>{record.status === "accepted" ? "принят" : "отклонён"}</b>{" "}
+              {moment.format(new Date(record.received_at))}
+              <em className="stock-split">
+                {record.lines} строк · сформирован {moment.format(new Date(record.generated_at))}
+                {record.error && ` · ${record.error}`}
+              </em>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <ol className="fbs-queue">
+          <li className="fbs-row-empty">Обменов ещё не было.</li>
+        </ol>
       )}
     </>
   );

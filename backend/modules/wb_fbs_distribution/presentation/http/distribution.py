@@ -1,13 +1,12 @@
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_fbs_distribution.application import (
-    MANUAL,
     FbsDistributionService,
     InvalidPlacementError,
     InvalidShareError,
@@ -22,14 +21,12 @@ from backend.modules.wb_fbs_distribution.application import (
     QueueEntry,
     SellerOverview,
     SetupOverview,
-    SnapshotRejected,
     SnapshotService,
     SnapshotState,
     WarehouseAdminService,
     WarehouseConflictError,
     WriteNotAllowedError,
 )
-from backend.modules.wb_fbs_distribution.infrastructure.onec import SnapshotFormatError, parse_snapshot
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.presentation.http.schemas import (
     CreatedWarehouseResponse,
@@ -311,33 +308,6 @@ async def stock_state(
     """Чем сейчас можно считать: какой снимок принят и насколько он свежий."""
     setup = await placement.setup()
     return snapshot_response(await snapshots.state(), setup.settings.reserve_units)
-
-
-@router.post("/stock", response_model=SnapshotStateResponse)
-@inject
-async def upload_stock(
-    request: Request,
-    _: CurrentPrincipal,
-    snapshots: FromDishka[SnapshotService],
-    placement: FromDishka[PlacementService],
-) -> SnapshotStateResponse:
-    """Принять абсолютный снимок остатков 1С: тело запроса — CSV или JSON.
-
-    Пока обмена с 1С нет, снимок грузит оператор файлом. Тем же телом сможет
-    ходить и будущий адаптер: сырое тело, а не форма, чтобы у обмена с 1С не
-    было лишнего обёртывания.
-    """
-    payload = await request.body()
-    try:
-        snapshot = parse_snapshot(payload)
-    except SnapshotFormatError as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    try:
-        state = await snapshots.accept(snapshot, source=MANUAL)
-    except SnapshotRejected as error:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
-    setup = await placement.setup()
-    return snapshot_response(state, setup.settings.reserve_units)
 
 
 @router.get("/stock/history", response_model=list[SnapshotHistoryItem])

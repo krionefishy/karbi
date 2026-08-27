@@ -137,9 +137,6 @@ export function FbsDistributionPage() {
           <div className="reviews-heading">
             <div>
               <h1>{AUTOMATION_TITLE}</h1>
-              <p className="muted">
-                Делит физический остаток товара между виртуальными FBS-складами кабинета.
-              </p>
             </div>
             <span className="mode-switch">
               <button className={tab === "cabinet" ? "mode-active" : ""} onClick={() => setTab("cabinet")}>
@@ -227,9 +224,7 @@ export function FbsDistributionPage() {
                 <div>
                   <h2>Виртуальные склады</h2>
                   <p className="muted">
-                    {warehouses.length
-                      ? `${warehouses.length} складов в кабинете.`
-                      : "В кабинете пока нет виртуальных FBS-складов."}
+                    {warehouses.length ? `${warehouses.length} складов в кабинете.` : "Складов нет."}
                   </p>
                 </div>
                 <button
@@ -248,7 +243,7 @@ export function FbsDistributionPage() {
                   <span>Город</span>
                   <span>Направление</span>
                   <span>Груз</span>
-                  <span>Место</span>
+                  <span>Порядок в направлении</span>
                   <span>Участвует</span>
                 </div>
                 {warehouses.map((warehouse) => (
@@ -264,7 +259,7 @@ export function FbsDistributionPage() {
                     <span>{cargoLabel(warehouse.cargo_type)}</span>
                     <span>
                       <input
-                        aria-label={`Место склада ${warehouse.warehouse_id} внутри направления`}
+                        aria-label={`Порядок склада ${warehouse.warehouse_id} внутри направления`}
                         type="number"
                         min={0}
                         defaultValue={warehouse.position}
@@ -302,9 +297,6 @@ export function FbsDistributionPage() {
                   <div className="reviews-heading">
                     <div>
                       <h2>Очередь распределения</h2>
-                      <p className="muted">
-                        В этом порядке расчёт берёт склады: по одному из каждого направления, затем второй круг.
-                      </p>
                     </div>
                   </div>
                   <ol className="fbs-queue">

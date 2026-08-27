@@ -45,9 +45,7 @@ export function FbsPlanPanel({ sellerId, sellerName, writeEnabled }: Props) {
       <div className="reviews-heading">
         <div>
           <h2>Расчёт распределения</h2>
-          <p className="muted">
-            Считает план по «{sellerName}» и показывает его. В Wildberries ничего не отправляется.
-          </p>
+          <p className="muted">Кабинет «{sellerName}».</p>
         </div>
         <button className="primary-button" disabled={build.isPending} onClick={() => build.mutate()}>
           <Calculator size={16} />
@@ -175,7 +173,6 @@ export function FbsPlanPanel({ sellerId, sellerName, writeEnabled }: Props) {
               <div className="reviews-heading">
                 <div>
                   <h2>Не попало в план</h2>
-                  <p className="muted">Пропуск без причины неотличим от «товара нет» — здесь причина у каждого.</p>
                 </div>
               </div>
               <ol className="fbs-queue">

@@ -43,10 +43,7 @@ export function FbsWarehouseAdmin({ sellerId, writeEnabled, warehouses }: Props)
         <div>
           <h2>Создать склад</h2>
           <p className="muted">
-            {writeEnabled
-              ? "Создаёт виртуальный склад в живом кабинете Wildberries под выбранным объектом."
-              : "Кабинету не разрешена запись в Wildberries — включите её на вкладке выше."}
-            {" "}
+            {writeEnabled ? "" : "Записывать в Wildberries не разрешено. "}
             Объектов с направлением и без склада: {available.length}.
           </p>
         </div>

@@ -57,8 +57,7 @@ export function FbsMappingPanel({ sellers }: Props) {
         <div>
           <h2>Сопоставление с карточками</h2>
           <p className="muted">
-            Позиция 1С находит размер карточки по баркоду. Сопоставлено {state?.mapped_pools ?? 0} из{" "}
-            {state?.pools ?? 0}. Несопоставленные на Wildberries не выгружаются.
+            Сопоставлено {state?.mapped_pools ?? 0} из {state?.pools ?? 0}.
           </p>
         </div>
       </div>
@@ -80,11 +79,7 @@ export function FbsMappingPanel({ sellers }: Props) {
           <div className="reviews-heading">
             <div>
               <h2>Общий запас нескольких кабинетов</h2>
-              <p className="muted">
-                Один баркод заведён в нескольких кабинетах — значит запас у них физически один. Без правила
-                деления такой пул в расчёт не идёт: иначе каждый кабинет пообещает Wildberries весь остаток.
-                Без правила осталось {state.shared_without_rule}.
-              </p>
+              <p className="muted">Без правила деления: {state.shared_without_rule}.</p>
             </div>
           </div>
           <section className="fbs-pool-table" aria-label="Общие пулы">
@@ -131,11 +126,7 @@ export function FbsMappingPanel({ sellers }: Props) {
       <div className="reviews-heading">
         <div>
           <h2>Без карточки</h2>
-          <p className="muted">
-            {state?.unmapped.length
-              ? "Этим позициям не нашлось размера ни в одном подключённом кабинете."
-              : "Все позиции сопоставлены."}
-          </p>
+          <p className="muted">{state?.unmapped.length ? `${state.unmapped.length} позиций` : "Нет"}</p>
         </div>
       </div>
       {state && state.unmapped.length > 0 && (

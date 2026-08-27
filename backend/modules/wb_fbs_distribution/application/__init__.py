@@ -46,7 +46,7 @@ from backend.modules.wb_fbs_distribution.application.publication import (
 from backend.modules.wb_fbs_distribution.application.snapshots import (
     ACCEPTED,
     DISCONNECTED,
-    MANUAL,
+    ONEC,
     REJECTED,
     DisconnectedSource,
     PoolRow,
@@ -70,7 +70,7 @@ __all__ = [
     "REASON_TEXT",
     "AUTOMATION_ID",
     "DISCONNECTED",
-    "MANUAL",
+    "ONEC",
     "REJECTED",
     "DESCRIPTION",
     "TITLE",

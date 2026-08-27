@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_fbs_distribution.domain import StockSnapshot, available_units
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 
-MANUAL = "manual"
+# Идентификатор источника, которым подпишется будущий обмен с 1С.
+ONEC = "1c"
 DISCONNECTED = "disconnected"
 
 ACCEPTED = "accepted"

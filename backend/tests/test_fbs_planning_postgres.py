@@ -14,7 +14,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     SellerModel,
 )
 from backend.modules.wb_fbs_distribution.application import (
-    MANUAL,
+    ONEC,
     FbsDistributionEnrollment,
     MappingService,
     MirrorService,
@@ -189,7 +189,7 @@ async def stock(database, quantity: int) -> None:
                     ),
                 ),
             ),
-            source=MANUAL,
+            source=ONEC,
             now=NOW,
         )
 
