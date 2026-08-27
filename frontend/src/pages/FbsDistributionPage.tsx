@@ -199,14 +199,7 @@ export function FbsDistributionPage() {
               </div>
               <div>
                 <dt>Режим</dt>
-                <dd>
-                  {writing ? "Запись в Wildberries разрешена" : "Только расчёт, без записи"}
-                  <span className="automation-run-detail">
-                    {writing
-                      ? "Рассчитанные остатки уходят в кабинет."
-                      : "План считается и показывается, но в Wildberries ничего не уходит."}
-                  </span>
-                </dd>
+                <dd>{writing ? "Запись в Wildberries разрешена" : "Только расчёт, без записи"}</dd>
               </div>
               <div>
                 <dt>Подключён</dt>
@@ -306,7 +299,11 @@ export function FbsDistributionPage() {
                       </em>
                     </span>
                     <span>{warehouse.city || "—"}</span>
-                    <span>{warehouse.region_code ?? "не размечено"}</span>
+                    <span>
+                      {warehouse.region_code
+                        ? (regionTitles.get(warehouse.region_code) ?? warehouse.region_code)
+                        : "не размечено"}
+                    </span>
                     <span>{cargoLabel(warehouse.cargo_type)}</span>
                     <span>
                       <input

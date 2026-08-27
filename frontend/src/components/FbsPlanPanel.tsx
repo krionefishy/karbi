@@ -47,19 +47,21 @@ export function FbsPlanPanel({ sellerId, sellerName, writeEnabled }: Props) {
           <h2>Расчёт распределения</h2>
           <p className="muted">Кабинет «{sellerName}».</p>
         </div>
-        <button className="primary-button" disabled={build.isPending} onClick={() => build.mutate()}>
-          <Calculator size={16} />
-          {build.isPending ? "Считаем…" : "Посчитать"}
-        </button>
-        <button
-          className="primary-button"
-          disabled={!writeEnabled || !plan || publish.isPending}
-          title={writeEnabled ? undefined : "Кабинету не разрешена запись в Wildberries"}
-          onClick={() => publish.mutate()}
-        >
-          <Upload size={16} />
-          {publish.isPending ? "Публикуем…" : "Отправить в Wildberries"}
-        </button>
+        <div className="heading-actions">
+          <button className="secondary-button" disabled={build.isPending} onClick={() => build.mutate()}>
+            <Calculator size={16} />
+            {build.isPending ? "Считаем…" : "Посчитать"}
+          </button>
+          <button
+            className="primary-button"
+            disabled={!writeEnabled || !plan || publish.isPending}
+            title={writeEnabled ? undefined : "Кабинету не разрешена запись в Wildberries"}
+            onClick={() => publish.mutate()}
+          >
+            <Upload size={16} />
+            {publish.isPending ? "Публикуем…" : "Отправить в Wildberries"}
+          </button>
+        </div>
       </div>
       {error && <div className="form-error">{error}</div>}
 

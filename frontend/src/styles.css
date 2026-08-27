@@ -157,8 +157,22 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .sync-state i { width: 6px; height: 6px; background: currentColor; }
 .sync-success { color: var(--positive); }.sync-error { color: var(--negative); }
 .reviews-content { flex: 1; padding: 30px 32px 64px; overflow: auto; }
-.reviews-heading { display: flex; align-items: flex-end; justify-content: space-between; max-width: 1320px; margin: 0 auto 26px; }
+.reviews-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1320px; margin: 0 auto 26px; }
+/* Левая половина ужимается, правая — нет: иначе кнопки и вкладки уезжают за
+   край экрана раньше, чем заголовок согласится перенестись. */
+.reviews-heading > div:first-child { min-width: 0; }
+.reviews-heading > button, .reviews-heading > a, .reviews-heading > .heading-actions { flex: 0 0 auto; }
+/* Две и больше кнопок справа держатся вместе: прямыми детьми строки их
+   растаскивал бы space-between, и первая повисала бы посередине. */
+.heading-actions { display: flex; gap: 10px; align-items: center; }
 .reviews-heading h1 { margin-bottom: 6px; }
+/* Без этого h2 сохраняет браузерный отступ снизу (0.83em), и при выравнивании
+   по нижнему краю заголовок оказывается выше кнопки на два десятка пикселей. */
+.reviews-heading h2 { margin-bottom: 0; }
+.reviews-heading h2 + p { margin-top: 6px; }
+/* Строка с одним заголовком центрируется по кнопке: выравнивать по нижнему
+   краю имеет смысл, только когда под заголовком есть подпись. */
+.reviews-heading:not(:has(p)) { align-items: center; }
 .reviews-heading p { margin-bottom: 0; font-size: 13px; }
 .last-sync { text-align: right; }.last-sync strong { display: block; font-size: 13px; }
 .review-sync-actions { display: flex; align-items: center; gap: 18px; }
@@ -360,8 +374,14 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .registry-row-actions button:hover { color: var(--text); background: var(--paper); }
 .registry-row-actions .danger-icon { color: var(--negative); }
 
-.mode-switch { display: flex; gap: 8px; margin-bottom: 22px; }
-.mode-switch button { height: 34px; padding: 0 14px; color: var(--muted); background: transparent; border: 1px solid var(--line); cursor: pointer; }
+.mode-switch { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
+/* Кнопка не сжимается и не переносит текст внутри себя: сжатая, она рвала
+   подпись на две строки, а высота оставалась прежней — текст вылезал наружу. */
+.mode-switch button { flex: 0 0 auto; height: 34px; padding: 0 14px; color: var(--muted); white-space: nowrap; background: transparent; border: 1px solid var(--line); cursor: pointer; }
+/* В шапке страницы полоса вкладок стоит в одной строке с заголовком: нижний
+   отступ поднимал бы её над ним, а запрет сжатия не давал бы переноситься —
+   вместо второй строки вкладок она уезжала бы за край экрана. */
+.reviews-heading .mode-switch { flex: 0 1 auto; justify-content: flex-end; margin-bottom: 0; }
 .mode-switch button:disabled { opacity: .45; cursor: not-allowed; }
 .mode-switch .mode-active { color: #fff; background: var(--forest); border-color: var(--forest); }
 .seller-form select { width: 100%; height: 44px; padding: 0 11px; background: var(--surface); border: 1px solid var(--line); }
