@@ -275,14 +275,14 @@ export function ReviewsPage() {
                 {reviewSyncMutation.isPending ? "Запускаем…" : "Синхронизация отзывов"}
               </button>
               <button
-                className="secondary-button"
+                className="primary-button review-sync-button"
                 disabled={!selected}
                 onClick={() => {
                   setReportError("");
                   setReportOpen(true);
                 }}
               >
-                Выгрузить отчёт по продавцу
+                Выгрузить отчёт
               </button>
               {selected && (
                 <div className="last-sync catalog-status">
