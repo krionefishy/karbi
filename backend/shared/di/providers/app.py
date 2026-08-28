@@ -30,7 +30,7 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsWarehouseWriter,
     marketplace_throttle,
 )
-from backend.modules.wb_reviews.application import ReviewsEnrollment, ReviewSyncService
+from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
@@ -69,6 +69,12 @@ class AppProvider(Provider):
         поменяется одна строка.
         """
         return DisconnectedSource()
+
+    @provide(scope=Scope.APP)
+    def review_report_service(self, settings: Settings) -> ReviewReportService:
+        # Сервис строит отчёт в отдельном треде и подключается к БД сам,
+        # поэтому ему нужен URL, а не сессия запроса.
+        return ReviewReportService(settings.database.url)
 
     @provide(scope=Scope.APP)
     def fbs_marketplace_client(self, settings: Settings, redis: RedisClient) -> WBFbsMarketplaceClient:

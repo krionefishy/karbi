@@ -9,7 +9,13 @@ import { ReviewTimeline } from "../components/ReviewTimeline";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog, SellerDialog } from "../components/SellerDialog";
 import { SellerSidebar } from "../components/SellerSidebar";
-import { getLatestReviewSync, getSellerReviewHistory, startReviewSync } from "../features/reviews/api";
+import { ReviewReportDialog } from "../components/ReviewReportDialog";
+import {
+  downloadReviewReport,
+  getLatestReviewSync,
+  getSellerReviewHistory,
+  startReviewSync,
+} from "../features/reviews/api";
 import {
   attachSeller,
   detachSeller,
@@ -82,6 +88,8 @@ export function ReviewsPage() {
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   useEffect(() => {
     if (!sellers.some((item) => item.id === sellerId)) {
@@ -185,6 +193,22 @@ export function ReviewsPage() {
       await queryClient.invalidateQueries({ queryKey: ["wb-review-sync"] });
     },
   });
+  const reportMutation = useMutation({
+    mutationFn: ({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) =>
+      downloadReviewReport(sellerId, dateFrom, dateTo),
+    onSuccess: ({ blob, filename }) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename ?? "reviews.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+      setReportOpen(false);
+      setReportError("");
+    },
+    onError: (error) =>
+      setReportError(error instanceof ApiError ? error.message : "Не удалось сформировать отчёт"),
+  });
 
   useEffect(() => {
     if (reviewSync?.finished_at) {
@@ -249,6 +273,16 @@ export function ReviewsPage() {
                 onClick={() => reviewSyncMutation.mutate()}
               >
                 {reviewSyncMutation.isPending ? "Запускаем…" : "Синхронизация отзывов"}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={!selected}
+                onClick={() => {
+                  setReportError("");
+                  setReportOpen(true);
+                }}
+              >
+                Отчёт XLSX
               </button>
               {selected && (
                 <div className="last-sync catalog-status">
@@ -378,6 +412,15 @@ export function ReviewsPage() {
           )}
         </main>
       </div>
+      {reportOpen && selected && (
+        <ReviewReportDialog
+          sellerName={selected.name}
+          pending={reportMutation.isPending}
+          error={reportError}
+          onClose={() => setReportOpen(false)}
+          onSubmit={(dateFrom, dateTo) => reportMutation.mutate({ dateFrom, dateTo })}
+        />
+      )}
       {dialogSeller && (
         <SellerDialog
           seller={dialogSeller}

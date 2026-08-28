@@ -363,9 +363,15 @@ class ReviewSyncRepository:
 
     async def history(self, seller_id: uuid.UUID, days: int) -> list[DailyRatings]:
         since = datetime.now(MOSCOW).date() - timedelta(days=days - 1)
+        return await self.history_range(seller_id, since, None)
+
+    async def history_range(self, seller_id: uuid.UUID, date_from: date, date_to: date | None) -> list[DailyRatings]:
+        conditions = [DailyReviewCountModel.seller_id == seller_id, DailyReviewCountModel.date >= date_from]
+        if date_to is not None:
+            conditions.append(DailyReviewCountModel.date <= date_to)
         rows = await self.session.scalars(
             select(DailyReviewCountModel)
-            .where(DailyReviewCountModel.seller_id == seller_id, DailyReviewCountModel.date >= since)
+            .where(*conditions)
             .order_by(DailyReviewCountModel.article, DailyReviewCountModel.date)
         )
         return [

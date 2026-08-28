@@ -57,6 +57,44 @@ export function refreshAccessToken(): Promise<AuthRefreshPayload> {
   return refreshPromise;
 }
 
+export interface FileDownload {
+  blob: Blob;
+  filename: string | null;
+}
+
+function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const utf8 = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // Падать из-за битого заголовка не стоит — ниже есть обычный filename.
+    }
+  }
+  return header.match(/filename="?([^";]+)"?/i)?.[1] ?? null;
+}
+
+export async function apiDownload(path: string): Promise<FileDownload> {
+  let response = await send(path);
+  if (response.status === 401) {
+    try {
+      await refreshAccessToken();
+      response = await send(path);
+    } catch {
+      setAccessToken(null);
+    }
+  }
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса");
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get("Content-Disposition")),
+  };
+}
+
 export async function apiRequest<T>(path: string, init?: RequestInit, options?: RequestOptions): Promise<T> {
   let response = await send(path, init);
   if (response.status === 401 && !options?.skipRefresh) {
