@@ -282,7 +282,7 @@ export function ReviewsPage() {
                   setReportOpen(true);
                 }}
               >
-                Отчёт XLSX
+                Выгрузить отчёт по продавцу
               </button>
               {selected && (
                 <div className="last-sync catalog-status">
