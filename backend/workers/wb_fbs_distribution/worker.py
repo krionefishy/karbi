@@ -12,7 +12,6 @@ from backend.modules.wb_fbs_distribution.application import MirrorService
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
 from backend.shared.heartbeat import touch_heartbeat
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
@@ -28,13 +27,11 @@ class FbsDistributionWorker:
     def __init__(
         self,
         database: Database,
-        cipher: CredentialCipher,
         marketplace: WBFbsMarketplaceClient,
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
         self.database = database
-        self.cipher = cipher
         self.marketplace = marketplace
         self.settings = settings
         self.config = settings.fbs_distribution
@@ -103,7 +100,6 @@ class FbsDistributionWorker:
                 SellerRepository(session),
                 FbsDistributionRepository(session),
                 self.marketplace,
-                self.cipher,
             )
             try:
                 result = await service.sync_seller(seller_id)

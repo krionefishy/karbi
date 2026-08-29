@@ -104,6 +104,19 @@ async def restore_seller(
     return await one_seller_response(service, seller)
 
 
+@router.post("/{seller_id}/egress-verify", response_model=SellerResponse)
+@inject
+async def egress_verify(
+    seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Повторная проверка ключа на шлюзе: для key_invalid после починки прав в кабинете WB."""
+    try:
+        seller = await service.refresh_egress(seller_id)
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    return await one_seller_response(service, seller)
+
+
 @router.post("/{seller_id}/catalog-sync", response_model=SellerResponse)
 @inject
 async def retry_sync(seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]) -> SellerResponse:

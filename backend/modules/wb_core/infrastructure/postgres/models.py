@@ -36,6 +36,16 @@ class SellerModel(WBCoreBase):
     catalog_sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     last_catalog_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     catalog_sync_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Сага доставки ключа на шлюз wb-egress: статус отвечает шлюз
+    # (delivered/verified/key_invalid/no_free_ip/disabled), либо доставка не
+    # прошла с нашей стороны (undelivered/unsynced). Ключа в этой базе нет.
+    egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
+    egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    egress_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # Монотонная версия для идемпотентных upsert'ов шлюза: очередная версия —
+    # max(wall-clock мс, предыдущая + 1), поэтому ни скачок NTP назад, ни две
+    # правки в одну миллисекунду не дадут шлюзу принять позднее за раннее.
+    egress_version: Mapped[int] = mapped_column(BigInteger, default=0)
 
     __table_args__ = (
         CheckConstraint(
@@ -43,24 +53,6 @@ class SellerModel(WBCoreBase):
             name="ck_wb_core_sellers_catalog_sync_status",
         ),
         Index("ix_wb_core_sellers_archived", "archived_at"),
-    )
-
-
-class CredentialModel(WBCoreBase):
-    __tablename__ = "credentials"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    seller_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("wb_core.sellers.id", ondelete="CASCADE"),
-        nullable=False,
-        unique=True,
-    )
-    encrypted_api_key: Mapped[str] = mapped_column(String, nullable=False)
-    key_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

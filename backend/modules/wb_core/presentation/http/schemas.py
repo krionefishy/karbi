@@ -63,6 +63,10 @@ class SellerResponse(BaseModel):
     catalog_sync_error: str | None
     archived_at: str | None = None
     automations: list[str] = []
+    # Сага доставки ключа на шлюз wb-egress.
+    egress_status: str = "undelivered"
+    egress_error: str | None = None
+    egress_ip: str | None = None
 
 
 class ArticleResponse(BaseModel):

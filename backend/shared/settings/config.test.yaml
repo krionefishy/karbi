@@ -21,11 +21,6 @@ auth:
   jwt_secret: test-only-secret-at-least-32-characters
   issuer: karbi
   audience: karbi-api
-security:
-  # Test-only Fernet key: without it nothing can create a seller, so the HTTP
-  # registry tests could not run at all.
-  credential_encryption_keys: [t4M661SyxKpmks_0sQNwk-j10CSbpUIuk_4zGSjv13M=]
-  credential_fingerprint_key: test-only-fingerprint-key
 rate_limit:
   enabled: false
 worker:
@@ -34,27 +29,14 @@ worker:
   review_sync_minute: 30
   review_sync_timezone: Europe/Moscow
   feedback_page_size: 5000
-  feedback_request_interval_seconds: 0.0
-  feedback_retry_wait_seconds: 600
   job_lease_seconds: 1800
   job_max_attempts: 3
   job_retry_backoff_seconds: 300
   run_max_age_seconds: 21600
-wb_api:
-  window_seconds: 60
-  content_per_key: 90
-  content_per_host: 90
-  feedbacks_per_key: 55
-  feedbacks_per_host: 55
-  statistics_per_key: 6
-  statistics_per_host: 30
-  marketplace_per_key: 60
-  marketplace_per_host: 120
-  analytics_per_key: 3
-  analytics_per_host: 30
-  # Tests must not sit through the production spacing.
-  analytics_min_interval_seconds: 0
-  max_wait_seconds: 120
+egress:
+  base_url: ${EGRESS_URL:-http://localhost:8090}
+  jwt_secret: ${EGRESS_JWT_SECRET:-local-egress-secret}
+  verify: ${EGRESS_VERIFY:-false}
 telegram:
   # Tests never reach Telegram; the base URL is here so an accidental call fails loudly.
   api_base_url: http://telegram.invalid

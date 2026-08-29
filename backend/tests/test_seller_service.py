@@ -4,14 +4,11 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from cryptography.fernet import Fernet
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import (
     AutomationEnrollment,
     AutomationNotFoundError,
-    DuplicateCredentialError,
     SellerArchivedError,
     SellerNotFoundError,
     SellerService,
@@ -19,7 +16,7 @@ from backend.modules.wb_core.application import (
 from backend.modules.wb_core.domain import Article, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
-from backend.shared.security import CredentialCipher
+from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
 
 
 class FakeSession:
@@ -27,14 +24,11 @@ class FakeSession:
         self.added: list[object] = []
         self.commits = 0
         self.rollbacks = 0
-        self.commit_error: Exception | None = None
 
     def add(self, value: object) -> None:
         self.added.append(value)
 
     async def commit(self) -> None:
-        if self.commit_error is not None:
-            raise self.commit_error
         self.commits += 1
 
     async def rollback(self) -> None:
@@ -63,6 +57,42 @@ class FakeEnrollment(AutomationEnrollment):
         self.enrolled.discard(seller_id)
 
 
+class FakeGateway:
+    """Шлюз wb-egress, каким его видит сервис: три управляющих вызова."""
+
+    def __init__(self, outcome: dict | None = None, error: Exception | None = None) -> None:
+        self.outcome = outcome or {"status": "verified", "egress_ip": "185.0.0.1", "verify_error": ""}
+        self.error = error
+        self.delivered: list[tuple[str, str, str]] = []
+        self.renamed: list[tuple[str, str]] = []
+        self.disabled: list[str] = []
+        self.verified: list[str] = []
+
+    async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.delivered.append((seller_id, name, api_key))
+        return dict(self.outcome)
+
+    async def rename_seller(self, *, seller_id: str, name: str, event_version: int) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.renamed.append((seller_id, name))
+        return dict(self.outcome)
+
+    async def disable_seller(self, *, seller_id: str, event_version: int) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.disabled.append(seller_id)
+        return {}
+
+    async def verify_seller(self, seller_id: str) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.verified.append(seller_id)
+        return dict(self.outcome)
+
+
 class FakeSellerRepository:
     def __init__(self) -> None:
         self.seller_id = uuid.uuid4()
@@ -72,9 +102,11 @@ class FakeSellerRepository:
             catalog_sync_status="success",
             catalog_sync_error=None,
             archived_at=None,
+            egress_status="undelivered",
+            egress_error=None,
+            egress_ip=None,
+            egress_version=0,
         )
-        self.credential = SimpleNamespace(encrypted_api_key="old", key_fingerprint="old")
-        self.exists = False
         self.deleted = False
         self.items = [Article(uuid.uuid4(), self.seller_id, "123", "SKU-1", "Товар")]
 
@@ -92,23 +124,37 @@ class FakeSellerRepository:
                 None,
                 self.model.catalog_sync_error,
                 self.model.archived_at,
+                self.model.egress_status,
+                self.model.egress_error,
+                self.model.egress_ip,
             )
         ]
 
-    async def fingerprint_exists(self, fingerprint: str, *, excluding=None) -> bool:
-        return self.exists
-
-    async def create(self, name: str, encrypted_key: str, fingerprint: str):
+    async def create(self, name: str):
         self.model.name = name
-        self.credential.encrypted_api_key = encrypted_key
-        self.credential.key_fingerprint = fingerprint
+        self.model.catalog_sync_status = "queued"
+        self.model.catalog_sync_error = None
         return self.model
 
     async def get(self, seller_id: uuid.UUID):
         return None if self.deleted or seller_id != self.seller_id else self.model
 
-    async def get_credential(self, seller_id: uuid.UUID):
-        return self.credential if seller_id == self.seller_id else None
+    async def set_egress_state(
+        self, seller_id: uuid.UUID, *, status: str, error: str | None, ip=None, version: int | None = None
+    ) -> None:
+        self.model.egress_status = status
+        self.model.egress_error = error
+        if ip is not None:
+            self.model.egress_ip = str(ip)
+        if version is not None:
+            self.model.egress_version = version
+
+    async def get_egress_version(self, seller_id: uuid.UUID) -> int:
+        return self.model.egress_version
+
+    async def reset_catalog_sync(self, seller_id: uuid.UUID) -> None:
+        self.model.catalog_sync_status = "queued"
+        self.model.catalog_sync_error = None
 
     async def archive(self, seller_id: uuid.UUID) -> bool:
         if seller_id != self.seller_id or self.model.archived_at is not None:
@@ -116,14 +162,12 @@ class FakeSellerRepository:
         self.model.archived_at = datetime.now(UTC)
         return True
 
-    async def restore(self, seller_id: uuid.UUID, encrypted_key: str, fingerprint: str) -> bool:
+    async def restore(self, seller_id: uuid.UUID) -> bool:
         if seller_id != self.seller_id or self.model.archived_at is None:
             return False
         self.model.archived_at = None
         self.model.catalog_sync_status = "queued"
         self.model.catalog_sync_error = None
-        self.credential.encrypted_api_key = encrypted_key
-        self.credential.key_fingerprint = fingerprint
         return True
 
     async def delete(self, seller_id: uuid.UUID) -> bool:
@@ -136,26 +180,33 @@ class FakeSellerRepository:
         return self.items
 
 
-def service_fixture() -> tuple[SellerService, FakeSellerRepository, FakeSession, FakeEnrollment]:
+def service_fixture(
+    gateway: FakeGateway | None = None,
+) -> tuple[SellerService, FakeSellerRepository, FakeSession, FakeEnrollment, FakeGateway]:
     session = FakeSession()
     repository = FakeSellerRepository()
     enrollment = FakeEnrollment()
-    cipher = CredentialCipher((Fernet.generate_key().decode(),), "test-fingerprint-key")
-    service = SellerService(cast(AsyncSession, session), cast(SellerRepository, repository), cipher, [enrollment])
-    return service, repository, session, enrollment
+    gateway = gateway or FakeGateway()
+    service = SellerService(
+        cast(AsyncSession, session), cast(SellerRepository, repository), cast(EgressGateway, gateway), [enrollment]
+    )
+    return service, repository, session, enrollment, gateway
 
 
 async def test_add_seller_creates_sync_outbox_event() -> None:
-    service, _, session, _ = service_fixture()
+    service, _, session, _, gateway = service_fixture()
 
     created = await service.create("ООО Ромашка", "wb-api-key-123456")
     assert created.name == "ООО Ромашка"
     assert created.catalog_sync_status == "queued"
+    assert created.egress_status == "verified"
+    assert created.egress_ip == "185.0.0.1"
+    assert gateway.delivered[0][1:] == ("ООО Ромашка", "wb-api-key-123456")
     assert any(isinstance(item, OutboxEventModel) for item in session.added)
 
 
 async def test_list_sellers() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, _ = service_fixture()
     repository.model.name = "ООО Ромашка"
 
     listed = await service.list_sellers()
@@ -163,21 +214,24 @@ async def test_list_sellers() -> None:
 
 
 async def test_edit_seller() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, gateway = service_fixture()
 
     updated = await service.update(repository.seller_id, "Seller Latin", None)
     assert updated.name == "Seller Latin"
+    # Без нового ключа имя едет на шлюз отдельным вызовом.
+    assert gateway.renamed == [(str(repository.seller_id), "Seller Latin")]
+    assert gateway.delivered == []
 
 
 async def test_list_seller_articles() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, _ = service_fixture()
 
     articles = await service.articles(repository.seller_id)
     assert articles[0].article == "123"
 
 
 async def test_a_seller_is_created_outside_automations() -> None:
-    service, repository, _, enrollment = service_fixture()
+    service, repository, _, enrollment, _ = service_fixture()
 
     await service.create("ООО Ромашка", "wb-api-key-123456")
     assert enrollment.enrolled == set()
@@ -189,7 +243,7 @@ async def test_a_seller_is_created_outside_automations() -> None:
 
 
 async def test_leaving_an_automation_keeps_the_seller_and_his_data() -> None:
-    service, repository, _, enrollment = service_fixture()
+    service, repository, _, enrollment, _ = service_fixture()
     await service.enroll("wb-reviews", repository.seller_id)
 
     await service.unenroll("wb-reviews", repository.seller_id)
@@ -200,12 +254,14 @@ async def test_leaving_an_automation_keeps_the_seller_and_his_data() -> None:
 
 
 async def test_archiving_detaches_from_every_automation_but_keeps_history() -> None:
-    service, repository, _, enrollment = service_fixture()
+    service, repository, _, enrollment, gateway = service_fixture()
     await service.enroll("wb-reviews", repository.seller_id)
 
     archived = await service.archive(repository.seller_id)
 
     assert archived.is_archived
+    assert archived.egress_status == "disabled"
+    assert gateway.disabled == [str(repository.seller_id)]
     assert enrollment.enrolled == set()
     assert enrollment.purged == []
     assert await service.list_sellers() == []
@@ -213,7 +269,7 @@ async def test_archiving_detaches_from_every_automation_but_keeps_history() -> N
 
 
 async def test_an_archived_seller_is_not_collected_for() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, _ = service_fixture()
     await service.archive(repository.seller_id)
 
     with pytest.raises(SellerArchivedError):
@@ -223,28 +279,31 @@ async def test_an_archived_seller_is_not_collected_for() -> None:
 
 
 async def test_restoring_asks_for_the_key_again() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, gateway = service_fixture()
     await service.archive(repository.seller_id)
 
     restored = await service.restore(repository.seller_id, "wb-api-key-restored")
 
     assert not restored.is_archived
     assert restored.catalog_sync_status == "queued"
-    assert repository.credential.encrypted_api_key != "old"
+    # Архивация отпустила ключ, поэтому на шлюз уезжает новый.
+    assert gateway.delivered[-1][2] == "wb-api-key-restored"
+    assert restored.egress_status == "verified"
 
 
 async def test_purge_lets_every_automation_erase_its_own_data() -> None:
-    service, repository, _, enrollment = service_fixture()
+    service, repository, _, enrollment, gateway = service_fixture()
     await service.enroll("wb-reviews", repository.seller_id)
 
     await service.purge(repository.seller_id)
 
     assert enrollment.purged == [repository.seller_id]
+    assert gateway.disabled == [str(repository.seller_id)]
     assert await service.list_sellers(include_archived=True) == []
 
 
 async def test_membership_is_reported_per_seller() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, _ = service_fixture()
     await service.enroll("wb-reviews", repository.seller_id)
     other = uuid.uuid4()
 
@@ -254,28 +313,37 @@ async def test_membership_is_reported_per_seller() -> None:
 
 
 async def test_unknown_automation_is_rejected() -> None:
-    service, repository, _, _ = service_fixture()
+    service, repository, _, _, _ = service_fixture()
 
     with pytest.raises(AutomationNotFoundError):
         await service.enroll("wb-turnover", repository.seller_id)
 
 
 async def test_purging_an_unknown_seller_is_an_error() -> None:
-    service, _, _, _ = service_fixture()
+    service, _, _, _, _ = service_fixture()
 
     with pytest.raises(SellerNotFoundError):
         await service.purge(uuid.uuid4())
 
 
-async def test_concurrent_duplicate_key_becomes_the_same_domain_conflict() -> None:
-    service, repository, session, _ = service_fixture()
-    await service.archive(repository.seller_id)
-    session.commit_error = IntegrityError("INSERT", {}, Exception("duplicate key value violates unique constraint"))
+async def test_an_unreachable_gateway_leaves_the_seller_undelivered() -> None:
+    """Ключ не доехал: селлер создан, но помечен, и синхронизация не ставится."""
+    gateway = FakeGateway(error=EgressAdminError("Шлюз WB недоступен"))
+    service, _, session, _, _ = service_fixture(gateway)
 
-    with pytest.raises(DuplicateCredentialError):
-        await service.create("ООО Ромашка", "wb-api-key-123456")
-    assert session.rollbacks == 1
+    created = await service.create("ООО Ромашка", "wb-api-key-123456")
 
-    with pytest.raises(DuplicateCredentialError):
-        await service.restore(repository.seller_id, "wb-api-key-restored")
-    assert session.rollbacks == 2
+    assert created.egress_status == "undelivered"
+    assert created.egress_error is not None and "недоступен" in created.egress_error
+    assert not any(isinstance(item, OutboxEventModel) for item in session.added)
+
+
+async def test_an_invalid_key_verdict_lands_on_the_seller() -> None:
+    gateway = FakeGateway(outcome={"status": "key_invalid", "egress_ip": "", "verify_error": "HTTP 401 от WB"})
+    service, _, session, _, _ = service_fixture(gateway)
+
+    created = await service.create("ООО Ромашка", "wb-api-key-123456")
+
+    assert created.egress_status == "key_invalid"
+    assert created.egress_error == "HTTP 401 от WB"
+    assert not any(isinstance(item, OutboxEventModel) for item in session.added)

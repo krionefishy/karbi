@@ -12,8 +12,13 @@ def test_test_settings_are_loaded_from_yaml() -> None:
     assert settings.rate_limit.enabled is False
     assert settings.auth.access_token_ttl_seconds == 86_400
     assert settings.auth.refresh_token_ttl_seconds == 604_800
-    assert settings.worker.feedback_request_interval_seconds == 0.0
-    assert settings.worker.feedback_retry_wait_seconds == 600
+    # Паузы и ретраи 429 переехали на шлюз; у воркера остались лимиты задач.
+    assert settings.worker.job_lease_seconds == 1800
+    assert settings.worker.job_retry_backoff_seconds == 300
+    # Шлюз wb-egress: своя секция вместо прежних security/wb_api.
+    assert settings.egress.audience == "wb-egress:karbi"
+    assert settings.egress.jwt_ttl_seconds == 300
+    assert settings.egress.request_timeout_seconds == 200
 
 
 def test_a_request_timeout_below_the_poll_timeout_is_refused() -> None:

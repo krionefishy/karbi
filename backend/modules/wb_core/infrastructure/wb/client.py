@@ -1,30 +1,25 @@
-import asyncio
 import logging
-import random
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
-from backend.modules.wb_core.infrastructure.wb.observability import read_rate_limit
-from backend.modules.wb_core.infrastructure.wb.throttle import (
-    WBThrottle,
-    WBThrottleTimeout,
-    host_bucket,
-    key_bucket,
-    scope_for_key,
+from backend.modules.wb_core.infrastructure.wb.egress import (
+    EgressGateway,
+    WBPermanentError,
+    WBTemporaryError,
 )
 
 CONTENT_BUCKET = "content"
 PAGE_LIMIT = 100
 
-
-class WBPermanentError(Exception):
-    pass
-
-
-class WBTemporaryError(Exception):
-    pass
+__all__ = [
+    "CONTENT_BUCKET",
+    "PAGE_LIMIT",
+    "CatalogCard",
+    "CatalogSnapshot",
+    "WBContentClient",
+    "WBPermanentError",
+    "WBTemporaryError",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,45 +45,56 @@ class CatalogSnapshot:
 
 
 class WBContentClient:
-    endpoint = "https://content-api.wildberries.ru/content/v2/get/cards/list"
-    trash_endpoint = "https://content-api.wildberries.ru/content/v2/get/cards/trash"
+    """Каталог селлера через шлюз wb-egress: запрос уходит под seller_id."""
 
-    def __init__(self, timeout_seconds: float = 30.0, throttle: WBThrottle | None = None) -> None:
-        self.timeout = httpx.Timeout(timeout_seconds, connect=10.0)
-        self.throttle = throttle
+    endpoint = "/content/v2/get/cards/list"
+    trash_endpoint = "/content/v2/get/cards/trash"
+
+    def __init__(self, gateway: EgressGateway) -> None:
+        self.gateway = gateway
         self.logger = logging.getLogger("wb.content.client")
 
-    async def get_catalog(self, api_key: str) -> CatalogSnapshot:
+    async def get_catalog(self, seller_id: str) -> CatalogSnapshot:
         """Both halves of the account: cards in sale and cards the seller archived.
 
         `cards/list` never returns archived cards, so a товар moved to the корзина
         would otherwise look as if it had vanished from WB entirely.
         """
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            active = await self._consume(client, api_key, self.endpoint, {"withPhoto": -1})
-            try:
-                archived = await self._consume(client, api_key, self.trash_endpoint, None)
-            except (WBPermanentError, WBTemporaryError) as error:
-                self.logger.warning("wb_trash_unavailable", extra={"error": str(error)})
-                return CatalogSnapshot(active=active, archived=[], archived_available=False)
+        active = await self._consume(seller_id, self.endpoint, {"withPhoto": -1})
+        try:
+            archived = await self._consume(seller_id, self.trash_endpoint, None)
+        except (WBPermanentError, WBTemporaryError) as error:
+            self.logger.warning("wb_trash_unavailable", extra={"error": str(error)})
+            return CatalogSnapshot(active=active, archived=[], archived_available=False)
         return CatalogSnapshot(active=active, archived=archived, archived_available=True)
 
-    async def get_articles(self, api_key: str) -> list[CatalogCard]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            return await self._consume(client, api_key, self.endpoint, {"withPhoto": -1})
+    async def get_articles(self, seller_id: str) -> list[CatalogCard]:
+        return await self._consume(seller_id, self.endpoint, {"withPhoto": -1})
 
     async def _consume(
         self,
-        client: httpx.AsyncClient,
-        api_key: str,
+        seller_id: str,
         endpoint: str,
         card_filter: dict[str, Any] | None,
     ) -> list[CatalogCard]:
         cursor: dict[str, Any] = {"limit": PAGE_LIMIT}
         cards: list[CatalogCard] = []
         while True:
-            response = await self._request(client, endpoint, api_key, cursor, card_filter)
-            payload = response.json()
+            settings: dict[str, Any] = {"sort": {"ascending": True}, "cursor": cursor}
+            if card_filter is not None:
+                settings["filter"] = card_filter
+            payload = (
+                await self.gateway.call(
+                    seller_id=seller_id,
+                    api=CONTENT_BUCKET,
+                    method="POST",
+                    path=endpoint,
+                    json={"settings": settings},
+                    api_name="WB Content API",
+                    category="Контент",
+                )
+                or {}
+            )
             page = payload.get("cards") or []
             cards.extend(self._card(item) for item in page if item.get("nmID") is not None)
             result_cursor = payload.get("cursor") or {}
@@ -148,72 +154,3 @@ class WBContentClient:
                 }
             )
         return collected
-
-    async def _request(
-        self,
-        client: httpx.AsyncClient,
-        endpoint: str,
-        api_key: str,
-        cursor: dict[str, Any],
-        card_filter: dict[str, Any] | None,
-    ) -> httpx.Response:
-        settings: dict[str, Any] = {"sort": {"ascending": True}, "cursor": cursor}
-        if card_filter is not None:
-            settings["filter"] = card_filter
-        scope = scope_for_key(api_key)
-        for attempt in range(5):
-            if self.throttle is not None:
-                try:
-                    await self.throttle.acquire(
-                        (key_bucket(CONTENT_BUCKET), scope),
-                        (host_bucket(CONTENT_BUCKET), "all"),
-                    )
-                except WBThrottleTimeout as error:
-                    raise WBTemporaryError(f"WB Content API: {error}") from error
-            try:
-                response = await client.post(
-                    endpoint,
-                    headers={"Authorization": api_key},
-                    json={"settings": settings},
-                )
-            except httpx.RequestError as error:
-                if attempt == 4:
-                    raise WBTemporaryError(
-                        f"Не удалось подключиться к WB Content API после 5 попыток: {error}"
-                    ) from error
-                await asyncio.sleep(self._retry_delay(None, attempt))
-                continue
-            snapshot = read_rate_limit(self.logger, response, path=endpoint)
-            if self.throttle is not None:
-                self.throttle.observe(key_bucket(CONTENT_BUCKET), scope, snapshot)
-            if response.status_code in {401, 403}:
-                raise WBPermanentError("API-ключ недействителен или не имеет доступа к категории Контент")
-            if response.status_code == 404:
-                raise WBPermanentError(f"WB Content API не знает метод {endpoint}")
-            if response.status_code == 429 or response.status_code >= 500:
-                if attempt == 4:
-                    raise WBTemporaryError(
-                        f"WB Content API временно недоступен после 5 попыток: HTTP {response.status_code}"
-                    )
-                await asyncio.sleep(self._retry_delay(response, attempt))
-                continue
-            try:
-                response.raise_for_status()
-            except httpx.HTTPError as error:
-                raise WBTemporaryError(f"Ошибка WB Content API: {error}") from error
-            return response
-        raise RuntimeError("WB request retry loop exhausted")
-
-    @staticmethod
-    def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
-        """Wait exactly as long as WB asked, and guess only when it stayed silent."""
-        fallback = float(min(2**attempt, 30))
-        if response is None:
-            return fallback + random.uniform(0.1, 0.5)
-        retry_header = response.headers.get("X-Ratelimit-Retry") or response.headers.get("Retry-After")
-        if retry_header is None:
-            return fallback + random.uniform(0.1, 0.5)
-        try:
-            return max(float(retry_header), 0.0) + random.uniform(0.1, 0.5)
-        except ValueError:
-            return fallback + random.uniform(0.1, 0.5)

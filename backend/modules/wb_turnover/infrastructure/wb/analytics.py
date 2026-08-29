@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 ANALYTICS_BUCKET = "analytics"
@@ -42,10 +40,9 @@ class WBAnalyticsClient(WBJsonClient):
     bucket = ANALYTICS_BUCKET
     api_name = "WB Analytics API"
     category = "Аналитика"
-    base_url = "https://seller-analytics-api.wildberries.ru"
     path = "/api/analytics/v1/stocks-report/wb-warehouses"
 
-    async def stocks(self, api_key: str) -> list[FBOStockRow]:
+    async def stocks(self, seller_id: str) -> list[FBOStockRow]:
         """Every stock line of the account, one page after another.
 
         The report lists a товар only while it has stock or something in
@@ -54,20 +51,18 @@ class WBAnalyticsClient(WBJsonClient):
         """
         collected: list[FBOStockRow] = []
         offset = 0
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for _ in range(MAX_PAGES):
-                payload = await self.request(
-                    client,
-                    "POST",
-                    f"{self.base_url}{self.path}",
-                    api_key,
-                    json={"limit": PAGE_LIMIT, "offset": offset},
-                )
-                items = self._items(payload)
-                collected.extend(row for raw in items if (row := self._row(raw)) is not None)
-                if len(items) < PAGE_LIMIT:
-                    return collected
-                offset += len(items)
+        for _ in range(MAX_PAGES):
+            payload = await self.request(
+                "POST",
+                self.path,
+                seller_id,
+                json={"limit": PAGE_LIMIT, "offset": offset},
+            )
+            items = self._items(payload)
+            collected.extend(row for raw in items if (row := self._row(raw)) is not None)
+            if len(items) < PAGE_LIMIT:
+                return collected
+            offset += len(items)
         raise WBPermanentError(f"{self.api_name}: отчёт по остаткам не закончился за {MAX_PAGES} страниц")
 
     def _items(self, payload: Any) -> list[dict]:

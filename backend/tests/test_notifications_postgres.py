@@ -24,16 +24,11 @@ from backend.modules.notifications.infrastructure.postgres import (
     SubscriptionModel,
 )
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 SELLER_ID = uuid.uuid4()
-
-
-def cipher() -> CredentialCipher:
-    return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
 
 
 class FakeRelay(RelayClient):

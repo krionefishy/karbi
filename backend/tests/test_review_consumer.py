@@ -11,14 +11,13 @@ from typing import cast
 import pytest
 
 from backend.modules.wb_core.domain import Article
-from backend.modules.wb_core.infrastructure.wb import CatalogCard, WBContentClient
+from backend.modules.wb_core.infrastructure.wb import CatalogCard, WBContentClient, WBPermanentError
 from backend.modules.wb_reviews.infrastructure.wb import (
     FeedbackAggregation,
     FeedbackProduct,
     WBFeedbackClient,
     WBFeedbackTemporaryError,
 )
-from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
 from backend.workers.wb_reviews import catalog_consumer as catalog_module
 from backend.workers.wb_reviews import review_consumer as consumer_module
@@ -58,10 +57,7 @@ class FakeSellers:
         return False
 
     async def get(self, seller_id: uuid.UUID):
-        return SimpleNamespace(id=seller_id) if seller_id == self.seller_id else None
-
-    async def get_credential(self, seller_id: uuid.UUID):
-        return SimpleNamespace(encrypted_api_key="encrypted") if seller_id == self.seller_id else None
+        return SimpleNamespace(id=seller_id, archived_at=None) if seller_id == self.seller_id else None
 
     async def list_articles(self, seller_id: uuid.UUID) -> list[Article]:
         return self.articles
@@ -127,7 +123,7 @@ class FakeFeedbackClient:
     def __init__(self, database: FakeDatabase) -> None:
         self.database = database
 
-    async def aggregate(self, api_key: str) -> FeedbackAggregation:
+    async def aggregate(self, seller_id: str) -> FeedbackAggregation:
         assert self.database.open_sessions == 0
         return FeedbackAggregation(
             counts={"123": (1, 2, 3, 4, 5), "456": (0, 0, 0, 1, 2)},
@@ -140,24 +136,18 @@ class FakeFeedbackClient:
 
 
 class RateLimitedFeedbackClient:
-    async def aggregate(self, api_key: str) -> FeedbackAggregation:
+    async def aggregate(self, seller_id: str) -> FeedbackAggregation:
         raise WBFeedbackTemporaryError("WB Feedbacks API временно недоступен после 10 минут повторов: HTTP 429")
 
 
 class MustNotBeCalledClient:
-    async def aggregate(self, api_key: str) -> FeedbackAggregation:
+    async def aggregate(self, seller_id: str) -> FeedbackAggregation:
         raise AssertionError("WB must not be called for an unclaimed job")
-
-
-class FakeCipher:
-    def decrypt(self, token: str) -> str:
-        return "api-key"
 
 
 def build_consumer(database: FakeDatabase, client) -> ReviewSyncConsumer:
     return ReviewSyncConsumer(
         cast(Database, database),
-        cast(CredentialCipher, FakeCipher()),
         "kafka:9092",
         "test",
         5000,
@@ -306,10 +296,7 @@ class FakeCatalogSellers:
         return False
 
     async def get(self, seller_id: uuid.UUID):
-        return SimpleNamespace(id=seller_id) if seller_id == self.seller_id else None
-
-    async def get_credential(self, seller_id: uuid.UUID):
-        return SimpleNamespace(encrypted_api_key="encrypted")
+        return SimpleNamespace(id=seller_id, archived_at=None) if seller_id == self.seller_id else None
 
     async def set_sync_status(self, seller_id: uuid.UUID, status: str, error: str | None = None) -> None:
         self.sync_statuses.append((status, error))
@@ -318,40 +305,38 @@ class FakeCatalogSellers:
         self.inbox_events.append(event_id)
 
 
-class BrokenCipher:
-    def decrypt(self, token: str) -> str:
-        raise CredentialDecryptionError("ни один ключ не подошёл")
+class InvalidKeyContentClient:
+    async def get_catalog(self, seller_id: str):
+        raise WBPermanentError("WB Content API: ключ недействителен или не имеет доступа")
 
 
 class MustNotBeCalledContentClient:
-    async def get_catalog(self, api_key: str):
-        raise AssertionError("WB must not be called with an undecryptable key")
+    async def get_catalog(self, seller_id: str):
+        raise AssertionError("WB must not be called for a malformed payload")
 
 
-async def test_catalog_consumer_treats_an_undecryptable_key_as_permanent(monkeypatch) -> None:
-    """A key that no longer decrypts would otherwise be retried forever."""
+async def test_catalog_consumer_treats_an_invalid_key_as_permanent(monkeypatch) -> None:
+    """A key the gateway rejects for good would otherwise be retried forever."""
     seller_id, event_id = uuid.uuid4(), uuid.uuid4()
     sellers = FakeCatalogSellers(seller_id)
     monkeypatch.setattr(catalog_module, "SellerRepository", lambda session: sellers)
     consumer = CatalogSyncConsumer(
         cast(Database, FakeDatabase()),
-        cast(CredentialCipher, BrokenCipher()),
         "kafka:9092",
         "test",
-        client=cast(WBContentClient, MustNotBeCalledContentClient()),
+        client=cast(WBContentClient, InvalidKeyContentClient()),
     )
 
     await consumer.process({"event_id": str(event_id), "seller_id": str(seller_id)})
 
     assert sellers.sync_statuses[-1][0] == "error"
-    assert "не подошёл" in sellers.sync_statuses[-1][1]
+    assert "недействителен" in sellers.sync_statuses[-1][1]
     assert sellers.inbox_events == [event_id]
 
 
 async def test_catalog_consumer_raises_a_skippable_error_for_a_malformed_payload() -> None:
     consumer = CatalogSyncConsumer(
         cast(Database, FakeDatabase()),
-        cast(CredentialCipher, FakeCipher()),
         "kafka:9092",
         "test",
         client=cast(WBContentClient, MustNotBeCalledContentClient()),
@@ -434,7 +419,7 @@ async def test_a_non_json_message_does_not_kill_the_catalog_consumer(monkeypatch
     monkeypatch.setattr(catalog_module, "AIOKafkaConsumer", build)
 
     class EmptyCatalog:
-        async def get_catalog(self, api_key: str):
+        async def get_catalog(self, seller_id: str):
             return SimpleNamespace(active=[], archived=[], archived_available=[])
 
     async def upsert_catalog(seller_id, *, active, archived, archived_available) -> None:
@@ -444,7 +429,6 @@ async def test_a_non_json_message_does_not_kill_the_catalog_consumer(monkeypatch
 
     consumer = CatalogSyncConsumer(
         cast(Database, database),
-        cast(CredentialCipher, FakeCipher()),
         "kafka:9092",
         "test",
         client=cast(WBContentClient, EmptyCatalog()),

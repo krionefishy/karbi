@@ -12,7 +12,6 @@ from backend.modules.notifications.infrastructure.postgres.models import BotMode
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
-    CredentialModel,
     OutboxEventModel,
     SellerModel,
 )
@@ -36,37 +35,33 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 TODAY = date(2026, 8, 20)
 WINDOW = 14
 
 
-def cipher() -> CredentialCipher:
-    return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
-
-
 class FakeStatistics(WBStatisticsClient):
     def __init__(self, order_rows=()) -> None:
-        super().__init__()
+        super().__init__(make_gateway())
         self.order_rows = list(order_rows)
         self.requested_from: datetime | None = None
 
-    async def orders(self, api_key: str, date_from: datetime) -> list[OrderRow]:
+    async def orders(self, seller_id: str, date_from: datetime) -> list[OrderRow]:
         self.requested_from = date_from
         return list(self.order_rows)
 
 
 class FakeAnalytics(WBAnalyticsClient):
     def __init__(self, stock_rows=(), error: Exception | None = None) -> None:
-        super().__init__()
+        super().__init__(make_gateway())
         self.stock_rows = list(stock_rows)
         self.error = error
 
-    async def stocks(self, api_key: str) -> list[FBOStockRow]:
+    async def stocks(self, seller_id: str) -> list[FBOStockRow]:
         if self.error is not None:
             raise self.error
         return list(self.stock_rows)
@@ -77,18 +72,18 @@ class FakeMarketplace(WBMarketplaceClient):
     hold the same size."""
 
     def __init__(self, warehouse_list=(), amounts=None, error: Exception | None = None) -> None:
-        super().__init__()
+        super().__init__(make_gateway())
         self.warehouse_list = list(warehouse_list)
         self.amounts = amounts or {}
         self.error = error
         self.asked: list[tuple[int, tuple[int, ...]]] = []
 
-    async def warehouses(self, api_key: str) -> list[Warehouse]:
+    async def warehouses(self, seller_id: str) -> list[Warehouse]:
         if self.error is not None:
             raise self.error
         return list(self.warehouse_list)
 
-    async def stocks(self, api_key: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
+    async def stocks(self, seller_id: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
         if self.error is not None:
             raise self.error
         self.asked.append((warehouse_id, tuple(chrt_ids)))
@@ -132,13 +127,6 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     async with database.session() as session:
         session.add(model)
         await session.flush()
-        session.add(
-            CredentialModel(
-                seller_id=model.id,
-                encrypted_api_key=cipher().encrypt("wb-turnover-key"),
-                key_fingerprint=uuid.uuid4().hex,
-            )
-        )
         for article, chrt_ids in (("101", (1011, 1012)), ("102", (1021,))):
             session.add(
                 ArticleModel(
@@ -205,7 +193,6 @@ def collection(session, analytics, marketplace, statistics=None) -> CollectionSe
         session,
         SellerRepository(session),
         TurnoverRepository(session),
-        cipher(),
         statistics or FakeStatistics(),
         analytics,
         marketplace,
@@ -497,11 +484,11 @@ async def test_orders_are_read_page_by_page_until_nothing_new_arrives() -> None:
 
     class Paged(WBStatisticsClient):
         def __init__(self) -> None:
-            super().__init__()
+            super().__init__(make_gateway())
             self.cursors: list[datetime] = []
 
-        async def request(self, client, method, url, api_key, **kwargs):  # type: ignore[override]
-            self.cursors.append(kwargs["params"]["dateFrom"])
+        async def request(self, method, path, seller_id, *, params=None, json=None):  # type: ignore[override]
+            self.cursors.append(params["dateFrom"])
             return [
                 {
                     "srid": row.srid,

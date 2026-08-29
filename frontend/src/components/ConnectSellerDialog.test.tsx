@@ -14,6 +14,9 @@ function seller(id: string, name: string): Seller {
     catalog_sync_error: null,
     archived_at: null,
     automations: [],
+    egress_status: "verified",
+    egress_error: null,
+    egress_ip: null,
   };
 }
 

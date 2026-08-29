@@ -38,9 +38,6 @@ auth:
   audience: karbi-api
   access_token_ttl_seconds: 86400
   refresh_token_ttl_seconds: 604800
-security:
-  credential_encryption_keys: ${CREDENTIALS_ENCRYPTION_KEYS:-}
-  credential_fingerprint_key: ${CREDENTIALS_FINGERPRINT_KEY:-}
 rate_limit:
   enabled: true
   requests: ${RATE_LIMIT_REQUESTS:-30}
@@ -51,26 +48,16 @@ worker:
   review_sync_minute: 30
   review_sync_timezone: Europe/Moscow
   feedback_page_size: ${WB_FEEDBACK_PAGE_SIZE:-5000}
-  feedback_request_interval_seconds: ${WB_FEEDBACK_REQUEST_INTERVAL_SECONDS:-0.0}
-  feedback_retry_wait_seconds: ${WB_FEEDBACK_RETRY_WAIT_SECONDS:-600}
   job_lease_seconds: 1800
   job_max_attempts: 3
   job_retry_backoff_seconds: 300
   run_max_age_seconds: 21600
-wb_api:
-  window_seconds: ${WB_RATE_WINDOW_SECONDS:-60}
-  content_per_key: ${WB_CONTENT_PER_KEY:-90}
-  content_per_host: ${WB_CONTENT_PER_HOST:-90}
-  feedbacks_per_key: ${WB_FEEDBACKS_PER_KEY:-55}
-  feedbacks_per_host: ${WB_FEEDBACKS_PER_HOST:-55}
-  statistics_per_key: ${WB_STATISTICS_PER_KEY:-6}
-  statistics_per_host: ${WB_STATISTICS_PER_HOST:-30}
-  marketplace_per_key: ${WB_MARKETPLACE_PER_KEY:-60}
-  marketplace_per_host: ${WB_MARKETPLACE_PER_HOST:-120}
-  analytics_per_key: ${WB_ANALYTICS_PER_KEY:-3}
-  analytics_per_host: ${WB_ANALYTICS_PER_HOST:-30}
-  analytics_min_interval_seconds: ${WB_ANALYTICS_MIN_INTERVAL_SECONDS:-20}
-  max_wait_seconds: ${WB_RATE_MAX_WAIT_SECONDS:-120}
+egress:
+  base_url: ${EGRESS_URL:-}
+  jwt_secret: ${EGRESS_JWT_SECRET:-}
+  verify: ${EGRESS_VERIFY:-/etc/egress/egress.crt}
+  jwt_ttl_seconds: ${EGRESS_JWT_TTL_SECONDS:-300}
+  request_timeout_seconds: ${EGRESS_REQUEST_TIMEOUT_SECONDS:-200}
 telegram:
   api_base_url: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
   poll_timeout_seconds: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-25}

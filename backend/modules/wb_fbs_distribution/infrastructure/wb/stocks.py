@@ -1,7 +1,5 @@
 from collections.abc import Sequence
 
-import httpx
-
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient
 from backend.modules.wb_fbs_distribution.infrastructure.wb.marketplace import MARKETPLACE_BUCKET, SKU_CHUNK
 
@@ -18,9 +16,8 @@ class WBFbsStockWriter(WBJsonClient):
     bucket = MARKETPLACE_BUCKET
     api_name = "WB Marketplace API"
     category = "Маркетплейс"
-    base_url = "https://marketplace-api.wildberries.ru"
 
-    async def publish(self, api_key: str, warehouse_id: int, amounts: Sequence[tuple[str, int]]) -> int:
+    async def publish(self, seller_id: str, warehouse_id: int, amounts: Sequence[tuple[str, int]]) -> int:
         """Записать остатки пачками. Возвращает число отправленных строк.
 
         Обнуление — это `amount = 0`, а не `DELETE`: тот удаляет саму запись
@@ -29,14 +26,12 @@ class WBFbsStockWriter(WBJsonClient):
         """
         if not amounts:
             return 0
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for offset in range(0, len(amounts), SKU_CHUNK):
-                chunk = amounts[offset : offset + SKU_CHUNK]
-                await self.request(
-                    client,
-                    "PUT",
-                    f"{self.base_url}/api/v3/stocks/{warehouse_id}",
-                    api_key,
-                    json={"stocks": [{"sku": sku, "amount": amount} for sku, amount in chunk]},
-                )
+        for offset in range(0, len(amounts), SKU_CHUNK):
+            chunk = amounts[offset : offset + SKU_CHUNK]
+            await self.request(
+                "PUT",
+                f"/api/v3/stocks/{warehouse_id}",
+                seller_id,
+                json={"stocks": [{"sku": sku, "amount": amount} for sku, amount in chunk]},
+            )
         return len(amounts)

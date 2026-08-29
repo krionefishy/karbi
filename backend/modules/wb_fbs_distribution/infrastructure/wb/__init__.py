@@ -6,7 +6,6 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb.marketplace import (
     WBFbsMarketplaceClient,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.wb.stocks import WBFbsStockWriter
-from backend.modules.wb_fbs_distribution.infrastructure.wb.throttle import marketplace_throttle
 from backend.modules.wb_fbs_distribution.infrastructure.wb.warehouses import WBFbsWarehouseWriter
 
 __all__ = [
@@ -17,5 +16,4 @@ __all__ = [
     "WBFbsMarketplaceClient",
     "WBFbsStockWriter",
     "WBFbsWarehouseWriter",
-    "marketplace_throttle",
 ]

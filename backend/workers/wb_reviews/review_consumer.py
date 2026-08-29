@@ -16,7 +16,6 @@ from backend.modules.wb_reviews.infrastructure.wb import (
     WBFeedbackTemporaryError,
 )
 from backend.shared.kafka_streams.topics import WBReviewsTopics
-from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
@@ -34,29 +33,22 @@ class ReviewSyncConsumer:
     def __init__(
         self,
         database: Database,
-        cipher: CredentialCipher,
         bootstrap_servers: str,
         group_id: str,
         page_size: int,
-        request_interval_seconds: float = 1.0,
-        retry_wait_seconds: int = 600,
+        *,
         lease_seconds: int = 1800,
         max_attempts: int = 3,
         retry_backoff_seconds: int = 300,
-        client: WBFeedbackClient | None = None,
+        client: WBFeedbackClient,
     ) -> None:
         self.database = database
-        self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.retry_backoff_seconds = retry_backoff_seconds
-        self.feedback_client = client or WBFeedbackClient(
-            page_size=page_size,
-            request_interval_seconds=request_interval_seconds,
-            max_retry_wait_seconds=retry_wait_seconds,
-        )
+        self.feedback_client = client
         self.logger = logging.getLogger("wb.reviews.consumer")
 
     async def run(self) -> None:
@@ -120,9 +112,8 @@ class ReviewSyncConsumer:
                 await session.commit()
                 return
             seller = await sellers.get(seller_id)
-            credential = await sellers.get_credential(seller_id)
-            if seller is None or credential is None:
-                await reviews.fail_job(job_id, "Селлер удалён или API-ключ отсутствует")
+            if seller is None or seller.archived_at is not None:
+                await reviews.fail_job(job_id, "Селлер удалён или в архиве")
                 await reviews.finalize_run(run_id)
                 sellers.mark_inbox(event_id, "WBReviewSyncRequested")
                 await session.commit()
@@ -135,15 +126,13 @@ class ReviewSyncConsumer:
                 self.logger.info("review_sync_job_not_claimed", extra={"job_id": str(job_id)})
                 return
             await reviews.mark_run_running(run_id)
-            encrypted_key = credential.encrypted_api_key
             await session.commit()
 
         # Phase 2: talk to WB. The catalog is already in Postgres, so only
         # feedbacks are fetched here.
         try:
-            api_key = self.cipher.decrypt(encrypted_key)
-            aggregation = await self.feedback_client.aggregate(api_key)
-        except (CredentialDecryptionError, WBFeedbackPermanentError) as error:
+            aggregation = await self.feedback_client.aggregate(str(seller_id))
+        except WBFeedbackPermanentError as error:
             await self._finish(event_id, run_id, job_id, str(error), retry=False)
             return
         except WBFeedbackTemporaryError as error:

@@ -15,7 +15,6 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.shared.security import CredentialCipher, CredentialDecryptionError
 
 # Wildberries reports and accepts statistics dates in Moscow time without a zone.
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -51,7 +50,6 @@ class CollectionService:
         session: AsyncSession,
         sellers: SellerRepository,
         turnover: TurnoverRepository,
-        cipher: CredentialCipher,
         statistics: WBStatisticsClient,
         analytics: WBAnalyticsClient,
         marketplace: WBMarketplaceClient,
@@ -59,7 +57,6 @@ class CollectionService:
         self.session = session
         self.sellers = sellers
         self.turnover = turnover
-        self.cipher = cipher
         self.statistics = statistics
         self.analytics = analytics
         self.marketplace = marketplace
@@ -73,7 +70,7 @@ class CollectionService:
         reading nor overwrites the previous FBS figures with zeros — zeros
         would read as «товар кончился» and raise a false alarm.
         """
-        api_key = await self._api_key(seller_id)
+        seller_key = str(seller_id)
         known = await self._known_articles(seller_id)
         article_of = await self.sellers.list_chrt_articles(seller_id)
         # The reads are done. The requests below can take minutes on a large
@@ -82,7 +79,7 @@ class CollectionService:
         await self.session.commit()
 
         fbo: dict[str, list[int]] = {article: [0, 0, 0, 0] for article in known}
-        for row in await self.analytics.stocks(api_key):
+        for row in await self.analytics.stocks(seller_key):
             values = fbo.setdefault(row.article, [0, 0, 0, 0])
             values[0] += row.quantity
             values[2] += row.in_way_to_client
@@ -107,19 +104,19 @@ class CollectionService:
         )
         await self.session.commit()
 
-        return StockResult(len(fbo), await self._store_fbs(seller_id, api_key, snapshot_date, slot, article_of))
+        return StockResult(len(fbo), await self._store_fbs(seller_id, seller_key, snapshot_date, slot, article_of))
 
     async def _store_fbs(
         self,
         seller_id: uuid.UUID,
-        api_key: str,
+        seller_key: str,
         snapshot_date: date,
         slot: int,
         article_of: dict[int, str],
     ) -> str:
         """Collect and write the FBS half, reporting why it is missing when it is."""
         try:
-            fbs = await self._collect_fbs(seller_id, api_key, article_of)
+            fbs = await self._collect_fbs(seller_id, seller_key, article_of)
         except (WBPermanentError, WBTemporaryError) as error:
             self.logger.warning("turnover_fbs_unavailable", extra={"seller_id": str(seller_id), "error": str(error)})
             await self.session.rollback()
@@ -144,7 +141,7 @@ class CollectionService:
     async def _collect_fbs(
         self,
         seller_id: uuid.UUID,
-        api_key: str,
+        seller_key: str,
         article_of: dict[int, str],
     ) -> dict[str, tuple[int, int, int, int]] | None:
         """Declared stock at the seller's warehouses, or None when there is none to collect.
@@ -155,14 +152,14 @@ class CollectionService:
         if not article_of:
             self.logger.warning("В каталоге селлера %s нет размеров — FBS-остатки в этом срезе не собраны", seller_id)
             return None
-        warehouses = await self._warehouses(seller_id, api_key)
+        warehouses = await self._warehouses(seller_id, seller_key)
         if not warehouses:
             self.logger.warning("У селлера %s нет складов Marketplace — FBS-остатки в этом срезе не собраны", seller_id)
             return None
         chrt_ids = list(article_of)
         amounts: dict[str, int] = defaultdict(int)
         for warehouse_id, _ in warehouses:
-            declared = await self.marketplace.stocks(api_key, warehouse_id, chrt_ids)
+            declared = await self.marketplace.stocks(seller_key, warehouse_id, chrt_ids)
             for chrt_id, amount in declared.items():
                 article = article_of.get(chrt_id)
                 if article is not None:
@@ -172,12 +169,12 @@ class CollectionService:
             article: (amounts.get(article, 0), amounts.get(article, 0), 0, 0) for article in set(article_of.values())
         }
 
-    async def _warehouses(self, seller_id: uuid.UUID, api_key: str) -> list[tuple[int, str]]:
+    async def _warehouses(self, seller_id: uuid.UUID, seller_key: str) -> list[tuple[int, str]]:
         tracked = await self.turnover.tracked(seller_id)
         synced_at = tracked.warehouses_synced_at if tracked else None
         if synced_at is not None and datetime.now(UTC) - synced_at < WAREHOUSE_REFRESH:
             return await self.turnover.warehouses(seller_id)
-        warehouses = [(item.id, item.name) for item in await self.marketplace.warehouses(api_key)]
+        warehouses = [(item.id, item.name) for item in await self.marketplace.warehouses(seller_key)]
         await self.turnover.replace_warehouses(seller_id, warehouses)
         return warehouses
 
@@ -190,7 +187,7 @@ class CollectionService:
         window instead of leaving a hole, and the overlap covers orders that
         changed while the previous pull was running.
         """
-        api_key = await self._api_key(seller_id)
+        seller_key = str(seller_id)
         tracked = await self.turnover.tracked(seller_id)
         watermark = tracked.orders_watermark if tracked else None
         if watermark is None:
@@ -203,7 +200,7 @@ class CollectionService:
         # opens its own short one.
         await self.session.commit()
 
-        rows = await self.statistics.orders(api_key, date_from.astimezone(MOSCOW))
+        rows = await self.statistics.orders(seller_key, date_from.astimezone(MOSCOW))
         if not rows:
             return 0
         if not await self.turnover.still_tracked(seller_id):
@@ -245,12 +242,3 @@ class CollectionService:
         were 243 of 1035 rows, every one of them «нет остатка».
         """
         return {article.article for article in await self.sellers.list_articles(seller_id) if article.state == "active"}
-
-    async def _api_key(self, seller_id: uuid.UUID) -> str:
-        credential = await self.sellers.get_credential(seller_id)
-        if credential is None:
-            raise WBPermanentError("У селлера нет API-ключа")
-        try:
-            return self.cipher.decrypt(credential.encrypted_api_key)
-        except CredentialDecryptionError as error:
-            raise WBPermanentError("API-ключ селлера не расшифровывается") from error

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -14,6 +14,7 @@ import {
   restoreSeller,
   retrySellerSync,
   updateSeller,
+  verifySellerEgress,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
 
@@ -22,6 +23,16 @@ const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   syncing: "Синхронизация",
   success: "Готово",
   error: "Ошибка",
+};
+
+const egressStatusText: Record<string, string> = {
+  verified: "проверен",
+  delivered: "доставлен",
+  key_invalid: "ключ отклонён",
+  no_free_ip: "нет свободного IP",
+  disabled: "отключён",
+  undelivered: "не доставлен",
+  unsynced: "не синхронизирован",
 };
 
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
@@ -89,6 +100,10 @@ export function SellersPage() {
       setFormError(error instanceof ApiError ? error.message : "Не удалось восстановить селлера"),
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refresh });
+  const egressVerifyMutation = useMutation({
+    mutationFn: verifySellerEgress,
+    onSuccess: refresh,
+  });
 
   return (
     <div className="app-page">
@@ -147,6 +162,7 @@ export function SellersPage() {
               <span>Селлер</span>
               <span>Товаров</span>
               <span>Каталог</span>
+              <span>Ключ</span>
               <span>Автоматизации</span>
               <span>Действия</span>
             </div>
@@ -164,6 +180,12 @@ export function SellersPage() {
                 <span>{seller.product_count}</span>
                 <span className={`catalog-state catalog-state-${seller.catalog_sync_status}`}>
                   {seller.archived_at ? "—" : syncStatusText[seller.catalog_sync_status]}
+                </span>
+                <span
+                  className={`egress-state egress-state-${seller.egress_status}`}
+                  title={seller.egress_error ?? undefined}
+                >
+                  {seller.archived_at ? "—" : (egressStatusText[seller.egress_status] ?? seller.egress_status)}
                 </span>
                 <span className="registry-automations">
                   {seller.automations.length === 0
@@ -215,6 +237,15 @@ export function SellersPage() {
                       >
                         <RefreshCw size={15} />
                       </button>
+                      {seller.egress_status !== "verified" && (
+                        <button
+                          title="Перепроверить ключ на шлюзе"
+                          aria-label={`Перепроверить ключ ${seller.name}`}
+                          onClick={() => egressVerifyMutation.mutate(seller.id)}
+                        >
+                          <KeyRound size={15} />
+                        </button>
+                      )}
                       <button
                         title="В архив"
                         aria-label={`Отправить в архив ${seller.name}`}

@@ -2,19 +2,14 @@ import asyncio
 import signal
 
 from backend.infrastructure.logging import configure_logging
-from backend.modules.wb_core.infrastructure.wb import WBThrottle, budgets_for, key_bucket
+from backend.modules.wb_core.infrastructure.wb import EgressGateway
 from backend.modules.wb_turnover.infrastructure.wb import (
-    ANALYTICS_BUCKET,
-    MARKETPLACE_BUCKET,
-    STATISTICS_BUCKET,
     WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
-from backend.storage.redis import RedisClient
 from backend.workers.wb_turnover.worker import TurnoverWorker
 
 
@@ -30,59 +25,22 @@ class TurnoverWorkerApplication:
         self.settings = settings or load_settings()
         configure_logging(self.settings.app.log_level)
         self.database = Database()
-        self.redis = RedisClient()
-        cipher = CredentialCipher(
-            self.settings.security.credential_encryption_keys,
-            self.settings.security.credential_fingerprint_key,
-        )
-        throttle = self._create_throttle()
+        # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
+        gateway = EgressGateway(self.settings.egress)
         self.worker = TurnoverWorker(
             self.database,
-            cipher,
-            WBStatisticsClient(throttle=throttle),
-            WBAnalyticsClient(throttle=throttle),
-            WBMarketplaceClient(throttle=throttle),
+            WBStatisticsClient(gateway),
+            WBAnalyticsClient(gateway),
+            WBMarketplaceClient(gateway),
             self.settings,
-        )
-
-    def _create_throttle(self) -> WBThrottle:
-        wb_api = self.settings.wb_api
-        return WBThrottle(
-            budgets={
-                **budgets_for(
-                    STATISTICS_BUCKET,
-                    per_key=wb_api.statistics_per_key,
-                    per_host=wb_api.statistics_per_host,
-                    window_seconds=wb_api.window_seconds,
-                ),
-                **budgets_for(
-                    MARKETPLACE_BUCKET,
-                    per_key=wb_api.marketplace_per_key,
-                    per_host=wb_api.marketplace_per_host,
-                    window_seconds=wb_api.window_seconds,
-                ),
-                **budgets_for(
-                    ANALYTICS_BUCKET,
-                    per_key=wb_api.analytics_per_key,
-                    per_host=wb_api.analytics_per_host,
-                    window_seconds=wb_api.window_seconds,
-                ),
-            },
-            redis_client=self.redis,
-            max_wait_seconds=wb_api.max_wait_seconds,
-            # The stock report rejects back-to-back calls even inside its
-            # minute budget, so pages and sellers are spaced by a hard floor.
-            min_intervals={key_bucket(ANALYTICS_BUCKET): float(wb_api.analytics_min_interval_seconds)},
         )
 
     async def run(self) -> None:
         self.settings.validate_runtime_secrets()
         try:
             await self.database.connect(self.settings.database.url, pool_size=2, max_overflow=2)
-            await self.redis.connect(self.settings.redis.url)
             await self.worker.run()
         finally:
-            await self.redis.disconnect()
             await self.database.disconnect()
 
     def install_signal_handlers(self) -> None:

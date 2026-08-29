@@ -8,7 +8,6 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError
 from backend.shared.kafka_streams.topics import WBCoreTopics
-from backend.shared.security import CredentialCipher, CredentialDecryptionError
 from backend.storage.pg import Database
 from backend.workers.wb_reviews.review_consumer import POLL_INTERVAL_MARGIN_MS, InvalidPayloadError
 
@@ -21,17 +20,16 @@ class CatalogSyncConsumer:
     def __init__(
         self,
         database: Database,
-        cipher: CredentialCipher,
         bootstrap_servers: str,
         group_id: str,
-        client: WBContentClient | None = None,
+        *,
+        client: WBContentClient,
         max_poll_interval_ms: int = DEFAULT_MAX_POLL_INTERVAL_MS,
     ) -> None:
         self.database = database
-        self.cipher = cipher
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
-        self.client = client or WBContentClient()
+        self.client = client
         self.max_poll_interval_ms = max_poll_interval_ms
         self.logger = logging.getLogger("wb.catalog.consumer")
 
@@ -84,19 +82,18 @@ class CatalogSyncConsumer:
             if await repository.inbox_processed(event_id):
                 return
             seller = await repository.get(seller_id)
-            credential = await repository.get_credential(seller_id)
-            if seller is None or credential is None:
+            if seller is None or seller.archived_at is not None:
+                # Событие, опубликованное до архивации, доживает в Kafka дольше
+                # селлера: обрабатывать его — значит дёргать шлюз за
+                # отключённого и записывать ему ошибку синка.
                 repository.mark_inbox(event_id, "WBCatalogSyncRequested")
                 await session.commit()
                 return
             await repository.set_sync_status(seller_id, "syncing")
             await session.commit()
-            encrypted_key = credential.encrypted_api_key
         try:
-            # A key that cannot be decrypted is as permanent a failure as a
-            # rejected one: retrying the message forever helps nobody.
-            catalog = await self.client.get_catalog(self.cipher.decrypt(encrypted_key))
-        except (CredentialDecryptionError, WBPermanentError) as error:
+            catalog = await self.client.get_catalog(str(seller_id))
+        except WBPermanentError as error:
             async with self.database.session() as session:
                 repository = SellerRepository(session)
                 await repository.set_sync_status(seller_id, "error", str(error))

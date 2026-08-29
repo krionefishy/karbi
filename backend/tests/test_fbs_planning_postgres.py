@@ -9,7 +9,6 @@ from sqlalchemy import update as sa_update
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
-    CredentialModel,
     OutboxEventModel,
     SellerModel,
 )
@@ -43,9 +42,9 @@ from backend.modules.wb_fbs_distribution.infrastructure.postgres import (
     WBOfficeModel,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.wb import Office, SellerWarehouse, WBFbsMarketplaceClient
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 NOW = datetime(2026, 8, 26, 9, 0, tzinfo=UTC)
@@ -57,18 +56,14 @@ CITIES = {"moscow": 101, "volga": 102, "krasnodar": 103, "ural": 104, "northwest
 
 class FakeMarketplace(WBFbsMarketplaceClient):
     def __init__(self, offices, warehouses) -> None:
-        super().__init__()
+        super().__init__(make_gateway())
         self.office_rows, self.warehouse_rows = list(offices), list(warehouses)
 
-    async def offices(self, api_key: str):
+    async def offices(self, seller_id: str):
         return list(self.office_rows)
 
-    async def warehouses(self, api_key: str):
+    async def warehouses(self, seller_id: str):
         return list(self.warehouse_rows)
-
-
-def cipher() -> CredentialCipher:
-    return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
 
 
 @pytest_asyncio.fixture
@@ -79,13 +74,6 @@ async def cabinet() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     async with database.session() as session:
         session.add(seller)
         await session.flush()
-        session.add(
-            CredentialModel(
-                seller_id=seller.id,
-                encrypted_api_key=cipher().encrypt("wb-plan-key"),
-                key_fingerprint=uuid.uuid4().hex,
-            )
-        )
         session.add_all(
             [
                 ArticleModel(
@@ -169,7 +157,6 @@ async def prepare(database: Database, seller_id: uuid.UUID) -> None:
             SellerRepository(session),
             FbsDistributionRepository(session),
             FakeMarketplace(offices, warehouses),
-            cipher(),
         ).sync_seller(seller_id)
     async with database.session() as session:
         placement = PlacementService(session, FbsDistributionRepository(session))

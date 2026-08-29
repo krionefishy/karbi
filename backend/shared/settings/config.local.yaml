@@ -30,9 +30,6 @@ auth:
   audience: karbi-api
   access_token_ttl_seconds: 86400
   refresh_token_ttl_seconds: 604800
-security:
-  credential_encryption_keys: []
-  credential_fingerprint_key: ""
 rate_limit:
   enabled: true
   requests: 30
@@ -43,19 +40,14 @@ worker:
   review_sync_minute: 30
   review_sync_timezone: Europe/Moscow
   feedback_page_size: 5000
-  feedback_request_interval_seconds: 0.0
-  feedback_retry_wait_seconds: 600
   job_lease_seconds: 1800
   job_max_attempts: 3
   job_retry_backoff_seconds: 300
   run_max_age_seconds: 21600
-wb_api:
-  window_seconds: 60
-  content_per_key: 90
-  content_per_host: 90
-  feedbacks_per_key: 55
-  feedbacks_per_host: 55
-  max_wait_seconds: 120
+egress:
+  base_url: ${EGRESS_URL:-http://localhost:8090}
+  jwt_secret: ${EGRESS_JWT_SECRET:-local-egress-secret}
+  verify: ${EGRESS_VERIFY:-false}
 telegram:
   api_base_url: https://api.telegram.org
   invite_link_ttl_hours: 72

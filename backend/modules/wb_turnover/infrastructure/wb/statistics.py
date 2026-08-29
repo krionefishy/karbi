@@ -2,8 +2,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-import httpx
-
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 STATISTICS_BUCKET = "statistics"
@@ -34,9 +32,8 @@ class WBStatisticsClient(WBJsonClient):
     bucket = STATISTICS_BUCKET
     api_name = "WB Statistics API"
     category = "Статистика"
-    base_url = "https://statistics-api.wildberries.ru"
 
-    async def orders(self, api_key: str, date_from: datetime) -> list[OrderRow]:
+    async def orders(self, seller_id: str, date_from: datetime) -> list[OrderRow]:
         """Orders whose lastChangeDate is at or after `date_from`.
 
         Cancellations come back through this same window: a cancelled order is
@@ -50,22 +47,20 @@ class WBStatisticsClient(WBJsonClient):
         """
         collected: dict[str, OrderRow] = {}
         cursor = date_from
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for _ in range(ORDERS_MAX_PAGES):
-                payload = await self.request(
-                    client,
-                    "GET",
-                    f"{self.base_url}/api/v1/supplier/orders",
-                    api_key,
-                    params={"dateFrom": cursor.strftime("%Y-%m-%dT%H:%M:%S"), "flag": 0},
-                )
-                rows = [row for raw in self._rows(payload) if (row := self._order(raw)) is not None]
-                fresh = [row for row in rows if row.srid not in collected]
-                if not fresh:
-                    break
-                for row in fresh:
-                    collected[row.srid] = row
-                cursor = max(row.last_change_date for row in rows)
+        for _ in range(ORDERS_MAX_PAGES):
+            payload = await self.request(
+                "GET",
+                "/api/v1/supplier/orders",
+                seller_id,
+                params={"dateFrom": cursor.strftime("%Y-%m-%dT%H:%M:%S"), "flag": 0},
+            )
+            rows = [row for raw in self._rows(payload) if (row := self._order(raw)) is not None]
+            fresh = [row for row in rows if row.srid not in collected]
+            if not fresh:
+                break
+            for row in fresh:
+                collected[row.srid] = row
+            cursor = max(row.last_change_date for row in rows)
         return list(collected.values())
 
     @staticmethod

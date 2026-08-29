@@ -9,7 +9,7 @@ from sqlalchemy import update as sa_update
 
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.postgres.models import CredentialModel, OutboxEventModel, SellerModel
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
 from backend.modules.wb_fbs_distribution.application import (
     FbsDistributionEnrollment,
     FbsDistributionService,
@@ -30,17 +30,13 @@ from backend.modules.wb_fbs_distribution.infrastructure.postgres import (
     WBOfficeModel,
 )
 from backend.modules.wb_fbs_distribution.infrastructure.wb import Office, SellerWarehouse, WBFbsMarketplaceClient
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 # Порог «давно не пробовали»: в этих проверках попытки не мешают.
 LATER = datetime.now(UTC) + timedelta(days=1)
-
-
-def cipher() -> CredentialCipher:
-    return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
 
 
 def office(office_id: int, city: str = "Москва", cargo_type: int = 1) -> Office:
@@ -73,14 +69,14 @@ def warehouse(warehouse_id: int, office_id: int, *, processing: bool = False) ->
 
 class FakeMarketplace(WBFbsMarketplaceClient):
     def __init__(self, offices=(), warehouses=()) -> None:
-        super().__init__()
+        super().__init__(make_gateway())
         self.office_rows = list(offices)
         self.warehouse_rows = list(warehouses)
 
-    async def offices(self, api_key: str):
+    async def offices(self, seller_id: str):
         return list(self.office_rows)
 
-    async def warehouses(self, api_key: str):
+    async def warehouses(self, seller_id: str):
         return list(self.warehouse_rows)
 
 
@@ -90,7 +86,6 @@ def mirror(session, marketplace: FakeMarketplace) -> MirrorService:
         SellerRepository(session),
         FbsDistributionRepository(session),
         marketplace,
-        cipher(),
     )
 
 
@@ -101,14 +96,6 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     model = SellerModel(name="FBS распределение тест", catalog_sync_status="success")
     async with database.session() as session:
         session.add(model)
-        await session.flush()
-        session.add(
-            CredentialModel(
-                seller_id=model.id,
-                encrypted_api_key=cipher().encrypt("wb-fbs-key"),
-                key_fingerprint=uuid.uuid4().hex,
-            )
-        )
         await session.commit()
     try:
         yield database, model.id
