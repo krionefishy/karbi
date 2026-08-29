@@ -14,6 +14,9 @@ class Seller:
     last_catalog_sync_at: datetime | None
     catalog_sync_error: str | None
     archived_at: datetime | None = None
+    egress_status: str = "undelivered"
+    egress_error: str | None = None
+    egress_ip: str | None = None
 
     @property
     def is_archived(self) -> bool:

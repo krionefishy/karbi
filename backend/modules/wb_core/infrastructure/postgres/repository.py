@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.domain import Article, Seller
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
-    CredentialModel,
     InboxEventModel,
     OutboxEventModel,
     SellerModel,
@@ -44,50 +43,44 @@ class SellerRepository:
     async def get(self, seller_id: uuid.UUID) -> SellerModel | None:
         return await self.session.get(SellerModel, seller_id)
 
-    async def get_credential(self, seller_id: uuid.UUID) -> CredentialModel | None:
-        return await self.session.scalar(select(CredentialModel).where(CredentialModel.seller_id == seller_id))
-
-    async def fingerprint_exists(self, fingerprint: str, *, excluding: uuid.UUID | None = None) -> bool:
-        query = select(CredentialModel.id).where(CredentialModel.key_fingerprint == fingerprint)
-        if excluding:
-            query = query.where(CredentialModel.seller_id != excluding)
-        return await self.session.scalar(query) is not None
-
-    async def create(self, name: str, encrypted_key: str, fingerprint: str) -> SellerModel:
+    async def create(self, name: str) -> SellerModel:
         seller = SellerModel(name=name, catalog_sync_status="queued")
         self.session.add(seller)
         await self.session.flush()
-        self.session.add(
-            CredentialModel(seller_id=seller.id, encrypted_api_key=encrypted_key, key_fingerprint=fingerprint)
-        )
         return seller
+
+    async def set_egress_state(
+        self,
+        seller_id: uuid.UUID,
+        *,
+        status: str,
+        error: str | None,
+        ip: str | None = None,
+    ) -> None:
+        values: dict[str, Any] = {"egress_status": status, "egress_error": error}
+        if ip is not None:
+            values["egress_ip"] = str(ip)
+        await self.session.execute(update(SellerModel).where(SellerModel.id == seller_id).values(**values))
 
     async def archive(self, seller_id: uuid.UUID) -> bool:
         """Take the seller out of service without losing anything collected.
 
-        The API key goes away with him: nothing may call Wildberries for an
-        archived seller, and a lingering credential would also keep its
-        fingerprint reserved, so re-adding the same key would be refused as a
-        duplicate with no way to see why.
+        Ключа в этой базе нет; отключение на шлюзе — забота вызывающего.
         """
         seller = await self.get(seller_id)
         if seller is None or seller.archived_at is not None:
             return False
         seller.archived_at = datetime.now(UTC)
-        await self.session.execute(delete(CredentialModel).where(CredentialModel.seller_id == seller_id))
         await self._drop_pending_sync_events(seller_id)
         return True
 
-    async def restore(self, seller_id: uuid.UUID, encrypted_key: str, fingerprint: str) -> bool:
+    async def restore(self, seller_id: uuid.UUID) -> bool:
         seller = await self.get(seller_id)
         if seller is None or seller.archived_at is None:
             return False
         seller.archived_at = None
         seller.catalog_sync_status = "queued"
         seller.catalog_sync_error = None
-        self.session.add(
-            CredentialModel(seller_id=seller_id, encrypted_api_key=encrypted_key, key_fingerprint=fingerprint)
-        )
         return True
 
     async def delete(self, seller_id: uuid.UUID) -> bool:
@@ -275,6 +268,9 @@ class SellerRepository:
             model.last_catalog_sync_at,
             model.catalog_sync_error,
             model.archived_at,
+            model.egress_status,
+            model.egress_error,
+            model.egress_ip,
         )
 
     @staticmethod

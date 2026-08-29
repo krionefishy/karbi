@@ -1,12 +1,13 @@
-import httpx
 import pytest
 import respx
 
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
+from backend.tests.egress_stub import EgressStub, make_gateway
 
-MARKETPLACE = "https://marketplace-api.wildberries.ru"
-KEY = "wb-key"
+OFFICES = "/api/v3/offices"
+WAREHOUSES = "/api/v3/warehouses"
+SELLER = "seller-1"
 
 # Ответы урезаны до одной строки, но поля и их типы взяты из настоящего ответа WB.
 OFFICE_ROW = {
@@ -33,11 +34,20 @@ WAREHOUSE_ROW = {
 }
 
 
-@respx.mock
-async def test_offices_are_read_with_the_fields_the_plan_needs() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE_ROW]))
+def client() -> WBFbsMarketplaceClient:
+    return WBFbsMarketplaceClient(make_gateway())
 
-    [office] = await WBFbsMarketplaceClient().offices(KEY)
+
+async def test_offices_are_read_with_the_fields_the_plan_needs() -> None:
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", OFFICES, body=[OFFICE_ROW])
+
+        [office] = await client().offices(SELLER)
+
+        # Конверт шлюза несёт селлера и раздел WB — ключа в нём нет.
+        envelope = stub.calls[0]
+        assert envelope["seller_id"] == SELLER and envelope["api"] == "marketplace"
 
     assert (office.office_id, office.city, office.cargo_type) == (10236, "Абакан", 1)
     assert office.federal_district == "Сибирский федеральный округ"
@@ -45,65 +55,65 @@ async def test_offices_are_read_with_the_fields_the_plan_needs() -> None:
     assert office.selected is False
 
 
-@respx.mock
 async def test_an_office_without_a_federal_district_still_arrives() -> None:
     """WB leaves the district null for a fifth of the offices; dropping them
     would quietly shrink the catalogue the operator picks from."""
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(
-        return_value=httpx.Response(200, json=[{**OFFICE_ROW, "federalDistrict": None}])
-    )
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", OFFICES, body=[{**OFFICE_ROW, "federalDistrict": None}])
 
-    [office] = await WBFbsMarketplaceClient().offices(KEY)
+        [office] = await client().offices(SELLER)
 
     assert office.federal_district == ""
 
 
-@respx.mock
 async def test_a_row_without_an_identifier_is_skipped() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(
-        return_value=httpx.Response(200, json=[OFFICE_ROW, {"name": "Без id", "city": "Москва"}])
-    )
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", OFFICES, body=[OFFICE_ROW, {"name": "Без id", "city": "Москва"}])
 
-    offices = await WBFbsMarketplaceClient().offices(KEY)
+        offices = await client().offices(SELLER)
 
     assert [office.office_id for office in offices] == [10236]
 
 
-@respx.mock
 async def test_warehouses_keep_the_office_they_are_bound_to() -> None:
     """`officeId` is what the stock is physically handed over to; losing it
     would leave a warehouse nobody can deliver for."""
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(200, json=[WAREHOUSE_ROW]))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", WAREHOUSES, body=[WAREHOUSE_ROW])
 
-    [warehouse] = await WBFbsMarketplaceClient().warehouses(KEY)
+        [warehouse] = await client().warehouses(SELLER)
 
     assert (warehouse.warehouse_id, warehouse.office_id, warehouse.store_id) == (2035130, 3103350, 50214336)
     assert warehouse.name == "1. Москва Домодедово"
     assert (warehouse.is_processing, warehouse.is_deleting) == (False, False)
 
 
-@respx.mock
 async def test_a_warehouse_being_created_is_reported_as_such() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(
-        return_value=httpx.Response(200, json=[{**WAREHOUSE_ROW, "isProcessing": True}])
-    )
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", WAREHOUSES, body=[{**WAREHOUSE_ROW, "isProcessing": True}])
 
-    [warehouse] = await WBFbsMarketplaceClient().warehouses(KEY)
+        [warehouse] = await client().warehouses(SELLER)
 
     assert warehouse.is_processing is True
 
 
-@respx.mock
 async def test_an_answer_that_is_not_a_list_is_a_permanent_error() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(200, json={"error": "nope"}))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", WAREHOUSES, body={"error": "nope"})
 
-    with pytest.raises(WBPermanentError):
-        await WBFbsMarketplaceClient().warehouses(KEY)
+        with pytest.raises(WBPermanentError):
+            await client().warehouses(SELLER)
 
 
-@respx.mock
 async def test_a_key_without_the_marketplace_category_says_so() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(403))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", OFFICES, status=403)
 
-    with pytest.raises(WBPermanentError, match="Маркетплейс"):
-        await WBFbsMarketplaceClient().offices(KEY)
+        with pytest.raises(WBPermanentError, match="Маркетплейс"):
+            await client().offices(SELLER)

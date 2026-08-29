@@ -17,6 +17,9 @@ def seller_response(seller: Seller, automations: Sequence[str] = ()) -> SellerRe
         catalog_sync_error=seller.catalog_sync_error,
         archived_at=seller.archived_at.isoformat() if seller.archived_at else None,
         automations=list(automations),
+        egress_status=seller.egress_status,
+        egress_error=seller.egress_error,
+        egress_ip=seller.egress_ip,
     )
 
 

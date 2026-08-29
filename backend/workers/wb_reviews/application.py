@@ -4,11 +4,9 @@ import signal
 from collections.abc import Callable, Coroutine
 
 from backend.infrastructure.logging import configure_logging
-from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBThrottle, budgets_for
-from backend.modules.wb_core.infrastructure.wb.client import CONTENT_BUCKET
-from backend.modules.wb_reviews.infrastructure.wb import FEEDBACKS_BUCKET, WBFeedbackClient
+from backend.modules.wb_core.infrastructure.wb import EgressGateway, WBContentClient
+from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient
 from backend.shared.kafka_streams.kafka import ensure_topics
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
 from backend.storage.redis import RedisClient
@@ -40,47 +38,21 @@ class WBReviewsWorkerApplication:
         )
         self.catalog_consumer, self.review_consumer = self._create_consumers()
 
-    def _create_throttle(self) -> WBThrottle:
-        wb_api = self.settings.wb_api
-        return WBThrottle(
-            budgets={
-                **budgets_for(
-                    CONTENT_BUCKET,
-                    per_key=wb_api.content_per_key,
-                    per_host=wb_api.content_per_host,
-                    window_seconds=wb_api.window_seconds,
-                ),
-                **budgets_for(
-                    FEEDBACKS_BUCKET,
-                    per_key=wb_api.feedbacks_per_key,
-                    per_host=wb_api.feedbacks_per_host,
-                    window_seconds=wb_api.window_seconds,
-                ),
-            },
-            redis_client=self.redis,
-            max_wait_seconds=wb_api.max_wait_seconds,
-        )
-
     def _create_consumers(self) -> tuple[CatalogSyncConsumer | None, ReviewSyncConsumer | None]:
         if not self.settings.kafka.enabled:
             return None, None
-        cipher = CredentialCipher(
-            self.settings.security.credential_encryption_keys,
-            self.settings.security.credential_fingerprint_key,
-        )
         worker = self.settings.worker
-        throttle = self._create_throttle()
+        # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
+        gateway = EgressGateway(self.settings.egress)
         return (
             CatalogSyncConsumer(
                 self.database,
-                cipher,
                 self.settings.kafka.bootstrap_servers,
                 f"{self.settings.kafka.consumer_group}.wb.catalog",
-                client=WBContentClient(throttle=throttle),
+                client=WBContentClient(gateway),
             ),
             ReviewSyncConsumer(
                 self.database,
-                cipher,
                 self.settings.kafka.bootstrap_servers,
                 f"{self.settings.kafka.consumer_group}.wb.reviews",
                 worker.feedback_page_size,
@@ -89,12 +61,7 @@ class WBReviewsWorkerApplication:
                 lease_seconds=worker.job_lease_seconds,
                 max_attempts=worker.job_max_attempts,
                 retry_backoff_seconds=worker.job_retry_backoff_seconds,
-                client=WBFeedbackClient(
-                    page_size=worker.feedback_page_size,
-                    request_interval_seconds=worker.feedback_request_interval_seconds,
-                    max_retry_wait_seconds=worker.feedback_retry_wait_seconds,
-                    throttle=throttle,
-                ),
+                client=WBFeedbackClient(gateway, page_size=worker.feedback_page_size),
             ),
         )
 

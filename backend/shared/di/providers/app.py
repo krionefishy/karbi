@@ -10,6 +10,7 @@ from backend.modules.platform.application import AuthService, PasswordService, T
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.infrastructure.wb import EgressGateway
 from backend.modules.wb_fbs_distribution.application import (
     DisconnectedSource,
     FbsDistributionEnrollment,
@@ -28,14 +29,12 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsMarketplaceClient,
     WBFbsStockWriter,
     WBFbsWarehouseWriter,
-    marketplace_throttle,
 )
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 from backend.storage.redis import RedisClient
@@ -55,10 +54,9 @@ class AppProvider(Provider):
         return PasswordService()
 
     @provide(scope=Scope.APP)
-    def credential_cipher(self, settings: Settings) -> CredentialCipher:
-        return CredentialCipher(
-            settings.security.credential_encryption_keys, settings.security.credential_fingerprint_key
-        )
+    def egress_gateway(self, settings: Settings) -> EgressGateway:
+        """Единственная дорога к WB: ключи и троттлинг живут на шлюзе wb-egress."""
+        return EgressGateway(settings.egress)
 
     @provide(scope=Scope.APP)
     def fbs_stock_source(self) -> StockSnapshotSource:
@@ -77,22 +75,18 @@ class AppProvider(Provider):
         return ReviewReportService(settings.database.url)
 
     @provide(scope=Scope.APP)
-    def fbs_marketplace_client(self, settings: Settings, redis: RedisClient) -> WBFbsMarketplaceClient:
-        """Читающий клиент складов WB для действий оператора.
-
-        Тот же Redis-бюджет, что у воркеров: ручная сверка не должна выедать
-        лимит кабинета в обход фоновых запросов.
-        """
-        return WBFbsMarketplaceClient(throttle=marketplace_throttle(settings, redis))
+    def fbs_marketplace_client(self, gateway: EgressGateway) -> WBFbsMarketplaceClient:
+        """Читающий клиент складов WB для действий оператора."""
+        return WBFbsMarketplaceClient(gateway)
 
     @provide(scope=Scope.APP)
-    def fbs_warehouse_writer(self, settings: Settings, redis: RedisClient) -> WBFbsWarehouseWriter:
+    def fbs_warehouse_writer(self, gateway: EgressGateway) -> WBFbsWarehouseWriter:
         """Клиент команд, меняющих кабинет. Отдельный от читающего намеренно."""
-        return WBFbsWarehouseWriter(throttle=marketplace_throttle(settings, redis))
+        return WBFbsWarehouseWriter(gateway)
 
     @provide(scope=Scope.APP)
-    def fbs_stock_writer(self, settings: Settings, redis: RedisClient) -> WBFbsStockWriter:
-        return WBFbsStockWriter(throttle=marketplace_throttle(settings, redis))
+    def fbs_stock_writer(self, gateway: EgressGateway) -> WBFbsStockWriter:
+        return WBFbsStockWriter(gateway)
 
 
 class SessionProvider(Provider):
@@ -127,10 +121,10 @@ class SessionProvider(Provider):
         self,
         session: AsyncSession,
         repository: SellerRepository,
-        cipher: CredentialCipher,
+        gateway: EgressGateway,
         enrollments: list[AutomationEnrollment],
     ) -> SellerService:
-        return SellerService(session, repository, cipher, enrollments)
+        return SellerService(session, repository, gateway, enrollments)
 
     @provide(scope=Scope.REQUEST)
     def review_sync_repository(self, session: AsyncSession) -> ReviewSyncRepository:
@@ -194,9 +188,8 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
         marketplace: WBFbsMarketplaceClient,
         writer: WBFbsStockWriter,
-        cipher: CredentialCipher,
     ) -> PublicationService:
-        return PublicationService(session, sellers, distribution, marketplace, writer, cipher)
+        return PublicationService(session, sellers, distribution, marketplace, writer)
 
     @provide(scope=Scope.REQUEST)
     def fbs_warehouse_admin_service(
@@ -206,9 +199,8 @@ class SessionProvider(Provider):
         distribution: FbsDistributionRepository,
         marketplace: WBFbsMarketplaceClient,
         writer: WBFbsWarehouseWriter,
-        cipher: CredentialCipher,
     ) -> WarehouseAdminService:
-        return WarehouseAdminService(session, sellers, distribution, marketplace, writer, cipher)
+        return WarehouseAdminService(session, sellers, distribution, marketplace, writer)
 
     @provide(scope=Scope.REQUEST)
     def fbs_planning_service(
@@ -226,9 +218,8 @@ class SessionProvider(Provider):
         sellers: SellerRepository,
         distribution: FbsDistributionRepository,
         marketplace: WBFbsMarketplaceClient,
-        cipher: CredentialCipher,
     ) -> MirrorService:
-        return MirrorService(session, sellers, distribution, marketplace, cipher)
+        return MirrorService(session, sellers, distribution, marketplace)
 
     @provide(scope=Scope.REQUEST)
     def notification_repository(self, session: AsyncSession) -> NotificationRepository:

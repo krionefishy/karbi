@@ -9,7 +9,20 @@ export interface Seller {
   archived_at: string | null;
   /** Automations the seller is connected to. */
   automations: string[];
+  /** Сага доставки ключа на шлюз wb-egress. */
+  egress_status: EgressStatus;
+  egress_error: string | null;
+  egress_ip: string | null;
 }
+
+export type EgressStatus =
+  | "verified"
+  | "delivered"
+  | "key_invalid"
+  | "no_free_ip"
+  | "disabled"
+  | "undelivered"
+  | "unsynced";
 
 export type ArticleState = "active" | "archived" | "feedback_only";
 

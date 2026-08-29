@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.egress_stub import make_gateway
 from backend.workers.wb_fbs_distribution.worker import FbsDistributionWorker
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
@@ -12,10 +12,7 @@ MOSCOW = ZoneInfo(SETTINGS.fbs_distribution.timezone)
 
 
 def worker() -> FbsDistributionWorker:
-    cipher = CredentialCipher(
-        SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key
-    )
-    return FbsDistributionWorker(Database(), cipher, WBFbsMarketplaceClient(), SETTINGS)
+    return FbsDistributionWorker(Database(), WBFbsMarketplaceClient(make_gateway()), SETTINGS)
 
 
 def test_before_the_hour_the_mirror_is_measured_against_yesterday() -> None:

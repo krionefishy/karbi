@@ -1,8 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 MARKETPLACE_BUCKET = "marketplace"
@@ -22,12 +20,10 @@ class WBMarketplaceClient(WBJsonClient):
     bucket = MARKETPLACE_BUCKET
     api_name = "WB Marketplace API"
     category = "Маркетплейс"
-    base_url = "https://marketplace-api.wildberries.ru"
 
-    async def warehouses(self, api_key: str) -> list[Warehouse]:
+    async def warehouses(self, seller_id: str) -> list[Warehouse]:
         """Warehouses that can hold stock. Ones being deleted are skipped."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            payload = await self.request(client, "GET", f"{self.base_url}/api/v3/warehouses", api_key)
+        payload = await self.request("GET", "/api/v3/warehouses", seller_id)
         if payload is None:
             return []
         if not isinstance(payload, list):
@@ -38,7 +34,7 @@ class WBMarketplaceClient(WBJsonClient):
             if isinstance(row, dict) and isinstance(row.get("id"), int) and not row.get("isDeleting")
         ]
 
-    async def stocks(self, api_key: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
+    async def stocks(self, seller_id: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
         """Declared amount per size.
 
         Asked by `chrtId`, not by barcode: the catalog already keys sizes that
@@ -49,20 +45,18 @@ class WBMarketplaceClient(WBJsonClient):
         collected: dict[int, int] = {}
         if not chrt_ids:
             return collected
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            for offset in range(0, len(chrt_ids), CHRT_CHUNK):
-                chunk = chrt_ids[offset : offset + CHRT_CHUNK]
-                payload = await self.request(
-                    client,
-                    "POST",
-                    f"{self.base_url}/api/v3/stocks/{warehouse_id}",
-                    api_key,
-                    json={"chrtIds": chunk},
-                )
-                for row in self._stock_rows(payload):
-                    chrt_id = row.get("chrtId")
-                    if isinstance(chrt_id, int):
-                        collected[chrt_id] = int(row.get("amount") or 0)
+        for offset in range(0, len(chrt_ids), CHRT_CHUNK):
+            chunk = chrt_ids[offset : offset + CHRT_CHUNK]
+            payload = await self.request(
+                "POST",
+                f"/api/v3/stocks/{warehouse_id}",
+                seller_id,
+                json={"chrtIds": chunk},
+            )
+            for row in self._stock_rows(payload):
+                chrt_id = row.get("chrtId")
+                if isinstance(chrt_id, int):
+                    collected[chrt_id] = int(row.get("amount") or 0)
         return collected
 
     def _stock_rows(self, payload: Any) -> list[dict]:

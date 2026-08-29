@@ -5,11 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.modules.wb_fbs_distribution.application.mirror import MirrorService
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, WBFbsWarehouseWriter
-from backend.shared.security import CredentialCipher
 
 
 class WriteNotAllowedError(Exception):
@@ -42,15 +40,13 @@ class WarehouseAdminService:
         distribution: FbsDistributionRepository,
         marketplace: WBFbsMarketplaceClient,
         writer: WBFbsWarehouseWriter,
-        cipher: CredentialCipher,
     ) -> None:
         self.session = session
         self.sellers = sellers
         self.distribution = distribution
         self.marketplace = marketplace
         self.writer = writer
-        self.cipher = cipher
-        self.mirror = MirrorService(session, sellers, distribution, marketplace, cipher)
+        self.mirror = MirrorService(session, sellers, distribution, marketplace)
 
     async def create(self, seller_id: uuid.UUID, office_id: int, name: str) -> CreatedWarehouse:
         """Создать склад под объектом WB и сразу обновить зеркало.
@@ -116,7 +112,5 @@ class WarehouseAdminService:
             raise SellerNotFoundError(str(seller_id))
         if not enrollment.write_enabled:
             raise WriteNotAllowedError("Кабинету не разрешена запись в Wildberries")
-        credential = await self.sellers.get_credential(seller_id)
-        if credential is None:
-            raise WBPermanentError("У селлера нет API-ключа")
-        return self.cipher.decrypt(credential.encrypted_api_key)
+        # Ключа здесь больше нет: шлюз подставит его сам по seller_id.
+        return str(seller_id)

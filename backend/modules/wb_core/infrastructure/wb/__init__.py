@@ -5,30 +5,16 @@ from backend.modules.wb_core.infrastructure.wb.client import (
     WBPermanentError,
     WBTemporaryError,
 )
-from backend.modules.wb_core.infrastructure.wb.json_client import ATTEMPTS, WBJsonClient
-from backend.modules.wb_core.infrastructure.wb.throttle import (
-    WBBudget,
-    WBThrottle,
-    WBThrottleTimeout,
-    budgets_for,
-    host_bucket,
-    key_bucket,
-    scope_for_key,
-)
+from backend.modules.wb_core.infrastructure.wb.egress import EgressAdminError, EgressGateway
+from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 __all__ = [
-    "ATTEMPTS",
     "CatalogCard",
     "CatalogSnapshot",
-    "WBBudget",
+    "EgressAdminError",
+    "EgressGateway",
     "WBContentClient",
     "WBJsonClient",
     "WBPermanentError",
     "WBTemporaryError",
-    "WBThrottle",
-    "WBThrottleTimeout",
-    "budgets_for",
-    "host_bucket",
-    "key_bucket",
-    "scope_for_key",
 ]

@@ -8,7 +8,7 @@
 flowchart TB
     subgraph db["PostgreSQL"]
         platform["platform<br/>users (+ is_admin)"]
-        core["wb_core<br/>sellers, credentials, articles<br/>outbox_events, inbox_events"]
+        core["wb_core<br/>sellers, articles<br/>outbox_events, inbox_events"]
         reviews["wb_reviews<br/>tracked_sellers, daily_review_counts<br/>sync_runs, sync_run_sellers"]
         turnover["wb_turnover<br/>tracked_sellers, seller_warehouses<br/>stock_snapshots, orders, turnover_daily<br/>collection_runs, notification_log"]
         notify["notifications<br/>bots (без токенов), bot_cursors<br/>invite_links, subscriptions, outgoing_messages"]
@@ -20,7 +20,7 @@ flowchart TB
 | Схема | Содержание | Кто пишет |
 | --- | --- | --- |
 | `platform` | сотрудники: логин, хеш пароля, активность, признак администратора | api |
-| `wb_core` | реестр селлеров, зашифрованные ключи, каталог артикулов, outbox и inbox | api, каталог-консьюмер |
+| `wb_core` | реестр селлеров (без ключей, со статусами шлюза), каталог артикулов, outbox и inbox | api, каталог-консьюмер |
 | `wb_reviews` | подключения, суточные снапшоты отзывов, прогоны и job'ы | воркер отзывов |
 | `wb_turnover` | подключения, склады, снимки остатков, заказы, метрика, лог уведомлений | воркер оборачиваемости |
 | `notifications` | боты, курсоры апдейтов, приглашения, подписки чатов, очередь исходящих | воркер уведомлений, api (админка) |
@@ -42,16 +42,14 @@ flowchart TB
 
 | Что | Где | Как |
 | --- | --- | --- |
-| Ключ API селлера | `wb_core.credentials` | Fernet-шифротекст + отпечаток HMAC |
+| Ключ API селлера | не хранится | живёт на шлюзе wb-egress, сюда не попадает |
 | Токен бота | не хранится | живёт на релее вне РФ, сюда не попадает |
 
 В `notifications.bots` от бота остались код, заголовок и шаблон ссылки-приглашения:
 колонку с токеном сняли миграцией, когда токены переехали на релей.
 
-Отпечаток нужен, чтобы отвечать на вопрос «такой ключ уже заведён?» без расшифровки; он
-уникален, и это единственная причина, по которой архивация селлера удаляет строку с
-ключом — иначе завести того же селлера заново было бы нельзя. Процедура смены ключей
-шифрования — [KEY_ROTATION.md](../KEY_ROTATION.md).
+Шифротекстов в этой базе больше нет: ключи селлеров живут на шлюзе wb-egress и
+шифруются его собственным ключом, которого этот сервер не знает.
 
 ## Хранение и чистка
 

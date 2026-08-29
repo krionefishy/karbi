@@ -1,8 +1,6 @@
-import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
-import httpx
 import pytest
 import pytest_asyncio
 import respx
@@ -10,7 +8,7 @@ from sqlalchemy import delete
 from sqlalchemy import update as sa_update
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.postgres.models import CredentialModel, OutboxEventModel, SellerModel
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
 from backend.modules.wb_fbs_distribution.application import (
     FbsDistributionEnrollment,
     FbsDistributionService,
@@ -27,12 +25,13 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsMarketplaceClient,
     WBFbsWarehouseWriter,
 )
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.egress_stub import EgressStub, make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
-MARKETPLACE = "https://marketplace-api.wildberries.ru"
+OFFICES = "/api/v3/offices"
+WAREHOUSES = "/api/v3/warehouses"
 
 OFFICE = {
     "federalDistrict": "Центральный федеральный округ",
@@ -61,8 +60,10 @@ def warehouse_row(warehouse_id: int, office_id: int) -> dict:
     }
 
 
-def cipher() -> CredentialCipher:
-    return CredentialCipher(SETTINGS.security.credential_encryption_keys, SETTINGS.security.credential_fingerprint_key)
+@pytest.fixture
+def stub() -> Iterator[EgressStub]:
+    with respx.mock as router:
+        yield EgressStub(router)
 
 
 @pytest_asyncio.fixture
@@ -73,13 +74,6 @@ async def cabinet() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     async with database.session() as session:
         session.add(seller)
         await session.flush()
-        session.add(
-            CredentialModel(
-                seller_id=seller.id,
-                encrypted_api_key=cipher().encrypt("wb-admin-key"),
-                key_fingerprint=uuid.uuid4().hex,
-            )
-        )
         await session.commit()
     try:
         yield database, seller.id
@@ -98,10 +92,13 @@ def admin(session) -> WarehouseAdminService:
         session,
         SellerRepository(session),
         FbsDistributionRepository(session),
-        WBFbsMarketplaceClient(),
-        WBFbsWarehouseWriter(),
-        cipher(),
+        WBFbsMarketplaceClient(make_gateway()),
+        WBFbsWarehouseWriter(make_gateway()),
     )
+
+
+def creations(stub: EgressStub) -> list[dict]:
+    return [call for call in stub.requests_to(WAREHOUSES) if call["method"] == "POST"]
 
 
 async def enrol(database, seller_id: uuid.UUID, *, write: bool) -> None:
@@ -115,89 +112,86 @@ async def enrol(database, seller_id: uuid.UUID, *, write: bool) -> None:
             ).set_write_enabled(seller_id, True)
 
 
-@respx.mock
-async def test_a_cabinet_without_write_permission_is_never_touched(cabinet) -> None:
+async def test_a_cabinet_without_write_permission_is_never_touched(cabinet, stub) -> None:
     """The permission is the only thing between a mistaken click and a live
     cabinet, so nothing may reach WB before it is granted."""
     database, seller_id = cabinet
     await enrol(database, seller_id, write=False)
-    route = respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 1}))
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 1})
 
     async with database.session() as session:
         with pytest.raises(WriteNotAllowedError):
             await admin(session).create(seller_id, 242, "Москва")
 
-    assert route.call_count == 0
+    assert stub.calls == []
 
 
-@respx.mock
-async def test_creating_a_warehouse_mirrors_it_at_once(cabinet) -> None:
+async def test_creating_a_warehouse_mirrors_it_at_once(cabinet, stub) -> None:
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    create = respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 777}))
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE]))
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(200, json=[warehouse_row(777, 242)]))
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 777})
+    stub.on("GET", OFFICES, body=[OFFICE])
+    stub.on("GET", WAREHOUSES, body=[warehouse_row(777, 242)])
 
     async with database.session() as session:
         created = await admin(session).create(seller_id, 242, "  Москва Вешки  ")
 
     assert created.warehouse_id == 777
     # Название уходит подчищенным от лишних пробелов, объект — числом.
-    assert json.loads(create.calls.last.request.read()) == {"name": "Москва Вешки", "officeId": 242}
+    [create] = creations(stub)
+    assert create["body"] == {"name": "Москва Вешки", "officeId": 242}
+    # Конверт несёт селлера — ключ подставляет шлюз.
+    assert create["seller_id"] == str(seller_id)
     async with database.session() as session:
         rows = await FbsDistributionRepository(session).warehouses(seller_id)
     assert [(row.warehouse_id, row.office_id) for row in rows] == [(777, 242)]
 
 
-@respx.mock
-async def test_a_second_warehouse_on_the_same_office_is_refused_before_wb_sees_it(cabinet) -> None:
+async def test_a_second_warehouse_on_the_same_office_is_refused_before_wb_sees_it(cabinet, stub) -> None:
     """WB forbids it anyway, but its refusal explains nothing to the operator."""
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE]))
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(200, json=[warehouse_row(777, 242)]))
-    respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 778}))
+    stub.on("GET", OFFICES, body=[OFFICE])
+    stub.on("GET", WAREHOUSES, body=[warehouse_row(777, 242)])
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 778})
     async with database.session() as session:
         await admin(session).create(seller_id, 242, "Первый")
-    posts_before = len([call for call in respx.calls if call.request.method == "POST"])
+    posts_before = len(creations(stub))
 
     async with database.session() as session:
         with pytest.raises(WarehouseConflictError):
             await admin(session).create(seller_id, 242, "Второй")
 
     # Второй запрос до WB не дошёл: отказ выдан по зеркалу, до сети.
-    assert len([call for call in respx.calls if call.request.method == "POST"]) == posts_before
+    assert len(creations(stub)) == posts_before
 
 
-@respx.mock
-async def test_a_warehouse_still_in_the_scheme_is_not_deleted(cabinet) -> None:
+async def test_a_warehouse_still_in_the_scheme_is_not_deleted(cabinet, stub) -> None:
     """Deleting it would leave the calculation counting on a warehouse that is
     gone, and WB does not bring deleted ones back."""
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE]))
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(200, json=[warehouse_row(777, 242)]))
-    respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 777}))
+    stub.on("GET", OFFICES, body=[OFFICE])
+    stub.on("GET", WAREHOUSES, body=[warehouse_row(777, 242)])
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 777})
     async with database.session() as session:
         await admin(session).create(seller_id, 242, "Москва")
 
-    removal = respx.delete(f"{MARKETPLACE}/api/v3/warehouses/777").mock(return_value=httpx.Response(204))
+    stub.on("DELETE", f"{WAREHOUSES}/777", status=204)
     async with database.session() as session:
         with pytest.raises(WarehouseConflictError, match="участвует"):
             await admin(session).delete(seller_id, 777)
 
-    assert removal.call_count == 0
+    assert stub.requests_to(f"{WAREHOUSES}/777") == []
 
 
-@respx.mock
-async def test_a_warehouse_taken_out_of_the_scheme_can_be_deleted(cabinet) -> None:
+async def test_a_warehouse_taken_out_of_the_scheme_can_be_deleted(cabinet, stub) -> None:
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE]))
-    warehouses = respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(
-        return_value=httpx.Response(200, json=[warehouse_row(777, 242)])
-    )
-    respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 777}))
+    stub.on("GET", OFFICES, body=[OFFICE])
+    wb_warehouses = [warehouse_row(777, 242)]
+    stub.on("GET", WAREHOUSES, reply=lambda payload: (200, list(wb_warehouses)))
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 777})
     async with database.session() as session:
         await admin(session).create(seller_id, 242, "Москва")
     async with database.session() as session:
@@ -206,41 +200,37 @@ async def test_a_warehouse_taken_out_of_the_scheme_can_be_deleted(cabinet) -> No
         )
         await session.commit()
 
-    removal = respx.delete(f"{MARKETPLACE}/api/v3/warehouses/777").mock(return_value=httpx.Response(204))
-    warehouses.mock(return_value=httpx.Response(200, json=[]))
+    stub.on("DELETE", f"{WAREHOUSES}/777", status=204)
+    wb_warehouses.clear()
     async with database.session() as session:
         await admin(session).delete(seller_id, 777)
 
-    assert removal.call_count == 1
+    assert len(stub.requests_to(f"{WAREHOUSES}/777")) == 1
     async with database.session() as session:
         assert await FbsDistributionRepository(session).warehouses(seller_id) == []
 
 
-@respx.mock
-async def test_rebinding_onto_a_busy_office_is_refused(cabinet) -> None:
+async def test_rebinding_onto_a_busy_office_is_refused(cabinet, stub) -> None:
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    respx.get(f"{MARKETPLACE}/api/v3/offices").mock(return_value=httpx.Response(200, json=[OFFICE]))
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(
-        return_value=httpx.Response(200, json=[warehouse_row(777, 242), warehouse_row(778, 204)])
-    )
-    respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"id": 777}))
+    stub.on("GET", OFFICES, body=[OFFICE])
+    stub.on("GET", WAREHOUSES, body=[warehouse_row(777, 242), warehouse_row(778, 204)])
+    stub.on("POST", WAREHOUSES, status=201, body={"id": 777})
     async with database.session() as session:
         await admin(session).create(seller_id, 242, "Москва")
 
-    rename = respx.put(f"{MARKETPLACE}/api/v3/warehouses/778").mock(return_value=httpx.Response(204))
+    stub.on("PUT", f"{WAREHOUSES}/778", status=204)
     async with database.session() as session:
         with pytest.raises(WarehouseConflictError):
             await admin(session).rebind(seller_id, 778, name="Переехал", office_id=242)
 
-    assert rename.call_count == 0
+    assert stub.requests_to(f"{WAREHOUSES}/778") == []
 
 
-@respx.mock
-async def test_a_creation_answer_without_an_id_is_a_permanent_error(cabinet) -> None:
+async def test_a_creation_answer_without_an_id_is_a_permanent_error(cabinet, stub) -> None:
     database, seller_id = cabinet
     await enrol(database, seller_id, write=True)
-    respx.post(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(201, json={"ok": True}))
+    stub.on("POST", WAREHOUSES, status=201, body={"ok": True})
 
     async with database.session() as session:
         with pytest.raises(Exception, match="нет id"):

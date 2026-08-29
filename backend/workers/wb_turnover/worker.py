@@ -18,7 +18,6 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBStatisticsClient,
 )
 from backend.shared.heartbeat import touch_heartbeat
-from backend.shared.security import CredentialCipher
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
@@ -42,7 +41,6 @@ class TurnoverWorker:
     def __init__(
         self,
         database: Database,
-        cipher: CredentialCipher,
         statistics: WBStatisticsClient,
         analytics: WBAnalyticsClient,
         marketplace: WBMarketplaceClient,
@@ -50,7 +48,6 @@ class TurnoverWorker:
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
         self.database = database
-        self.cipher = cipher
         self.statistics = statistics
         self.analytics = analytics
         self.marketplace = marketplace
@@ -149,7 +146,6 @@ class TurnoverWorker:
             session,
             SellerRepository(session),
             TurnoverRepository(session),
-            self.cipher,
             self.statistics,
             self.analytics,
             self.marketplace,
@@ -250,7 +246,6 @@ class TurnoverWorker:
                         session,
                         SellerRepository(session),
                         TurnoverRepository(session),
-                        self.cipher,
                         self.statistics,
                         self.analytics,
                         self.marketplace,

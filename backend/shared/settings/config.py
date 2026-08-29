@@ -116,12 +116,6 @@ class AuthConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class SecurityConfig:
-    credential_encryption_keys: tuple[str, ...] = field(default=(), repr=False)
-    credential_fingerprint_key: str = field(default="", repr=False)
-
-
-@dataclass(frozen=True, slots=True)
 class RateLimitConfig:
     enabled: bool = True
     requests: int = 30
@@ -224,26 +218,24 @@ class TelegramConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class WBApiConfig:
-    """Egress budget for Wildberries. Buckets are shared across every worker through Redis."""
+class EgressConfig:
+    """The wb-egress gateway: seller keys, the WB throttle and per-seller IPs live there.
 
-    window_seconds: int = 60
-    content_per_key: int = 90
-    content_per_host: int = 90
-    feedbacks_per_key: int = 55
-    feedbacks_per_host: int = 55
-    # Statistics is the strictest category WB has; marketplace is far softer.
-    # Both are only the net until the first response brings real headers.
-    statistics_per_key: int = 6
-    statistics_per_host: int = 30
-    marketplace_per_key: int = 60
-    marketplace_per_host: int = 120
-    analytics_per_key: int = 3
-    analytics_per_host: int = 30
-    # The stock report refuses a burst even inside its minute budget, so pages
-    # are spaced by a hard floor rather than by the window alone.
-    analytics_min_interval_seconds: int = 20
-    max_wait_seconds: int = 120
+    This service no longer reaches *.wildberries.ru on its own — every call
+    carries a seller_id and goes through the gateway, which signs it and sends
+    it from the seller's pinned address.
+    """
+
+    base_url: str = ""
+    jwt_secret: str = field(default="", repr=False)
+    audience: str = "wb-egress:karbi"
+    jwt_ttl_seconds: int = 300
+    # "true"/"false", or a path to the gateway certificate to pin. Never disable
+    # verification in production: the JWT rides on this connection.
+    verify: str = "true"
+    # The gateway may hold a background call in its queue for up to ~120s and
+    # then spend up to 60s talking to WB — the client outlives both.
+    request_timeout_seconds: int = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,10 +246,9 @@ class Settings:
     kafka: KafkaConfig
     s3: S3Config
     auth: AuthConfig
-    security: SecurityConfig
     rate_limit: RateLimitConfig
     worker: WorkerConfig
-    wb_api: WBApiConfig
+    egress: EgressConfig
     telegram: TelegramConfig
     relay: RelayConfig
     turnover: TurnoverConfig
@@ -301,7 +292,10 @@ class Settings:
         worker["job_max_attempts"] = int(worker.get("job_max_attempts", 3))
         worker["job_retry_backoff_seconds"] = int(worker.get("job_retry_backoff_seconds", 300))
         worker["run_max_age_seconds"] = int(worker.get("run_max_age_seconds", 21_600))
-        wb_api = {key: int(value) for key, value in dict(data.get("wb_api", {})).items()}
+        egress = dict(data.get("egress", {}))
+        for key in ("jwt_ttl_seconds", "request_timeout_seconds"):
+            if key in egress:
+                egress[key] = int(egress[key])
         turnover = dict(data.get("turnover", {}))
         if "stock_slot_hours" in turnover:
             turnover["stock_slot_hours"] = tuple(int(hour) for hour in turnover["stock_slot_hours"])
@@ -342,10 +336,6 @@ class Settings:
         for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
             if key in relay:
                 relay[key] = int(relay[key])
-        security = data.get("security", {})
-        keys = security.get("credential_encryption_keys", [])
-        if isinstance(keys, str):
-            keys = [key.strip() for key in keys.split(",") if key.strip()]
         settings = cls(
             app=AppConfig(**{**app, "cors_origins": tuple(app.get("cors_origins", []))}),
             database=DatabaseConfig(**database),
@@ -353,13 +343,9 @@ class Settings:
             kafka=KafkaConfig(**kafka),
             s3=S3Config(**s3),
             auth=AuthConfig(**auth),
-            security=SecurityConfig(
-                credential_encryption_keys=tuple(keys),
-                credential_fingerprint_key=security.get("credential_fingerprint_key", ""),
-            ),
             rate_limit=RateLimitConfig(**rate_limit),
             worker=WorkerConfig(**worker),
-            wb_api=WBApiConfig(**wb_api),
+            egress=EgressConfig(**egress),
             telegram=TelegramConfig(**telegram),
             relay=RelayConfig(**relay),
             turnover=TurnoverConfig(**turnover),
@@ -389,26 +375,6 @@ class Settings:
             raise ValueError("worker.job_retry_backoff_seconds must be positive")
         if self.worker.run_max_age_seconds <= self.worker.job_lease_seconds:
             raise ValueError("worker.run_max_age_seconds must exceed worker.job_lease_seconds")
-        if self.wb_api.window_seconds < 1:
-            raise ValueError("wb_api.window_seconds must be positive")
-        if self.wb_api.analytics_min_interval_seconds < 0:
-            raise ValueError("wb_api.analytics_min_interval_seconds cannot be negative")
-        if (
-            min(
-                self.wb_api.content_per_key,
-                self.wb_api.content_per_host,
-                self.wb_api.feedbacks_per_key,
-                self.wb_api.feedbacks_per_host,
-                self.wb_api.statistics_per_key,
-                self.wb_api.statistics_per_host,
-                self.wb_api.marketplace_per_key,
-                self.wb_api.marketplace_per_host,
-                self.wb_api.analytics_per_key,
-                self.wb_api.analytics_per_host,
-            )
-            < 1
-        ):
-            raise ValueError("wb_api budgets must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):
@@ -468,10 +434,6 @@ class Settings:
             invalid.append("database.password")
         if not self.redis.password:
             invalid.append("redis.password")
-        if not self.security.credential_encryption_keys:
-            invalid.append("security.credential_encryption_keys")
-        if len(self.security.credential_fingerprint_key) < 32:
-            invalid.append("security.credential_fingerprint_key")
         if "*" in self.app.cors_origins:
             invalid.append("app.cors_origins cannot contain '*' in production")
         if not self.relay.base_url:
@@ -482,6 +444,12 @@ class Settings:
             invalid.append("relay.verify cannot disable TLS verification in production")
         if self.relay.audience == self.relay.inbound_audience:
             invalid.append("relay.audience and relay.inbound_audience must differ")
+        if not self.egress.base_url:
+            invalid.append("egress.base_url")
+        if len(self.egress.jwt_secret) < 32:
+            invalid.append("egress.jwt_secret")
+        if self.egress.verify.lower() in {"false", "0", "no"}:
+            invalid.append("egress.verify cannot disable TLS verification in production")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
         if invalid:

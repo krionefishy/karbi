@@ -56,9 +56,12 @@ services:
       S3_REGION: ${S3_REGION:-ru-central-1}
       S3_VERIFY_TLS: ${S3_VERIFY_TLS:-true}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - no default in production}
-      CREDENTIALS_ENCRYPTION_KEYS: ${CREDENTIALS_ENCRYPTION_KEYS:?set CREDENTIALS_ENCRYPTION_KEYS in .env - no default in production}
-      CREDENTIALS_FINGERPRINT_KEY: ${CREDENTIALS_FINGERPRINT_KEY:?set CREDENTIALS_FINGERPRINT_KEY in .env - no default in production}
       WB_FEEDBACK_PAGE_SIZE: ${WB_FEEDBACK_PAGE_SIZE:-5000}
+      # Шлюз wb-egress: ключи селлеров, троттлинг WB и исходящие IP живут там.
+      # Все запросы к WB уходят на него под seller_id.
+      EGRESS_URL: https://egress.internal:${EGRESS_TLS_PORT:-8443}
+      EGRESS_JWT_SECRET: ${EGRESS_JWT_SECRET:?set EGRESS_JWT_SECRET in .env - no default in production}
+      EGRESS_VERIFY: ${EGRESS_VERIFY:-/etc/egress/egress.crt}
       # The relay outside Russia is the only way to the messenger. The secret is
       # shared with it; the bot tokens themselves never come back here.
       RELAY_BASE_URL: ${RELAY_BASE_URL:?set RELAY_BASE_URL in .env}
@@ -78,8 +81,10 @@ services:
       retries: 6
     volumes:
       - ./relay-tls:/etc/relay:ro
+      - ./egress-tls:/etc/egress:ro
     extra_hosts:
       - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
+      - "egress.internal:${EGRESS_HOST_IP:?set EGRESS_HOST_IP in .env}"
     networks:
       - proxy
       - internal
@@ -92,6 +97,10 @@ services:
     mem_limit: 384m
     command: ["python", "-m", "backend.workers.wb_reviews.main"]
     environment: *application-environment
+    volumes:
+      - ./egress-tls:/etc/egress:ro
+    extra_hosts:
+      - "egress.internal:${EGRESS_HOST_IP:?set EGRESS_HOST_IP in .env}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -117,6 +126,10 @@ services:
     mem_limit: 384m
     command: ["python", "-m", "backend.workers.wb_turnover.main"]
     environment: *application-environment
+    volumes:
+      - ./egress-tls:/etc/egress:ro
+    extra_hosts:
+      - "egress.internal:${EGRESS_HOST_IP:?set EGRESS_HOST_IP in .env}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -135,6 +148,10 @@ services:
     mem_limit: 384m
     command: ["python", "-m", "backend.workers.wb_fbs_distribution.main"]
     environment: *application-environment
+    volumes:
+      - ./egress-tls:/etc/egress:ro
+    extra_hosts:
+      - "egress.internal:${EGRESS_HOST_IP:?set EGRESS_HOST_IP in .env}"
     depends_on:
       migrate:
         condition: service_completed_successfully

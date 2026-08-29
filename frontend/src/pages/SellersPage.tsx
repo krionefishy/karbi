@@ -24,6 +24,16 @@ const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   error: "Ошибка",
 };
 
+const egressStatusText: Record<string, string> = {
+  verified: "проверен",
+  delivered: "доставлен",
+  key_invalid: "ключ отклонён",
+  no_free_ip: "нет свободного IP",
+  disabled: "отключён",
+  undelivered: "не доставлен",
+  unsynced: "не синхронизирован",
+};
+
 const dateFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 
 export function SellersPage() {
@@ -147,6 +157,7 @@ export function SellersPage() {
               <span>Селлер</span>
               <span>Товаров</span>
               <span>Каталог</span>
+              <span>Ключ</span>
               <span>Автоматизации</span>
               <span>Действия</span>
             </div>
@@ -164,6 +175,12 @@ export function SellersPage() {
                 <span>{seller.product_count}</span>
                 <span className={`catalog-state catalog-state-${seller.catalog_sync_status}`}>
                   {seller.archived_at ? "—" : syncStatusText[seller.catalog_sync_status]}
+                </span>
+                <span
+                  className={`egress-state egress-state-${seller.egress_status}`}
+                  title={seller.egress_error ?? undefined}
+                >
+                  {seller.archived_at ? "—" : (egressStatusText[seller.egress_status] ?? seller.egress_status)}
                 </span>
                 <span className="registry-automations">
                   {seller.automations.length === 0

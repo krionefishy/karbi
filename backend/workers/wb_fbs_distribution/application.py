@@ -2,8 +2,8 @@ import asyncio
 import signal
 
 from backend.infrastructure.logging import configure_logging
-from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, marketplace_throttle
-from backend.shared.security import CredentialCipher
+from backend.modules.wb_core.infrastructure.wb import EgressGateway
+from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
 from backend.storage.redis import RedisClient
@@ -14,8 +14,7 @@ class FbsDistributionWorkerApplication:
     """Отдельный процесс автоматизации распределения FBS.
 
     Свой воркер, а не шаг в оборачиваемости: та читает заявленные остатки, а
-    этот ими управляет. Общими остаются HTTP-клиент, шифрование ключей и
-    Redis-бюджет запросов к WB, но не жизненный цикл и не права.
+    этот ими управляет. Ключи и бюджет запросов к WB живут на шлюзе wb-egress.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -23,15 +22,10 @@ class FbsDistributionWorkerApplication:
         configure_logging(self.settings.app.log_level)
         self.database = Database()
         self.redis = RedisClient()
-        cipher = CredentialCipher(
-            self.settings.security.credential_encryption_keys,
-            self.settings.security.credential_fingerprint_key,
-        )
-        throttle = marketplace_throttle(self.settings, self.redis)
+        gateway = EgressGateway(self.settings.egress)
         self.worker = FbsDistributionWorker(
             self.database,
-            cipher,
-            WBFbsMarketplaceClient(throttle=throttle),
+            WBFbsMarketplaceClient(gateway),
             self.settings,
         )
 

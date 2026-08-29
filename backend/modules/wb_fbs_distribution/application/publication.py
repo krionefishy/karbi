@@ -10,7 +10,6 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTempor
 from backend.modules.wb_fbs_distribution.application.warehouses import WriteNotAllowedError
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient, WBFbsStockWriter
-from backend.shared.security import CredentialCipher
 
 VERIFIED = "verified"
 DRIFT = "drift"
@@ -62,14 +61,12 @@ class PublicationService:
         distribution: FbsDistributionRepository,
         marketplace: WBFbsMarketplaceClient,
         writer: WBFbsStockWriter,
-        cipher: CredentialCipher,
     ) -> None:
         self.session = session
         self.sellers = sellers
         self.distribution = distribution
         self.marketplace = marketplace
         self.writer = writer
-        self.cipher = cipher
 
     async def publish(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> PublicationResult:
         stamp = now or datetime.now(UTC)
@@ -178,7 +175,5 @@ class PublicationService:
             raise SellerNotFoundError(str(seller_id))
         if not enrollment.write_enabled:
             raise WriteNotAllowedError("Кабинету не разрешена запись в Wildberries")
-        credential = await self.sellers.get_credential(seller_id)
-        if credential is None:
-            raise WBPermanentError("У селлера нет API-ключа")
-        return self.cipher.decrypt(credential.encrypted_api_key)
+        # Ключа здесь больше нет: шлюз подставит его сам по seller_id.
+        return str(seller_id)

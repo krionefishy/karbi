@@ -1,16 +1,22 @@
+import contextlib
+import time
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application.enrollment import AutomationEnrollment
 from backend.modules.wb_core.domain import Article, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
 from backend.shared.kafka_streams.topics import WBCoreTopics
 from backend.shared.outbox import OutboxRepository
-from backend.shared.security import CredentialCipher
+
+# Статусы селлера на шлюзе, какими их видит админка. Первая группа приходит от
+# самого шлюза; вторая описывает доставку с нашей стороны.
+EGRESS_UNDELIVERED = "undelivered"  # шлюз недоступен, ключ не доехал
+EGRESS_UNSYNCED = "unsynced"  # локальная правка есть, шлюз о ней не знает
 
 
 class SellerNotFoundError(Exception):
@@ -18,7 +24,7 @@ class SellerNotFoundError(Exception):
 
 
 class DuplicateCredentialError(Exception):
-    pass
+    """Исторический тип: ключи больше не хранятся здесь, дубликаты не ловятся."""
 
 
 class SellerArchivedError(Exception):
@@ -32,69 +38,66 @@ class AutomationNotFoundError(Exception):
 class SellerService:
     """The seller registry: who exists, and which automations he is connected to.
 
-    Sellers live here and only here. An automation enrolls and releases them
-    through :class:`AutomationEnrollment`, so leaving an automation never
-    reaches the registry, and the registry never touches an automation's tables.
+    Sellers live here and only here. Ключ селлера в базу не пишется вовсе: из
+    запроса регистрации он синхронно уезжает на шлюз wb-egress и существует
+    только там. Исход доставки — статус на селлере (сага из WB_EGRESS.md):
+    шлюз отвечает `delivered`/`verified`/`key_invalid`/`no_free_ip`, а если он
+    недоступен — селлер остаётся в `undelivered`, и ключ нужно ввести ещё раз.
     """
 
     def __init__(
         self,
         session: AsyncSession,
         repository: SellerRepository,
-        cipher: CredentialCipher,
+        gateway: EgressGateway,
         enrollments: Sequence[AutomationEnrollment] = (),
     ) -> None:
         self.session = session
         self.repository = repository
-        self.cipher = cipher
+        self.gateway = gateway
         self.enrollments = tuple(enrollments)
 
     async def list_sellers(self, *, include_archived: bool = False) -> list[Seller]:
         return await self.repository.list_sellers(include_archived=include_archived)
 
     async def create(self, name: str, api_key: str) -> Seller:
-        fingerprint = self.cipher.fingerprint(api_key)
-        if await self.repository.fingerprint_exists(fingerprint):
-            raise DuplicateCredentialError
-        try:
-            seller = await self.repository.create(name.strip(), self.cipher.encrypt(api_key), fingerprint)
+        seller = await self.repository.create(name.strip())
+        delivered = await self._deliver_key(seller.id, seller.name, api_key)
+        if delivered:
             self._queue_sync(seller.id, "seller_created")
-            await self.session.commit()
-        except IntegrityError as error:
-            # A concurrent insert slipped in between the fingerprint check and the commit.
-            await self.session.rollback()
-            raise DuplicateCredentialError from error
-        return Seller(seller.id, seller.name, 0, "queued", None, None)
+        await self.session.commit()
+        return await self._reload(seller.id)
 
     async def update(self, seller_id: uuid.UUID, name: str | None, api_key: str | None) -> Seller:
         seller = await self._active(seller_id)
         if name is not None:
             seller.name = name.strip()
         if api_key is not None:
-            fingerprint = self.cipher.fingerprint(api_key)
-            if await self.repository.fingerprint_exists(fingerprint, excluding=seller_id):
-                raise DuplicateCredentialError
-            credential = await self.repository.get_credential(seller_id)
-            if credential is None:
-                raise SellerNotFoundError
-            credential.encrypted_api_key = self.cipher.encrypt(api_key)
-            credential.key_fingerprint = fingerprint
+            # Новый ключ едет на шлюз вместе с актуальным именем одним вызовом.
             seller.catalog_sync_status = "queued"
             seller.catalog_sync_error = None
-            self._queue_sync(seller.id, "credential_updated")
-        try:
-            await self.session.commit()
-        except IntegrityError as error:
-            await self.session.rollback()
-            raise DuplicateCredentialError from error
+            if await self._deliver_key(seller.id, seller.name, api_key):
+                self._queue_sync(seller.id, "credential_updated")
+        elif name is not None:
+            await self._rename_on_egress(seller.id, seller.name)
+        await self.session.commit()
         return await self._reload(seller_id)
 
     async def archive(self, seller_id: uuid.UUID) -> Seller:
-        """Retire the seller: he leaves every automation, collected data stays."""
+        """Retire the seller: he leaves every automation, collected data stays.
+
+        На шлюзе селлер отключается, но его IP остаётся закреплённым: вернувшись,
+        он не засветится в WB со второго адреса.
+        """
         await self._active(seller_id)
         for enrollment in self.enrollments:
             await enrollment.detach(seller_id)
         await self.repository.archive(seller_id)
+        try:
+            await self.gateway.disable_seller(seller_id=str(seller_id), event_version=self._version())
+            await self.repository.set_egress_state(seller_id, status="disabled", error=None)
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(seller_id, status=EGRESS_UNSYNCED, error=str(error))
         await self.session.commit()
         return await self._reload(seller_id, include_archived=True)
 
@@ -105,16 +108,10 @@ class SellerService:
             raise SellerNotFoundError
         if seller.archived_at is None:
             return await self._reload(seller_id)
-        fingerprint = self.cipher.fingerprint(api_key)
-        if await self.repository.fingerprint_exists(fingerprint, excluding=seller_id):
-            raise DuplicateCredentialError
-        await self.repository.restore(seller_id, self.cipher.encrypt(api_key), fingerprint)
-        self._queue_sync(seller_id, "seller_restored")
-        try:
-            await self.session.commit()
-        except IntegrityError as error:
-            await self.session.rollback()
-            raise DuplicateCredentialError from error
+        await self.repository.restore(seller_id)
+        if await self._deliver_key(seller_id, seller.name, api_key):
+            self._queue_sync(seller_id, "seller_restored")
+        await self.session.commit()
         return await self._reload(seller_id)
 
     async def purge(self, seller_id: uuid.UUID) -> None:
@@ -124,6 +121,10 @@ class SellerService:
         for enrollment in self.enrollments:
             await enrollment.purge(seller_id)
         await self.repository.delete(seller_id)
+        # Строки селлера уже нет — статус писать некуда; недоставленное
+        # отключение добьёт сверка (backend/commands/sync_egress_status.py).
+        with contextlib.suppress(EgressAdminError):
+            await self.gateway.disable_seller(seller_id=str(seller_id), event_version=self._version())
         await self.session.commit()
 
     async def request_sync(self, seller_id: uuid.UUID) -> Seller:
@@ -173,6 +174,35 @@ class SellerService:
             raise SellerNotFoundError
         await enrollment.detach(seller_id)
         await self.session.commit()
+
+    async def _deliver_key(self, seller_id: uuid.UUID, name: str, api_key: str) -> bool:
+        """Отдать ключ шлюзу и записать исход. True — по ключу можно работать."""
+        try:
+            outcome = await self.gateway.put_seller(
+                seller_id=str(seller_id), name=name, api_key=api_key, event_version=self._version()
+            )
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(seller_id, status=EGRESS_UNDELIVERED, error=str(error))
+            return False
+        status = str(outcome.get("status") or EGRESS_UNDELIVERED)
+        await self.repository.set_egress_state(
+            seller_id,
+            status=status,
+            error=str(outcome.get("verify_error") or "") or None,
+            ip=outcome.get("egress_ip"),
+        )
+        return status in {"verified", "delivered"}
+
+    async def _rename_on_egress(self, seller_id: uuid.UUID, name: str) -> None:
+        try:
+            await self.gateway.rename_seller(seller_id=str(seller_id), name=name, event_version=self._version())
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(seller_id, status=EGRESS_UNSYNCED, error=str(error))
+
+    @staticmethod
+    def _version() -> int:
+        """Монотонная версия события для идемпотентных upsert'ов шлюза."""
+        return time.time_ns() // 1_000_000
 
     async def _active(self, seller_id: uuid.UUID):
         seller = await self.repository.get(seller_id)

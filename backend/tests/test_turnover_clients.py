@@ -1,32 +1,34 @@
-import json
 from datetime import date, datetime
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 import respx
 
-from backend.modules.wb_core.infrastructure.wb import ATTEMPTS, WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb.egress import ATTEMPTS
 from backend.modules.wb_turnover.infrastructure.wb import (
     PAGE_LIMIT,
     WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
 )
+from backend.tests.egress_stub import EgressStub, make_gateway
 
-STATISTICS = "https://statistics-api.wildberries.ru"
-MARKETPLACE = "https://marketplace-api.wildberries.ru"
-KEY = "wb-key"
+ORDERS = "/api/v1/supplier/orders"
+WAREHOUSES = "/api/v3/warehouses"
+STOCKS_REPORT = "/api/analytics/v1/stocks-report/wb-warehouses"
+SELLER = "seller-1"
 
 
-@respx.mock
 async def test_orders_without_srid_are_skipped() -> None:
     """Without srid the same order cannot be recognised twice, and counting it
     again is worse than not counting it."""
-    respx.get(f"{STATISTICS}/api/v1/supplier/orders").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            ORDERS,
+            body=[
                 {
                     "srid": "s1",
                     "nmId": 101,
@@ -39,58 +41,58 @@ async def test_orders_without_srid_are_skipped() -> None:
                 {"nmId": 102, "date": "2026-08-19T10:00:00", "lastChangeDate": "2026-08-19T10:00:00"},
             ],
         )
-    )
 
-    rows = await WBStatisticsClient().orders(KEY, datetime(2026, 8, 6, 0, 0))
+        rows = await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 8, 6, 0, 0))
 
     assert len(rows) == 1
     assert (rows[0].srid, rows[0].article, rows[0].order_date) == ("s1", "101", date(2026, 8, 19))
     assert rows[0].price == 1200
 
 
-@respx.mock
 async def test_the_orders_window_is_sent_the_way_wb_expects_it() -> None:
-    route = respx.get(f"{STATISTICS}/api/v1/supplier/orders").mock(return_value=httpx.Response(200, json=[]))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", ORDERS, body=[])
 
-    await WBStatisticsClient().orders(KEY, datetime(2026, 8, 6, 7, 30))
+        await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 8, 6, 7, 30))
 
-    assert route.calls.last.request.url.params["dateFrom"] == "2026-08-06T07:30:00"
-    assert route.calls.last.request.url.params["flag"] == "0"
-    assert route.calls.last.request.headers["Authorization"] == KEY
+    envelope = stub.requests_to(ORDERS)[-1]
+    assert envelope["query"] == {"dateFrom": "2026-08-06T07:30:00", "flag": 0}
+    # Ключа в конверте нет — шлюз подставит его сам по селлеру.
+    assert envelope["seller_id"] == SELLER
+    assert envelope["api"] == "statistics"
 
 
-@respx.mock
 async def test_fbs_stock_is_asked_by_size_in_chunks_of_a_thousand() -> None:
-    route = respx.post(f"{MARKETPLACE}/api/v3/stocks/7").mock(
-        return_value=httpx.Response(200, json={"stocks": [{"sku": "b1", "chrtId": 11, "amount": 4}]})
-    )
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", "/api/v3/stocks/7", body={"stocks": [{"sku": "b1", "chrtId": 11, "amount": 4}]})
 
-    amounts = await WBMarketplaceClient().stocks(KEY, 7, list(range(1500)))
+        amounts = await WBMarketplaceClient(make_gateway()).stocks(SELLER, 7, list(range(1500)))
 
-    assert len(route.calls) == 2
-    assert json.loads(route.calls[0].request.read())["chrtIds"][:3] == [0, 1, 2]
-    assert "skus" not in json.loads(route.calls[0].request.read())
+    calls = stub.requests_to("/api/v3/stocks/7")
+    assert len(calls) == 2
+    assert calls[0]["body"]["chrtIds"][:3] == [0, 1, 2]
+    assert "skus" not in calls[0]["body"]
     assert amounts == {11: 4}
 
 
-@respx.mock
 async def test_warehouses_being_deleted_are_left_out() -> None:
-    respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(
-        return_value=httpx.Response(
-            200,
-            json=[
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            WAREHOUSES,
+            body=[
                 {"id": 1, "name": "Москва"},
                 {"id": 2, "name": "Уезжает", "isDeleting": True},
                 {"name": "Без id"},
             ],
         )
-    )
 
-    assert [(w.id, w.name) for w in await WBMarketplaceClient().warehouses(KEY)] == [(1, "Москва")]
+        warehouses = await WBMarketplaceClient(make_gateway()).warehouses(SELLER)
 
-
-ANALYTICS = "https://seller-analytics-api.wildberries.ru"
-STOCKS_REPORT = f"{ANALYTICS}/api/analytics/v1/stocks-report/wb-warehouses"
+    assert [(w.id, w.name) for w in warehouses] == [(1, "Москва")]
 
 
 def item(nm_id: int, quantity: int, **extra) -> dict:
@@ -108,96 +110,114 @@ def item(nm_id: int, quantity: int, **extra) -> dict:
     return row
 
 
-def report(items: list[dict]) -> httpx.Response:
-    return httpx.Response(200, json={"data": {"items": items}})
+def report(items: list[dict]) -> tuple[int, dict]:
+    return 200, {"data": {"items": items}}
 
 
-@respx.mock
 async def test_the_stock_report_is_asked_for_as_wb_expects() -> None:
-    route = respx.post(STOCKS_REPORT).mock(return_value=report([]))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, body={"data": {"items": []}})
 
-    await WBAnalyticsClient().stocks(KEY)
+        await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
-    request = route.calls.last.request
-    assert request.method == "POST"
-    assert request.headers["Authorization"] == KEY
-    assert json.loads(request.read()) == {"limit": PAGE_LIMIT, "offset": 0}
+    envelope = stub.requests_to(STOCKS_REPORT)[-1]
+    assert envelope["method"] == "POST"
+    assert envelope["seller_id"] == SELLER
+    assert envelope["api"] == "analytics"
+    assert envelope["body"] == {"limit": PAGE_LIMIT, "offset": 0}
 
 
-@respx.mock
 async def test_stock_lines_become_rows_and_missing_numbers_become_zero() -> None:
-    respx.post(STOCKS_REPORT).mock(return_value=report([item(101, 5, inWayToClient=7), {"nmId": 102, "chrtId": 3}]))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "POST", STOCKS_REPORT, body={"data": {"items": [item(101, 5, inWayToClient=7), {"nmId": 102, "chrtId": 3}]}}
+        )
 
-    rows = await WBAnalyticsClient().stocks(KEY)
+        rows = await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
     assert [(r.article, r.quantity, r.in_way_to_client) for r in rows] == [("101", 5, 7), ("102", 0, 0)]
 
 
-@respx.mock
 async def test_a_line_without_nmid_is_dropped_not_guessed() -> None:
-    respx.post(STOCKS_REPORT).mock(return_value=report([item(101, 5), {"chrtId": 9, "quantity": 3}]))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, body={"data": {"items": [item(101, 5), {"chrtId": 9, "quantity": 3}]}})
 
-    rows = await WBAnalyticsClient().stocks(KEY)
+        rows = await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
     assert [r.article for r in rows] == ["101"]
 
 
-@respx.mock
 async def test_a_full_page_is_followed_by_the_next_one() -> None:
     """A short page means the report is over; a full one never does."""
-    pages = [report([item(index, 1) for index in range(PAGE_LIMIT)]), report([item(999, 1)])]
-    route = respx.post(STOCKS_REPORT).mock(side_effect=pages)
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "POST",
+            STOCKS_REPORT,
+            side_effect=[
+                report([item(index, 1) for index in range(PAGE_LIMIT)]),
+                report([item(999, 1)]),
+            ],
+        )
 
-    rows = await WBAnalyticsClient().stocks(KEY)
+        rows = await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
+    calls = stub.requests_to(STOCKS_REPORT)
     assert len(rows) == PAGE_LIMIT + 1
-    assert json.loads(route.calls[1].request.read())["offset"] == PAGE_LIMIT
+    assert calls[1]["body"]["offset"] == PAGE_LIMIT
 
 
-@respx.mock
 async def test_an_empty_report_is_a_success_not_an_error() -> None:
-    respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(200, json={"data": {"items": []}}))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, body={"data": {"items": []}})
 
-    assert await WBAnalyticsClient().stocks(KEY) == []
+        assert await WBAnalyticsClient(make_gateway()).stocks(SELLER) == []
 
 
-@respx.mock
 async def test_an_unexpected_report_shape_is_permanent() -> None:
-    respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(200, json={"data": {"items": "нет"}}))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, body={"data": {"items": "нет"}})
 
-    with pytest.raises(WBPermanentError):
-        await WBAnalyticsClient().stocks(KEY)
+        with pytest.raises(WBPermanentError):
+            await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
 
-@respx.mock
-async def test_a_key_without_the_analytics_category_says_so(monkeypatch) -> None:
+async def test_a_key_without_the_analytics_category_says_so() -> None:
     """«Неверный ключ» sends someone to reissue a key that is in fact fine."""
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
-    respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(403, json={}))
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, status=403)
 
-    with pytest.raises(WBPermanentError, match="Аналитика"):
-        await WBAnalyticsClient().stocks(KEY)
+        with pytest.raises(WBPermanentError, match="Аналитика"):
+            await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
 
-@respx.mock
 async def test_the_report_is_retried_while_wb_is_unwell(monkeypatch) -> None:
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
-    route = respx.post(STOCKS_REPORT).mock(return_value=httpx.Response(429, json={}))
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("POST", STOCKS_REPORT, status=429)
 
-    with pytest.raises(WBTemporaryError):
-        await WBAnalyticsClient().stocks(KEY)
-    assert len(route.calls) == ATTEMPTS
+        with pytest.raises(WBTemporaryError):
+            await WBAnalyticsClient(make_gateway()).stocks(SELLER)
+        assert len(stub.requests_to(STOCKS_REPORT)) == ATTEMPTS
 
 
-@respx.mock
 async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary(monkeypatch) -> None:
     # The retry backoff is the point of the loop, not of this test.
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.json_client.asyncio.sleep", AsyncMock())
-    respx.get(f"{STATISTICS}/api/v1/supplier/orders").mock(return_value=httpx.Response(401, json={}))
-    with pytest.raises(WBPermanentError, match="Статистика"):
-        await WBStatisticsClient().orders(KEY, datetime(2026, 8, 6))
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", ORDERS, status=401)
+        with pytest.raises(WBPermanentError, match="Статистика"):
+            await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 8, 6))
 
-    outage = respx.get(f"{MARKETPLACE}/api/v3/warehouses").mock(return_value=httpx.Response(503, json={}))
-    with pytest.raises(WBTemporaryError):
-        await WBMarketplaceClient().warehouses(KEY)
-    assert len(outage.calls) == ATTEMPTS
+        stub.on("GET", WAREHOUSES, status=503)
+        with pytest.raises(WBTemporaryError):
+            await WBMarketplaceClient(make_gateway()).warehouses(SELLER)
+        assert len(stub.requests_to(WAREHOUSES)) == ATTEMPTS

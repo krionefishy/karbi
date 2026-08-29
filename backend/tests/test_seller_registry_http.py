@@ -7,7 +7,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
 from backend.app.application import Application
-from backend.modules.wb_core.infrastructure.postgres.models import CredentialModel, OutboxEventModel, SellerModel
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
+from backend.modules.wb_core.infrastructure.wb import EgressGateway
 from backend.modules.wb_reviews.infrastructure.postgres.models import DailyReviewCountModel, TrackedSellerModel
 from backend.shared.settings import load_settings
 
@@ -15,7 +16,27 @@ API = "/api/v1"
 
 
 @pytest_asyncio.fixture
-async def registry() -> AsyncIterator[tuple[Application, AsyncClient]]:
+async def registry(monkeypatch) -> AsyncIterator[tuple[Application, AsyncClient]]:
+    # Ключи живут на шлюзе wb-egress; здесь его управляющие вызовы всегда рады.
+    async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict:
+        return {
+            "seller_id": seller_id,
+            "name": name,
+            "status": "verified",
+            "egress_ip": "185.0.0.1",
+            "event_version": event_version,
+            "verify_error": "",
+        }
+
+    async def rename_seller(self, *, seller_id: str, name: str, event_version: int) -> dict:
+        return {"seller_id": seller_id, "name": name, "event_version": event_version}
+
+    async def disable_seller(self, *, seller_id: str, event_version: int) -> dict:
+        return {"seller_id": seller_id, "status": "disabled", "event_version": event_version}
+
+    monkeypatch.setattr(EgressGateway, "put_seller", put_seller)
+    monkeypatch.setattr(EgressGateway, "rename_seller", rename_seller)
+    monkeypatch.setattr(EgressGateway, "disable_seller", disable_seller)
     application = Application(load_settings("backend/shared/settings/config.test.yaml"))
     app = application.get_app()
     async with app.router.lifespan_context(app):
@@ -78,7 +99,7 @@ async def test_leaving_an_automation_keeps_the_seller_and_his_history(registry) 
 
 
 async def test_archiving_releases_the_key_and_hides_the_seller(registry) -> None:
-    application, client = registry
+    _, client = registry
     seller = await create_seller(client, "Реестр Архив", "wb-registry-key-3")
     seller_id = uuid.UUID(seller["id"])
     await client.post(f"{API}/automations/wb-reviews/sellers", json={"seller_id": str(seller_id)})
@@ -90,11 +111,9 @@ async def test_archiving_releases_the_key_and_hides_the_seller(registry) -> None
     assert archived[0]["archived_at"] is not None
     assert archived[0]["automations"] == []
     assert (await client.get(f"{API}/automations/wb-reviews/sellers")).json() == []
-    async with application.database.session() as session:
-        credential = await session.scalar(select(CredentialModel).where(CredentialModel.seller_id == seller_id))
-        assert credential is None
     # The archived seller may not be collected for, and the same key can be
-    # handed to a new one because archiving let go of the fingerprint.
+    # handed to a new one: it never lived in this base, and the gateway was
+    # told to disable the archived seller.
     assert (await client.post(f"{API}/wb/sellers/{seller_id}/catalog-sync")).status_code == 409
     assert (
         await client.post(f"{API}/automations/wb-reviews/sellers", json={"seller_id": str(seller_id)})
