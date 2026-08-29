@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -14,6 +14,7 @@ import {
   restoreSeller,
   retrySellerSync,
   updateSeller,
+  verifySellerEgress,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
 
@@ -99,6 +100,10 @@ export function SellersPage() {
       setFormError(error instanceof ApiError ? error.message : "Не удалось восстановить селлера"),
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refresh });
+  const egressVerifyMutation = useMutation({
+    mutationFn: verifySellerEgress,
+    onSuccess: refresh,
+  });
 
   return (
     <div className="app-page">
@@ -232,6 +237,15 @@ export function SellersPage() {
                       >
                         <RefreshCw size={15} />
                       </button>
+                      {seller.egress_status !== "verified" && (
+                        <button
+                          title="Перепроверить ключ на шлюзе"
+                          aria-label={`Перепроверить ключ ${seller.name}`}
+                          onClick={() => egressVerifyMutation.mutate(seller.id)}
+                        >
+                          <KeyRound size={15} />
+                        </button>
+                      )}
                       <button
                         title="В архив"
                         aria-label={`Отправить в архив ${seller.name}`}

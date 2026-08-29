@@ -57,7 +57,7 @@ class FakeSellers:
         return False
 
     async def get(self, seller_id: uuid.UUID):
-        return SimpleNamespace(id=seller_id) if seller_id == self.seller_id else None
+        return SimpleNamespace(id=seller_id, archived_at=None) if seller_id == self.seller_id else None
 
     async def list_articles(self, seller_id: uuid.UUID) -> list[Article]:
         return self.articles
@@ -296,7 +296,7 @@ class FakeCatalogSellers:
         return False
 
     async def get(self, seller_id: uuid.UUID):
-        return SimpleNamespace(id=seller_id) if seller_id == self.seller_id else None
+        return SimpleNamespace(id=seller_id, archived_at=None) if seller_id == self.seller_id else None
 
     async def set_sync_status(self, seller_id: uuid.UUID, status: str, error: str | None = None) -> None:
         self.sync_statuses.append((status, error))

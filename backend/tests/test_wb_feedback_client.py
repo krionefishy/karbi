@@ -1,5 +1,6 @@
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 import respx
 
@@ -86,11 +87,10 @@ async def test_feedback_client_ignores_feedback_without_valid_rating() -> None:
     assert result.feedback_count == 0
 
 
-async def test_feedback_client_stops_after_rate_limit_retries(monkeypatch) -> None:
-    """Ретраи 429 теперь живут в шлюзовом клиенте, а не в клиенте отзывов."""
+async def test_feedback_client_fails_fast_on_rate_limit(monkeypatch) -> None:
+    """429 от WB, донесённый шлюзом, окончателен сразу: шлюз уже отработал свои ретраи."""
     sleep = AsyncMock()
     monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", sleep)
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.random.uniform", lambda *_: 0.1)
 
     with respx.mock as router:
         stub = EgressStub(router)
@@ -99,28 +99,33 @@ async def test_feedback_client_stops_after_rate_limit_retries(monkeypatch) -> No
         with pytest.raises(WBFeedbackTemporaryError, match="HTTP 429"):
             await client().aggregate(SELLER)
 
-        assert len(stub.requests_to(FEEDBACKS)) == 3
+        assert len(stub.requests_to(FEEDBACKS)) == 1
 
-    assert sleep.await_count == 2
-    # Без rate_limit в ответе шлюза действует запасная пауза в 5 секунд.
-    assert [call.args[0] for call in sleep.await_args_list] == [pytest.approx(5.1), pytest.approx(5.1)]
+    assert sleep.await_count == 0
 
 
-async def test_feedback_client_retries_the_same_page_after_rate_limit(monkeypatch) -> None:
+async def test_feedback_client_retries_the_same_page_after_a_transport_failure(monkeypatch) -> None:
+    """Обрыв до шлюза повторяется той же страницей; конверт с 429 — уже нет."""
     monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
 
     with respx.mock as router:
         stub = EgressStub(router)
-        stub.on(
-            "GET",
-            FEEDBACKS,
-            side_effect=[
-                (429, None),
+        responses = iter(
+            [
+                None,  # обрыв соединения до шлюза
                 page(feedback("a", 101, 5)),
                 page(),
                 page(),
-            ],
+            ]
         )
+
+        def reply(payload: dict) -> tuple[int, dict]:
+            response = next(responses)
+            if response is None:
+                raise httpx.ConnectError("соединение оборвалось")
+            return response
+
+        stub.on("GET", FEEDBACKS, reply=reply)
         stub.on("GET", ARCHIVE, body={"data": {"feedbacks": []}})
 
         result = await client(page_size=1).aggregate(SELLER)

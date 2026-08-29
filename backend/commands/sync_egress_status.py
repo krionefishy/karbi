@@ -1,20 +1,30 @@
-"""Сверка статусов селлеров со шлюзом wb-egress.
+"""Сверка селлеров со шлюзом wb-egress — и статусов, и самого состояния.
 
-Шлюз — источник правды о доставленных ключах и закреплённых IP; эта команда
-переносит его состояние в колонки egress_* реестра. Используется как бэкфил
-после выкатки саги и как ручная сверка при расхождениях.
+Команда закрывает три вида расхождений:
+
+- копирует статусы шлюза в колонки `egress_*` реестра (бэкфил после выкатки);
+- гасит на шлюзе то, что должно быть погашено: архивный селлер, чей disable в
+  момент архивации не доехал, и осиротевшие записи шлюза, чей селлер уже
+  выкорчеван из реестра (purge при недоступном шлюзе);
+- доносит переименование, застрявшее в статусе `unsynced`.
 
 Запуск на проде: docker compose exec api python -m backend.commands.sync_egress_status
 """
 
 import asyncio
 import sys
+import time
 import uuid
 
+from backend.modules.wb_core.domain.entities import EGRESS_DISABLED, EGRESS_UNDELIVERED
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.wb import EgressGateway
+from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+
+
+def _version() -> int:
+    return time.time_ns() // 1_000_000
 
 
 async def sync() -> int:
@@ -22,31 +32,60 @@ async def sync() -> int:
     gateway = EgressGateway(settings.egress)
     database = Database()
     await database.connect(settings.database.url, pool_size=1, max_overflow=0)
-    matched = 0
+    failures = 0
     try:
-        rows = await gateway.list_sellers()
-        by_id = {row["seller_id"]: row for row in rows}
+        remote = {row["seller_id"]: row for row in await gateway.list_sellers()}
         async with database.session() as session:
             repository = SellerRepository(session)
             for seller in await repository.list_sellers(include_archived=True):
-                remote = by_id.get(str(seller.id))
-                if remote is None:
-                    print(f"missing on egress: {seller.id}  {seller.name}")
+                row = remote.pop(str(seller.id), None)
+                if row is None:
+                    print(f"FAIL  отсутствует на шлюзе: {seller.id}  {seller.name}")
+                    failures += 1
+                    continue
+                row = await _repair(gateway, seller, row)
+                if row is None:
+                    failures += 1
                     continue
                 await repository.set_egress_state(
                     uuid.UUID(str(seller.id)),
-                    status=str(remote.get("status") or "undelivered"),
-                    error=str(remote.get("verify_error") or "") or None,
-                    ip=remote.get("egress_ip"),
+                    status=str(row.get("status") or EGRESS_UNDELIVERED),
+                    error=str(row.get("verify_error") or "") or None,
+                    ip=row.get("egress_ip"),
                 )
-                matched += 1
-                print(f"{remote.get('status'):<12} {remote.get('egress_ip') or '-':<16} {seller.id}  {seller.name}")
+                print(f"{row.get('status'):<12} {row.get('egress_ip') or '-':<16} {seller.id}  {seller.name}")
             await session.commit()
-        print(f"synced {matched} sellers")
-        return 0
+        # Осиротевшие записи шлюза: селлер выкорчеван из реестра, а его ключ на
+        # шлюзе остался живым (purge при недоступном шлюзе). Гасим.
+        for seller_id, row in remote.items():
+            if row.get("status") == EGRESS_DISABLED:
+                continue
+            try:
+                await gateway.disable_seller(seller_id=seller_id, event_version=_version())
+                print(f"disabled orphan: {seller_id}  {row.get('name')}")
+            except EgressAdminError as error:
+                print(f"FAIL  сирота не отключена: {seller_id}  {row.get('name')}: {error}")
+                failures += 1
+        print(f"done{f', провалов: {failures}' if failures else ''}")
+        return 1 if failures else 0
     finally:
         await gateway.aclose()
         await database.disconnect()
+
+
+async def _repair(gateway: EgressGateway, seller, row: dict) -> dict | None:
+    """Донести локальное намерение до шлюза; вернуть его свежее состояние."""
+    try:
+        if seller.archived_at is not None and row.get("status") != EGRESS_DISABLED:
+            # Архивация прошла локально, disable не доехал — ключ всё ещё жив.
+            return await gateway.disable_seller(seller_id=str(seller.id), event_version=_version())
+        if seller.archived_at is None and row.get("name") != seller.name:
+            # Переименование, застрявшее в unsynced.
+            return await gateway.rename_seller(seller_id=str(seller.id), name=seller.name, event_version=_version())
+    except EgressAdminError as error:
+        print(f"FAIL  не удалось выровнять {seller.id}  {seller.name}: {error}")
+        return None
+    return row
 
 
 if __name__ == "__main__":

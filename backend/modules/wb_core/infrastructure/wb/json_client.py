@@ -18,8 +18,11 @@ class WBJsonClient:
     # lacks one checkbox.
     category = ""
 
-    def __init__(self, gateway: EgressGateway) -> None:
+    def __init__(self, gateway: EgressGateway, *, priority: str = "background") -> None:
         self.gateway = gateway
+        # interactive — для действий оператора: в очереди шлюза они обгоняют
+        # фоновые автоматизации, а не стоят за ночным синком.
+        self.priority = priority
         self.logger = logging.getLogger(f"wb.{self.bucket}.client")
 
     async def request(
@@ -38,6 +41,7 @@ class WBJsonClient:
             path=path,
             params=params,
             json=json,
+            priority=self.priority,
             api_name=self.api_name,
             category=self.category,
         )

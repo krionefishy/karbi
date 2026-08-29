@@ -129,8 +129,6 @@ class WorkerConfig:
     review_sync_minute: int = 30
     review_sync_timezone: str = "Europe/Moscow"
     feedback_page_size: int = 5000
-    feedback_request_interval_seconds: float = 0.0
-    feedback_retry_wait_seconds: int = 600
     job_lease_seconds: int = 1800
     job_max_attempts: int = 3
     job_retry_backoff_seconds: int = 300
@@ -286,8 +284,6 @@ class Settings:
         worker["review_sync_hour"] = int(worker.get("review_sync_hour", 0))
         worker["review_sync_minute"] = int(worker.get("review_sync_minute", 30))
         worker["feedback_page_size"] = int(worker.get("feedback_page_size", 5000))
-        worker["feedback_request_interval_seconds"] = float(worker.get("feedback_request_interval_seconds", 0.0))
-        worker["feedback_retry_wait_seconds"] = int(worker.get("feedback_retry_wait_seconds", 600))
         worker["job_lease_seconds"] = int(worker.get("job_lease_seconds", 1800))
         worker["job_max_attempts"] = int(worker.get("job_max_attempts", 3))
         worker["job_retry_backoff_seconds"] = int(worker.get("job_retry_backoff_seconds", 300))
@@ -363,10 +359,6 @@ class Settings:
             raise ValueError("worker.feedback_page_size must be between 1 and 5000")
         if self.worker.poll_interval_seconds < 1:
             raise ValueError("worker.poll_interval_seconds must be positive")
-        if self.worker.feedback_request_interval_seconds < 0:
-            raise ValueError("worker.feedback_request_interval_seconds cannot be negative")
-        if self.worker.feedback_retry_wait_seconds < 1:
-            raise ValueError("worker.feedback_retry_wait_seconds must be positive")
         if self.worker.job_lease_seconds < 60:
             raise ValueError("worker.job_lease_seconds must be at least 60")
         if self.worker.job_max_attempts < 1:

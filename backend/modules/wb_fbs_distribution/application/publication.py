@@ -70,7 +70,7 @@ class PublicationService:
 
     async def publish(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> PublicationResult:
         stamp = now or datetime.now(UTC)
-        api_key = await self._writable_key(seller_id)
+        seller_key = await self._writable_seller(seller_id)
 
         plan = await self.distribution.latest_plan(seller_id)
         if plan is None:
@@ -89,12 +89,12 @@ class PublicationService:
 
         outcomes = []
         for warehouse_id, amounts in sorted(changes.items()):
-            outcomes.append(await self._publish_one(api_key, seller_id, plan.id, warehouse_id, amounts, stamp))
+            outcomes.append(await self._publish_one(seller_key, seller_id, plan.id, warehouse_id, amounts, stamp))
         return PublicationResult(plan_id=plan.id, outcomes=outcomes)
 
     async def _publish_one(
         self,
-        api_key: str,
+        seller_key: str,
         seller_id: uuid.UUID,
         plan_id: uuid.UUID,
         warehouse_id: int,
@@ -103,7 +103,7 @@ class PublicationService:
     ) -> WarehouseOutcome:
         rows = sorted(amounts.items())
         try:
-            await self.writer.publish(api_key, warehouse_id, rows)
+            await self.writer.publish(seller_key, warehouse_id, rows)
         except (WBPermanentError, WBTemporaryError) as error:
             await self._record(seller_id, plan_id, warehouse_id, len(rows), FAILED, 0, str(error), stamp)
             return WarehouseOutcome(warehouse_id, sent=0, drift=0, status=FAILED, error=str(error))
@@ -112,7 +112,7 @@ class PublicationService:
         # полей и на неверном имени вернёт успех, ничего не изменив. Поэтому
         # состояние считается подтверждённым только после вычитки.
         try:
-            actual = await self.marketplace.stocks(api_key, warehouse_id, [sku for sku, _ in rows])
+            actual = await self.marketplace.stocks(seller_key, warehouse_id, [sku for sku, _ in rows])
         except (WBPermanentError, WBTemporaryError) as error:
             await self._record(seller_id, plan_id, warehouse_id, len(rows), FAILED, 0, str(error), stamp)
             return WarehouseOutcome(warehouse_id, sent=len(rows), drift=0, status=FAILED, error=str(error))
@@ -169,7 +169,7 @@ class PublicationService:
             desired[(item.warehouse_id, sku)] = item.amount
         return desired
 
-    async def _writable_key(self, seller_id: uuid.UUID) -> str:
+    async def _writable_seller(self, seller_id: uuid.UUID) -> str:
         enrollment = await self.distribution.enrollment(seller_id)
         if enrollment is None:
             raise SellerNotFoundError(str(seller_id))

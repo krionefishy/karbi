@@ -29,8 +29,6 @@ worker:
   review_sync_minute: 30
   review_sync_timezone: Europe/Moscow
   feedback_page_size: 5000
-  feedback_request_interval_seconds: 0.0
-  feedback_retry_wait_seconds: 600
   job_lease_seconds: 1800
   job_max_attempts: 3
   job_retry_backoff_seconds: 300

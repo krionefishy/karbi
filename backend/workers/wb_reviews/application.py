@@ -9,7 +9,6 @@ from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient
 from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
-from backend.storage.redis import RedisClient
 from backend.workers.wb_reviews.catalog_consumer import CatalogSyncConsumer
 from backend.workers.wb_reviews.review_consumer import ReviewSyncConsumer
 from backend.workers.wb_reviews.worker import WBReviewsWorker
@@ -25,7 +24,6 @@ class WBReviewsWorkerApplication:
         configure_logging(self.settings.app.log_level)
         self.logger = logging.getLogger("wb.reviews.application")
         self.database = Database()
-        self.redis = RedisClient()
         self.worker = WBReviewsWorker(
             self.database,
             self.settings.worker.poll_interval_seconds,
@@ -56,8 +54,6 @@ class WBReviewsWorkerApplication:
                 self.settings.kafka.bootstrap_servers,
                 f"{self.settings.kafka.consumer_group}.wb.reviews",
                 worker.feedback_page_size,
-                worker.feedback_request_interval_seconds,
-                worker.feedback_retry_wait_seconds,
                 lease_seconds=worker.job_lease_seconds,
                 max_attempts=worker.job_max_attempts,
                 retry_backoff_seconds=worker.job_retry_backoff_seconds,
@@ -74,7 +70,6 @@ class WBReviewsWorkerApplication:
                 pool_size=self.settings.database.pool_size,
                 max_overflow=self.settings.database.max_overflow,
             )
-            await self.redis.connect(self.settings.redis.url)
             tasks: list[asyncio.Task[None]] = []
             if self.settings.kafka.enabled:
                 if self.catalog_consumer is None or self.review_consumer is None:
@@ -102,7 +97,6 @@ class WBReviewsWorkerApplication:
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
         finally:
-            await self.redis.disconnect()
             await self.database.disconnect()
 
     async def _supervise(self, name: str, factory: Callable[[], Coroutine[None, None, None]]) -> None:

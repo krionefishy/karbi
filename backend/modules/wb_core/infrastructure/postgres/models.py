@@ -42,6 +42,10 @@ class SellerModel(WBCoreBase):
     egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
     egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
     egress_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    # Монотонная версия для идемпотентных upsert'ов шлюза: очередная версия —
+    # max(wall-clock мс, предыдущая + 1), поэтому ни скачок NTP назад, ни две
+    # правки в одну миллисекунду не дадут шлюзу принять позднее за раннее.
+    egress_version: Mapped[int] = mapped_column(BigInteger, default=0)
 
     __table_args__ = (
         CheckConstraint(

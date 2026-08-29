@@ -82,7 +82,10 @@ class CatalogSyncConsumer:
             if await repository.inbox_processed(event_id):
                 return
             seller = await repository.get(seller_id)
-            if seller is None:
+            if seller is None or seller.archived_at is not None:
+                # Событие, опубликованное до архивации, доживает в Kafka дольше
+                # селлера: обрабатывать его — значит дёргать шлюз за
+                # отключённого и записывать ему ошибку синка.
                 repository.mark_inbox(event_id, "WBCatalogSyncRequested")
                 await session.commit()
                 return

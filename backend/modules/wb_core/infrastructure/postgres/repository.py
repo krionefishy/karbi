@@ -56,11 +56,25 @@ class SellerRepository:
         status: str,
         error: str | None,
         ip: str | None = None,
+        version: int | None = None,
     ) -> None:
         values: dict[str, Any] = {"egress_status": status, "egress_error": error}
         if ip is not None:
             values["egress_ip"] = str(ip)
+        if version is not None:
+            values["egress_version"] = version
         await self.session.execute(update(SellerModel).where(SellerModel.id == seller_id).values(**values))
+
+    async def get_egress_version(self, seller_id: uuid.UUID) -> int:
+        stored = await self.session.scalar(select(SellerModel.egress_version).where(SellerModel.id == seller_id))
+        return int(stored or 0)
+
+    async def reset_catalog_sync(self, seller_id: uuid.UUID) -> None:
+        await self.session.execute(
+            update(SellerModel)
+            .where(SellerModel.id == seller_id)
+            .values(catalog_sync_status="queued", catalog_sync_error=None)
+        )
 
     async def archive(self, seller_id: uuid.UUID) -> bool:
         """Take the seller out of service without losing anything collected.

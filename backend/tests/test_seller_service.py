@@ -66,6 +66,7 @@ class FakeGateway:
         self.delivered: list[tuple[str, str, str]] = []
         self.renamed: list[tuple[str, str]] = []
         self.disabled: list[str] = []
+        self.verified: list[str] = []
 
     async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict:
         if self.error is not None:
@@ -77,13 +78,19 @@ class FakeGateway:
         if self.error is not None:
             raise self.error
         self.renamed.append((seller_id, name))
-        return {}
+        return dict(self.outcome)
 
     async def disable_seller(self, *, seller_id: str, event_version: int) -> dict:
         if self.error is not None:
             raise self.error
         self.disabled.append(seller_id)
         return {}
+
+    async def verify_seller(self, seller_id: str) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.verified.append(seller_id)
+        return dict(self.outcome)
 
 
 class FakeSellerRepository:
@@ -98,6 +105,7 @@ class FakeSellerRepository:
             egress_status="undelivered",
             egress_error=None,
             egress_ip=None,
+            egress_version=0,
         )
         self.deleted = False
         self.items = [Article(uuid.uuid4(), self.seller_id, "123", "SKU-1", "Товар")]
@@ -131,11 +139,22 @@ class FakeSellerRepository:
     async def get(self, seller_id: uuid.UUID):
         return None if self.deleted or seller_id != self.seller_id else self.model
 
-    async def set_egress_state(self, seller_id: uuid.UUID, *, status: str, error: str | None, ip=None) -> None:
+    async def set_egress_state(
+        self, seller_id: uuid.UUID, *, status: str, error: str | None, ip=None, version: int | None = None
+    ) -> None:
         self.model.egress_status = status
         self.model.egress_error = error
         if ip is not None:
             self.model.egress_ip = str(ip)
+        if version is not None:
+            self.model.egress_version = version
+
+    async def get_egress_version(self, seller_id: uuid.UUID) -> int:
+        return self.model.egress_version
+
+    async def reset_catalog_sync(self, seller_id: uuid.UUID) -> None:
+        self.model.catalog_sync_status = "queued"
+        self.model.catalog_sync_error = None
 
     async def archive(self, seller_id: uuid.UUID) -> bool:
         if seller_id != self.seller_id or self.model.archived_at is not None:

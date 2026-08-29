@@ -56,7 +56,7 @@ class WarehouseAdminService:
         сороковом из шестидесяти лучше с сорока созданными, чем с непонятной
         ошибкой посреди цикла.
         """
-        api_key = await self._writable_key(seller_id)
+        seller_key = await self._writable_seller(seller_id)
         existing = {warehouse.office_id for warehouse in await self.distribution.warehouses(seller_id)}
         if office_id in existing:
             # WB не даёт привязать один объект к двум складам кабинета, и его
@@ -66,13 +66,13 @@ class WarehouseAdminService:
             raise WarehouseConflictError("У склада должно быть название")
         await self.session.commit()
 
-        warehouse_id = await self.writer.create(api_key, name=name.strip(), office_id=office_id)
+        warehouse_id = await self.writer.create(seller_key, name=name.strip(), office_id=office_id)
         await self.mirror.sync_seller(seller_id)
         return CreatedWarehouse(warehouse_id=warehouse_id, office_id=office_id, name=name.strip())
 
     async def rebind(self, seller_id: uuid.UUID, warehouse_id: int, *, name: str, office_id: int) -> None:
         """Переименовать склад или перепривязать его к другому объекту WB."""
-        api_key = await self._writable_key(seller_id)
+        seller_key = await self._writable_seller(seller_id)
         warehouses = {row.warehouse_id: row for row in await self.distribution.warehouses(seller_id)}
         if warehouse_id not in warehouses:
             raise WarehouseConflictError("Склад не найден в этом кабинете")
@@ -81,7 +81,7 @@ class WarehouseAdminService:
             raise WarehouseConflictError("Под этот объект у кабинета уже есть другой склад")
         await self.session.commit()
 
-        await self.writer.rename(api_key, warehouse_id, name=name.strip(), office_id=office_id)
+        await self.writer.rename(seller_key, warehouse_id, name=name.strip(), office_id=office_id)
         await self.mirror.sync_seller(seller_id)
 
     async def delete(self, seller_id: uuid.UUID, warehouse_id: int) -> None:
@@ -91,7 +91,7 @@ class WarehouseAdminService:
         надо вывести из схемы, чтобы расчёт перестал на него рассчитывать, а на
         WB уехали нули.
         """
-        api_key = await self._writable_key(seller_id)
+        seller_key = await self._writable_seller(seller_id)
         warehouses = {row.warehouse_id: row for row in await self.distribution.warehouses(seller_id)}
         warehouse = warehouses.get(warehouse_id)
         if warehouse is None:
@@ -102,10 +102,10 @@ class WarehouseAdminService:
             )
         await self.session.commit()
 
-        await self.writer.delete(api_key, warehouse_id)
+        await self.writer.delete(seller_key, warehouse_id)
         await self.mirror.sync_seller(seller_id)
 
-    async def _writable_key(self, seller_id: uuid.UUID) -> str:
+    async def _writable_seller(self, seller_id: uuid.UUID) -> str:
         """Ключ кабинета, но только если ему разрешено менять WB."""
         enrollment = await self.distribution.enrollment(seller_id)
         if enrollment is None:

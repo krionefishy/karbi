@@ -70,7 +70,7 @@ class CollectionService:
         reading nor overwrites the previous FBS figures with zeros — zeros
         would read as «товар кончился» and raise a false alarm.
         """
-        seller_key = await self._seller_key(seller_id)
+        seller_key = str(seller_id)
         known = await self._known_articles(seller_id)
         article_of = await self.sellers.list_chrt_articles(seller_id)
         # The reads are done. The requests below can take minutes on a large
@@ -187,7 +187,7 @@ class CollectionService:
         window instead of leaving a hole, and the overlap covers orders that
         changed while the previous pull was running.
         """
-        seller_key = await self._seller_key(seller_id)
+        seller_key = str(seller_id)
         tracked = await self.turnover.tracked(seller_id)
         watermark = tracked.orders_watermark if tracked else None
         if watermark is None:
@@ -242,7 +242,3 @@ class CollectionService:
         were 243 of 1035 rows, every one of them «нет остатка».
         """
         return {article.article for article in await self.sellers.list_articles(seller_id) if article.state == "active"}
-
-    async def _seller_key(self, seller_id: uuid.UUID) -> str:
-        # Ключа здесь больше нет: шлюз подставит его сам по seller_id.
-        return str(seller_id)

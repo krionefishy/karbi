@@ -32,6 +32,10 @@ export const restoreSeller = (sellerId: string, apiKey: string) =>
 export const retrySellerSync = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/catalog-sync`, { method: "POST" });
 
+/** Перепроверить ключ на шлюзе wb-egress (после починки прав в кабинете WB). */
+export const verifySellerEgress = (sellerId: string) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/egress-verify`, { method: "POST" });
+
 export const getAutomationSellers = (automationId: string) =>
   apiRequest<Seller[]>(`/api/v1/automations/${automationId}/sellers`);
 

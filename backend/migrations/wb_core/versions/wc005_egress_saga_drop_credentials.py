@@ -21,6 +21,9 @@ def upgrade() -> None:
     )
     op.add_column("sellers", sa.Column("egress_error", sa.String(), nullable=True), schema="wb_core")
     op.add_column("sellers", sa.Column("egress_ip", sa.String(45), nullable=True), schema="wb_core")
+    op.add_column(
+        "sellers", sa.Column("egress_version", sa.BigInteger(), nullable=False, server_default="0"), schema="wb_core"
+    )
     # Ключи уже доставлены на шлюз (backend/commands/export_sellers_to_egress.py)
     # и живут только там; шифртексты здесь — лишняя копия, которую нечем читать.
     op.drop_table("credentials", schema="wb_core")
@@ -45,6 +48,7 @@ def downgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         schema="wb_core",
     )
+    op.drop_column("sellers", "egress_version", schema="wb_core")
     op.drop_column("sellers", "egress_ip", schema="wb_core")
     op.drop_column("sellers", "egress_error", schema="wb_core")
     op.drop_column("sellers", "egress_status", schema="wb_core")

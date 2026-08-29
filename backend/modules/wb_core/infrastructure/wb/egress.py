@@ -81,7 +81,14 @@ class EgressGateway:
         api_name: str = "WB API",
         category: str = "",
     ) -> Any:
-        """Тело ответа WB, либо та же пара ошибок, что была у прямых клиентов."""
+        """Тело ответа WB, либо та же пара ошибок, что была у прямых клиентов.
+
+        Локальные повторы (ATTEMPTS) существуют только для транспортных сбоев
+        до шлюза. Всё, что шлюз донёс как ответ — включая 429 и 5xx от WB, —
+        окончательно: шлюз уже отработал свои ретраи и своё ожидание в очереди,
+        повторять поверх — значит множить нагрузку на задыхающийся эндпоинт.
+        Дальше этим занимаются повторы уровня задач.
+        """
         last_error = ""
         for attempt in range(ATTEMPTS):
             payload = await self._send(
@@ -99,11 +106,6 @@ class EgressGateway:
             if status == 404:
                 raise WBPermanentError(f"{api_name} не знает метод {path}")
             if status == 429 or status >= 500:
-                # Шлюз уже отработал свои ретраи; ответ окончателен для попытки.
-                last_error = f"HTTP {status} от WB"
-                if attempt < ATTEMPTS - 1:
-                    await asyncio.sleep(self._retry_after(payload) + random.uniform(0.1, 0.5))
-                    continue
                 raise WBTemporaryError(f"{api_name} отвечает HTTP {status}")
             if status >= 400:
                 raise WBPermanentError(f"{api_name} отклонил запрос: HTTP {status}")
@@ -139,18 +141,28 @@ class EgressGateway:
         except httpx.RequestError as error:
             return _Retry(reason=f"шлюз WB недоступен: {error}", delay=2.0)
         if response.status_code == 200:
-            return response.json()
+            try:
+                payload = response.json()
+            except ValueError:
+                # Обрезанный ответ или HTML от промежуточного nginx — не повод
+                # ронять вызывающего сырым исключением мимо контракта ошибок.
+                return _Retry(reason="шлюз вернул не JSON", delay=2.0)
+            if not isinstance(payload, dict):
+                return _Retry(reason="шлюз вернул JSON неожиданной формы", delay=2.0)
+            return payload
         detail = self._detail(response)
         if response.status_code == 429:
-            # Очередь шлюза не нашла бюджета за отведённое ожидание.
-            return _Retry(reason=detail or "лимит WB исчерпан", delay=self._header_retry(response, fallback=15.0))
+            # Очередь шлюза не нашла бюджета даже за своё ожидание — дальше
+            # пусть решает повтор уровня задачи, а не сон внутри вызова.
+            raise WBTemporaryError(detail or "Лимит запросов к WB исчерпан — повторите позже")
         if response.status_code in {404, 409}:
             raise WBPermanentError(detail or f"Селлер {seller_id} не обслуживается шлюзом")
         if response.status_code in {400, 422}:
             raise WBPermanentError(detail or "Шлюз отверг запрос как некорректный")
         if response.status_code == 401:
-            # Рассинхрон секрета — проблема инфраструктуры, а не селлера.
-            return _Retry(reason="шлюз отверг авторизацию сервиса (EGRESS_JWT_SECRET)", delay=30.0)
+            # Рассинхрон секрета — постоянная ошибка конфигурации: падать надо
+            # сразу и громко, а не жечь минуту сна на каждый вызов.
+            raise WBTemporaryError("Шлюз WB отверг авторизацию сервиса — проверьте EGRESS_JWT_SECRET на обеих сторонах")
         return _Retry(reason=f"шлюз ответил HTTP {response.status_code}", delay=5.0)
 
     # --- Управление селлерами -------------------------------------------
@@ -178,7 +190,10 @@ class EgressGateway:
             raise EgressAdminError(f"Шлюз WB недоступен: {error}") from error
         if response.status_code != 200:
             raise EgressAdminError(f"Шлюз ответил HTTP {response.status_code}", status_code=response.status_code)
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as error:
+            raise EgressAdminError("Шлюз вернул не JSON на запрос списка селлеров") from error
 
     async def _admin(self, method: str, path: str, payload: dict[str, Any] | None) -> dict[str, Any]:
         client = self._require_client()
@@ -187,7 +202,10 @@ class EgressGateway:
         except httpx.RequestError as error:
             raise EgressAdminError(f"Шлюз WB недоступен: {error}") from error
         if response.status_code == 200:
-            return response.json()
+            try:
+                return response.json()
+            except ValueError as error:
+                raise EgressAdminError("Шлюз вернул не JSON на управляющий вызов") from error
         raise EgressAdminError(
             self._detail(response) or f"Шлюз ответил HTTP {response.status_code}",
             status_code=response.status_code,
@@ -235,24 +253,6 @@ class EgressGateway:
             return ""
         detail = payload.get("detail")
         return detail if isinstance(detail, str) else ""
-
-    @staticmethod
-    def _header_retry(response: httpx.Response, *, fallback: float) -> float:
-        header = response.headers.get("Retry-After")
-        if header is None:
-            return fallback
-        try:
-            return max(float(header), 0.0)
-        except ValueError:
-            return fallback
-
-    @staticmethod
-    def _retry_after(payload: dict[str, Any]) -> float:
-        rate = payload.get("rate_limit") or {}
-        retry = rate.get("retry")
-        if isinstance(retry, int | float):
-            return max(float(retry), 1.0)
-        return 5.0
 
 
 class _Retry:

@@ -36,12 +36,11 @@ class ReviewSyncConsumer:
         bootstrap_servers: str,
         group_id: str,
         page_size: int,
-        request_interval_seconds: float = 1.0,
-        retry_wait_seconds: int = 600,
+        *,
         lease_seconds: int = 1800,
         max_attempts: int = 3,
         retry_backoff_seconds: int = 300,
-        client: WBFeedbackClient | None = None,
+        client: WBFeedbackClient,
     ) -> None:
         self.database = database
         self.bootstrap_servers = bootstrap_servers
@@ -49,8 +48,6 @@ class ReviewSyncConsumer:
         self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.retry_backoff_seconds = retry_backoff_seconds
-        if client is None:
-            raise ValueError("ReviewSyncConsumer requires an explicit WBFeedbackClient")
         self.feedback_client = client
         self.logger = logging.getLogger("wb.reviews.consumer")
 
@@ -115,8 +112,8 @@ class ReviewSyncConsumer:
                 await session.commit()
                 return
             seller = await sellers.get(seller_id)
-            if seller is None:
-                await reviews.fail_job(job_id, "Селлер удалён")
+            if seller is None or seller.archived_at is not None:
+                await reviews.fail_job(job_id, "Селлер удалён или в архиве")
                 await reviews.finalize_run(run_id)
                 sellers.mark_inbox(event_id, "WBReviewSyncRequested")
                 await session.commit()

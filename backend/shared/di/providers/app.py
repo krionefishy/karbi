@@ -76,17 +76,21 @@ class AppProvider(Provider):
 
     @provide(scope=Scope.APP)
     def fbs_marketplace_client(self, gateway: EgressGateway) -> WBFbsMarketplaceClient:
-        """Читающий клиент складов WB для действий оператора."""
-        return WBFbsMarketplaceClient(gateway)
+        """Читающий клиент складов WB для действий оператора.
+
+        Оператор ждёт ответа прямо сейчас, поэтому его запросы идут в очередь
+        шлюза с приоритетом interactive и обгоняют фоновые автоматизации.
+        """
+        return WBFbsMarketplaceClient(gateway, priority="interactive")
 
     @provide(scope=Scope.APP)
     def fbs_warehouse_writer(self, gateway: EgressGateway) -> WBFbsWarehouseWriter:
         """Клиент команд, меняющих кабинет. Отдельный от читающего намеренно."""
-        return WBFbsWarehouseWriter(gateway)
+        return WBFbsWarehouseWriter(gateway, priority="interactive")
 
     @provide(scope=Scope.APP)
     def fbs_stock_writer(self, gateway: EgressGateway) -> WBFbsStockWriter:
-        return WBFbsStockWriter(gateway)
+        return WBFbsStockWriter(gateway, priority="interactive")
 
 
 class SessionProvider(Provider):

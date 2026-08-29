@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 import respx
 
@@ -197,27 +198,45 @@ async def test_a_key_without_the_analytics_category_says_so() -> None:
             await WBAnalyticsClient(make_gateway()).stocks(SELLER)
 
 
-async def test_the_report_is_retried_while_wb_is_unwell(monkeypatch) -> None:
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
+async def test_a_wb_rate_limit_delivered_by_the_gateway_is_final(monkeypatch) -> None:
+    """Шлюз уже отработал свои ретраи: 429 в конверте окончателен с первого раза."""
+    sleep = AsyncMock()
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", sleep)
     with respx.mock as router:
         stub = EgressStub(router)
         stub.on("POST", STOCKS_REPORT, status=429)
 
         with pytest.raises(WBTemporaryError):
             await WBAnalyticsClient(make_gateway()).stocks(SELLER)
+        assert len(stub.requests_to(STOCKS_REPORT)) == 1
+    assert sleep.await_count == 0
+
+
+async def test_a_transport_failure_is_retried_before_giving_up(monkeypatch) -> None:
+    # The retry backoff is the point of the loop, not of this test.
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
+    with respx.mock as router:
+        stub = EgressStub(router)
+
+        def reply(payload: dict) -> tuple[int, dict]:
+            raise httpx.ConnectError("соединение оборвалось")
+
+        stub.on("POST", STOCKS_REPORT, reply=reply)
+
+        with pytest.raises(WBTemporaryError):
+            await WBAnalyticsClient(make_gateway()).stocks(SELLER)
         assert len(stub.requests_to(STOCKS_REPORT)) == ATTEMPTS
 
 
-async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary(monkeypatch) -> None:
-    # The retry backoff is the point of the loop, not of this test.
-    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
+async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary() -> None:
     with respx.mock as router:
         stub = EgressStub(router)
         stub.on("GET", ORDERS, status=401)
         with pytest.raises(WBPermanentError, match="Статистика"):
             await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 8, 6))
 
+        # 5xx от WB тоже доносится шлюзом как окончательный: без локальных повторов.
         stub.on("GET", WAREHOUSES, status=503)
         with pytest.raises(WBTemporaryError):
             await WBMarketplaceClient(make_gateway()).warehouses(SELLER)
-        assert len(stub.requests_to(WAREHOUSES)) == ATTEMPTS
+        assert len(stub.requests_to(WAREHOUSES)) == 1

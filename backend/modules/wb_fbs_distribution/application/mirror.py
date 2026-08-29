@@ -43,13 +43,13 @@ class MirrorService:
         Справочник объектов у всех кабинетов один, но спросить его можно только
         ключом: сверка кабинета попутно освежает общий каталог.
         """
-        api_key = str(seller_id)
+        seller_key = str(seller_id)
         # Сеть впереди: держать транзакцию открытой через два запроса к WB
         # значит держать и её блокировки.
         await self.session.commit()
 
-        offices = await self.marketplace.offices(api_key)
-        warehouses = await self.marketplace.warehouses(api_key)
+        offices = await self.marketplace.offices(seller_key)
+        warehouses = await self.marketplace.warehouses(seller_key)
 
         stamp = now or datetime.now(UTC)
         if not await self.distribution.tracked(seller_id):
