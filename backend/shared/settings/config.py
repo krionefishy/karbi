@@ -118,7 +118,11 @@ class AuthConfig:
 @dataclass(frozen=True, slots=True)
 class RateLimitConfig:
     enabled: bool = True
-    requests: int = 30
+    # Весь офис приходит с одного адреса, а интерфейс опрашивает сервер каждые
+    # несколько секунд, пока идёт синхронизация: 30 запросов в минуту такой
+    # интерфейс выбирает вдвоём в двух вкладках. Это заслон от злоупотребления,
+    # а не от обычной работы.
+    requests: int = 120
     window_seconds: int = 60
 
 
@@ -277,7 +281,7 @@ class Settings:
         auth["refresh_token_ttl_seconds"] = int(auth.get("refresh_token_ttl_seconds", 604_800))
         rate_limit = dict(data.get("rate_limit", {}))
         rate_limit["enabled"] = _as_bool(rate_limit.get("enabled", True))
-        rate_limit["requests"] = int(rate_limit.get("requests", 30))
+        rate_limit["requests"] = int(rate_limit.get("requests", 120))
         rate_limit["window_seconds"] = int(rate_limit.get("window_seconds", 60))
         worker = dict(data.get("worker", {}))
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))

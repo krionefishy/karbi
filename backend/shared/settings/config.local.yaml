@@ -32,7 +32,7 @@ auth:
   refresh_token_ttl_seconds: 604800
 rate_limit:
   enabled: true
-  requests: 30
+  requests: 120
   window_seconds: 60
 worker:
   poll_interval_seconds: 30

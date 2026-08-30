@@ -40,7 +40,7 @@ auth:
   refresh_token_ttl_seconds: 604800
 rate_limit:
   enabled: true
-  requests: ${RATE_LIMIT_REQUESTS:-30}
+  requests: ${RATE_LIMIT_REQUESTS:-120}
   window_seconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
 worker:
   poll_interval_seconds: 30

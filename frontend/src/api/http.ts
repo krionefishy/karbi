@@ -37,6 +37,10 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   return fetch(path, { ...init, headers, credentials: "include" });
 }
 
+function isSessionGone(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403);
+}
+
 export function refreshAccessToken(): Promise<AuthRefreshPayload> {
   if (!refreshPromise) {
     refreshPromise = fetch("/api/v1/auth/refresh", {
@@ -45,7 +49,13 @@ export function refreshAccessToken(): Promise<AuthRefreshPayload> {
       headers: { Accept: "application/json" },
     })
       .then(async (response) => {
-        if (!response.ok) throw new ApiError(response.status, "Сессия истекла");
+        // Сессию хоронит только отказ в правах. Лимитер (429), сетевой сбой или
+        // 5xx — это «сейчас не получилось»: разлогинивать из-за них значит
+        // выбрасывать человека из интерфейса каждый раз, когда сервер занят.
+        if (response.status === 401 || response.status === 403) {
+          throw new ApiError(response.status, "Сессия истекла");
+        }
+        if (!response.ok) throw new ApiError(response.status, "Не удалось обновить сессию");
         const payload = (await response.json()) as AuthRefreshPayload;
         setAccessToken(payload.access_token);
         return payload;
@@ -81,8 +91,9 @@ export async function apiDownload(path: string): Promise<FileDownload> {
     try {
       await refreshAccessToken();
       response = await send(path);
-    } catch {
-      setAccessToken(null);
+    } catch (error) {
+      if (isSessionGone(error)) setAccessToken(null);
+      throw error;
     }
   }
   if (!response.ok) {
@@ -101,8 +112,9 @@ export async function apiRequest<T>(path: string, init?: RequestInit, options?: 
     try {
       await refreshAccessToken();
       response = await send(path, init);
-    } catch {
-      setAccessToken(null);
+    } catch (error) {
+      if (isSessionGone(error)) setAccessToken(null);
+      throw error;
     }
   }
   if (!response.ok) {

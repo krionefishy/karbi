@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
-import { setAccessToken } from "../../api/http";
+import { ApiError, setAccessToken } from "../../api/http";
 import { restoreSession } from "./api";
 import type { CurrentUser } from "./types";
 
@@ -23,7 +23,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
       .then((session) => {
         if (active) setUser(session.user);
       })
-      .catch(() => setAccessToken(null))
+      // Токен сбрасываем, только если сессии действительно нет: 429 от лимитера
+      // при восстановлении не повод показывать форму входа.
+      .catch((error: unknown) => {
+        if (!(error instanceof ApiError) || error.status === 401 || error.status === 403) {
+          setAccessToken(null);
+        }
+      })
       .finally(() => {
         if (active) setIsLoading(false);
       });
