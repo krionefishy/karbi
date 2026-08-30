@@ -13,7 +13,7 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.tests.egress_stub import EgressStub, make_gateway
+from backend.tests.egress_stub import REQUEST_URL, EgressStub, make_gateway
 
 ORDERS = "/api/v1/supplier/orders"
 WAREHOUSES = "/api/v3/warehouses"
@@ -240,3 +240,15 @@ async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary() -> Non
         with pytest.raises(WBTemporaryError):
             await WBMarketplaceClient(make_gateway()).warehouses(SELLER)
         assert len(stub.requests_to(WAREHOUSES)) == 1
+
+
+async def test_an_unexpected_gateway_status_carries_its_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Код ответа без текста шлюза не сказал бы, что именно у него сломалось."""
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock(return_value=None))
+    with respx.mock as router:
+        router.post(REQUEST_URL).respond(
+            502, json={"detail": "Не удалось связаться с Wildberries: Cannot assign requested address"}
+        )
+
+        with pytest.raises(WBTemporaryError, match="Cannot assign requested address"):
+            await WBStatisticsClient(make_gateway()).orders("seller-1", datetime(2026, 8, 30))

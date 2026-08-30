@@ -163,7 +163,10 @@ class EgressGateway:
             # Рассинхрон секрета — постоянная ошибка конфигурации: падать надо
             # сразу и громко, а не жечь минуту сна на каждый вызов.
             raise WBTemporaryError("Шлюз WB отверг авторизацию сервиса — проверьте EGRESS_JWT_SECRET на обеих сторонах")
-        return _Retry(reason=f"шлюз ответил HTTP {response.status_code}", delay=5.0)
+        # Текст шлюза дороже кода ответа: в нём написано, почему он не смог —
+        # например, что не удалось привязаться к исходящему адресу селлера.
+        reason = f"шлюз ответил HTTP {response.status_code}"
+        return _Retry(reason=f"{reason}: {detail}" if detail else reason, delay=5.0)
 
     # --- Управление селлерами -------------------------------------------
 
