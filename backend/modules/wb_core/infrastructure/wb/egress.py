@@ -109,6 +109,13 @@ class EgressGateway:
                 raise WBTemporaryError(f"{api_name} отвечает HTTP {status}")
             if status >= 400:
                 raise WBPermanentError(f"{api_name} отклонил запрос: HTTP {status}")
+            if payload.get("truncated"):
+                # Обрезанный JSON перестаёт быть JSON: молча отдать его дальше
+                # значит записать в базу половину страницы как целую.
+                raise WBTemporaryError(
+                    f"{api_name}: ответ не поместился в потолок шлюза и пришёл обрезанным — "
+                    "поднимите EGRESS_MAX_RESPONSE_BYTES или уменьшите размер страницы"
+                )
             return payload.get("body")
         raise WBTemporaryError(f"{api_name}: {last_error or 'запрос не прошёл'}")
 

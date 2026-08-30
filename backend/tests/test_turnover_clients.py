@@ -252,3 +252,14 @@ async def test_an_unexpected_gateway_status_carries_its_reason(monkeypatch: pyte
 
         with pytest.raises(WBTemporaryError, match="Cannot assign requested address"):
             await WBStatisticsClient(make_gateway()).orders("seller-1", datetime(2026, 8, 30))
+
+
+async def test_a_truncated_body_is_refused_instead_of_parsed() -> None:
+    """Обрезанный JSON — не данные: половина страницы, записанная как целая, хуже ошибки."""
+    with respx.mock as router:
+        router.post(REQUEST_URL).respond(
+            200, json={"status": 200, "ok": True, "body": '{"data": {"feed', "truncated": True}
+        )
+
+        with pytest.raises(WBTemporaryError, match="обрезанным"):
+            await WBStatisticsClient(make_gateway()).orders("seller-1", datetime(2026, 8, 30))
