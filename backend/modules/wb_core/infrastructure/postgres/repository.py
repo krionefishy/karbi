@@ -232,6 +232,7 @@ class SellerRepository:
                         "subject_id": statement.excluded.subject_id,
                         "subject_name": statement.excluded.subject_name,
                         "photo_url": statement.excluded.photo_url,
+                        "photo_count": statement.excluded.photo_count,
                         "sizes": statement.excluded.sizes,
                         "state": statement.excluded.state,
                         "updated_at": func.now(),
@@ -252,6 +253,7 @@ class SellerRepository:
             "subject_id": card.subject_id,
             "subject_name": card.subject_name,
             "photo_url": card.photo_url,
+            "photo_count": card.photo_count,
             "sizes": card.sizes,
             "state": state,
         }
@@ -300,5 +302,6 @@ class SellerRepository:
             subject_id=model.subject_id,
             subject_name=model.subject_name,
             photo_url=model.photo_url,
+            photo_count=model.photo_count,
             state=model.state,
         )

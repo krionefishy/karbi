@@ -63,12 +63,14 @@ def _digest_line(item: dict[str, Any]) -> str:
     where = f" (склад WB {fbo} + свой {fbs})" if fbo and fbs else ""
     previous = item.get("previous_days")
     trend = ""
+    # Дни целые, поэтому дельта видна и без округления: разошлись цифры —
+    # значит запас за сутки действительно сдвинулся на день.
     if isinstance(previous, int | float) and isinstance(days, int | float):
-        if round(previous, 1) > round(days, 1):
-            trend = f", вчера было {previous:.1f}"
-        elif round(previous, 1) < round(days, 1):
-            trend = f", вчера было {previous:.1f} — стало лучше"
-    measure = f"{days:.1f}" if isinstance(days, int | float) else "?"
+        if previous > days:
+            trend = f", вчера было {previous:.0f}"
+        elif previous < days:
+            trend = f", вчера было {previous:.0f} — стало лучше"
+    measure = f"{days:.0f}" if isinstance(days, int | float) else "?"
     return f"• {name} ({article})\n  хватит на {measure} дн.{trend} · остаток {stock} шт.{where}"
 
 

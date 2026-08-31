@@ -13,15 +13,15 @@ from backend.modules.wb_turnover.domain import (
 
 SELLER = uuid.uuid4()
 TODAY = date(2026, 8, 20)
-WINDOW = 14
+WINDOW = 3
 
 
 def metric(
     *,
     stock: ArticleStock | None = ArticleStock("123", 42, 0),
-    orders: ArticleOrders | None = ArticleOrders("123", 28, 0, date(2026, 8, 6)),
+    orders: ArticleOrders | None = ArticleOrders("123", 6, 0, date(2026, 8, 17)),
     average_stock: float = 42.0,
-    stock_days: int = 14,
+    stock_days: int = 3,
 ):
     return compute_turnover(
         seller_id=SELLER,
@@ -35,13 +35,13 @@ def metric(
     )
 
 
-def test_two_weeks_of_orders_become_a_daily_rate_and_days_of_cover() -> None:
+def test_the_window_of_orders_becomes_a_daily_rate_and_days_of_cover() -> None:
     row = metric()
 
-    # 28 orders over the 14 whole days of the window is two a day; 42 in stock
-    # lasts three weeks at that rate.
+    # Six orders over the three whole days of the window is two a day; 42 in
+    # stock lasts three weeks at that rate.
     assert row.avg_daily_orders == 2.0
-    assert row.days_of_cover == 21.0
+    assert row.days_of_cover == 21
     assert row.status == STATUS_OK
 
 
@@ -49,32 +49,32 @@ def test_cover_follows_todays_stock_while_turnover_follows_the_average() -> None
     """The alert must react to the shelf being empty now, not to how full it was."""
     row = metric(stock=ArticleStock("123", 4, 0), average_stock=42.0)
 
-    assert row.days_of_cover == 2.0
-    assert row.turnover_days == 21.0
+    assert row.days_of_cover == 2
+    assert row.turnover_days == 21
 
 
 def test_stock_is_summed_across_both_delivery_models() -> None:
     row = metric(stock=ArticleStock("123", 12, 30))
 
     assert (row.stock_total, row.stock_fbo, row.stock_fbs) == (42, 12, 30)
-    assert row.days_of_cover == 21.0
+    assert row.days_of_cover == 21
 
 
-def test_a_товар_on_sale_for_three_days_is_not_averaged_over_fourteen() -> None:
-    """Dividing by the whole window would make a new article look five times slower."""
-    row = metric(orders=ArticleOrders("123", 12, 0, date(2026, 8, 16)))
+def test_a_товар_on_sale_for_one_day_is_not_averaged_over_the_whole_window() -> None:
+    """Dividing by the whole window would make a new article look three times slower."""
+    row = metric(orders=ArticleOrders("123", 12, 0, date(2026, 8, 19)))
 
-    assert row.sales_days == 4
-    assert row.avg_daily_orders == 3.0
-    assert row.days_of_cover == 14.0
+    assert row.sales_days == 1
+    assert row.avg_daily_orders == 12.0
+    assert row.days_of_cover == 3
 
 
 def test_cancellations_are_not_counted_as_sales() -> None:
-    row = metric(orders=ArticleOrders("123", 14, 14, date(2026, 8, 6)))
+    row = metric(orders=ArticleOrders("123", 3, 3, date(2026, 8, 17)))
 
     assert row.avg_daily_orders == 1.0
-    assert row.cancelled_count == 14
-    assert row.days_of_cover == 42.0
+    assert row.cancelled_count == 3
+    assert row.days_of_cover == 42
 
 
 def test_an_empty_shelf_is_not_a_fast_turnover() -> None:
@@ -87,7 +87,7 @@ def test_an_empty_shelf_is_not_a_fast_turnover() -> None:
 
 
 def test_an_article_nobody_orders_raises_no_alarm() -> None:
-    row = metric(orders=ArticleOrders("123", 0, 3, date(2026, 8, 6)))
+    row = metric(orders=ArticleOrders("123", 0, 3, date(2026, 8, 17)))
 
     assert row.status == STATUS_NO_SALES
     assert row.days_of_cover is None
@@ -105,5 +105,24 @@ def test_the_first_day_after_connecting_already_gives_a_number() -> None:
     row = metric(average_stock=42.0, stock_days=1)
 
     assert row.stock_days == 1
-    assert row.days_of_cover == 21.0
+    assert row.days_of_cover == 21
     assert row.status == STATUS_OK
+
+
+def test_days_are_whole_and_rounded_down() -> None:
+    """Half a day of cover is not a day the seller has to ship in."""
+    row = metric(stock=ArticleStock("123", 5, 0), average_stock=5.0)
+
+    # 5 in stock at two a day is 2.5 days, and 2.5 days is two days.
+    assert row.days_of_cover == 2
+    assert row.turnover_days == 2
+
+
+def test_less_than_a_day_of_cover_reads_as_zero_and_still_alerts() -> None:
+    """Rounding up would promise a day that is not there; dropping the row
+    would lose the loudest alert of the lot."""
+    row = metric(stock=ArticleStock("123", 1, 0))
+
+    assert row.days_of_cover == 0
+    assert row.status == STATUS_OK
+    assert row.alerting is True

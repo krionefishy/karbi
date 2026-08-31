@@ -123,10 +123,11 @@ class TurnoverDailyModel(WBTurnoverBase):
     cancelled_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     avg_daily_orders: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
     # What the alert watches: current stock divided by the daily sales rate.
-    days_of_cover: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # Whole days, rounded down — a fraction of a day is not a day in hand.
+    days_of_cover: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # The bookkeeping figure: average stock over the window, honest only once
     # the window is full of our own snapshots.
-    turnover_days: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    turnover_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stock_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sales_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="ok")

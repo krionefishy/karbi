@@ -129,6 +129,7 @@ class TurnoverWorker:
                         SellerRepository(session),
                         TurnoverRepository(session),
                         window_days=self.turnover.orders_window_days,
+                        min_photos=self.turnover.min_photos,
                     ).calculate(seller_id, now.date())
             except (WBPermanentError, WBTemporaryError) as failure:
                 error = str(failure)
@@ -199,6 +200,7 @@ class TurnoverWorker:
                         SellerRepository(session),
                         turnover,
                         window_days=self.turnover.orders_window_days,
+                        min_photos=self.turnover.min_photos,
                     )
                     rows = await service.calculate(seller_id, day)
                 self.logger.info("turnover_calculated", seller_id=str(seller_id), articles=len(rows))

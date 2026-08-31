@@ -134,6 +134,7 @@ async def test_catalog_upsert_stores_the_identity_fields(seller_repository) -> N
                     subject_id=42,
                     subject_name="Шуруповерты",
                     photo_url="https://basket.wb.ru/9.jpg",
+                    photo_count=4,
                     sizes=[{"chrt_id": 3, "tech_size": "0", "skus": ["2000000000009"]}],
                 )
             ],
@@ -149,3 +150,5 @@ async def test_catalog_upsert_stores_the_identity_fields(seller_repository) -> N
     assert article.brand == "Karbi"
     assert article.subject_name == "Шуруповерты"
     assert article.photo_url == "https://basket.wb.ru/9.jpg"
+    # По этому числу оборачиваемость решает, считать ли карточку вообще.
+    assert article.photo_count == 4

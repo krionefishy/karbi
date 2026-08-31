@@ -48,4 +48,5 @@ class Article:
     subject_id: int | None = None
     subject_name: str = ""
     photo_url: str = ""
+    photo_count: int | None = None
     state: str = "active"

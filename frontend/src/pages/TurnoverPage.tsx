@@ -125,6 +125,7 @@ export function TurnoverPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const threshold = turnover?.threshold_days ?? 10;
+  const windowDays = turnover?.window_days ?? 3;
   const allArticles = turnover?.articles ?? [];
   const dormant = allArticles.filter(isDormant);
   const articles = showDormant ? allArticles : allArticles.filter((item) => !isDormant(item));
@@ -243,8 +244,8 @@ export function TurnoverPage() {
             <div className="empty-state">
               <h2>Данных пока нет</h2>
               <p>
-                Первый снимок остатков будет взят в ближайший слот сбора, заказы подтянутся за две
-                недели назад. Метрика появится после ночного расчёта.
+                Первый снимок остатков будет взят в ближайший слот сбора, заказы подтянутся за
+                {" "}{windowDays} дн. назад. Метрика появится после ночного расчёта.
               </p>
             </div>
           ) : (
@@ -264,7 +265,7 @@ export function TurnoverPage() {
                 <span>Товар</span>
                 <span>Хватит на</span>
                 <span>Остаток</span>
-                <span>Заказов за 14 дн.</span>
+                <span>Заказов за {windowDays} дн.</span>
                 <span>В среднем в день</span>
                 <span>Оборачиваемость</span>
                 <span>Статус</span>
@@ -305,9 +306,9 @@ export function TurnoverPage() {
                     <span>{item.orders_count}</span>
                     <span>{item.avg_daily_orders.toFixed(2)}</span>
                     <span>
-                      {item.turnover_days === null ? "—" : `${item.turnover_days.toFixed(1)} дн.`}
-                      {item.stock_days > 0 && item.stock_days < 14 && (
-                        <em className="stock-split">по {item.stock_days} дн. из 14</em>
+                      {item.turnover_days === null ? "—" : `${item.turnover_days} дн.`}
+                      {item.stock_days > 0 && item.stock_days < windowDays && (
+                        <em className="stock-split">по {item.stock_days} дн. из {windowDays}</em>
                       )}
                     </span>
                     <span className={`turnover-state turnover-state-${item.status}`}>

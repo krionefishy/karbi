@@ -73,6 +73,8 @@ class ArticleModel(WBCoreBase):
     subject_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     subject_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     photo_url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
+    # NULL — карточку ещё не читали каталогом; ноль — читали, и фото в ней нет.
+    photo_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sizes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     # active — в продаже, archived — в корзине WB, feedback_only — карточки нет
     # ни в каталоге, ни в корзине, но по ней приходят отзывы.

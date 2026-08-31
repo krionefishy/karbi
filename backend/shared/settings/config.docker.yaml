@@ -85,10 +85,11 @@ turnover:
   calculation_minute: 40
   digest_hour: ${TURNOVER_DIGEST_HOUR:-10}
   digest_minute: 0
-  orders_window_days: ${TURNOVER_ORDERS_WINDOW_DAYS:-14}
-  orders_backfill_days: 14
+  orders_window_days: ${TURNOVER_ORDERS_WINDOW_DAYS:-3}
+  orders_backfill_days: 3
   orders_overlap_hours: 24
   threshold_days: ${TURNOVER_THRESHOLD_DAYS:-10}
+  min_photos: ${TURNOVER_MIN_PHOTOS:-3}
   snapshot_retention_days: 60
   order_retention_days: 45
   notification_bot: ${TURNOVER_NOTIFICATION_BOT:-turnover-alerts}

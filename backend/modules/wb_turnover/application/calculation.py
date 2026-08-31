@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.wb_core.domain import Article
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_turnover.domain import TurnoverRow, compute_turnover
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
@@ -23,15 +24,31 @@ class CalculationService:
         turnover: TurnoverRepository,
         *,
         window_days: int,
+        min_photos: int,
     ) -> None:
         self.session = session
         self.sellers = sellers
         self.turnover = turnover
         self.window_days = window_days
+        self.min_photos = min_photos
         self.logger = logging.getLogger("wb.turnover.calculation")
 
     async def _listed(self, seller_id: uuid.UUID) -> set[str]:
-        return {article.article for article in await self.sellers.list_articles(seller_id) if article.state == "active"}
+        return {
+            article.article
+            for article in await self.sellers.list_articles(seller_id)
+            if article.state == "active" and self._shown(article)
+        }
+
+    def _shown(self, article: Article) -> bool:
+        """Карточка с парой фото в выдаче WB почти не показывается, и считать ей
+        оборачиваемость незачем — товар стоит не потому, что кончается запас.
+
+        Число фото у нас появляется из синка каталога. Пока его нет (`None`),
+        товар не исключается: погасить уведомления по всему ассортименту из-за
+        того, что мы ещё не смотрели, — худшая из двух ошибок.
+        """
+        return article.photo_count is None or article.photo_count >= self.min_photos
 
     async def calculate(self, seller_id: uuid.UUID, day: date) -> list[TurnoverRow]:
         window_start = day - timedelta(days=self.window_days)

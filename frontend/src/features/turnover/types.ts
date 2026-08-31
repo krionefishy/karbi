@@ -22,6 +22,8 @@ export interface TurnoverArticles {
   seller_id: string;
   date: string | null;
   threshold_days: number;
+  /** Окно, за которое считался темп продаж. Подписывает колонки таблицы. */
+  window_days: number;
   articles: ArticleTurnover[];
 }
 

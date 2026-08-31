@@ -28,6 +28,11 @@ describe("cover", () => {
     expect(coverLabel(article(30), 10).tone).toBe("calm");
   });
 
+  it("shows whole days — a fraction of a day is not a day in hand", () => {
+    expect(coverLabel(article(3), 10).text).toBe("3 дн.");
+    expect(coverLabel(article(0), 10).text).toBe("0 дн.");
+  });
+
   it("says nothing when the metric could not be computed", () => {
     expect(coverLabel(article(null), 10)).toEqual({ text: "—", tone: "neutral" });
   });

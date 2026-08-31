@@ -41,7 +41,7 @@ from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 TODAY = date(2026, 8, 20)
-WINDOW = 14
+WINDOW = 3
 
 
 class FakeStatistics(WBStatisticsClient):
@@ -214,10 +214,14 @@ async def collect_orders(database, seller_id, statistics, now=None) -> None:
         )
 
 
-async def calculate(database, seller_id, day=TODAY):
+async def calculate(database, seller_id, day=TODAY, min_photos=SETTINGS.turnover.min_photos):
     async with database.session() as session:
         return await CalculationService(
-            session, SellerRepository(session), TurnoverRepository(session), window_days=WINDOW
+            session,
+            SellerRepository(session),
+            TurnoverRepository(session),
+            window_days=WINDOW,
+            min_photos=min_photos,
         ).calculate(seller_id, day)
 
 
@@ -335,7 +339,8 @@ async def test_the_metric_is_computed_from_what_was_collected(seller) -> None:
     rows = {row.article: row for row in await calculate(database, seller_id)}
 
     assert rows["101"].status == STATUS_OK
-    assert rows["101"].days_of_cover == 42 / 28  # 28 orders on one day of sale
+    # 28 orders on one day of sale is 42 / 28 = 1.5 дня — то есть один день.
+    assert rows["101"].days_of_cover == 1
     assert rows["102"].status == STATUS_NO_STOCK
 
 
@@ -356,7 +361,7 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
     first, second = await send(), await send()
 
     # Only 101: it is about to run out. 102 sits at zero as well, but nobody
-    # ordered it in two weeks — that is the assortment tail, not an alert.
+    # ordered it inside the window — that is the assortment tail, not an alert.
     assert (first.sent, first.articles) == (True, 1)
     assert second.sent is False
     async with database.session() as session:
@@ -667,6 +672,36 @@ async def test_cards_wb_no_longer_lists_are_left_out_of_the_metric(seller) -> No
     rows = await calculate(database, seller_id)
 
     assert [row.article for row in rows] == ["101"]
+
+
+async def test_a_card_with_too_few_photos_is_left_out_of_the_metric(seller) -> None:
+    """Карточку с парой фото WB почти не показывает: она стоит не из-за запаса,
+    и звать по ней на отгрузку незачем."""
+    database, seller_id = seller
+    async with database.session() as session:
+        await session.execute(update(ArticleModel).where(ArticleModel.seller_id == seller_id).values(photo_count=5))
+        await session.execute(
+            update(ArticleModel)
+            .where(ArticleModel.seller_id == seller_id, ArticleModel.article == "102")
+            .values(photo_count=2)
+        )
+        await session.commit()
+
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 5), stock("102", 7)]), FakeMarketplace())
+    rows = await calculate(database, seller_id, min_photos=3)
+
+    assert [row.article for row in rows] == ["101"]
+
+
+async def test_a_card_we_have_never_counted_photos_for_is_not_dropped(seller) -> None:
+    """NULL — это «не смотрели», а не «фото нет»: гасить уведомления по всему
+    ассортименту до первого синка каталога дороже лишней строки."""
+    database, seller_id = seller
+
+    await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 5), stock("102", 7)]), FakeMarketplace())
+    rows = await calculate(database, seller_id, min_photos=3)
+
+    assert [row.article for row in rows] == ["101", "102"]
 
 
 async def test_pressing_refresh_twice_asks_wildberries_once(seller) -> None:

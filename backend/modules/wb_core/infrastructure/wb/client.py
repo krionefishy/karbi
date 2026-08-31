@@ -34,6 +34,10 @@ class CatalogCard:
     subject_id: int | None = None
     subject_name: str = ""
     photo_url: str = ""
+    # Сколько всего фото в карточке. None — карточку каталогом ещё не читали
+    # (так приходят товары, замеченные только в отзывах): «нет фото» и «не
+    # смотрели» решаются по-разному теми, кто по этому числу фильтрует.
+    photo_count: int | None = None
     sizes: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -120,6 +124,7 @@ class WBContentClient:
             subject_id=int(card["subjectID"]) if str(card.get("subjectID") or "").isdigit() else None,
             subject_name=str(card.get("subjectName") or ""),
             photo_url=WBContentClient._photo(card.get("photos")),
+            photo_count=WBContentClient._photo_count(card.get("photos")),
             sizes=WBContentClient._sizes(card.get("sizes")),
         )
 
@@ -136,6 +141,11 @@ class WBContentClient:
                     if isinstance(value, str) and value:
                         return value
         return ""
+
+    @staticmethod
+    def _photo_count(photos: Any) -> int | None:
+        """Столько фото в карточке. Пустой список — это ноль, а не «не знаем»."""
+        return len(photos) if isinstance(photos, list) else None
 
     @staticmethod
     def _sizes(sizes: Any) -> list[dict[str, Any]]:

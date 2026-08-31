@@ -33,6 +33,7 @@ async def seller_articles(
         seller_id=seller_id,
         date=snapshot.date.isoformat() if snapshot.date else None,
         threshold_days=settings.turnover.threshold_days,
+        window_days=settings.turnover.orders_window_days,
         articles=[article_response(item) for item in snapshot.articles],
     )
 

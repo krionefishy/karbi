@@ -49,16 +49,16 @@ class DigestService:
         self.logger = logging.getLogger("wb.turnover.digest")
 
     @staticmethod
-    def _number(value: float | None) -> float | None:
-        return float(value) if value is not None else None
+    def _number(value: int | None) -> int | None:
+        return int(value) if value is not None else None
 
     async def send(self, seller_id: uuid.UUID, day: date) -> DigestResult:
         rows = await self.turnover.turnover_on(seller_id, day)
         # An article already at zero belongs in the digest more than any other:
         # losing the alert the moment the shelf empties would be exactly wrong.
         # But only if it was actually selling — «нет остатка и не заказывали ни
-        # разу за две недели» is the assortment tail, not news. For one seller
-        # that split was 28 against 927.
+        # разу за окно» is the assortment tail, not news. For one seller that
+        # split was 28 against 927.
         alerting = [
             row
             for row in rows
@@ -66,7 +66,7 @@ class DigestService:
             or (
                 row.status == STATUS_OK
                 and row.days_of_cover is not None
-                and float(row.days_of_cover) < self.threshold_days
+                and int(row.days_of_cover) < self.threshold_days
             )
         ]
         if not alerting:
@@ -113,7 +113,7 @@ class DigestService:
                         {
                             "article": row.article,
                             "name": names.get(row.article, ""),
-                            "days": float(row.days_of_cover) if row.days_of_cover is not None else None,
+                            "days": self._number(row.days_of_cover),
                             "previous_days": self._number(previous.get(row.article)),
                             "stock": row.stock_total,
                             "stock_fbo": row.stock_fbo,

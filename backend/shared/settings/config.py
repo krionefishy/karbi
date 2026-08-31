@@ -153,12 +153,16 @@ class TurnoverConfig:
     calculation_minute: int = 40
     digest_hour: int = 10
     digest_minute: int = 0
-    orders_window_days: int = 14
-    orders_backfill_days: int = 14
+    # Трёхдневное окно: свежий темп продаж вместо усреднённого за две недели.
+    orders_window_days: int = 3
+    orders_backfill_days: int = 3
     # Перекрытие при инкрементальной догрузке: отменённый заказ приезжает заново
     # с новым lastChangeDate, но запас лишних суток дешевле пропущенной отмены.
     orders_overlap_hours: int = 24
     threshold_days: int = 10
+    # Карточка беднее трёх фото в выдаче WB почти не показывается, поэтому её
+    # оборачиваемость никого не спасает: в расчёт и в дайджест такие не идут.
+    min_photos: int = 3
     snapshot_retention_days: int = 60
     order_retention_days: int = 45
     notification_bot: str = "turnover-alerts"
@@ -310,6 +314,7 @@ class Settings:
             "orders_backfill_days",
             "orders_overlap_hours",
             "threshold_days",
+            "min_photos",
             "snapshot_retention_days",
             "order_retention_days",
         ):
@@ -381,6 +386,8 @@ class Settings:
             raise ValueError("turnover.orders_window_days must be positive")
         if self.turnover.threshold_days < 1:
             raise ValueError("turnover.threshold_days must be positive")
+        if self.turnover.min_photos < 0:
+            raise ValueError("turnover.min_photos must not be negative")
         if self.turnover.order_retention_days <= self.turnover.orders_window_days:
             # Pruning inside the window would erase the very orders the metric divides by.
             raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")

@@ -1,3 +1,4 @@
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -41,8 +42,8 @@ class TurnoverRow:
     orders_count: int
     cancelled_count: int
     avg_daily_orders: float
-    days_of_cover: float | None
-    turnover_days: float | None
+    days_of_cover: int | None
+    turnover_days: int | None
     stock_days: int
     sales_days: int
     status: str
@@ -74,8 +75,12 @@ def compute_turnover(
     honest as the number of days we have been collecting (`stock_days`).
 
     The divisor is the days the article was actually on sale inside the window,
-    not the window itself: a товар first ordered three days ago would otherwise
-    look like it sells five times slower than it does.
+    not the window itself: a товар first ordered yesterday would otherwise look
+    like it sells a whole window slower than it does.
+
+    Both numbers are whole days rounded down. Half a day of cover is not a day
+    the seller has, and «хватит на 0 дн.» is the honest reading of a shelf that
+    empties before tomorrow.
     """
     ordered = orders.orders if orders else 0
     cancelled = orders.cancelled if orders else 0
@@ -94,8 +99,8 @@ def compute_turnover(
     elif ordered == 0:
         status = STATUS_NO_SALES
 
-    days_of_cover = round(total / rate, 2) if status == STATUS_OK and rate > 0 else None
-    turnover_days = round(average_stock / rate, 2) if rate > 0 and average_stock > 0 else None
+    days_of_cover = math.floor(total / rate) if status == STATUS_OK and rate > 0 else None
+    turnover_days = math.floor(average_stock / rate) if rate > 0 and average_stock > 0 else None
     return TurnoverRow(
         seller_id=seller_id,
         article=article,

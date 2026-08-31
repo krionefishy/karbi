@@ -40,12 +40,33 @@ async def test_content_client_maps_every_identity_field() -> None:
             subject_id=42,
             subject_name="Компрессоры автомобильные",
             photo_url="https://basket.wb.ru/small.jpg",
+            photo_count=1,
             sizes=[{"chrt_id": 7, "tech_size": "0", "skus": ["2000000000001"]}],
         )
     ]
     # Конверт шлюза несёт селлера и раздел WB — ключа в нём нет.
     envelope = stub.calls[0]
     assert envelope["seller_id"] == "seller-1" and envelope["api"] == "content"
+
+
+async def test_content_client_counts_photos_and_says_when_it_cannot() -> None:
+    """По этому числу оборачиваемость отсеивает бедные карточки, поэтому пустой
+    список фото и отсутствие поля обязаны различаться."""
+    photos = [{"big": f"https://basket.wb.ru/{index}.jpg"} for index in range(4)]
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "POST",
+            WBContentClient.endpoint,
+            body={
+                "cards": [card(1, photos=photos), card(2, photos=[]), card(3, photos=None)],
+                "cursor": {"total": 3},
+            },
+        )
+
+        articles = await client().get_articles("seller-1")
+
+    assert [item.photo_count for item in articles] == [4, 0, None]
 
 
 async def test_content_client_reads_the_trash_alongside_the_catalog() -> None:

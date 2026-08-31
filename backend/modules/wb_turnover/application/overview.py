@@ -32,8 +32,8 @@ class ArticleTurnover:
     avg_stock: float
     orders_count: int
     avg_daily_orders: float
-    days_of_cover: float | None
-    turnover_days: float | None
+    days_of_cover: int | None
+    turnover_days: int | None
     stock_days: int
     status: str
 
@@ -163,8 +163,8 @@ class TurnoverService:
                     avg_stock=float(row.avg_stock),
                     orders_count=row.orders_count,
                     avg_daily_orders=float(row.avg_daily_orders),
-                    days_of_cover=float(row.days_of_cover) if row.days_of_cover is not None else None,
-                    turnover_days=float(row.turnover_days) if row.turnover_days is not None else None,
+                    days_of_cover=int(row.days_of_cover) if row.days_of_cover is not None else None,
+                    turnover_days=int(row.turnover_days) if row.turnover_days is not None else None,
                     stock_days=row.stock_days,
                     status=row.status,
                 )

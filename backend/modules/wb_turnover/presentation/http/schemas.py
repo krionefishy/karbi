@@ -13,8 +13,8 @@ class ArticleTurnoverResponse(BaseModel):
     avg_stock: float
     orders_count: int
     avg_daily_orders: float
-    days_of_cover: float | None
-    turnover_days: float | None
+    days_of_cover: int | None
+    turnover_days: int | None
     stock_days: int
     status: str
 
@@ -23,6 +23,9 @@ class TurnoverArticlesResponse(BaseModel):
     seller_id: uuid.UUID
     date: str | None
     threshold_days: int
+    # За сколько дней считался темп продаж: интерфейс подписывает этим числом
+    # колонки, чтобы окно можно было менять настройкой, а не правкой вёрстки.
+    window_days: int
     articles: list[ArticleTurnoverResponse]
 
 
