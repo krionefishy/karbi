@@ -355,7 +355,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .registry-actions { display: flex; align-items: center; gap: 18px; }
 .archived-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .registry-table { background: var(--surface); border: 1px solid var(--line); }
-.registry-head, .registry-row { display: grid; grid-template-columns: minmax(220px, 1fr) 90px 130px 130px minmax(200px, 1fr) 140px; align-items: center; min-height: 58px; border-bottom: 1px solid var(--line); }
+/* Ключей стало два — по колонке на маркетплейс; действий стало пять, поэтому
+   последняя колонка шире. */
+.registry-head, .registry-row { display: grid; grid-template-columns: minmax(220px, 1fr) 90px 130px 130px 130px minmax(160px, 1fr) 185px; align-items: center; min-height: 58px; border-bottom: 1px solid var(--line); }
 .registry-row:last-child { border-bottom: 0; }
 .registry-head { min-height: 42px; color: var(--muted); background: var(--paper); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
 .registry-head > *, .registry-row > * { padding: 0 16px; }
@@ -372,6 +374,8 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .egress-state { color: var(--muted); font: 10px "JetBrains Mono", monospace; text-transform: uppercase; }
 .egress-state-verified { color: var(--positive); }
 .egress-state-key_invalid, .egress-state-no_free_ip, .egress-state-undelivered { color: var(--negative); }
+/* «Не подключён» — не поломка, а «ещё не заводили»: красным быть не должно. */
+.egress-state-absent { color: var(--muted); }
 .registry-row-actions { display: flex; gap: 5px; }
 .registry-row-actions button { display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; color: var(--muted); background: var(--surface); border: 1px solid var(--line); cursor: pointer; }
 .registry-row-actions button:hover { color: var(--text); background: var(--paper); }

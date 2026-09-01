@@ -19,6 +19,8 @@ def seller_response(seller: Seller, automations: Sequence[str] = ()) -> SellerRe
         automations=list(automations),
         egress_status=seller.egress_status,
         egress_error=seller.egress_error,
+        ozon_egress_status=seller.ozon_egress_status,
+        ozon_egress_error=seller.ozon_egress_error,
         egress_ip=seller.egress_ip,
     )
 

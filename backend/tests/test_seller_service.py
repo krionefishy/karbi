@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.application import (
     AutomationEnrollment,
     AutomationNotFoundError,
+    DuplicateCredentialError,
     SellerArchivedError,
     SellerNotFoundError,
     SellerService,
 )
-from backend.modules.wb_core.domain import Article, Seller
+from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
 from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
@@ -58,15 +59,28 @@ class FakeEnrollment(AutomationEnrollment):
 
 
 class FakeGateway:
-    """Шлюз wb-egress, каким его видит сервис: три управляющих вызова."""
+    """Шлюз wb-egress, каким его видит сервис: управляющие вызовы по маркетплейсам."""
 
-    def __init__(self, outcome: dict | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        outcome: dict | None = None,
+        error: Exception | None = None,
+        ozon_outcome: dict | None = None,
+    ) -> None:
         self.outcome = outcome or {"status": "verified", "egress_ip": "185.0.0.1", "verify_error": ""}
+        self.ozon_outcome = ozon_outcome or {
+            "status": "verified",
+            "egress_ip": "185.0.0.1",
+            "verify_error": "",
+            "marketplaces": {"ozon": {"status": "verified", "verify_error": ""}},
+        }
         self.error = error
         self.delivered: list[tuple[str, str, str]] = []
+        self.ozon_delivered: list[dict] = []
         self.renamed: list[tuple[str, str]] = []
         self.disabled: list[str] = []
         self.verified: list[str] = []
+        self.ozon_verified: list[str] = []
 
     async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict:
         if self.error is not None:
@@ -92,6 +106,37 @@ class FakeGateway:
         self.verified.append(seller_id)
         return dict(self.outcome)
 
+    async def put_ozon_credentials(
+        self,
+        *,
+        seller_id: str,
+        name: str,
+        client_id: str,
+        api_key: str,
+        performance_client_id: str,
+        performance_client_secret: str,
+        event_version: int,
+    ) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.ozon_delivered.append(
+            {
+                "seller_id": seller_id,
+                "name": name,
+                "client_id": client_id,
+                "api_key": api_key,
+                "performance_client_id": performance_client_id,
+                "performance_client_secret": performance_client_secret,
+            }
+        )
+        return dict(self.ozon_outcome)
+
+    async def verify_ozon(self, seller_id: str) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.ozon_verified.append(seller_id)
+        return dict(self.ozon_outcome)
+
 
 class FakeSellerRepository:
     def __init__(self) -> None:
@@ -104,6 +149,8 @@ class FakeSellerRepository:
             archived_at=None,
             egress_status="undelivered",
             egress_error=None,
+            ozon_egress_status="undelivered",
+            ozon_egress_error=None,
             egress_ip=None,
             egress_version=0,
         )
@@ -117,16 +164,18 @@ class FakeSellerRepository:
             return []
         return [
             Seller(
-                self.seller_id,
-                self.model.name,
-                len(self.items),
-                self.model.catalog_sync_status,
-                None,
-                self.model.catalog_sync_error,
-                self.model.archived_at,
-                self.model.egress_status,
-                self.model.egress_error,
-                self.model.egress_ip,
+                id=self.seller_id,
+                name=self.model.name,
+                product_count=len(self.items),
+                catalog_sync_status=self.model.catalog_sync_status,
+                last_catalog_sync_at=None,
+                catalog_sync_error=self.model.catalog_sync_error,
+                archived_at=self.model.archived_at,
+                egress_status=self.model.egress_status,
+                egress_error=self.model.egress_error,
+                ozon_egress_status=self.model.ozon_egress_status,
+                ozon_egress_error=self.model.ozon_egress_error,
+                egress_ip=self.model.egress_ip,
             )
         ]
 
@@ -140,10 +189,18 @@ class FakeSellerRepository:
         return None if self.deleted or seller_id != self.seller_id else self.model
 
     async def set_egress_state(
-        self, seller_id: uuid.UUID, *, status: str, error: str | None, ip=None, version: int | None = None
+        self,
+        seller_id: uuid.UUID,
+        *,
+        status: str,
+        error: str | None,
+        ip=None,
+        version: int | None = None,
+        marketplace: str = MARKETPLACE_WB,
     ) -> None:
-        self.model.egress_status = status
-        self.model.egress_error = error
+        prefix = "ozon_" if marketplace == MARKETPLACE_OZON else ""
+        setattr(self.model, f"{prefix}egress_status", status)
+        setattr(self.model, f"{prefix}egress_error", error)
         if ip is not None:
             self.model.egress_ip = str(ip)
         if version is not None:
@@ -347,3 +404,93 @@ async def test_an_invalid_key_verdict_lands_on_the_seller() -> None:
     assert created.egress_status == "key_invalid"
     assert created.egress_error == "HTTP 401 от WB"
     assert not any(isinstance(item, OutboxEventModel) for item in session.added)
+
+
+# --- Ozon -------------------------------------------------------------------
+
+
+async def test_ozon_credentials_are_delivered_to_the_gateway() -> None:
+    service, repository, _, _, gateway = service_fixture()
+
+    seller = await service.set_ozon_credentials(
+        repository.seller_id,
+        client_id="111222",
+        api_key="ozon-api-key-123456",
+        performance_client_id="42@advertising.performance.ozon.ru",
+        performance_client_secret="perf-secret",
+    )
+
+    assert seller.ozon_egress_status == "verified"
+    delivered = gateway.ozon_delivered[0]
+    assert delivered["client_id"] == "111222"
+    assert delivered["performance_client_secret"] == "perf-secret"
+    # Имя селлера едет вместе с учёткой: шлюзу оно нужно для строки селлера.
+    assert delivered["name"] == repository.model.name
+
+
+async def test_ozon_does_not_disturb_the_wildberries_status() -> None:
+    """Учётки независимы: ключ WB проверен, а Ozon — нет, и наоборот."""
+    gateway = FakeGateway(
+        ozon_outcome={"marketplaces": {"ozon": {"status": "key_invalid", "verify_error": "HTTP 401 от Ozon"}}}
+    )
+    service, repository, _, _, _ = service_fixture(gateway)
+    await service.create("ООО Ромашка", "wb-api-key-123456")
+
+    seller = await service.set_ozon_credentials(repository.seller_id, client_id="111222", api_key="ozon-api-key-123456")
+
+    assert seller.egress_status == "verified"
+    assert seller.ozon_egress_status == "key_invalid"
+    assert seller.ozon_egress_error == "HTTP 401 от Ozon"
+
+
+async def test_the_wildberries_saga_survives_a_gateway_that_predates_ozon() -> None:
+    """Во время выкатки шлюз ещё отдаёт плоский status — это статус WB."""
+    gateway = FakeGateway(outcome={"status": "verified", "egress_ip": "185.0.0.1", "verify_error": ""})
+    service, _, _, _, _ = service_fixture(gateway)
+
+    created = await service.create("ООО Ромашка", "wb-api-key-123456")
+
+    assert created.egress_status == "verified"
+    assert created.ozon_egress_status == "undelivered"
+
+
+async def test_an_unreachable_gateway_leaves_the_ozon_account_undelivered() -> None:
+    gateway = FakeGateway(error=EgressAdminError("Шлюз недоступен"))
+    service, repository, _, _, _ = service_fixture(gateway)
+
+    seller = await service.set_ozon_credentials(repository.seller_id, client_id="111222", api_key="ozon-api-key-123456")
+
+    assert seller.ozon_egress_status == "undelivered"
+    assert seller.ozon_egress_error is not None and "недоступен" in seller.ozon_egress_error
+
+
+async def test_a_cabinet_already_taken_is_reported_as_a_conflict() -> None:
+    gateway = FakeGateway(
+        error=EgressAdminError("Кабинет Ozon 111222 уже заведён у селлера «ООО Икс»", status_code=409)
+    )
+    service, repository, _, _, _ = service_fixture(gateway)
+
+    with pytest.raises(DuplicateCredentialError, match="ООО Икс"):
+        await service.set_ozon_credentials(repository.seller_id, client_id="111222", api_key="ozon-api-key-123456")
+
+
+async def test_reverification_updates_only_the_ozon_status() -> None:
+    service, repository, _, _, gateway = service_fixture()
+    repository.model.ozon_egress_status = "key_invalid"
+
+    seller = await service.refresh_ozon_egress(repository.seller_id)
+
+    assert gateway.ozon_verified == [str(repository.seller_id)]
+    assert gateway.verified == []
+    assert seller.ozon_egress_status == "verified"
+
+
+async def test_archiving_puts_out_every_marketplace() -> None:
+    service, repository, _, _, _ = service_fixture()
+    await service.create("ООО Ромашка", "wb-api-key-123456")
+    await service.set_ozon_credentials(repository.seller_id, client_id="111222", api_key="ozon-api-key-123456")
+
+    archived = await service.archive(repository.seller_id)
+
+    assert archived.egress_status == "disabled"
+    assert archived.ozon_egress_status == "disabled"

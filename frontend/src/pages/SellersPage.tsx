@@ -1,10 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Store, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
-import { ConfirmDialog, RestoreSellerDialog, SellerDialog } from "../components/SellerDialog";
+import {
+  ConfirmDialog,
+  OzonCredentialsDialog,
+  RestoreSellerDialog,
+  SellerDialog,
+} from "../components/SellerDialog";
 import { getAutomations } from "../features/automations/api";
 import {
   archiveSeller,
@@ -13,10 +18,13 @@ import {
   purgeSeller,
   restoreSeller,
   retrySellerSync,
+  setOzonCredentials,
   updateSeller,
+  verifyOzonEgress,
   verifySellerEgress,
 } from "../features/sellers/api";
-import type { Seller, SellerInput } from "../features/sellers/types";
+import type { OzonCredentialsInput, Seller, SellerInput } from "../features/sellers/types";
+import { isOzonMissing } from "../features/sellers/types";
 
 const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   queued: "В очереди",
@@ -44,6 +52,7 @@ export function SellersPage() {
   const [archiving, setArchiving] = useState<Seller | null>(null);
   const [purging, setPurging] = useState<Seller | null>(null);
   const [restoring, setRestoring] = useState<Seller | null>(null);
+  const [ozonSeller, setOzonSeller] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
 
   const { data: sellers = [], isLoading } = useQuery({
@@ -104,6 +113,25 @@ export function SellersPage() {
     mutationFn: verifySellerEgress,
     onSuccess: refresh,
   });
+  const ozonMutation = useMutation({
+    mutationFn: (payload: OzonCredentialsInput) => setOzonCredentials((ozonSeller as Seller).id, payload),
+    onSuccess: async () => {
+      setOzonSeller(null);
+      setFormError("");
+      await refresh();
+    },
+    onError: (error) =>
+      setFormError(error instanceof ApiError ? error.message : "Не удалось сохранить учётку Ozon"),
+  });
+  const ozonVerifyMutation = useMutation({
+    mutationFn: () => verifyOzonEgress((ozonSeller as Seller).id),
+    // Диалог остаётся открытым: менеджер должен увидеть новый вердикт там же,
+    // где нажал «Перепроверить».
+    onSuccess: async (seller) => {
+      setOzonSeller(seller);
+      await refresh();
+    },
+  });
 
   return (
     <div className="app-page">
@@ -162,7 +190,8 @@ export function SellersPage() {
               <span>Селлер</span>
               <span>Товаров</span>
               <span>Каталог</span>
-              <span>Ключ</span>
+              <span>Ключ WB</span>
+              <span>Ключ Ozon</span>
               <span>Автоматизации</span>
               <span>Действия</span>
             </div>
@@ -186,6 +215,16 @@ export function SellersPage() {
                   title={seller.egress_error ?? undefined}
                 >
                   {seller.archived_at ? "—" : (egressStatusText[seller.egress_status] ?? seller.egress_status)}
+                </span>
+                <span
+                  className={`egress-state egress-state-${isOzonMissing(seller) ? "absent" : seller.ozon_egress_status}`}
+                  title={seller.ozon_egress_error ?? undefined}
+                >
+                  {seller.archived_at
+                    ? "—"
+                    : isOzonMissing(seller)
+                      ? "не подключён"
+                      : (egressStatusText[seller.ozon_egress_status] ?? seller.ozon_egress_status)}
                 </span>
                 <span className="registry-automations">
                   {seller.automations.length === 0
@@ -247,6 +286,16 @@ export function SellersPage() {
                         </button>
                       )}
                       <button
+                        title={isOzonMissing(seller) ? "Подключить Ozon" : "Учётка Ozon"}
+                        aria-label={`Учётка Ozon ${seller.name}`}
+                        onClick={() => {
+                          setFormError("");
+                          setOzonSeller(seller);
+                        }}
+                      >
+                        <Store size={15} />
+                      </button>
+                      <button
                         title="В архив"
                         aria-label={`Отправить в архив ${seller.name}`}
                         onClick={() => setArchiving(seller)}
@@ -271,10 +320,21 @@ export function SellersPage() {
           onSubmit={(value) => saveMutation.mutate(value)}
         />
       )}
+      {ozonSeller && (
+        <OzonCredentialsDialog
+          seller={ozonSeller}
+          pending={ozonMutation.isPending}
+          verifying={ozonVerifyMutation.isPending}
+          error={formError}
+          onClose={() => setOzonSeller(null)}
+          onSubmit={(value) => ozonMutation.mutate(value)}
+          onVerify={() => ozonVerifyMutation.mutate()}
+        />
+      )}
       {archiving && (
         <ConfirmDialog
           title="Отправить в архив?"
-          description={`«${archiving.name}» отключится от всех автоматизаций и перестанет собирать данные. Ключ будет удалён, собранная история останется. Вернуть можно в любой момент.`}
+          description={`«${archiving.name}» отключится от всех автоматизаций и перестанет собирать данные. Ключи всех маркетплейсов будут удалены, собранная история останется. Вернуть можно в любой момент.`}
           confirmLabel="В архив"
           pendingLabel="Архивируем…"
           pending={archiveMutation.isPending}

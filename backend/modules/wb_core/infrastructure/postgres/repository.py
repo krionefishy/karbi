@@ -7,7 +7,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.domain import Article, Seller
+from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
     InboxEventModel,
@@ -17,6 +17,13 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
 from backend.modules.wb_core.infrastructure.wb import CatalogCard
 
 _UPSERT_CHUNK = 500
+
+# Колонки исхода доставки по маркетплейсам. Пара без префикса — за
+# Wildberries, по истории: её читают фронтенд и сверка со шлюзом.
+_EGRESS_COLUMNS = {
+    MARKETPLACE_WB: (SellerModel.egress_status, SellerModel.egress_error),
+    MARKETPLACE_OZON: (SellerModel.ozon_egress_status, SellerModel.ozon_egress_error),
+}
 
 
 class SellerRepository:
@@ -57,13 +64,16 @@ class SellerRepository:
         error: str | None,
         ip: str | None = None,
         version: int | None = None,
+        marketplace: str = MARKETPLACE_WB,
     ) -> None:
-        values: dict[str, Any] = {"egress_status": status, "egress_error": error}
+        """Исход доставки по одному маркетплейсу; адрес и версия — общие."""
+        status_column, error_column = _EGRESS_COLUMNS[marketplace]
+        values: dict[Any, Any] = {status_column: status, error_column: error}
         if ip is not None:
-            values["egress_ip"] = str(ip)
+            values[SellerModel.egress_ip] = str(ip)
         if version is not None:
-            values["egress_version"] = version
-        await self.session.execute(update(SellerModel).where(SellerModel.id == seller_id).values(**values))
+            values[SellerModel.egress_version] = version
+        await self.session.execute(update(SellerModel).where(SellerModel.id == seller_id).values(values))
 
     async def get_egress_version(self, seller_id: uuid.UUID) -> int:
         stored = await self.session.scalar(select(SellerModel.egress_version).where(SellerModel.id == seller_id))
@@ -277,16 +287,18 @@ class SellerRepository:
     @staticmethod
     def _seller(model: SellerModel, count: int) -> Seller:
         return Seller(
-            model.id,
-            model.name,
-            count,
-            model.catalog_sync_status,
-            model.last_catalog_sync_at,
-            model.catalog_sync_error,
-            model.archived_at,
-            model.egress_status,
-            model.egress_error,
-            model.egress_ip,
+            id=model.id,
+            name=model.name,
+            product_count=count,
+            catalog_sync_status=model.catalog_sync_status,
+            last_catalog_sync_at=model.last_catalog_sync_at,
+            catalog_sync_error=model.catalog_sync_error,
+            archived_at=model.archived_at,
+            egress_status=model.egress_status,
+            egress_error=model.egress_error,
+            ozon_egress_status=model.ozon_egress_status,
+            ozon_egress_error=model.ozon_egress_error,
+            egress_ip=model.egress_ip,
         )
 
     @staticmethod

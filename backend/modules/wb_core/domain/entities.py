@@ -4,9 +4,15 @@ from datetime import datetime
 
 ARTICLE_STATES = ("active", "archived", "feedback_only")
 
-# Сага доставки ключа на шлюз wb-egress: первую группу статусов отвечает сам
+# Маркетплейсы, по которым у селлера бывает учётка. Строки те же, что в
+# путях шлюза и в ответе его /api/v1/sellers.
+MARKETPLACE_WB = "wb"
+MARKETPLACE_OZON = "ozon"
+
+# Сага доставки учётки на шлюз wb-egress: первую группу статусов отвечает сам
 # шлюз, вторая описывает доставку с нашей стороны. Единственный словарь этих
 # строк — здесь; фронтенд повторяет его в features/sellers/types.ts.
+# Словарь общий для маркетплейсов: у Ozon те же исходы, что у Wildberries.
 EGRESS_VERIFIED = "verified"
 EGRESS_DELIVERED = "delivered"
 EGRESS_KEY_INVALID = "key_invalid"
@@ -29,6 +35,8 @@ class Seller:
     archived_at: datetime | None = None
     egress_status: str = EGRESS_UNDELIVERED
     egress_error: str | None = None
+    ozon_egress_status: str = EGRESS_UNDELIVERED
+    ozon_egress_error: str | None = None
     egress_ip: str | None = None
 
     @property

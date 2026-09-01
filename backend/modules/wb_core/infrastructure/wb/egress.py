@@ -182,6 +182,34 @@ class EgressGateway:
             "PUT", f"/api/v1/sellers/{seller_id}", {"name": name, "api_key": api_key, "event_version": event_version}
         )
 
+    async def put_ozon_credentials(
+        self,
+        *,
+        seller_id: str,
+        name: str,
+        client_id: str,
+        api_key: str,
+        performance_client_id: str,
+        performance_client_secret: str,
+        event_version: int,
+    ) -> dict[str, Any]:
+        """Учётка Ozon целиком: Client-Id, Api-Key и необязательная пара Performance."""
+        return await self._admin(
+            "PUT",
+            f"/api/v1/sellers/{seller_id}/ozon",
+            {
+                "name": name,
+                "client_id": client_id,
+                "api_key": api_key,
+                "performance_client_id": performance_client_id,
+                "performance_client_secret": performance_client_secret,
+                "event_version": event_version,
+            },
+        )
+
+    async def verify_ozon(self, seller_id: str) -> dict[str, Any]:
+        return await self._admin("POST", f"/api/v1/sellers/{seller_id}/ozon/verify", None)
+
     async def rename_seller(self, *, seller_id: str, name: str, event_version: int) -> dict[str, Any]:
         payload = {"name": name, "event_version": event_version}
         return await self._admin("PATCH", f"/api/v1/sellers/{seller_id}", payload)

@@ -9,9 +9,12 @@ export interface Seller {
   archived_at: string | null;
   /** Automations the seller is connected to. */
   automations: string[];
-  /** Сага доставки ключа на шлюз wb-egress. */
+  /** Сага доставки учётки на шлюз wb-egress. Пара без префикса — про WB. */
   egress_status: EgressStatus;
   egress_error: string | null;
+  ozon_egress_status: EgressStatus;
+  ozon_egress_error: string | null;
+  /** Адрес общий: у селлера он один на оба маркетплейса. */
   egress_ip: string | null;
 }
 
@@ -43,3 +46,18 @@ export interface SellerInput {
   name: string;
   api_key: string;
 }
+
+/**
+ * Учётка Ozon целиком. Частичного обновления нет: шлюз заменяет учётку
+ * полностью, поэтому при ротации вводятся все значения заново.
+ */
+export interface OzonCredentialsInput {
+  client_id: string;
+  api_key: string;
+  performance_client_id: string;
+  performance_client_secret: string;
+}
+
+/** Учётка Ozon ни разу не доезжала до шлюза — это не ошибка, а «ещё не заводили». */
+export const isOzonMissing = (seller: Seller) =>
+  seller.ozon_egress_status === "undelivered" && seller.ozon_egress_error === null;

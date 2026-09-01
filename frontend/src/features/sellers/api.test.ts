@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { archiveSeller, attachSeller, detachSeller, getSellers, purgeSeller } from "./api";
+import {
+  archiveSeller,
+  attachSeller,
+  detachSeller,
+  getSellers,
+  purgeSeller,
+  setOzonCredentials,
+  verifyOzonEgress,
+} from "./api";
 
 function stubFetch() {
   const request = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
@@ -59,6 +67,45 @@ describe("seller registry api", () => {
     expect(request).toHaveBeenCalledWith(
       "/api/v1/automations/wb-reviews/sellers",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ seller_id: "seller-1" }) }),
+    );
+  });
+
+  it("sends the whole Ozon account, since the gateway replaces it as a whole", async () => {
+    const request = vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", request);
+
+    await setOzonCredentials("seller-1", {
+      client_id: "111222",
+      api_key: "ozon-api-key",
+      performance_client_id: "42@advertising.performance.ozon.ru",
+      performance_client_secret: "perf-secret",
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/wb/sellers/seller-1/ozon",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({
+      client_id: "111222",
+      api_key: "ozon-api-key",
+      performance_client_id: "42@advertising.performance.ozon.ru",
+      performance_client_secret: "perf-secret",
+    });
+  });
+
+  it("keeps the two marketplaces' re-checks apart", async () => {
+    const request = vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", request);
+
+    await verifyOzonEgress("seller-1");
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/wb/sellers/seller-1/ozon-verify",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 });

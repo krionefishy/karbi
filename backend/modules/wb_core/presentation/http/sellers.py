@@ -12,6 +12,7 @@ from backend.modules.wb_core.application import (
 )
 from backend.modules.wb_core.presentation.http.schemas import (
     ArticleResponse,
+    OzonCredentials,
     SellerCreate,
     SellerResponse,
     SellerRestore,
@@ -66,6 +67,43 @@ async def update_seller(
         raise archived_conflict() from error
     except DuplicateCredentialError as error:
         raise HTTPException(status.HTTP_409_CONFLICT, "Этот API-ключ уже используется") from error
+    return await one_seller_response(service, seller)
+
+
+@router.put("/{seller_id}/ozon", response_model=SellerResponse)
+@inject
+async def set_ozon_credentials(
+    seller_id: uuid.UUID, payload: OzonCredentials, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Завести или обновить учётку Ozon. Ключ WB для этого вводить не нужно."""
+    try:
+        seller = await service.set_ozon_credentials(
+            seller_id,
+            client_id=payload.client_id,
+            api_key=payload.api_key.get_secret_value(),
+            performance_client_id=payload.performance_client_id,
+            performance_client_secret=payload.performance_client_secret.get_secret_value(),
+        )
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    except SellerArchivedError as error:
+        raise archived_conflict() from error
+    except DuplicateCredentialError as error:
+        # Текст шлюза называет селлера, за которым кабинет уже закреплён.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    return await one_seller_response(service, seller)
+
+
+@router.post("/{seller_id}/ozon-verify", response_model=SellerResponse)
+@inject
+async def ozon_egress_verify(
+    seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Повторная проверка учётки Ozon: после перевыпуска ключа в кабинете."""
+    try:
+        seller = await service.refresh_ozon_egress(seller_id)
+    except SellerNotFoundError as error:
+        raise not_found() from error
     return await one_seller_response(service, seller)
 
 

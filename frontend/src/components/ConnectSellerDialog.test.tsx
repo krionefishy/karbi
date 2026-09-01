@@ -16,6 +16,8 @@ function seller(id: string, name: string): Seller {
     automations: [],
     egress_status: "verified",
     egress_error: null,
+    ozon_egress_status: "undelivered",
+    ozon_egress_error: null,
     egress_ip: null,
   };
 }

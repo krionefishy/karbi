@@ -1,5 +1,5 @@
 import { apiRequest } from "../../api/http";
-import type { Seller, SellerArticle, SellerInput } from "./types";
+import type { OzonCredentialsInput, Seller, SellerArticle, SellerInput } from "./types";
 
 export function getSellers(includeArchived = false) {
   const query = includeArchived ? "?include_archived=true" : "";
@@ -35,6 +35,17 @@ export const retrySellerSync = (sellerId: string) =>
 /** Перепроверить ключ на шлюзе wb-egress (после починки прав в кабинете WB). */
 export const verifySellerEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/egress-verify`, { method: "POST" });
+
+/** Завести или обновить учётку Ozon. Ключ WB для этого вводить не нужно. */
+export const setOzonCredentials = (sellerId: string, payload: OzonCredentialsInput) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+/** Перепроверить учётку Ozon (после перевыпуска ключа — он живёт полгода). */
+export const verifyOzonEgress = (sellerId: string) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon-verify`, { method: "POST" });
 
 export const getAutomationSellers = (automationId: string) =>
   apiRequest<Seller[]>(`/api/v1/automations/${automationId}/sellers`);

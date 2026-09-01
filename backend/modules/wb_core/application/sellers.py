@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application.enrollment import AutomationEnrollment
-from backend.modules.wb_core.domain import Article, Seller
+from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
 from backend.modules.wb_core.domain.entities import (
     EGRESS_DISABLED,
     EGRESS_SERVABLE,
@@ -85,6 +85,33 @@ class SellerService:
             await self._rename_on_egress(seller_id, new_name)
         return await self._reload(seller_id)
 
+    async def set_ozon_credentials(
+        self,
+        seller_id: uuid.UUID,
+        *,
+        client_id: str,
+        api_key: str,
+        performance_client_id: str = "",
+        performance_client_secret: str = "",
+    ) -> Seller:
+        """Завести или обновить учётку Ozon у существующего селлера.
+
+        Отдельный вызов, а не поле в форме селлера: учётки маркетплейсов
+        независимы, и ротация ключа Ozon не должна требовать ввода ключа WB.
+        """
+        seller = await self._active(seller_id)
+        name = seller.name
+        await self.session.commit()
+        await self._deliver_ozon(
+            seller_id,
+            name,
+            client_id=client_id,
+            api_key=api_key,
+            performance_client_id=performance_client_id,
+            performance_client_secret=performance_client_secret,
+        )
+        return await self._reload(seller_id)
+
     async def archive(self, seller_id: uuid.UUID) -> Seller:
         """Retire the seller: he leaves every automation, collected data stays.
 
@@ -140,6 +167,21 @@ class SellerService:
             await self.session.commit()
             return await self._reload(seller_id, include_archived=True)
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=None)
+        return await self._reload(seller_id, include_archived=True)
+
+    async def refresh_ozon_egress(self, seller_id: uuid.UUID) -> Seller:
+        """Повторная проверка учётки Ozon — после перевыпуска ключа в кабинете."""
+        if await self.repository.get(seller_id) is None:
+            raise SellerNotFoundError
+        try:
+            outcome = await self.gateway.verify_ozon(str(seller_id))
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(
+                seller_id, status=EGRESS_UNDELIVERED, error=str(error), marketplace=MARKETPLACE_OZON
+            )
+            await self.session.commit()
+            return await self._reload(seller_id, include_archived=True)
+        await self._apply_outcome(seller_id, outcome, sync_reason=None, version=None, marketplace=MARKETPLACE_OZON)
         return await self._reload(seller_id, include_archived=True)
 
     async def request_sync(self, seller_id: uuid.UUID) -> Seller:
@@ -208,16 +250,57 @@ class SellerService:
             return
         await self._apply_outcome(seller_id, outcome, sync_reason=sync_reason, version=version)
 
-    async def _apply_outcome(
-        self, seller_id: uuid.UUID, outcome: dict, *, sync_reason: str | None, version: int | None
+    async def _deliver_ozon(
+        self,
+        seller_id: uuid.UUID,
+        name: str,
+        *,
+        client_id: str,
+        api_key: str,
+        performance_client_id: str,
+        performance_client_secret: str,
     ) -> None:
-        status = str(outcome.get("status") or EGRESS_UNDELIVERED)
+        """Отдать учётку Ozon шлюзу и записать исход отдельной короткой транзакцией."""
+        version = await self._next_version(seller_id)
+        try:
+            outcome = await self.gateway.put_ozon_credentials(
+                seller_id=str(seller_id),
+                name=name,
+                client_id=client_id,
+                api_key=api_key,
+                performance_client_id=performance_client_id,
+                performance_client_secret=performance_client_secret,
+                event_version=version,
+            )
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(
+                seller_id, status=EGRESS_UNDELIVERED, error=str(error), marketplace=MARKETPLACE_OZON
+            )
+            await self.session.commit()
+            if error.status_code == 409:
+                # Один кабинет Ozon на двух селлерах означал бы один кабинет
+                # с двух исходящих адресов.
+                raise DuplicateCredentialError(str(error)) from error
+            return
+        await self._apply_outcome(seller_id, outcome, sync_reason=None, version=version, marketplace=MARKETPLACE_OZON)
+
+    async def _apply_outcome(
+        self,
+        seller_id: uuid.UUID,
+        outcome: dict,
+        *,
+        sync_reason: str | None,
+        version: int | None,
+        marketplace: str = MARKETPLACE_WB,
+    ) -> None:
+        status, error = _outcome_of(outcome, marketplace)
         await self.repository.set_egress_state(
             seller_id,
             status=status,
-            error=str(outcome.get("verify_error") or "") or None,
+            error=error,
             ip=outcome.get("egress_ip"),
             version=version,
+            marketplace=marketplace,
         )
         if status in EGRESS_SERVABLE and sync_reason is not None:
             await self.repository.reset_catalog_sync(seller_id)
@@ -237,14 +320,21 @@ class SellerService:
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=version)
 
     async def _disable_on_egress(self, seller_id: uuid.UUID) -> None:
+        """Отключение селлера гасит все его учётки: шлюз делает это одним вызовом."""
         version = await self._next_version(seller_id)
         try:
             await self.gateway.disable_seller(seller_id=str(seller_id), event_version=version)
         except EgressAdminError as error:
-            await self.repository.set_egress_state(seller_id, status=EGRESS_UNSYNCED, error=str(error))
+            for marketplace in (MARKETPLACE_WB, MARKETPLACE_OZON):
+                await self.repository.set_egress_state(
+                    seller_id, status=EGRESS_UNSYNCED, error=str(error), marketplace=marketplace
+                )
             await self.session.commit()
             return
-        await self.repository.set_egress_state(seller_id, status=EGRESS_DISABLED, error=None, version=version)
+        for marketplace in (MARKETPLACE_WB, MARKETPLACE_OZON):
+            await self.repository.set_egress_state(
+                seller_id, status=EGRESS_DISABLED, error=None, version=version, marketplace=marketplace
+            )
         await self.session.commit()
 
     async def _next_version(self, seller_id: uuid.UUID) -> int:
@@ -282,3 +372,20 @@ class SellerService:
                 "schema_version": 1,
             },
         )
+
+
+def _outcome_of(outcome: dict, marketplace: str) -> tuple[str, str | None]:
+    """Статус и ошибка по одному маркетплейсу из ответа шлюза.
+
+    Шлюз до появления Ozon отдавал один плоский `status`, и это был статус WB.
+    Разбираем и его: во время выкатки одна сторона обновляется раньше другой,
+    и сага WB не должна на это время ослепнуть.
+    """
+    reported = outcome.get("marketplaces")
+    if isinstance(reported, dict):
+        entry = reported.get(marketplace)
+        if isinstance(entry, dict):
+            return str(entry.get("status") or EGRESS_UNDELIVERED), str(entry.get("verify_error") or "") or None
+    if marketplace == MARKETPLACE_WB:
+        return str(outcome.get("status") or EGRESS_UNDELIVERED), str(outcome.get("verify_error") or "") or None
+    return EGRESS_UNDELIVERED, None
