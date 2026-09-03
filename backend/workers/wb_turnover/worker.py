@@ -94,6 +94,7 @@ class TurnoverWorker:
         if self.is_due(now, self.turnover.digest_hour, self.turnover.digest_minute):
             await self.send_digests(now.date())
         await self.serve_refresh_requests(now)
+        await self.collect_region_orders(now.date())
 
     async def serve_refresh_requests(self, now: datetime) -> None:
         """Collect out of schedule for whoever pressed the button.
@@ -141,6 +142,49 @@ class TurnoverWorker:
                 await TurnoverRepository(session).finish_refresh(request_id, error)
                 await session.commit()
             self.logger.info("turnover_refresh_served", seller_id=str(seller_id), failed=bool(error))
+
+    async def collect_region_orders(self, day: date) -> None:
+        """Досбор спроса по округам — по паре суток за цикл.
+
+        Без слота и без записи о прогоне: шаг хранит своё место сам и потому
+        идемпотентен — после рестарта его нечего чинить, а пропущенные сутки он
+        закрывает сам, растягивая свой отрезок вперёд. Когда отрезок дошёл до
+        вчера и до горизонта, шаг перестаёт ходить в WB вовсе.
+
+        Понемногу за раз — потому что бюджет «Статистики» общий с ежедневной
+        догрузкой заказов, а полгода истории нужны один раз и не срочно.
+        """
+        for seller_id in await self._sellers():
+            try:
+                async with self.database.session() as session:
+                    filled = await self._collection(session).collect_region_orders(
+                        seller_id,
+                        day,
+                        horizon_days=self.turnover.region_history_days,
+                        days=self.turnover.region_backfill_step_days,
+                    )
+                if filled:
+                    self.logger.info("turnover_region_days_collected", seller_id=str(seller_id), days=filled)
+            except (WBPermanentError, WBTemporaryError) as failure:
+                self.logger.warning("turnover_region_days_failed", seller_id=str(seller_id), error=str(failure))
+            except Exception:
+                self.logger.exception("turnover_region_days_crashed", seller_id=str(seller_id))
+
+    async def _sellers(self) -> list[uuid.UUID]:
+        """То же пересечение, что и у слота, но без занятия слота."""
+        async with self.database.session() as session:
+            return await self._due_sellers(session)
+
+    @staticmethod
+    async def _due_sellers(session) -> list[uuid.UUID]:
+        """Подключённые к автоматизации и живые в реестре.
+
+        Пересечение считается заново каждый раз: архивный селлер не должен
+        получить задачу, потому что его ключа у нас больше нет.
+        """
+        tracked = await TurnoverRepository(session).tracked_seller_ids()
+        active = {seller.id for seller in await SellerRepository(session).list_sellers()}
+        return sorted(tracked & active)
 
     def _collection(self, session) -> CollectionService:
         return CollectionService(
@@ -279,10 +323,9 @@ class TurnoverWorker:
                 await session.rollback()
                 return None, []
             run_id = run.id
-            tracked = await turnover.tracked_seller_ids()
-            active = {seller.id for seller in await SellerRepository(session).list_sellers()}
+            seller_ids = await self._due_sellers(session)
             await session.commit()
-        return run_id, sorted(tracked & active)
+        return run_id, seller_ids
 
     async def _finish(self, run_id: uuid.UUID, sellers: int, failed: int, error: str | None) -> None:
         async with self.database.session() as session:
@@ -296,6 +339,10 @@ class TurnoverWorker:
                 orders_before=day - timedelta(days=self.turnover.order_retention_days),
                 turnover_before=day - timedelta(days=TURNOVER_RETENTION_DAYS),
                 notifications_before=day - timedelta(days=NOTIFICATION_RETENTION_DAYS),
+                # На день шире окна отчёта: обрезать ровно по границе значит
+                # терять самые старые сутки раньше, чем отчёт перестанет их
+                # спрашивать.
+                regions_before=day - timedelta(days=self.turnover.region_history_days + 1),
             )
             await session.commit()
 

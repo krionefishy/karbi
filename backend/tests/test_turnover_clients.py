@@ -64,6 +64,63 @@ async def test_the_orders_window_is_sent_the_way_wb_expects_it() -> None:
     assert envelope["api"] == "statistics"
 
 
+async def test_the_district_of_the_buyer_is_read_from_the_order() -> None:
+    """`oblastOkrugName` — то, из чего складывается спрос по регионам."""
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            ORDERS,
+            body=[
+                {
+                    "srid": "s1",
+                    "nmId": 101,
+                    "date": "2026-09-03T10:00:00",
+                    "lastChangeDate": "2026-09-03T12:00:00",
+                    "oblastOkrugName": "Центральный федеральный округ",
+                    "regionName": "Москва",
+                }
+            ],
+        )
+
+        rows = await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 9, 1, 0, 0))
+
+    assert rows[0].district == "Центральный федеральный округ"
+
+
+async def test_a_day_of_history_is_asked_by_the_order_date() -> None:
+    """`flag=1` спрашивает сутки целиком — иначе сбор назад нечем остановить."""
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            ORDERS,
+            body=[
+                {
+                    "srid": "s1",
+                    "nmId": 101,
+                    "date": "2026-09-02T10:00:00",
+                    "lastChangeDate": "2026-09-03T12:00:00",
+                    "oblastOkrugName": "Приволжский федеральный округ",
+                },
+                # Так выглядел бы ответ, если бы WB понял флаг иначе: чужие
+                # сутки в дне истории — это раздутый день, а не бонус.
+                {
+                    "srid": "s2",
+                    "nmId": 101,
+                    "date": "2026-09-03T10:00:00",
+                    "lastChangeDate": "2026-09-03T12:00:00",
+                    "oblastOkrugName": "Приволжский федеральный округ",
+                },
+            ],
+        )
+
+        rows = await WBStatisticsClient(make_gateway()).orders_on(SELLER, date(2026, 9, 2))
+
+    assert [row.srid for row in rows] == ["s1"]
+    assert stub.requests_to(ORDERS)[-1]["query"] == {"dateFrom": "2026-09-02", "flag": 1}
+
+
 async def test_fbs_stock_is_asked_by_size_in_chunks_of_a_thousand() -> None:
     with respx.mock as router:
         stub = EgressStub(router)

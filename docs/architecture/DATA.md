@@ -10,7 +10,7 @@ flowchart TB
         platform["platform<br/>users (+ is_admin)"]
         core["wb_core<br/>sellers, articles<br/>outbox_events, inbox_events"]
         reviews["wb_reviews<br/>tracked_sellers, daily_review_counts<br/>sync_runs, sync_run_sellers"]
-        turnover["wb_turnover<br/>tracked_sellers, seller_warehouses<br/>stock_snapshots, orders, turnover_daily<br/>collection_runs, notification_log"]
+        turnover["wb_turnover<br/>tracked_sellers, seller_warehouses<br/>stock_snapshots, orders, region_orders<br/>warehouse_stocks, turnover_daily<br/>collection_runs, notification_log"]
         notify["notifications<br/>bots (без токенов), bot_cursors<br/>invite_links, subscriptions, outgoing_messages"]
     end
 ```
@@ -22,7 +22,7 @@ flowchart TB
 | `platform` | сотрудники: логин, хеш пароля, активность, признак администратора | api |
 | `wb_core` | реестр селлеров (без ключей, со статусами шлюза), каталог артикулов, outbox и inbox | api, каталог-консьюмер |
 | `wb_reviews` | подключения, суточные снапшоты отзывов, прогоны и job'ы | воркер отзывов |
-| `wb_turnover` | подключения, склады, снимки остатков, заказы, метрика, лог уведомлений | воркер оборачиваемости |
+| `wb_turnover` | подключения, склады, снимки остатков, заказы, спрос по округам, остатки FBS по складам, метрика, лог уведомлений | воркер оборачиваемости |
 | `notifications` | боты, курсоры апдейтов, приглашения, подписки чатов, очередь исходящих | воркер уведомлений, api (админка) |
 
 Схема автоматизации автономна: свои подключения (`tracked_sellers`), своя история, свои
@@ -56,6 +56,12 @@ flowchart TB
 История не бесконечна: снимки остатков и заказы удаляются по возрасту в ежедневном
 расчёте (по умолчанию 60 и 45 дней). Снапшоты отзывов живут дольше — на них строится ряд
 «вчера против сегодня», и обрезать его нечем.
+
+Спрос по округам живёт полгода — дольше заказов, из которых он сложился. Он и собирается
+отдельно от них, посуточно у WB: пересчитать его из `orders` можно было бы только внутри
+их горизонта, а за ним такой пересчёт обнулял бы собранную историю
+([automations/WB_TURNOVER.md](../automations/WB_TURNOVER.md)). Остатки FBS по складам,
+наоборот, истории не имеют вовсе — слой перезаписывается целиком.
 
 Записи о прогонах переживают удаление селлера намеренно: это журнал того, что
 автоматизация делала той ночью, и API показывает job удалённого селлера как «Удалённый

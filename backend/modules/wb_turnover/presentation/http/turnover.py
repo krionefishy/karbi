@@ -1,11 +1,17 @@
+import urllib.parse
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
-from backend.modules.wb_turnover.application import NotificationBotMissingError, TurnoverService
+from backend.modules.wb_turnover.application import (
+    XLSX_MEDIA_TYPE,
+    NotificationBotMissingError,
+    ReplenishmentReportService,
+    TurnoverService,
+)
 from backend.modules.wb_turnover.presentation.http.schemas import (
     InviteLinkResponse,
     RefreshResponse,
@@ -95,3 +101,29 @@ async def refresh_state(
     except SellerNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не подключён к автоматизации") from error
     return refresh_response(state) if state else None
+
+
+@router.get("/sellers/{seller_id}/replenishment")
+@inject
+async def replenishment_report(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    service: FromDishka[ReplenishmentReportService],
+) -> Response:
+    """Книга для подсорта: темп, спрос по округам, остатки по складам FBS.
+
+    Периода у отчёта нет: темп и остатки — это «сейчас», а окно по регионам
+    задано настройкой, чтобы у всех кабинетов оно было одинаковым.
+    """
+    try:
+        report = await service.build(seller_id)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не найден") from error
+    # Имя с кириллицей уезжает в filename*, а ascii-вариант остаётся запасным.
+    fallback = f"podsort_{report.day.isoformat()}.xlsx"
+    encoded = urllib.parse.quote(report.filename)
+    return Response(
+        content=report.content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"},
+    )

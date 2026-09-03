@@ -187,6 +187,29 @@ class SellerRepository:
                         collected.setdefault(barcode, (chrt_id, row.article))
         return collected
 
+    async def list_article_barcodes(self, seller_id: uuid.UUID) -> dict[str, str]:
+        """Article → its first barcode, in the order WB lists the sizes.
+
+        One card carries a barcode per size, but a report line is a card: the
+        first one is what the seller's own tables call «баркод товара». Cards
+        without sizes simply have none, and an empty cell is honest — inventing
+        a barcode would break the lookup it exists for.
+        """
+        rows = await self.session.scalars(
+            select(ArticleModel).where(ArticleModel.seller_id == seller_id, ArticleModel.state != "archived")
+        )
+        collected: dict[str, str] = {}
+        for row in rows:
+            for size in row.sizes or []:
+                if not isinstance(size, dict):
+                    continue
+                barcodes = [str(sku).strip() for sku in size.get("skus") or []]
+                first = next((barcode for barcode in barcodes if barcode), "")
+                if first:
+                    collected.setdefault(row.article, first)
+                    break
+        return collected
+
     async def upsert_catalog(
         self,
         seller_id: uuid.UUID,

@@ -20,6 +20,7 @@ class OrderRow:
     is_cancel: bool
     price: float
     warehouse_type: str
+    district: str = ""
 
 
 class WBStatisticsClient(WBJsonClient):
@@ -63,6 +64,34 @@ class WBStatisticsClient(WBJsonClient):
             cursor = max(row.last_change_date for row in rows)
         return list(collected.values())
 
+    async def orders_on(self, seller_id: str, day: date) -> list[OrderRow]:
+        """Every order placed on that calendar day, however it changed since.
+
+        `flag=1` asks by the order date instead of by `lastChangeDate`, so one
+        request is the whole day and asking again returns the same day — which
+        is what makes walking backwards through history restartable. The
+        incremental pull cannot do this: it follows changes, and a change has no
+        upper bound to stop at.
+
+        The answer is filtered by date anyway. WB decides what the flag means,
+        and a day that quietly came back as «всё, что изменилось» would inflate
+        that day instead of failing loudly.
+
+        One day is one response and cannot be paged: `flag=1` has no cursor to
+        continue from. A day that outgrows what WB is willing to return in one
+        answer would come back truncated and silently short — at our volumes a
+        day fits, but a seller with tens of thousands of orders a day would need
+        a step smaller than a day.
+        """
+        payload = await self.request(
+            "GET",
+            "/api/v1/supplier/orders",
+            seller_id,
+            params={"dateFrom": day.isoformat(), "flag": 1},
+        )
+        rows = [row for raw in self._rows(payload) if (row := self._order(raw)) is not None]
+        return [row for row in rows if row.order_date == day]
+
     @staticmethod
     def _rows(payload: Any) -> list[dict]:
         if payload is None:
@@ -89,6 +118,7 @@ class WBStatisticsClient(WBJsonClient):
             is_cancel=bool(raw.get("isCancel")),
             price=float(raw.get("finishedPrice") or raw.get("priceWithDisc") or 0),
             warehouse_type=str(raw.get("warehouseType") or ""),
+            district=str(raw.get("oblastOkrugName") or ""),
         )
 
     @staticmethod

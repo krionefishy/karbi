@@ -12,10 +12,12 @@ from backend.modules.wb_turnover.infrastructure.postgres.models import (
     NotificationLogModel,
     OrderModel,
     RefreshRequestModel,
+    RegionOrdersModel,
     SellerWarehouseModel,
     StockSnapshotModel,
     TrackedSellerModel,
     TurnoverDailyModel,
+    WarehouseStockModel,
 )
 
 _CHUNK = 1000
@@ -44,8 +46,10 @@ class TurnoverRepository:
         for model in (
             StockSnapshotModel,
             OrderModel,
+            RegionOrdersModel,
             TurnoverDailyModel,
             SellerWarehouseModel,
+            WarehouseStockModel,
             NotificationLogModel,
         ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
@@ -248,8 +252,123 @@ class TurnoverRepository:
             for row in rows.all()
         }
 
+    # --- спрос по округам --------------------------------------------------
+
+    async def replace_region_day(
+        self, seller_id: uuid.UUID, day: date, counts: dict[tuple[str, str], tuple[int, int]]
+    ) -> None:
+        """Записать сутки поверх того, что за них лежало.
+
+        Сбор спрашивает у WB день целиком, поэтому его ответ — это весь день, а
+        не добавка к нему.
+        """
+        await self.session.execute(
+            delete(RegionOrdersModel).where(RegionOrdersModel.seller_id == seller_id, RegionOrdersModel.date == day)
+        )
+        rows = [
+            {
+                "seller_id": seller_id,
+                "article": article,
+                "district": district,
+                "date": day,
+                "orders": orders,
+                "cancelled": cancelled,
+            }
+            for (article, district), (orders, cancelled) in counts.items()
+        ]
+        for offset in range(0, len(rows), _CHUNK):
+            await self.session.execute(insert(RegionOrdersModel).values(rows[offset : offset + _CHUNK]))
+
+    async def region_orders(self, seller_id: uuid.UUID, since: date, until: date) -> dict[str, dict[str, int]]:
+        """Спрос по округам: артикул → округ → штук, без отменённых заказов."""
+        rows = await self.session.execute(
+            select(
+                RegionOrdersModel.article,
+                RegionOrdersModel.district,
+                func.sum(RegionOrdersModel.orders),
+            )
+            .where(
+                RegionOrdersModel.seller_id == seller_id,
+                RegionOrdersModel.date >= since,
+                RegionOrdersModel.date <= until,
+            )
+            .group_by(RegionOrdersModel.article, RegionOrdersModel.district)
+        )
+        collected: dict[str, dict[str, int]] = {}
+        for article, district, orders in rows.all():
+            collected.setdefault(article, {})[district] = int(orders or 0)
+        return collected
+
+    async def widen_region_range(self, seller_id: uuid.UUID, day: date) -> None:
+        """Растянуть отрезок собранных суток так, чтобы он включал этот день.
+
+        Границы только расходятся: сбор идёт от вчера в обе стороны, и отрезок
+        обязан остаться непрерывным. Присваивание вместо `LEAST`/`GREATEST`
+        сузило бы его, стоило шагу сбора повториться.
+        """
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(
+                regions_filled_from=func.least(func.coalesce(TrackedSellerModel.regions_filled_from, day), day),
+                regions_filled_to=func.greatest(func.coalesce(TrackedSellerModel.regions_filled_to, day), day),
+            )
+        )
+
+    # --- остатки по складам продавца ---------------------------------------
+
+    async def replace_warehouse_stocks(self, seller_id: uuid.UUID, amounts: dict[tuple[str, int], int]) -> None:
+        """Переписать слой остатков FBS целиком и отметить, когда это вышло.
+
+        Целиком, потому что склад, о котором WB промолчал, пуст, а не «остался
+        как вчера»: обновление по месту оставило бы вчерашнюю цифру там, откуда
+        товар уехал. Нули не пишутся: отсутствие строки и так означает пустую полку.
+        """
+        await self.session.execute(delete(WarehouseStockModel).where(WarehouseStockModel.seller_id == seller_id))
+        rows = [
+            {
+                "seller_id": seller_id,
+                "article": article,
+                "warehouse_id": warehouse_id,
+                "quantity": quantity,
+            }
+            for (article, warehouse_id), quantity in amounts.items()
+            if quantity
+        ]
+        for offset in range(0, len(rows), _CHUNK):
+            await self.session.execute(insert(WarehouseStockModel).values(rows[offset : offset + _CHUNK]))
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(fbs_stocks_at=datetime.now(UTC))
+        )
+
+    async def warehouse_stocks(self, seller_id: uuid.UUID) -> dict[str, dict[int, int]]:
+        """Артикул → склад → штук. Отсутствующая пара означает пустую полку.
+
+        Когда этот слой собран — у `tracked_sellers.fbs_stocks_at`: без него
+        «везде ноль» и «ни разу не собирали» выглядят одинаково.
+        """
+        rows = await self.session.execute(
+            select(
+                WarehouseStockModel.article,
+                WarehouseStockModel.warehouse_id,
+                WarehouseStockModel.quantity,
+            ).where(WarehouseStockModel.seller_id == seller_id)
+        )
+        collected: dict[str, dict[int, int]] = {}
+        for article, warehouse_id, quantity in rows.all():
+            collected.setdefault(article, {})[int(warehouse_id)] = int(quantity)
+        return collected
+
     async def prune(
-        self, *, snapshots_before: date, orders_before: date, turnover_before: date, notifications_before: date
+        self,
+        *,
+        snapshots_before: date,
+        orders_before: date,
+        turnover_before: date,
+        notifications_before: date,
+        regions_before: date,
     ) -> None:
         await self.session.execute(
             delete(StockSnapshotModel).where(StockSnapshotModel.snapshot_date < snapshots_before)
@@ -257,6 +376,7 @@ class TurnoverRepository:
         await self.session.execute(delete(OrderModel).where(OrderModel.order_date < orders_before))
         await self.session.execute(delete(TurnoverDailyModel).where(TurnoverDailyModel.date < turnover_before))
         await self.session.execute(delete(NotificationLogModel).where(NotificationLogModel.date < notifications_before))
+        await self.session.execute(delete(RegionOrdersModel).where(RegionOrdersModel.date < regions_before))
 
     # --- metric -----------------------------------------------------------
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Copy, Link2, RefreshCw } from "lucide-react";
+import { Copy, Download, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -17,6 +17,7 @@ import {
 import type { Seller, SellerInput } from "../features/sellers/types";
 import {
   createInviteLink,
+  downloadReplenishmentReport,
   getRefreshState,
   getTurnoverArticles,
   requestRefresh,
@@ -45,6 +46,7 @@ export function TurnoverPage() {
   const [invite, setInvite] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [showDormant, setShowDormant] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -115,6 +117,20 @@ export function TurnoverPage() {
       await queryClient.invalidateQueries({ queryKey: ["turnover-refresh", sellerId] });
     },
   });
+  const reportMutation = useMutation({
+    mutationFn: () => downloadReplenishmentReport(sellerId),
+    onSuccess: ({ blob, filename }) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename ?? "podsort.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+      setReportError("");
+    },
+    onError: (error) =>
+      setReportError(error instanceof ApiError ? error.message : "Не удалось собрать отчёт"),
+  });
   const inviteMutation = useMutation({
     mutationFn: () => createInviteLink(sellerId),
     onSuccess: (link) => {
@@ -177,6 +193,15 @@ export function TurnoverPage() {
                   {refreshing ? "Обновляем…" : "Обновить данные"}
                 </button>
                 <button
+                  className="secondary-button"
+                  disabled={reportMutation.isPending}
+                  onClick={() => reportMutation.mutate()}
+                  title="Excel для подсорта: темп, заказы по округам, остатки по складам FBS"
+                >
+                  <Download size={15} />
+                  {reportMutation.isPending ? "Собираем…" : "Отчёт для подсорта"}
+                </button>
+                <button
                   className="primary-button"
                   disabled={inviteMutation.isPending}
                   onClick={() => inviteMutation.mutate()}
@@ -188,6 +213,7 @@ export function TurnoverPage() {
             )}
           </div>
 
+          {reportError && <div className="inline-error">{reportError}</div>}
           {refreshState?.status === "error" && !refreshing && (
             <div className="inline-error">Обновление не удалось: {refreshState.error ?? "неизвестная ошибка"}</div>
           )}

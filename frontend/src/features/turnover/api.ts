@@ -1,4 +1,4 @@
-import { apiRequest } from "../../api/http";
+import { apiDownload, apiRequest } from "../../api/http";
 import type { InviteLink, RefreshState, TurnoverArticles } from "./types";
 
 export const getTurnoverArticles = (sellerId: string) =>
@@ -14,3 +14,7 @@ export const requestRefresh = (sellerId: string) =>
 
 export const getRefreshState = (sellerId: string) =>
   apiRequest<RefreshState | null>(`/api/v1/wb/turnover/sellers/${sellerId}/refresh`);
+
+/** Книга для подсорта: темп, спрос по округам, остатки по складам FBS. */
+export const downloadReplenishmentReport = (sellerId: string) =>
+  apiDownload(`/api/v1/wb/turnover/sellers/${sellerId}/replenishment`);

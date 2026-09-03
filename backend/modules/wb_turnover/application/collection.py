@@ -11,6 +11,7 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.modules.wb_turnover.infrastructure.wb import (
+    OrderRow,
     WBAnalyticsClient,
     WBMarketplaceClient,
     WBStatisticsClient,
@@ -23,6 +24,19 @@ WAREHOUSE_REFRESH = timedelta(days=1)
 FBS_COLLECTED = "collected"
 FBS_ABSENT = "absent"
 FBS_FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class FbsStock:
+    """Остаток FBS в двух разрезах: суммой на артикул и по складам.
+
+    Оба берутся из одного обхода складов. Метрике нужна сумма — товар считается
+    целиком, где бы он ни лежал; подсорту нужен разрез, потому что вопрос у него
+    другой: чего не хватает именно в Казани.
+    """
+
+    totals: dict[str, tuple[int, int, int, int]]
+    per_warehouse: dict[tuple[str, int], int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +139,8 @@ class CollectionService:
             return FBS_ABSENT
         if not await self._still_ours(seller_id):
             return FBS_ABSENT
-        await self.turnover.upsert_snapshots(seller_id, snapshot_date, slot, "fbs", fbs)
+        await self.turnover.upsert_snapshots(seller_id, snapshot_date, slot, "fbs", fbs.totals)
+        await self.turnover.replace_warehouse_stocks(seller_id, fbs.per_warehouse)
         await self.session.commit()
         return FBS_COLLECTED
 
@@ -143,11 +158,13 @@ class CollectionService:
         seller_id: uuid.UUID,
         seller_key: str,
         article_of: dict[int, str],
-    ) -> dict[str, tuple[int, int, int, int]] | None:
+    ) -> FbsStock | None:
         """Declared stock at the seller's warehouses, or None when there is none to collect.
 
         Summed over every size of an article and every warehouse: the same
-        товар lives under several chrtId at several addresses.
+        товар lives under several chrtId at several addresses. The per-warehouse
+        breakdown is kept from the same walk — it costs nothing here and cannot
+        be recovered from the sum later.
         """
         if not article_of:
             self.logger.warning("В каталоге селлера %s нет размеров — FBS-остатки в этом срезе не собраны", seller_id)
@@ -158,16 +175,22 @@ class CollectionService:
             return None
         chrt_ids = list(article_of)
         amounts: dict[str, int] = defaultdict(int)
+        per_warehouse: dict[tuple[str, int], int] = defaultdict(int)
         for warehouse_id, _ in warehouses:
             declared = await self.marketplace.stocks(seller_key, warehouse_id, chrt_ids)
             for chrt_id, amount in declared.items():
                 article = article_of.get(chrt_id)
                 if article is not None:
                     amounts[article] += amount
+                    per_warehouse[(article, warehouse_id)] += amount
         # A size WB stayed silent about holds nothing at that warehouse.
-        return {
-            article: (amounts.get(article, 0), amounts.get(article, 0), 0, 0) for article in set(article_of.values())
-        }
+        return FbsStock(
+            totals={
+                article: (amounts.get(article, 0), amounts.get(article, 0), 0, 0)
+                for article in set(article_of.values())
+            },
+            per_warehouse=dict(per_warehouse),
+        )
 
     async def _warehouses(self, seller_id: uuid.UUID, seller_key: str) -> list[tuple[int, str]]:
         tracked = await self.turnover.tracked(seller_id)
@@ -227,6 +250,90 @@ class CollectionService:
         await self.turnover.set_watermark(seller_id, max(self._aware(row.last_change_date) for row in rows))
         await self.session.commit()
         return len(rows)
+
+    async def collect_region_orders(self, seller_id: uuid.UUID, today: date, *, horizon_days: int, days: int) -> int:
+        """Собрать спрос по округам за сутки, которых ещё нет в базе.
+
+        Ходим по суткам: `dateFrom = дата, flag = 1` отдаёт заказы, сделанные в
+        этот день. Одним запросом за полгода нельзя — у метода нет верхней
+        границы периода, и «всё с марта» он обрежет молча. Сутки — это один
+        запрос, он повторяем, и потерять его при рестарте не жалко.
+
+        Отсчёт ведётся от **вчера**: сегодняшний день ещё меняется, и считать
+        его наравне с прожитыми — то же самое, что занижать темп сегодняшними
+        тремя часами.
+
+        Собранное описывается непрерывным отрезком `[filled_from, filled_to]`.
+        Сначала отрезок растёт вперёд, до вчера, — так закрываются сутки,
+        пропущенные простоем; потом назад, до горизонта. Границы двигаются
+        только после записи дня, поэтому прерванный сбор продолжается с того же
+        места, а не начинается заново.
+
+        Возвращает, сколько суток добавлено. Когда добавлять нечего, шаг не
+        ходит в WB вовсе.
+        """
+        yesterday = today - timedelta(days=1)
+        tracked = await self.turnover.tracked(seller_id)
+        filled_from = tracked.regions_filled_from if tracked else None
+        filled_to = tracked.regions_filled_to if tracked else None
+        await self.session.commit()
+
+        wanted = self._region_days(
+            yesterday,
+            floor=today - timedelta(days=horizon_days),
+            filled_from=filled_from,
+            filled_to=filled_to,
+            limit=days,
+        )
+        collected = 0
+        for day in wanted:
+            rows = await self.statistics.orders_on(str(seller_id), day)
+            if not await self._still_ours(seller_id):
+                return collected
+            await self.turnover.replace_region_day(seller_id, day, self._by_district(rows))
+            await self.turnover.widen_region_range(seller_id, day)
+            await self.session.commit()
+            collected += 1
+        return collected
+
+    @staticmethod
+    def _region_days(
+        yesterday: date,
+        *,
+        floor: date,
+        filled_from: date | None,
+        filled_to: date | None,
+        limit: int,
+    ) -> list[date]:
+        """Какие сутки собирать следующими — сначала свежие, потом в глубину.
+
+        Вперёд раньше, чем вглубь: сутки, пропущенные простоем, нужнее самых
+        старых, а горизонт всё равно никуда не уедет.
+        """
+        if filled_from is None or filled_to is None:
+            # Отрезка ещё нет — начинаем его от вчера и растим назад.
+            deepest = [yesterday - timedelta(days=offset) for offset in range(limit)]
+            return [day for day in deepest if day >= floor]
+        forward = [filled_to + timedelta(days=offset) for offset in range(1, limit + 1)]
+        wanted = [day for day in forward if day <= yesterday]
+        backward = [filled_from - timedelta(days=offset) for offset in range(1, limit + 1)]
+        wanted += [day for day in backward if day >= floor]
+        return wanted[:limit]
+
+    @staticmethod
+    def _by_district(rows: list[OrderRow]) -> dict[tuple[str, str], tuple[int, int]]:
+        """Заказы и отмены по паре «артикул + округ».
+
+        Округ хранится ровно тем, что назвал WB, — пустая строка в том числе.
+        Отбрасывать безымянные строки значило бы, что «Итого» в отчёте меньше,
+        чем заказов на самом деле; куда их отнести, решает отчёт.
+        """
+        counts: dict[tuple[str, str], tuple[int, int]] = {}
+        for row in rows:
+            key = (row.article, row.district)
+            orders, cancelled = counts.get(key, (0, 0))
+            counts[key] = (orders, cancelled + 1) if row.is_cancel else (orders + 1, cancelled)
+        return counts
 
     @staticmethod
     def _aware(moment: datetime) -> datetime:

@@ -15,9 +15,15 @@ from backend.modules.wb_turnover.application.overview import (
     TurnoverService,
     TurnoverSnapshot,
 )
+from backend.modules.wb_turnover.application.replenishment import (
+    XLSX_MEDIA_TYPE,
+    ReplenishmentReportFile,
+    ReplenishmentReportService,
+)
 
 __all__ = [
     "AUTOMATION_ID",
+    "XLSX_MEDIA_TYPE",
     "DESCRIPTION",
     "TITLE",
     "ArticleTurnover",
@@ -27,6 +33,8 @@ __all__ = [
     "DigestService",
     "NotificationBotMissingError",
     "RefreshRequest",
+    "ReplenishmentReportFile",
+    "ReplenishmentReportService",
     "TurnoverEnrollment",
     "TurnoverOverview",
     "TurnoverSnapshot",

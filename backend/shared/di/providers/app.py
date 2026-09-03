@@ -32,7 +32,11 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
 )
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
-from backend.modules.wb_turnover.application import TurnoverEnrollment, TurnoverService
+from backend.modules.wb_turnover.application import (
+    ReplenishmentReportService,
+    TurnoverEnrollment,
+    TurnoverService,
+)
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.settings import Settings
@@ -73,6 +77,16 @@ class AppProvider(Provider):
         # Сервис строит отчёт в отдельном треде и подключается к БД сам,
         # поэтому ему нужен URL, а не сессия запроса.
         return ReviewReportService(settings.database.url)
+
+    @provide(scope=Scope.APP)
+    def replenishment_report_service(self, settings: Settings) -> ReplenishmentReportService:
+        # Как и отчёт по отзывам: строится в отдельном треде со своим движком,
+        # поэтому получает URL базы, а не сессию запроса.
+        return ReplenishmentReportService(
+            settings.database.url,
+            window_days=settings.turnover.orders_window_days,
+            region_history_days=settings.turnover.region_history_days,
+        )
 
     @provide(scope=Scope.APP)
     def fbs_marketplace_client(self, gateway: EgressGateway) -> WBFbsMarketplaceClient:

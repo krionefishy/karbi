@@ -165,6 +165,14 @@ class TurnoverConfig:
     min_photos: int = 3
     snapshot_retention_days: int = 60
     order_retention_days: int = 45
+    # Глубина региональной базы для подсорта: доля округа в спросе считается по
+    # этому окну, и на столько же назад догружается история при подключении.
+    # Полгода — то, за что менеджер и раньше собирал отчёт руками.
+    region_history_days: int = 180
+    # Сколько суток истории догружается за один цикл воркера. Каждые сутки —
+    # это запрос в «Статистику», и её бюджет делится с обычной догрузкой
+    # заказов: догрузка полугода растянута намеренно, она разовая.
+    region_backfill_step_days: int = 2
     notification_bot: str = "turnover-alerts"
 
 
@@ -321,6 +329,8 @@ class Settings:
             "min_photos",
             "snapshot_retention_days",
             "order_retention_days",
+            "region_history_days",
+            "region_backfill_step_days",
         ):
             if key in turnover:
                 turnover[key] = int(turnover[key])
@@ -392,6 +402,10 @@ class Settings:
             raise ValueError("turnover.threshold_days must be positive")
         if self.turnover.min_photos < 0:
             raise ValueError("turnover.min_photos must not be negative")
+        if self.turnover.region_history_days < 1:
+            raise ValueError("turnover.region_history_days must be positive")
+        if self.turnover.region_backfill_step_days < 1:
+            raise ValueError("turnover.region_backfill_step_days must be positive")
         if self.turnover.order_retention_days <= self.turnover.orders_window_days:
             # Pruning inside the window would erase the very orders the metric divides by.
             raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")

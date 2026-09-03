@@ -37,6 +37,17 @@ class TrackedSellerModel(WBTurnoverBase):
     # so a failed run simply repeats itself instead of leaving a hole.
     orders_watermark: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     warehouses_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Границы непрерывного отрезка, за который собран спрос по округам. Сбор
+    # растягивает отрезок в обе стороны — вперёд до вчера, назад до горизонта —
+    # и по паре суток за цикл, поэтому прерванный сбор продолжается с того же
+    # места, а пропущенные сутки закрываются сами.
+    regions_filled_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    regions_filled_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Когда в последний раз удалось переписать слой остатков FBS по складам.
+    # Отметка на селлере, а не на строке: слой пишется целиком, и без неё
+    # «везде ноль» не отличить от «ни разу не собирали» — строк нет в обоих
+    # случаях.
+    fbs_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SellerWarehouseModel(WBTurnoverBase):
@@ -105,6 +116,54 @@ class OrderModel(WBTurnoverBase):
         Index("ix_wb_turnover_orders_window", "seller_id", "order_date"),
         Index("ix_wb_turnover_orders_article", "seller_id", "article", "order_date"),
     )
+
+
+class RegionOrdersModel(WBTurnoverBase):
+    """Заказы одного артикула в одном федеральном округе за сутки.
+
+    Отдельная таблица, а не запрос к `orders`, потому что горизонты разные:
+    строки заказов чистятся через полтора месяца, а подсорт спрашивает долю
+    округа за полгода. Агрегат узкий, поэтому переживает чистку сырья дёшево.
+
+    Сутки — наименьшее деление, которое позволяет считать любое окно и при этом
+    переписывать день целиком: повторный сбор тех же суток идемпотентен, а
+    инкремент счётчика задваивал бы заказы.
+
+    Отмены лежат рядом, хотя отчёт их не показывает: «в этом округе половину
+    заказов отменили» — первый вопрос к странно выглядящему распределению, и
+    без своей колонки он остался бы без ответа.
+    """
+
+    __tablename__ = "region_orders"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    district: Mapped[str] = mapped_column(String(64), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cancelled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (Index("ix_wb_turnover_region_orders_window", "seller_id", "date"),)
+
+
+class WarehouseStockModel(WBTurnoverBase):
+    """Сколько товара селлер объявил на каждом своём складе FBS — прямо сейчас.
+
+    Истории здесь нет намеренно. Метрике нужен средний запас, поэтому она копит
+    снимки; подсорту нужен ответ «что лежит в Казани сегодня», и хранить его
+    четыре раза в сутки на полтора месяца — это 60 миллионов строк ради одной
+    последней. Слой перезаписывается целиком при каждом успешном сборе, а когда
+    это было — знает `tracked_sellers.fbs_stocks_at`.
+
+    Пустых строк тут нет: склад, о котором WB промолчал, пуст.
+    """
+
+    __tablename__ = "warehouse_stocks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class TurnoverDailyModel(WBTurnoverBase):
