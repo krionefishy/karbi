@@ -6,6 +6,7 @@ from backend.modules.notifications.presentation.http import admin_bots_router
 from backend.modules.platform.presentation.http import admin_users_router
 from backend.modules.platform.presentation.http import router as auth_router
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
+from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
 from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
@@ -18,6 +19,7 @@ router.include_router(wb_sellers_router)
 router.include_router(wb_reviews_router)
 router.include_router(wb_turnover_router)
 router.include_router(wb_fbs_distribution_router)
+router.include_router(onec_router)
 router.include_router(automations_router)
 
 

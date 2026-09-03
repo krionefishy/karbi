@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
+from backend.modules.wb_fbs_distribution.application import DisconnectedSource
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
@@ -12,7 +13,7 @@ MOSCOW = ZoneInfo(SETTINGS.fbs_distribution.timezone)
 
 
 def worker() -> FbsDistributionWorker:
-    return FbsDistributionWorker(Database(), WBFbsMarketplaceClient(make_gateway()), SETTINGS)
+    return FbsDistributionWorker(Database(), WBFbsMarketplaceClient(make_gateway()), DisconnectedSource(), SETTINGS)
 
 
 def test_before_the_hour_the_mirror_is_measured_against_yesterday() -> None:

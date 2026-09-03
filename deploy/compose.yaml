@@ -67,6 +67,7 @@ services:
       RELAY_BASE_URL: ${RELAY_BASE_URL:?set RELAY_BASE_URL in .env}
       RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET in .env - no default in production}
       RELAY_VERIFY: ${RELAY_VERIFY:-/etc/relay/relay.crt}
+      ONEC_TOKEN: ${ONEC_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

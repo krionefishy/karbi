@@ -93,3 +93,8 @@ turnover:
   snapshot_retention_days: 60
   order_retention_days: 45
   notification_bot: ${TURNOVER_NOTIFICATION_BOT:-turnover-alerts}
+
+fbs_distribution:
+  timezone: Europe/Moscow
+  # Токен входящего обмена с 1С. Пустой — обмен выключен, эндпоинт отвечает 503.
+  onec_token: ${ONEC_TOKEN:-}

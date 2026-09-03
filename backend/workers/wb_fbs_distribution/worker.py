@@ -8,7 +8,12 @@ import structlog
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
-from backend.modules.wb_fbs_distribution.application import MirrorService
+from backend.modules.wb_fbs_distribution.application import (
+    MirrorService,
+    SnapshotRejected,
+    SnapshotService,
+    StockSnapshotSource,
+)
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
 from backend.shared.heartbeat import touch_heartbeat
@@ -28,11 +33,13 @@ class FbsDistributionWorker:
         self,
         database: Database,
         marketplace: WBFbsMarketplaceClient,
+        stock_source: StockSnapshotSource,
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
         self.database = database
         self.marketplace = marketplace
+        self.stock_source = stock_source
         self.settings = settings
         self.config = settings.fbs_distribution
         self.timezone = ZoneInfo(self.config.timezone)
@@ -58,7 +65,38 @@ class FbsDistributionWorker:
         self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
+        await self.poll_stock_source()
         await self.sync_mirror(self._now(self.timezone))
+
+    async def poll_stock_source(self) -> bool:
+        """Забрать снимок остатков у источника, если тот отдаёт данные сам.
+
+        Заглушка отвечает None, и шаг молча пропускается. Когда за портом
+        появится «тянущий» адаптер 1С, он заработает без правок воркера.
+        Пуш-обмен идёт мимо этого шага, через HTTP-эндпоинт.
+        """
+        snapshot = await self.stock_source.fetch()
+        if snapshot is None:
+            return False
+        async with self.database.session() as session:
+            distribution = FbsDistributionRepository(session)
+            latest = await distribution.latest_snapshot()
+            # Источник может отдавать один и тот же снимок каждый оборот;
+            # без отсечки журнал наполнялся бы повторами каждые полминуты.
+            if latest is not None and latest.generated_at >= snapshot.generated_at:
+                return False
+            service = SnapshotService(
+                session,
+                distribution,
+                max_age_minutes=self.config.snapshot_max_age_minutes,
+            )
+            try:
+                await service.accept(snapshot, source=self.stock_source.source_id)
+            except SnapshotRejected as error:
+                self.logger.warning("fbs_snapshot_rejected", source=self.stock_source.source_id, error=str(error))
+                return False
+        self.logger.info("fbs_snapshot_accepted", source=self.stock_source.source_id, lines=len(snapshot.lines))
+        return True
 
     def due_since(self, now: datetime) -> datetime:
         """Момент последней наступившей сверки.

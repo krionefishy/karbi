@@ -182,6 +182,10 @@ class FbsDistributionConfig:
     snapshot_max_age_minutes: int = 60
     # Через сколько повторять сверку кабинета после неудачной попытки.
     mirror_retry_minutes: int = 15
+    # Токен, которым 1С подписывает входящие снимки остатков. Пустой токен
+    # значит «обмен не настроен»: приёмный эндпоинт отвечает 503, а не пускает
+    # всех подряд.
+    onec_token: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True, slots=True)

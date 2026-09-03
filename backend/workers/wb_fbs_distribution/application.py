@@ -3,6 +3,7 @@ import signal
 
 from backend.infrastructure.logging import configure_logging
 from backend.modules.wb_core.infrastructure.wb import EgressGateway
+from backend.modules.wb_fbs_distribution.application import DisconnectedSource
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
@@ -24,6 +25,9 @@ class FbsDistributionWorkerApplication:
         self.worker = FbsDistributionWorker(
             self.database,
             WBFbsMarketplaceClient(gateway),
+            # «Тянущего» адаптера 1С пока нет; пуш-обмен идёт через HTTP-эндпоинт
+            # и в этом шаге не нуждается. Появится адаптер — встанет сюда.
+            DisconnectedSource(),
             self.settings,
         )
 
