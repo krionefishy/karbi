@@ -85,7 +85,19 @@ jobs:
             cd /opt/karbi/app
             test -f .env
 
-            git fetch --prune origin main
+            # GitHub троттлит анонимный git-трафик с этого адреса: fetch по
+            # HTTPS отваливается примерно пять раз из шести, причём мгновенно
+            # (401 -> git идёт спрашивать логин, которого нет). Повторы делают
+            # выкатку надёжной без учётных данных. Настоящее лечение — deploy
+            # key и SSH-remote, как у karbi-mcp на этом же сервере.
+            for attempt in $(seq 1 20); do
+              if git fetch --prune origin main; then break; fi
+              if [ "$attempt" = 20 ]; then
+                echo "git fetch не прошёл за 20 попыток — похоже, дело не в троттле" >&2
+                exit 1
+              fi
+              sleep 5
+            done
             git cat-file -e "${DEPLOY_SHA}^{commit}"
             git merge-base --is-ancestor "${DEPLOY_SHA}" origin/main
             git checkout --force main
