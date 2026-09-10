@@ -101,11 +101,15 @@ def evaluate(facts: ArticleFacts, thresholds: Thresholds) -> list[ItemState]:
 
 
 def _characteristics(facts: ArticleFacts) -> ItemState:
-    """По инструкции: заполнены все характеристики, доступные в категории."""
+    """Сколько заполнено и чего не хватает — для сведения, а не как ошибка.
+
+    Заполнять все характеристики категории селлер не требует: пункт зелёный,
+    как только справочник прочитан, а пустые поля видны в подсказке ячейки.
+    """
     if not facts.characteristics:
         return ItemState("characteristics", None, "справочник не прочитан")
     fill = characteristics_fill(facts.card, facts.characteristics)
-    return ItemState("characteristics", not fill.missing, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
+    return ItemState("characteristics", True, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
 
 
 def _missing_note(missing: tuple[str, ...]) -> str | None:

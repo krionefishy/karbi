@@ -111,14 +111,14 @@ def test_description_and_reviews_are_about_presence() -> None:
     assert states(facts(card=card(description_length=300)))["description"].done
 
 
-def test_characteristics_are_done_only_when_every_field_is_filled() -> None:
-    """По инструкции: заполнены все характеристики, доступные в категории."""
+def test_empty_characteristics_are_shown_but_not_an_error() -> None:
+    """Заполнять все характеристики не требуется: пункт зелёный, пустые поля — в подсказке."""
     state = states(facts(card=card(characteristic_ids=frozenset({1, 2, 3, 4}))))["characteristics"]
 
     # ИКПУ и «Описание» в справочнике есть, но в счёт не входят.
     assert characteristics_fill(card(), DIRECTORY) == CharacteristicsFill(filled=5, total=5, missing=())
     assert (states(facts())["characteristics"].done, states(facts())["characteristics"].detail) == (True, "5/5")
-    assert (state.done, state.detail, state.note) == (False, "4/5", "Не заполнены: Поле 5")
+    assert (state.done, state.detail, state.note) == (True, "4/5", "Не заполнены: Поле 5")
 
 
 def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
