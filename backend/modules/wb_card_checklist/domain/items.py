@@ -1,73 +1,32 @@
 from dataclasses import dataclass
-from enum import StrEnum
-
-
-class ItemKind(StrEnum):
-    # Решает API: менеджер отметку не ставит и не снимает.
-    AUTO = "auto"
-    # API видит факт, качество подтверждает менеджер. Без факта отметку не поставить.
-    CONFIRM = "confirm"
-    # API этого не видит вовсе — только отметка менеджера.
-    MANUAL = "manual"
 
 
 @dataclass(frozen=True, slots=True)
 class ChecklistItem:
     key: str
     title: str
-    kind: ItemKind
     meaning: str
+    # Входит ли пункт в «готово». Справочный пункт показывает данные WB, но
+    # правила «выполнено» у него нет.
+    counted: bool = True
 
 
-# Порядок и названия — как в таблице, которую менеджеры вели руками: выгрузка
-# ложится на старые файлы колонка в колонку.
+# Только то, что видно в данных WB: таблица ничего не просит отмечать руками.
+# Названия — как в ручной таблице менеджеров, чтобы выгрузка читалась так же.
 ITEMS: tuple[ChecklistItem, ...] = (
-    ChecklistItem(
-        "description",
-        "Описание (SEO)",
-        ItemKind.CONFIRM,
-        "Описание заполнено и оптимизировано под поисковые запросы.",
-    ),
+    ChecklistItem("description", "Описание (SEO)", "В карточке есть описание."),
     ChecklistItem(
         "characteristics",
         "Характеристики",
-        ItemKind.CONFIRM,
-        "Характеристики заполнены. WB подсказывает, какие поля категории пусты.",
+        "Сколько характеристик категории заполнено и какие пусты. В готовность не входит: правила полноты нет.",
+        counted=False,
     ),
-    ChecklistItem("photos", "Фото", ItemKind.AUTO, "Фото-контент установлен в карточку."),
-    ChecklistItem("video", "Видео", ItemKind.AUTO, "Видео установлено в карточку."),
-    ChecklistItem("video_cover", "Видеообложка", ItemKind.MANUAL, "Видеообложка установлена."),
-    ChecklistItem("rich_content", "Рич-контент", ItemKind.MANUAL, "Рич-контент собран и опубликован."),
-    ChecklistItem("discount", "Скидка / СПП", ItemKind.CONFIRM, "Скидка выставлена, цена на витрине рыночная."),
-    ChecklistItem(
-        "reviews_for_points",
-        "Отзывы за баллы",
-        ItemKind.MANUAL,
-        "Товар подключён к программе «Отзывы за баллы».",
-    ),
-    ChecklistItem(
-        "reviews_present",
-        "Отзывы есть",
-        ItemKind.AUTO,
-        "На карточке есть отзывы (завалы после раздачи).",
-    ),
-    ChecklistItem(
-        "reviews_with_photo",
-        "Отзывы с фото",
-        ItemKind.CONFIRM,
-        "Есть фото-отзывы, и на них раскрыта суть товара.",
-    ),
-    ChecklistItem(
-        "reviews_with_video",
-        "Отзывы с видео",
-        ItemKind.CONFIRM,
-        "Есть видео-отзывы, и на них раскрыта суть товара.",
-    ),
-    ChecklistItem(
-        "ratings_linked",
-        "Оценки прицеплены",
-        ItemKind.MANUAL,
-        "Оценки из кабинета прицеплены к основному товару.",
-    ),
+    ChecklistItem("photos", "Фото", "В карточке достаточно фото."),
+    ChecklistItem("video", "Видео", "В карточке есть видео."),
+    ChecklistItem("discount", "Скидка / СПП", "Скидка продавца выставлена. СПП WB не отдаёт."),
+    ChecklistItem("reviews_present", "Отзывы есть", "На карточке есть отзывы."),
+    ChecklistItem("reviews_with_photo", "Отзывы с фото", "На карточке есть отзывы с фото."),
+    ChecklistItem("reviews_with_video", "Отзывы с видео", "На карточке есть отзывы с видео."),
 )
 ITEMS_BY_KEY = {item.key: item for item in ITEMS}
+COUNTED_ITEMS = tuple(item for item in ITEMS if item.counted)

@@ -1,26 +1,18 @@
-/** auto — решает WB, confirm — менеджер, когда WB видит факт, manual — только менеджер. */
-export type ItemKind = "auto" | "confirm" | "manual";
-
 export interface ChecklistItem {
   key: string;
   title: string;
-  kind: ItemKind;
   meaning: string;
+  /** Входит ли пункт в «готово»; справочный только показывает данные WB. */
+  counted: boolean;
 }
 
 export interface ItemState {
   key: string;
-  kind: ItemKind;
-  checked: boolean;
-  /** Можно ли поставить отметку. Снять свою можно всегда. */
-  can_check: boolean;
-  /** Что видит WB: «25/38», «8 с фото». */
+  /** Выполнено ли по данным WB; null — данных нет или пункт справочный. */
+  done: boolean | null;
+  /** Что видит WB: «22/25», «8 с фото». */
   detail: string | null;
   note: string | null;
-  /** Отметка стоит, а факт, на котором она держалась, пропал. */
-  warning: string | null;
-  /** Данных нет — «не знаем», а не «не выполнено». */
-  unknown: boolean;
 }
 
 export interface ChecklistRow {
@@ -34,6 +26,7 @@ export interface ChecklistRow {
   stock: number;
   items: ItemState[];
   done: number;
+  total: number;
   ready: boolean;
   comment: string;
 }

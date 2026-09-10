@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Download, RefreshCw } from "lucide-react";
+import { Check, Download, Minus, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { ApiError } from "../api/http";
@@ -13,10 +13,9 @@ import {
   getRefreshState,
   requestRefresh,
   setComment,
-  setMark,
 } from "../features/checklist/api";
-import { applyMark, cellHint, isLocked, kindLabel, notices, visibleRows } from "../features/checklist/table";
-import type { Checklist, ChecklistItem, ChecklistRow, ItemState } from "../features/checklist/types";
+import { cellHint, cellTone, notices, visibleRows } from "../features/checklist/table";
+import type { ChecklistItem, ChecklistRow, ItemState } from "../features/checklist/types";
 import {
   attachSeller,
   detachSeller,
@@ -30,12 +29,6 @@ const AUTOMATION_ID = "wb-card-checklist";
 const AUTOMATION_TITLE = "Чек-лист карточек Wildberries";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
-
-interface MarkChange {
-  article: string;
-  item: string;
-  checked: boolean;
-}
 
 export function CardChecklistPage() {
   const queryClient = useQueryClient();
@@ -128,23 +121,6 @@ export function CardChecklistPage() {
     },
     onError: (error) => setActionError(error instanceof ApiError ? error.message : "Не удалось выгрузить таблицу"),
   });
-
-  // Галочка видна сразу, не дожидаясь ответа; отказ сервера откатывает её обратно.
-  const markMutation = useMutation({
-    mutationFn: ({ article, item, checked }: MarkChange) => setMark(sellerId, article, item, checked),
-    onMutate: async ({ article, item, checked }: MarkChange) => {
-      await queryClient.cancelQueries({ queryKey: checklistKey });
-      const previous = queryClient.getQueryData<Checklist>(checklistKey);
-      if (previous) queryClient.setQueryData(checklistKey, applyMark(previous, article, item, checked));
-      return { previous };
-    },
-    onError: (error, _change, context) => {
-      if (context?.previous) queryClient.setQueryData(checklistKey, context.previous);
-      setActionError(error instanceof ApiError ? error.message : "Не удалось сохранить отметку");
-    },
-    onSuccess: () => setActionError(""),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: checklistKey }),
-  });
   const commentMutation = useMutation({
     mutationFn: ({ article, text }: { article: string; text: string }) => setComment(sellerId, article, text),
     onError: (error) =>
@@ -180,8 +156,7 @@ export function CardChecklistPage() {
               <h1>Чек-лист карточек</h1>
               <p className="muted">
                 Карточки с остатком от {checklist?.min_stock ?? 10} шт.
-                {selected ? ` у ${selected.name}` : ""}. Что видно в данных WB, отмечается само, остальное —
-                менеджер.
+                {selected ? ` у ${selected.name}` : ""}. Всё по данным WB — отмечать ничего не нужно.
               </p>
             </div>
             {selected && (
@@ -260,7 +235,7 @@ export function CardChecklistPage() {
           ) : rows.length === 0 ? (
             <div className="empty-state">
               <h2>Нет товаров с остатком от {checklist.min_stock} шт.</h2>
-              <p>Как только товар наберёт остаток, он появится здесь вместе со своими отметками.</p>
+              <p>Как только товар наберёт остаток, он появится здесь.</p>
             </div>
           ) : (
             <>
@@ -291,7 +266,7 @@ export function CardChecklistPage() {
                   {checklist.items.map((item) => (
                     <span key={item.key} title={item.meaning}>
                       {item.title}
-                      <em className={`checklist-kind checklist-kind-${item.kind}`}>{kindLabel(item.kind)}</em>
+                      {!item.counted && <em className="checklist-kind">справка</em>}
                     </span>
                   ))}
                   <span>Готово</span>
@@ -302,7 +277,6 @@ export function CardChecklistPage() {
                     key={row.article}
                     row={row}
                     items={checklist.items}
-                    onToggle={(item, checked) => markMutation.mutate({ article: row.article, item, checked })}
                     onComment={(text) => commentMutation.mutate({ article: row.article, text })}
                   />
                 ))}
@@ -325,7 +299,7 @@ export function CardChecklistPage() {
       {detaching && (
         <ConfirmDialog
           title="Отключить от автоматизации?"
-          description={`«${detaching.name}» перестанет попадать в сбор карточек. Селлер и отметки менеджеров останутся.`}
+          description={`«${detaching.name}» перестанет попадать в сбор карточек. Селлер и комментарии останутся.`}
           confirmLabel="Отключить"
           pendingLabel="Отключаем…"
           pending={detachMutation.isPending}
@@ -340,11 +314,10 @@ export function CardChecklistPage() {
 interface RowProps {
   row: ChecklistRow;
   items: ChecklistItem[];
-  onToggle: (item: string, checked: boolean) => void;
   onComment: (text: string) => void;
 }
 
-function ChecklistRowView({ row, items, onToggle, onComment }: RowProps) {
+function ChecklistRowView({ row, items, onComment }: RowProps) {
   const states = new Map(row.items.map((state) => [state.key, state]));
   return (
     <div className="checklist-row">
@@ -372,14 +345,10 @@ function ChecklistRowView({ row, items, onToggle, onComment }: RowProps) {
       <span className="checklist-number">{row.stock}</span>
       {items.map((item) => {
         const state = states.get(item.key);
-        return state ? (
-          <ItemCell key={item.key} item={item} state={state} onToggle={(checked) => onToggle(item.key, checked)} />
-        ) : (
-          <span key={item.key} />
-        );
+        return state ? <ItemCell key={item.key} item={item} state={state} /> : <span key={item.key} />;
       })}
       <span className={`checklist-number ${row.ready ? "checklist-ready" : "checklist-pending"}`}>
-        {row.done}/{row.items.length}
+        {row.done}/{row.total}
       </span>
       <div className="checklist-comment">
         <input
@@ -398,28 +367,16 @@ function ChecklistRowView({ row, items, onToggle, onComment }: RowProps) {
   );
 }
 
-interface CellProps {
-  item: ChecklistItem;
-  state: ItemState;
-  onToggle: (checked: boolean) => void;
-}
+const toneIcons = { done: Check, missing: X, neutral: Minus };
+const toneLabels = { done: "есть", missing: "нет", neutral: "нет данных" };
 
-function ItemCell({ item, state, onToggle }: CellProps) {
-  const classes = ["checklist-cell"];
-  if (state.checked) classes.push("checklist-cell-done");
-  if (state.warning) classes.push("checklist-cell-warning");
-  if (state.unknown) classes.push("checklist-cell-unknown");
+function ItemCell({ item, state }: { item: ChecklistItem; state: ItemState }) {
+  const tone = cellTone(item, state);
+  const Icon = toneIcons[tone];
   return (
-    <div className={classes.join(" ")} title={cellHint(item, state)}>
-      <input
-        type="checkbox"
-        aria-label={`${item.title}`}
-        checked={state.checked}
-        disabled={isLocked(state)}
-        onChange={(event) => onToggle(event.target.checked)}
-      />
-      {state.warning && <AlertTriangle size={12} className="checklist-warning" aria-label={state.warning} />}
-      <small>{state.detail ?? (state.unknown ? "нет данных" : "")}</small>
+    <div className={`checklist-cell checklist-cell-${tone}`} title={cellHint(item, state)}>
+      {item.counted && <Icon size={15} aria-label={toneLabels[tone]} />}
+      <small>{state.detail ?? "нет данных"}</small>
     </div>
   );
 }

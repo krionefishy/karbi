@@ -6,20 +6,17 @@ from pydantic import BaseModel, Field
 class ChecklistItemResponse(BaseModel):
     key: str
     title: str
-    # auto — решает WB, confirm — менеджер при наличии факта, manual — только менеджер.
-    kind: str
     meaning: str
+    # Входит ли пункт в «готово»; справочный только показывает данные WB.
+    counted: bool
 
 
 class ItemStateResponse(BaseModel):
     key: str
-    kind: str
-    checked: bool
-    can_check: bool
+    # Выполнено ли по данным WB; null — данных нет или пункт справочный.
+    done: bool | None
     detail: str | None
     note: str | None
-    warning: str | None
-    unknown: bool
 
 
 class ChecklistRowResponse(BaseModel):
@@ -33,6 +30,7 @@ class ChecklistRowResponse(BaseModel):
     stock: int
     items: list[ItemStateResponse]
     done: int
+    total: int
     ready: bool
     comment: str
 
@@ -49,10 +47,6 @@ class ChecklistResponse(BaseModel):
     min_stock: int
     items: list[ChecklistItemResponse]
     rows: list[ChecklistRowResponse]
-
-
-class MarkRequest(BaseModel):
-    checked: bool
 
 
 class CommentRequest(BaseModel):

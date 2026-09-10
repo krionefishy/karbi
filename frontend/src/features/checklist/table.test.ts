@@ -1,24 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { applyMark, cellHint, isLocked, notices, visibleRows } from "./table";
-import type { Checklist, ChecklistRow, ItemState } from "./types";
+import { cellHint, cellTone, notices, visibleRows } from "./table";
+import type { Checklist, ChecklistItem, ChecklistRow, ItemState } from "./types";
+
+const photos: ChecklistItem = { key: "photos", title: "Фото", meaning: "Достаточно фото.", counted: true };
+const characteristics: ChecklistItem = {
+  key: "characteristics",
+  title: "Характеристики",
+  meaning: "Сколько заполнено.",
+  counted: false,
+};
 
 function state(overrides: Partial<ItemState>): ItemState {
-  return {
-    key: "rich_content",
-    kind: "manual",
-    checked: false,
-    can_check: true,
-    detail: null,
-    note: null,
-    warning: null,
-    unknown: false,
-    ...overrides,
-  };
+  return { key: "photos", done: true, detail: null, note: null, ...overrides };
 }
 
-function row(article: string, items: ItemState[], overrides: Partial<ChecklistRow> = {}): ChecklistRow {
-  const done = items.filter((item) => item.checked).length;
+function row(article: string, ready: boolean, overrides: Partial<ChecklistRow> = {}): ChecklistRow {
   return {
     article,
     vendor_code: `SKU-${article}`,
@@ -28,15 +25,16 @@ function row(article: string, items: ItemState[], overrides: Partial<ChecklistRo
     subject_name: "Пилы",
     card_created_at: null,
     stock: 20,
-    items,
-    done,
-    ready: done === items.length,
+    items: [],
+    done: ready ? 7 : 3,
+    total: 7,
+    ready,
     comment: "",
     ...overrides,
   };
 }
 
-function checklist(rows: ChecklistRow[], overrides: Partial<Checklist> = {}): Checklist {
+function checklist(overrides: Partial<Checklist> = {}): Checklist {
   return {
     seller_id: "seller-1",
     seller_name: "ИП",
@@ -46,63 +44,42 @@ function checklist(rows: ChecklistRow[], overrides: Partial<Checklist> = {}): Ch
     reviews_state: "ok",
     min_stock: 10,
     items: [],
-    rows,
+    rows: [],
     ...overrides,
   };
 }
 
 describe("checklist table", () => {
-  it("recounts the row when a tick lands", () => {
-    const data = checklist([
-      row("1", [state({ key: "photos", kind: "auto", checked: true, can_check: false }), state({ key: "rich_content" })]),
-    ]);
-
-    const [updated] = applyMark(data, "1", "rich_content", true).rows;
-
-    expect(updated.done).toBe(2);
-    expect(updated.ready).toBe(true);
+  it("colours a cell by what WB shows", () => {
+    expect(cellTone(photos, state({ done: true }))).toBe("done");
+    expect(cellTone(photos, state({ done: false }))).toBe("missing");
+    // Нет данных — это «не знаем», а не «не выполнено».
+    expect(cellTone(photos, state({ done: null }))).toBe("neutral");
+    // Справочный пункт не красится вовсе.
+    expect(cellTone(characteristics, state({ key: "characteristics", done: null, detail: "22/25" }))).toBe("neutral");
   });
 
-  it("drops the stale-fact warning together with the tick", () => {
-    const data = checklist([
-      row("1", [state({ key: "reviews_with_photo", kind: "confirm", checked: true, warning: "факт пропал" })]),
-    ]);
+  it("puts WB's figure and the empty fields into the hint", () => {
+    const hint = cellHint(
+      characteristics,
+      state({ key: "characteristics", done: null, detail: "22/25", note: "Не заполнены: Цвет" }),
+    );
 
-    const [updated] = applyMark(data, "1", "reviews_with_photo", false).rows;
-
-    expect(updated.items[0]).toMatchObject({ checked: false, warning: null });
+    expect(hint).toContain("WB: 22/25");
+    expect(hint).toContain("Не заполнены: Цвет");
+    expect(hint).not.toContain("Данных пока нет");
   });
 
   it("filters by search and by readiness", () => {
-    const rows = [
-      row("111", [state({ checked: true })]),
-      row("222", [state({ checked: false })], { title: "Пила цепная" }),
-    ];
+    const rows = [row("111", true), row("222", false, { title: "Пила цепная" })];
 
     expect(visibleRows(rows, { search: "", onlyPending: true }).map((item) => item.article)).toEqual(["222"]);
     expect(visibleRows(rows, { search: "ПИЛА", onlyPending: false }).map((item) => item.article)).toEqual(["222"]);
     expect(visibleRows(rows, { search: "20111", onlyPending: false }).map((item) => item.article)).toEqual(["111"]);
   });
 
-  it("locks what WB decides and what has no fact behind it", () => {
-    expect(isLocked(state({ kind: "auto", checked: true, can_check: false }))).toBe(true);
-    expect(isLocked(state({ kind: "confirm", checked: false, can_check: false }))).toBe(true);
-    // Свою отметку снять можно, даже если факта уже нет.
-    expect(isLocked(state({ kind: "confirm", checked: true, can_check: false }))).toBe(false);
-    expect(isLocked(state({ kind: "manual" }))).toBe(false);
-  });
-
-  it("explains a locked cell in its hint", () => {
-    const item = { key: "reviews_with_video", title: "Отзывы с видео", kind: "confirm" as const, meaning: "Есть видео-отзывы." };
-
-    const hint = cellHint(item, state({ kind: "confirm", can_check: false, detail: "0 с видео" }));
-
-    expect(hint).toContain("WB: 0 с видео");
-    expect(hint).toContain("отмечать пока не на чем");
-  });
-
   it("says why the table is empty", () => {
-    expect(notices(checklist([], { stock_state: "not_connected", reviews_state: "not_connected" }))).toHaveLength(2);
-    expect(notices(checklist([]))).toEqual([]);
+    expect(notices(checklist({ stock_state: "not_connected", reviews_state: "not_connected" }))).toHaveLength(2);
+    expect(notices(checklist())).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.modules.wb_card_checklist.domain import ItemState
+from backend.modules.wb_card_checklist.domain import COUNTED_ITEMS, ItemState
 
 STOCK_OK = "ok"
 # Селлер не подключён к оборачиваемости: остатков взять неоткуда.
@@ -31,11 +31,16 @@ class ChecklistRow:
 
     @property
     def done(self) -> int:
-        return sum(1 for item in self.items if item.checked)
+        # Справочные пункты всегда None, поэтому в счёт не попадают сами.
+        return sum(1 for item in self.items if item.done is True)
+
+    @property
+    def total(self) -> int:
+        return len(COUNTED_ITEMS)
 
     @property
     def ready(self) -> bool:
-        return self.done == len(self.items)
+        return self.done == self.total
 
 
 @dataclass(frozen=True, slots=True)

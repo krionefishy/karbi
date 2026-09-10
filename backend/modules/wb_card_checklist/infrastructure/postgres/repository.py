@@ -11,7 +11,6 @@ from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, Subj
 from backend.modules.wb_card_checklist.infrastructure.postgres.models import (
     CardFactsModel,
     CommentModel,
-    MarkModel,
     PriceFactsModel,
     RefreshRequestModel,
     SubjectCharacteristicsModel,
@@ -41,11 +40,11 @@ class ChecklistRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        """Everything this automation holds about the seller, ticks included.
+        """Everything this automation holds about the seller, comments included.
 
         The subject directory stays: it is WB's, shared by every seller.
         """
-        for model in (CardFactsModel, PriceFactsModel, MarkModel, CommentModel, RefreshRequestModel):
+        for model in (CardFactsModel, PriceFactsModel, CommentModel, RefreshRequestModel):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
 
@@ -223,36 +222,7 @@ class ChecklistRepository:
             for row in rows
         }
 
-    # --- marks and comments ----------------------------------------------
-
-    async def marks(self, seller_id: uuid.UUID) -> dict[str, dict[str, bool]]:
-        rows = await self.session.scalars(select(MarkModel).where(MarkModel.seller_id == seller_id))
-        collected: dict[str, dict[str, bool]] = {}
-        for row in rows:
-            collected.setdefault(row.article, {})[row.item] = row.checked
-        return collected
-
-    async def set_mark(
-        self, seller_id: uuid.UUID, article: str, item: str, checked: bool, updated_by: uuid.UUID | None
-    ) -> None:
-        statement = insert(MarkModel).values(
-            seller_id=seller_id,
-            article=article,
-            item=item,
-            checked=checked,
-            updated_by=updated_by,
-            updated_at=datetime.now(UTC),
-        )
-        await self.session.execute(
-            statement.on_conflict_do_update(
-                index_elements=["seller_id", "article", "item"],
-                set_={
-                    "checked": statement.excluded.checked,
-                    "updated_by": statement.excluded.updated_by,
-                    "updated_at": statement.excluded.updated_at,
-                },
-            )
-        )
+    # --- comments --------------------------------------------------------
 
     async def comments(self, seller_id: uuid.UUID) -> dict[str, str]:
         rows = await self.session.scalars(select(CommentModel).where(CommentModel.seller_id == seller_id))
