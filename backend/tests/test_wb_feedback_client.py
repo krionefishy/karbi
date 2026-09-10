@@ -75,6 +75,26 @@ async def test_feedback_client_reads_all_three_buckets_and_deduplicates() -> Non
     assert result.feedback_count == 6
 
 
+async def test_feedback_client_counts_reviews_with_photo_and_video() -> None:
+    """Медиа считается тем же проходом; повтор отзыва в архиве не удваивает его."""
+    with_photo = {**feedback("a", 101, 5), "photoLinks": [{"fullSize": "fs.webp", "miniSize": "ms.webp"}]}
+    with_both = {
+        **feedback("b", 101, 4),
+        "photoLinks": [{"fullSize": "fs.webp"}],
+        "video": {"link": "index.m3u8", "previewImage": "preview.webp", "durationSec": 8},
+    }
+    bare = {**feedback("c", 202, 5), "photoLinks": None, "video": None}
+
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", FEEDBACKS, side_effect=[page(with_photo, with_both, bare), page()])
+        stub.on("GET", ARCHIVE, side_effect=[page(with_photo)])
+
+        result = await client().aggregate(SELLER)
+
+    assert result.media == {"101": (2, 1), "202": (0, 0)}
+
+
 async def test_feedback_client_ignores_feedback_without_valid_rating() -> None:
     with respx.mock as router:
         stub = EgressStub(router)

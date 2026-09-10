@@ -99,8 +99,9 @@ class FakeReviews:
     async def mark_run_running(self, run_id: uuid.UUID) -> None:
         return None
 
-    async def upsert_daily_counts(self, seller_id: uuid.UUID, snapshot_date: date, article_counts) -> None:
+    async def upsert_daily_counts(self, seller_id: uuid.UUID, snapshot_date: date, article_counts, media=None) -> None:
         self.saved_counts = article_counts
+        self.saved_media = media
 
     async def complete_job(self, job_id: uuid.UUID, product_count: int, feedback_count: int) -> None:
         self.completed = True

@@ -13,6 +13,21 @@ class DailyRatings:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewTotals:
+    """How many reviews an article has, and how many of them carry media.
+
+    `with_photo` / `with_video` are None on snapshots taken before we started
+    counting media: «не знаем» must not read as «ни одного».
+    """
+
+    article: str
+    date: date
+    total: int
+    with_photo: int | None
+    with_video: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewSyncJob:
     id: uuid.UUID
     seller_id: uuid.UUID

@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_reviews.domain import DailyRatings, ReviewSyncRun
+from backend.modules.wb_reviews.domain import DailyRatings, ReviewSyncRun, ReviewTotals
 from backend.modules.wb_reviews.infrastructure.postgres.models import (
     DailyReviewCountModel,
     ReviewSyncJobModel,
@@ -330,7 +330,10 @@ class ReviewSyncRepository:
         seller_id: uuid.UUID,
         snapshot_date: date,
         article_counts: dict[str, tuple[int, int, int, int, int]],
+        media: dict[str, tuple[int, int]] | None = None,
     ) -> None:
+        """Write one day's counts. Without `media` the photo/video columns stay
+        NULL — «не считали», которое не спутать с «ни одного»."""
         now = datetime.now(UTC)
         rows = [
             {
@@ -342,6 +345,8 @@ class ReviewSyncRepository:
                 "count_rating_3": ratings[2],
                 "count_rating_4": ratings[3],
                 "count_rating_5": ratings[4],
+                "count_with_photo": media.get(article, (0, 0))[0] if media is not None else None,
+                "count_with_video": media.get(article, (0, 0))[1] if media is not None else None,
                 "collected_at": now,
             }
             for article, ratings in article_counts.items()
@@ -356,10 +361,44 @@ class ReviewSyncRepository:
                     "count_rating_3": statement.excluded.count_rating_3,
                     "count_rating_4": statement.excluded.count_rating_4,
                     "count_rating_5": statement.excluded.count_rating_5,
+                    "count_with_photo": statement.excluded.count_with_photo,
+                    "count_with_video": statement.excluded.count_with_video,
                     "collected_at": statement.excluded.collected_at,
                 },
             )
             await self.session.execute(statement)
+
+    async def latest_totals(self, seller_id: uuid.UUID) -> dict[str, ReviewTotals]:
+        """Every article of the seller as of the last day we have a snapshot for.
+
+        The nightly run writes a row for every article it knows, so the latest
+        date is one complete picture — mixing articles from different days
+        would compare numbers taken at different moments.
+        """
+        latest = await self.session.scalar(
+            select(func.max(DailyReviewCountModel.date)).where(DailyReviewCountModel.seller_id == seller_id)
+        )
+        if latest is None:
+            return {}
+        rows = await self.session.scalars(
+            select(DailyReviewCountModel).where(
+                DailyReviewCountModel.seller_id == seller_id, DailyReviewCountModel.date == latest
+            )
+        )
+        return {
+            row.article: ReviewTotals(
+                article=row.article,
+                date=row.date,
+                total=row.count_rating_1
+                + row.count_rating_2
+                + row.count_rating_3
+                + row.count_rating_4
+                + row.count_rating_5,
+                with_photo=row.count_with_photo,
+                with_video=row.count_with_video,
+            )
+            for row in rows
+        }
 
     async def history(self, seller_id: uuid.UUID, days: int) -> list[DailyRatings]:
         since = datetime.now(MOSCOW).date() - timedelta(days=days - 1)

@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -75,14 +76,35 @@ class WBContentClient:
     async def get_articles(self, seller_id: str) -> list[CatalogCard]:
         return await self._consume(seller_id, self.endpoint, {"withPhoto": -1})
 
+    async def raw_cards(self, seller_id: str) -> AsyncIterator[dict[str, Any]]:
+        """Карточки в продаже как их отдал WB, без разбора в `CatalogCard`.
+
+        Каталогу хватает названия и размеров, а автоматизациям бывают нужны
+        описание, видео и характеристики. Пагинация при этом одна и та же,
+        поэтому она живёт здесь, а разбор — у того, кому поля нужны.
+        """
+        async for page in self._pages(seller_id, self.endpoint, {"withPhoto": -1}):
+            for item in page:
+                yield item
+
     async def _consume(
         self,
         seller_id: str,
         endpoint: str,
         card_filter: dict[str, Any] | None,
     ) -> list[CatalogCard]:
-        cursor: dict[str, Any] = {"limit": PAGE_LIMIT}
         cards: list[CatalogCard] = []
+        async for page in self._pages(seller_id, endpoint, card_filter):
+            cards.extend(self._card(item) for item in page)
+        return cards
+
+    async def _pages(
+        self,
+        seller_id: str,
+        endpoint: str,
+        card_filter: dict[str, Any] | None,
+    ) -> AsyncIterator[list[dict[str, Any]]]:
+        cursor: dict[str, Any] = {"limit": PAGE_LIMIT}
         while True:
             settings: dict[str, Any] = {"sort": {"ascending": True}, "cursor": cursor}
             if card_filter is not None:
@@ -100,10 +122,10 @@ class WBContentClient:
                 or {}
             )
             page = payload.get("cards") or []
-            cards.extend(self._card(item) for item in page if item.get("nmID") is not None)
+            yield [item for item in page if isinstance(item, dict) and item.get("nmID") is not None]
             result_cursor = payload.get("cursor") or {}
             if int(result_cursor.get("total", len(page))) < PAGE_LIMIT:
-                return cards
+                return
             # WB names the continuation field differently per endpoint (updatedAt for
             # the catalog, trashedAt for the корзина), so echo back whatever it sent.
             continuation = {key: value for key, value in result_cursor.items() if key != "total"}
