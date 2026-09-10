@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Gauge, MessageSquareText, Warehouse } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Gauge, MessageSquareText, Warehouse } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -30,6 +30,7 @@ function momentLabel(value: string | null, fallback = "—") {
 function automationIcon(id: string) {
   if (id === "wb-turnover") return <Gauge size={22} />;
   if (id === "wb-fbs-distribution") return <Warehouse size={22} />;
+  if (id === "wb-card-checklist") return <ClipboardCheck size={22} />;
   return <MessageSquareText size={22} />;
 }
 
