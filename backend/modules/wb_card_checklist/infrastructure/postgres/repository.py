@@ -295,6 +295,20 @@ class ChecklistRepository:
             request.started_at = datetime.now(UTC)
         return requests
 
+    async def abandon_stale_refreshes(self, started_before: datetime) -> int:
+        """Close requests a dead worker left `running`.
+
+        Without this a restart mid-collection pins the seller's button to that
+        request forever: the active-request index lets no new one in.
+        """
+        result = await self.session.execute(
+            update(RefreshRequestModel)
+            .where(RefreshRequestModel.status == "running", RefreshRequestModel.started_at < started_before)
+            .values(status="error", error="Сбор прервался: воркер перезапустился", finished_at=datetime.now(UTC))
+            .returning(RefreshRequestModel.id)
+        )
+        return len(result.all())
+
     async def finish_refresh(self, request_id: uuid.UUID, error: str | None = None) -> None:
         await self.session.execute(
             update(RefreshRequestModel)

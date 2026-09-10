@@ -15,6 +15,11 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
+# Сбор одного селлера — это страницы карточек, цены и справочники, каждый
+# запрос шлюз может держать до пары минут. Запрос «в работе» дольше часа
+# живым быть не может: его бросил упавший процесс.
+STALE_REFRESH = timedelta(hours=1)
+
 
 class CardChecklistWorker:
     """Расписание чек-листа: суточный сбор карточек и цен плюс кнопка «Обновить».
@@ -97,10 +102,12 @@ class CardChecklistWorker:
     async def serve_refresh_requests(self) -> None:
         """Собрать вне расписания для тех, кто нажал кнопку."""
         async with self.database.session() as session:
-            requests = [
-                (request.id, request.seller_id) for request in await ChecklistRepository(session).claim_refreshes()
-            ]
+            checklist = ChecklistRepository(session)
+            abandoned = await checklist.abandon_stale_refreshes(datetime.now(UTC) - STALE_REFRESH)
+            requests = [(request.id, request.seller_id) for request in await checklist.claim_refreshes()]
             await session.commit()
+        if abandoned:
+            self.logger.warning("checklist_refresh_abandoned", count=abandoned)
         for request_id, seller_id in requests:
             error = await self.collect(seller_id)
             async with self.database.session() as session:

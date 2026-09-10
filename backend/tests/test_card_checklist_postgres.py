@@ -404,3 +404,24 @@ async def test_neighbours_hand_over_stock_and_reviews_only_to_their_own(database
         latest = (await totals.totals(seller) or {})["A"]
     # Последний срез снят без подсчёта медиа: «не знаем», а не ноль.
     assert (latest.date, latest.total, latest.with_photo, latest.with_video) == (today, 4, None, None)
+
+
+async def test_a_refresh_left_running_by_a_dead_worker_is_closed(database: Database, seller: uuid.UUID) -> None:
+    """Иначе кнопка «Обновить» у селлера навсегда висит на мёртвом запросе."""
+    async with database.session() as session:
+        await service(session).request_refresh(seller, None)
+    async with database.session() as session:
+        claimed = await ChecklistRepository(session).claim_refreshes()
+        assert [request.seller_id for request in claimed] == [seller]
+        claimed[0].started_at = datetime.now(UTC) - timedelta(hours=2)
+        await session.commit()
+
+    worker = CardChecklistWorker(database, FakeCards(CARDS), FakePrices(), SETTINGS)
+    await worker.serve_refresh_requests()
+
+    async with database.session() as session:
+        state = await service(session).refresh_state(seller)
+        assert state is not None and (state.status, state.in_progress) == ("error", False)
+        # Место освободилось: новое нажатие создаёт новый запрос.
+        fresh = await service(session).request_refresh(seller, None)
+    assert fresh.status == "queued"
