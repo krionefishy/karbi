@@ -31,7 +31,7 @@ ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem(
         "characteristics",
         "Характеристики",
-        ItemKind.AUTO,
+        ItemKind.CONFIRM,
         "Заполнены все характеристики, доступные в категории.",
     ),
     ChecklistItem("photos", "Фото", ItemKind.AUTO, "Фото-контент установлен в карточку."),

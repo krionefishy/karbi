@@ -202,7 +202,7 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     items = {state.key: state for state in beta.items}
     assert beta.stock == 15
     assert items["photos"].checked
-    assert (items["characteristics"].checked, items["characteristics"].detail) == (True, "3/3")
+    assert (items["characteristics"].can_check, items["characteristics"].detail) == (True, "3/3")
     # Отзывы у склейки общие: 3 у A и 2 у C — на карточке покупатель видит 5.
     assert items["reviews_present"].detail == "5 отз."
     assert (items["reviews_with_photo"].detail, items["reviews_with_photo"].can_check) == ("1 с фото", True)
@@ -241,8 +241,8 @@ async def test_ticks_follow_the_kind_of_item(database: Database, seller: uuid.UU
     assert items["video_cover"].checked
     assert items["description"].checked
     assert row.comment == "Ждём видео от подрядчика"
-    # Автоматом: характеристики, фото, видео, отзывы есть; руками: описание и видеообложка.
-    assert row.done == 6
+    # Автоматом: фото, видео, отзывы есть; руками: описание и видеообложка.
+    assert row.done == 5
 
     async with database.session() as session:
         await service(session).set_comment(seller, "A", "   ", user)
@@ -303,7 +303,7 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     assert header[17:] == ["Оценки прицеплены", "Готово из 12", "Статус", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
-    assert second[7] is True  # характеристики
+    assert second[8] is True  # фото
     assert second[10] is False  # видеообложка — никто не отметил
     assert second[18] == "=COUNTIF(G3:R3,TRUE)"
     assert second[19] == '=IF(S3=12,"ГОТОВ","НЕ ГОТОВ")'
