@@ -99,16 +99,18 @@ def test_characteristics_count_only_what_the_category_really_asks_for() -> None:
 
     # ИКПУ и «Описание» в справочнике есть, но в полноту не входят.
     assert fill == CharacteristicsFill(filled=5, total=5, missing=())
-    assert fill.complete
     assert states(facts())["characteristics"].detail == "5/5"
 
 
-def test_one_empty_characteristic_is_enough_to_fail() -> None:
+def test_characteristics_are_a_hint_and_the_manager_decides() -> None:
+    """Правила «заполнено всё» нет: WB показывает пустые поля, галочку ставит менеджер."""
     state = states(facts(card=card(characteristic_ids=frozenset({1, 2, 3, 4}))))["characteristics"]
 
-    assert not state.checked
+    assert state.kind is ItemKind.CONFIRM
+    assert (state.checked, state.can_check) == (False, True)
     assert state.detail == "4/5"
     assert state.note == "Не заполнены: Поле 5"
+    assert states(facts(), {"characteristics": True})["characteristics"].checked
 
 
 def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
@@ -116,6 +118,8 @@ def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
     state = states(facts(card=card(characteristic_ids=frozenset()), characteristics=directory))["characteristics"]
 
     assert state.note == "Не заполнены: Поле 1, Поле 2, Поле 3, Поле 4, Поле 5 и ещё 3"
+    # Ни одного заполненного поля — отмечать нечего.
+    assert not state.can_check
 
 
 def test_automatic_items_follow_the_card() -> None:

@@ -1,5 +1,5 @@
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from backend.modules.wb_card_checklist.domain.entities import (
     CardFacts,
@@ -15,6 +15,7 @@ from backend.modules.wb_card_checklist.domain.items import ITEMS, ItemKind
 SERVICE_CHARACTERISTICS = frozenset(
     {
         14177453,  # SKU
+        15000001,  # ТНВЭД — в части категорий под этим id, а не под 15004139
         15001135,  # Номер декларации соответствия
         15001136,  # Номер сертификата соответствия
         15001137,  # Дата регистрации сертификата/декларации
@@ -25,6 +26,7 @@ SERVICE_CHARACTERISTICS = frozenset(
         15003293,  # Артикул OZON
         15003988,  # NTIN
         15004139,  # Код ТН ВЭД
+        15004301,  # КТД для Республики Беларусь
     }
 )
 # Сколько незаполненных характеристик называть в подсказке поимённо.
@@ -33,7 +35,7 @@ NAMED_MISSING = 5
 
 @dataclass(frozen=True, slots=True)
 class Thresholds:
-    """Единственный порог среди пунктов — фото; остальное решается «есть или нет»."""
+    """Единственный порог среди пунктов — фото. Второй порог, остаток, отбирает строки, а не пункты."""
 
     min_photos: int = 3
 
@@ -75,10 +77,6 @@ class CharacteristicsFill:
     total: int
     missing: tuple[str, ...]
 
-    @property
-    def complete(self) -> bool:
-        return not self.missing
-
 
 def characteristics_fill(card: CardFacts, characteristics: Sequence[SubjectCharacteristic]) -> CharacteristicsFill:
     relevant = [
@@ -98,7 +96,7 @@ def evaluate(facts: ArticleFacts, marks: Mapping[str, bool], thresholds: Thresho
             marks,
             f"{card.description_length} симв." if card.description_length else "нет описания",
         ),
-        "characteristics": _characteristics(facts),
+        "characteristics": _characteristics(facts, marks),
         "photos": _auto("photos", card.photo_count >= thresholds.min_photos, f"{card.photo_count} фото"),
         "video": _auto("video", card.has_video, "есть" if card.has_video else "нет"),
         "discount": _discount(facts.price, marks),
@@ -134,11 +132,13 @@ def _confirm(key: str, fact: bool | None, marks: Mapping[str, bool], detail: str
     return ItemState(key, ItemKind.CONFIRM, checked=checked, can_check=fact, detail=detail, warning=warning)
 
 
-def _characteristics(facts: ArticleFacts) -> ItemState:
+def _characteristics(facts: ArticleFacts, marks: Mapping[str, bool]) -> ItemState:
+    """WB подсказывает, сколько заполнено и чего не хватает; готовность решает менеджер."""
     if not facts.characteristics:
-        return _auto("characteristics", None, "справочник не прочитан")
+        return _confirm("characteristics", None, marks, "справочник не прочитан")
     fill = characteristics_fill(facts.card, facts.characteristics)
-    return _auto("characteristics", fill.complete, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
+    state = _confirm("characteristics", fill.filled > 0, marks, f"{fill.filled}/{fill.total}")
+    return replace(state, note=_missing_note(fill.missing))
 
 
 def _missing_note(missing: tuple[str, ...]) -> str | None:
