@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.modules.wb_card_checklist.domain import ITEMS, ItemState
+from backend.modules.wb_card_checklist.domain import ITEMS, ITEMS_BY_KEY, ItemState
 
 STOCK_OK = "ok"
 # Селлер не подключён к оборачиваемости: остатков взять неоткуда.
@@ -40,6 +40,21 @@ class ChecklistRow:
     @property
     def ready(self) -> bool:
         return self.done == self.total
+
+    @property
+    def note(self) -> str:
+        """What is missing, in words: the same text on the page and in the xlsx.
+
+        Unknown items are named apart — «нет данных» is not «не хватает».
+        """
+        missing = [ITEMS_BY_KEY[item.key].title for item in self.items if item.done is False]
+        unknown = [ITEMS_BY_KEY[item.key].title for item in self.items if item.done is None]
+        parts = []
+        if missing:
+            parts.append(f"Не хватает: {', '.join(missing)}")
+        if unknown:
+            parts.append(f"Нет данных: {', '.join(unknown)}")
+        return ". ".join(parts) or "Всё выполнено"
 
 
 @dataclass(frozen=True, slots=True)

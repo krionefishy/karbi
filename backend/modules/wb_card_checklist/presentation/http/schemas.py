@@ -30,6 +30,8 @@ class ChecklistRowResponse(BaseModel):
     done: int
     total: int
     ready: bool
+    # Чего не хватает словами — тот же текст, что в колонке «Примечание» выгрузки.
+    note: str
     comment: str
 
 

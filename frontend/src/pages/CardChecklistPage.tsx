@@ -269,6 +269,7 @@ export function CardChecklistPage() {
                     </span>
                   ))}
                   <span>Готово</span>
+                  <span>Примечание</span>
                   <span>Комментарий</span>
                 </div>
                 {shown.map((row) => (
@@ -349,6 +350,7 @@ function ChecklistRowView({ row, items, onComment }: RowProps) {
       <span className={`checklist-number ${row.ready ? "checklist-ready" : "checklist-pending"}`}>
         {row.done}/{row.total}
       </span>
+      <span className="checklist-note">{row.note}</span>
       <div className="checklist-comment">
         <input
           // Ключ с текстом: после ответа сервера поле берёт сохранённое значение.

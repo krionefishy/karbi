@@ -209,7 +209,10 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     # Клубной скидки у A нет, видео-отзывов тоже: 7 из 9.
     assert (items["club_discount"].done, items["club_discount"].detail) == (False, "без скидки")
     assert (beta.done, beta.total, beta.ready) == (7, 9, False)
+    assert beta.note == "Не хватает: Скидка WB Клуба, Отзывы с видео"
     alpha_items = {state.key: state for state in alpha.items}
+    # Цены у C нет: «нет данных» названо отдельно от «не хватает».
+    assert alpha.note == "Не хватает: Отзывы с видео. Нет данных: Скидка / СПП, Скидка WB Клуба"
     # Одного фото по инструкции хватает.
     assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (True, "1 фото")
     assert alpha_items["discount"].done is None
@@ -281,7 +284,7 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
         "Отзывы с фото",
         "Отзывы с видео",
     ]
-    assert header[15:] == ["Готово из 9", "Статус", "Комментарий"]
+    assert header[15:] == ["Готово из 9", "Примечание", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
     # В ячейке — то, что видит WB, результат — цветом.
@@ -299,8 +302,8 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     green, red = "C6EFCE", "FFC7CE"
     fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 16)]
     assert fills == [green] * 5 + [red] + [green] * 2 + [red]
-    assert second[15:18] == [7, "НЕ ГОТОВ", "Проверить рич"]
-    assert sheet["Q3"].fill.fgColor.rgb[-6:] == red
+    # Вместо «ГОТОВ/НЕ ГОТОВ» — сколько закрыто и словами, чего не хватает.
+    assert second[15:18] == [7, "Не хватает: Скидка WB Клуба, Отзывы с видео", "Проверить рич"]
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")
