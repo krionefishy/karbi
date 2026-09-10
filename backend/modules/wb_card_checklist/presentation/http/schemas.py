@@ -7,13 +7,11 @@ class ChecklistItemResponse(BaseModel):
     key: str
     title: str
     meaning: str
-    # Входит ли пункт в «готово»; справочный только показывает данные WB.
-    counted: bool
 
 
 class ItemStateResponse(BaseModel):
     key: str
-    # Выполнено ли по данным WB; null — данных нет или пункт справочный.
+    # Выполнено ли по данным WB; null — данных нет.
     done: bool | None
     detail: str | None
     note: str | None

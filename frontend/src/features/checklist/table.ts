@@ -16,9 +16,9 @@ export function visibleRows(rows: ChecklistRow[], filter: RowFilter): ChecklistR
 
 export type CellTone = "done" | "missing" | "neutral";
 
-/** Зелёный — есть, красный — нет, серый — данных нет или пункт справочный. */
-export function cellTone(item: ChecklistItem, state: ItemState): CellTone {
-  if (!item.counted || state.done === null) return "neutral";
+/** Зелёный — выполнено, красный — нет, серый — данных нет. */
+export function cellTone(state: ItemState): CellTone {
+  if (state.done === null) return "neutral";
   return state.done ? "done" : "missing";
 }
 
@@ -26,7 +26,7 @@ export function cellHint(item: ChecklistItem, state: ItemState): string {
   const lines = [item.meaning];
   if (state.detail) lines.push(`WB: ${state.detail}`);
   if (state.note) lines.push(state.note);
-  if (item.counted && state.done === null) lines.push("Данных пока нет.");
+  if (state.done === null) lines.push("Данных пока нет.");
   return lines.join("\n");
 }
 

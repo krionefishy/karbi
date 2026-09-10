@@ -5,12 +5,11 @@ from datetime import date
 from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
-from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from backend.modules.wb_card_checklist.application.view import ChecklistView
-from backend.modules.wb_card_checklist.domain import COUNTED_ITEMS, ITEMS, ITEMS_BY_KEY
+from backend.modules.wb_card_checklist.domain import ITEMS
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -22,13 +21,23 @@ DONE_COLUMN = LAST_ITEM_COLUMN + 1
 STATUS_COLUMN = DONE_COLUMN + 1
 COMMENT_COLUMN = STATUS_COLUMN + 1
 
-# Цвета — из таблицы, которую менеджеры вели руками: тёмная шапка для
+# Цвета шапки — из таблицы, которую менеджеры вели руками: тёмная для
 # реквизитов, синяя для пунктов проверки.
 IDENTITY_FILL = PatternFill("solid", fgColor="1F3864")
 ITEM_FILL = PatternFill("solid", fgColor="2E5F8A")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
-CENTERED = Alignment(horizontal="center", vertical="center")
+CENTERED = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+# Выполнено — зелёный, нет — красный, как в интерфейсе. Ячейку без данных
+# не красим: «не знаем» не должно выглядеть как «не выполнено».
+DONE_FILL = PatternFill("solid", fgColor="C6EFCE")
+DONE_FONT = Font(color="006100")
+MISSING_FILL = PatternFill("solid", fgColor="FFC7CE")
+MISSING_FONT = Font(color="9C0006")
+
+READY = "ГОТОВ"
+NOT_READY = "НЕ ГОТОВ"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,18 +55,14 @@ class ChecklistReportFile:
 def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
     """The checklist as a spreadsheet: identity columns, then what WB shows.
 
-    Counted items are TRUE/FALSE (empty when WB gave no data), the reference
-    item carries its figure as text, and «готово» and the status are
-    formulas over the item columns, as in the managers' own table.
+    Each item cell holds WB's own figure («12 фото», «22/25») and its colour
+    says whether the item is done. Excel cannot count by colour, so «готово»
+    and the status are written as values, not formulas.
     """
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Чек-лист"
-    total = len(COUNTED_ITEMS)
-    done_letter = get_column_letter(DONE_COLUMN)
-    first_letter = get_column_letter(FIRST_ITEM_COLUMN)
-    last_letter = get_column_letter(LAST_ITEM_COLUMN)
-    status_letter = get_column_letter(STATUS_COLUMN)
+    total = len(ITEMS)
 
     headers = [*IDENTITY_HEADERS, *(item.title for item in ITEMS), f"Готово из {total}", "Статус", "Комментарий"]
     sheet.append(headers)
@@ -78,11 +83,9 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
                 row.barcode,
                 row.title,
                 view.seller_name,
-                # COUNTIF считает только TRUE: текст справочного пункта и
-                # пустые ячейки «нет данных» в готовность не попадают.
-                *(item.done if ITEMS_BY_KEY[item.key].counted else item.detail for item in row.items),
-                f"=COUNTIF({first_letter}{index}:{last_letter}{index},TRUE)",
-                f'=IF({done_letter}{index}={total},"ГОТОВ","НЕ ГОТОВ")',
+                *(item.detail for item in row.items),
+                row.done,
+                READY if row.ready else NOT_READY,
                 row.comment or None,
             ]
         )
@@ -92,34 +95,18 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
         sheet.cell(row=index, column=4).number_format = "@"
         for column in range(FIRST_ITEM_COLUMN, STATUS_COLUMN + 1):
             sheet.cell(row=index, column=column).alignment = CENTERED
-
-    last_row = max(len(view.rows) + 1, 2)
-    status_range = f"{status_letter}2:{status_letter}{last_row}"
-    sheet.conditional_formatting.add(
-        status_range,
-        CellIsRule(
-            operator="equal",
-            formula=['"ГОТОВ"'],
-            font=Font(bold=True, color="006100"),
-            fill=PatternFill("solid", start_color="C6EFCE", end_color="C6EFCE"),
-        ),
-    )
-    sheet.conditional_formatting.add(
-        status_range,
-        CellIsRule(
-            operator="equal",
-            formula=['"НЕ ГОТОВ"'],
-            font=Font(bold=True, color="9C0006"),
-            fill=PatternFill("solid", start_color="FFC7CE", end_color="FFC7CE"),
-        ),
-    )
+        for offset, item in enumerate(row.items):
+            _paint(sheet.cell(row=index, column=FIRST_ITEM_COLUMN + offset), item.done)
+        status = sheet.cell(row=index, column=STATUS_COLUMN)
+        _paint(status, row.ready)
+        status.font = Font(bold=True, color=status.font.color.rgb if status.font.color else None)
 
     for column, width in enumerate(IDENTITY_WIDTHS, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     for column in range(FIRST_ITEM_COLUMN, LAST_ITEM_COLUMN + 1):
-        sheet.column_dimensions[get_column_letter(column)].width = 14
-    sheet.column_dimensions[done_letter].width = 12
-    sheet.column_dimensions[status_letter].width = 13
+        sheet.column_dimensions[get_column_letter(column)].width = 15
+    sheet.column_dimensions[get_column_letter(DONE_COLUMN)].width = 12
+    sheet.column_dimensions[get_column_letter(STATUS_COLUMN)].width = 13
     sheet.column_dimensions[get_column_letter(COMMENT_COLUMN)].width = 36
     sheet.freeze_panes = sheet.cell(row=2, column=FIRST_ITEM_COLUMN)
 
@@ -130,17 +117,25 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
     return buffer.getvalue()
 
 
+def _paint(cell, done: bool | None) -> None:
+    if done is None:
+        return
+    cell.fill = DONE_FILL if done else MISSING_FILL
+    cell.font = DONE_FONT if done else MISSING_FONT
+
+
 def _instruction(sheet, min_stock: int) -> None:
     bold = Font(bold=True)
     wrap = Alignment(wrap_text=True, vertical="top")
-    total = len(COUNTED_ITEMS)
+    total = len(ITEMS)
     rows: list[tuple[str, str]] = [
         ("Чек-лист карточки товара — выгрузка из сервиса", ""),
         ("", ""),
         ("Какие товары в таблице", f"Все карточки кабинета с остатком от {min_stock} шт. (WB и свои склады)."),
         ("Откуда данные", "Всё берётся из данных WB, руками ничего не отмечается."),
-        (f"Колонка «Готово из {total}»", f"Формула COUNTIF по пунктам строки. «ГОТОВ» — когда выполнены все {total}."),
-        ("Пустая ячейка", "У WB нет данных по пункту: это «не знаем», а не «не выполнено»."),
+        ("Цвет ячейки", "Зелёный — пункт выполнен, красный — нет. В ячейке — то, что видит WB: «12 фото», «22/25»."),
+        ("Ячейка без цвета", "У WB нет данных по пункту: это «не знаем», а не «не выполнено»."),
+        (f"Колонка «Готово из {total}»", f"Сколько пунктов зелёные. «ГОТОВ» — когда зелёные все {total}."),
         ("", ""),
         ("Пункт", "Что означает"),
     ]
@@ -148,9 +143,9 @@ def _instruction(sheet, min_stock: int) -> None:
     for values in rows:
         sheet.append(list(values))
     sheet["A1"].font = Font(bold=True, size=13)
-    for row in (3, 4, 5, 6, 8):
+    for row in (3, 4, 5, 6, 7, 9):
         sheet.cell(row=row, column=1).font = bold
-    sheet.cell(row=8, column=2).font = bold
+    sheet.cell(row=9, column=2).font = bold
     for line in sheet.iter_rows(min_row=3):
         for cell in line:
             cell.alignment = wrap

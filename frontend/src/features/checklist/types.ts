@@ -2,13 +2,11 @@ export interface ChecklistItem {
   key: string;
   title: string;
   meaning: string;
-  /** Входит ли пункт в «готово»; справочный только показывает данные WB. */
-  counted: boolean;
 }
 
 export interface ItemState {
   key: string;
-  /** Выполнено ли по данным WB; null — данных нет или пункт справочный. */
+  /** Выполнено ли по данным WB; null — данных нет. */
   done: boolean | null;
   /** Что видит WB: «22/25», «8 с фото». */
   detail: string | null;

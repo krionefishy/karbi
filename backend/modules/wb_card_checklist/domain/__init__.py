@@ -4,7 +4,7 @@ from backend.modules.wb_card_checklist.domain.entities import (
     ReviewFacts,
     SubjectCharacteristic,
 )
-from backend.modules.wb_card_checklist.domain.items import COUNTED_ITEMS, ITEMS, ITEMS_BY_KEY, ChecklistItem
+from backend.modules.wb_card_checklist.domain.items import ITEMS, ITEMS_BY_KEY, ChecklistItem
 from backend.modules.wb_card_checklist.domain.rules import (
     SERVICE_CHARACTERISTICS,
     ArticleFacts,
@@ -16,7 +16,6 @@ from backend.modules.wb_card_checklist.domain.rules import (
 )
 
 __all__ = [
-    "COUNTED_ITEMS",
     "ITEMS",
     "ITEMS_BY_KEY",
     "SERVICE_CHARACTERISTICS",

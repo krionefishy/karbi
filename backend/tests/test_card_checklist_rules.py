@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from backend.modules.wb_card_checklist.domain import (
-    COUNTED_ITEMS,
     ITEMS,
     ArticleFacts,
     CardFacts,
@@ -74,9 +73,6 @@ def test_only_what_wb_shows_is_in_the_table() -> None:
         "Отзывы с фото",
         "Отзывы с видео",
     ]
-    # Характеристики — справка без правила, в «готово» не входят.
-    assert [item.key for item in ITEMS if not item.counted] == ["characteristics"]
-    assert len(COUNTED_ITEMS) == 7
 
 
 def test_a_complete_card_is_done_everywhere_it_can_be() -> None:
@@ -84,7 +80,7 @@ def test_a_complete_card_is_done_everywhere_it_can_be() -> None:
 
     assert {key: state.done for key, state in result.items()} == {
         "description": True,
-        "characteristics": None,
+        "characteristics": True,
         "photos": True,
         "video": True,
         "discount": True,
@@ -95,12 +91,13 @@ def test_a_complete_card_is_done_everywhere_it_can_be() -> None:
     assert result["reviews_with_photo"].detail == "8 с фото"
 
 
-def test_photos_need_three_and_video_needs_to_exist() -> None:
-    result = states(facts(card=card(photo_count=2, has_video=False)))
+def test_one_photo_and_one_video_are_enough() -> None:
+    """По инструкции: «фото-контент установлен», «видео установлено»."""
+    result = states(facts(card=card(photo_count=0, has_video=False)))
 
-    assert (result["photos"].done, result["photos"].detail) == (False, "2 фото")
+    assert (result["photos"].done, result["photos"].detail) == (False, "0 фото")
     assert (result["video"].done, result["video"].detail) == (False, "нет")
-    assert states(facts(card=card(photo_count=3)))["photos"].done
+    assert states(facts(card=card(photo_count=1)))["photos"].done
 
 
 def test_description_and_reviews_are_about_presence() -> None:
@@ -112,12 +109,14 @@ def test_description_and_reviews_are_about_presence() -> None:
     assert states(facts(card=card(description_length=300)))["description"].done
 
 
-def test_characteristics_show_what_is_filled_without_judging() -> None:
+def test_characteristics_are_done_only_when_every_field_is_filled() -> None:
+    """По инструкции: заполнены все характеристики, доступные в категории."""
     state = states(facts(card=card(characteristic_ids=frozenset({1, 2, 3, 4}))))["characteristics"]
 
     # ИКПУ и «Описание» в справочнике есть, но в счёт не входят.
     assert characteristics_fill(card(), DIRECTORY) == CharacteristicsFill(filled=5, total=5, missing=())
-    assert (state.done, state.detail, state.note) == (None, "4/5", "Не заполнены: Поле 5")
+    assert (states(facts())["characteristics"].done, states(facts())["characteristics"].detail) == (True, "5/5")
+    assert (state.done, state.detail, state.note) == (False, "4/5", "Не заполнены: Поле 5")
 
 
 def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
@@ -130,7 +129,7 @@ def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
 def test_missing_data_reads_as_unknown_not_as_failed() -> None:
     result = states(facts(characteristics=None, price=None, reviews=None))
 
-    for key in ("discount", "reviews_present", "reviews_with_photo", "reviews_with_video"):
+    for key in ("characteristics", "discount", "reviews_present", "reviews_with_photo", "reviews_with_video"):
         assert result[key].done is None, key
     assert result["characteristics"].detail == "справочник не прочитан"
     # Отзывы до первого подсчёта медиа: всего знаем, с фото — ещё нет.

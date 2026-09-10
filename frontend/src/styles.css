@@ -532,7 +532,6 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .checklist-sticky { position: sticky; left: 0; z-index: 1; background: inherit; box-shadow: 1px 0 0 var(--line); }
 .checklist-row .article-title { flex-direction: row; align-items: center; justify-content: flex-start; }
 .checklist-row .article-title strong { font-size: 12px; line-height: 1.3; }
-.checklist-kind { margin-top: 5px; color: var(--muted); font-size: 9px; font-style: normal; letter-spacing: .06em; }
 .checklist-cell { align-items: center; gap: 4px; text-align: center; }
 .checklist-cell small { color: var(--muted); font-size: 10px; line-height: 1.25; }
 .checklist-cell-done { color: var(--positive); background: var(--positive-bg); }

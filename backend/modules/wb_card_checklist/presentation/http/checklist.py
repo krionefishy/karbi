@@ -60,10 +60,7 @@ def checklist_response(view: ChecklistView) -> ChecklistResponse:
         stock_state=view.stock_state,
         reviews_state=view.reviews_state,
         min_stock=view.min_stock,
-        items=[
-            ChecklistItemResponse(key=item.key, title=item.title, meaning=item.meaning, counted=item.counted)
-            for item in ITEMS
-        ],
+        items=[ChecklistItemResponse(key=item.key, title=item.title, meaning=item.meaning) for item in ITEMS],
         rows=[row_response(row) for row in view.rows],
     )
 
