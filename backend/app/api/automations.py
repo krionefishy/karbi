@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from backend.app.api.schemas import AutomationResponse, AutomationSellerAttach
 from backend.app.api.utils import automation_catalog
 from backend.app.http.authentication import CurrentPrincipal
+from backend.modules.wb_card_checklist.application import ChecklistService
 from backend.modules.wb_core.application import (
     AutomationNotFoundError,
     DuplicateCredentialError,
@@ -34,12 +35,14 @@ async def automations(
     reviews: FromDishka[ReviewSyncService],
     turnover: FromDishka[TurnoverService],
     fbs_distribution: FromDishka[FbsDistributionService],
+    card_checklist: FromDishka[ChecklistService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
     return automation_catalog(
         await reviews.overview(),
         await turnover.overview(),
         await fbs_distribution.overview(),
+        await card_checklist.overview(),
         settings,
     )
 

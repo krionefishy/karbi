@@ -5,6 +5,7 @@ from backend.app.api.automations import router as automations_router
 from backend.modules.notifications.presentation.http import admin_bots_router
 from backend.modules.platform.presentation.http import admin_users_router
 from backend.modules.platform.presentation.http import router as auth_router
+from backend.modules.wb_card_checklist.presentation.http import router as wb_card_checklist_router
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
 from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
@@ -20,6 +21,7 @@ router.include_router(wb_reviews_router)
 router.include_router(wb_turnover_router)
 router.include_router(wb_fbs_distribution_router)
 router.include_router(onec_router)
+router.include_router(wb_card_checklist_router)
 router.include_router(automations_router)
 
 

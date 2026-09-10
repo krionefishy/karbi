@@ -1,7 +1,8 @@
 import uuid
 from datetime import UTC, date, datetime
 
-from backend.app.api.utils import automation_catalog, next_run_at, next_turnover_run_at
+from backend.app.api.utils import automation_catalog, next_checklist_run_at, next_run_at, next_turnover_run_at
+from backend.modules.wb_card_checklist.application import ChecklistOverview
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
@@ -19,6 +20,10 @@ def quiet_turnover() -> TurnoverOverview:
 def quiet_fbs() -> DistributionCatalogOverview:
     """Same for FBS distribution: an idle card must not colour its neighbours."""
     return DistributionCatalogOverview(seller_count=0)
+
+
+def quiet_checklist() -> ChecklistOverview:
+    return ChecklistOverview(seller_count=0, last_success_at=None, failing=0)
 
 
 def run(status: str, *, started: datetime | None = None, finished: datetime | None = None) -> ReviewSyncRun:
@@ -46,7 +51,7 @@ def test_catalog_reports_the_run_that_actually_happened() -> None:
         runs_last_24h=2,
     )
 
-    [automation, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), SETTINGS)
+    [automation, _, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), SETTINGS)
 
     assert automation.id == "wb-reviews"
     assert automation.seller_count == 4
@@ -77,7 +82,7 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
         runs_last_24h=1,
     )
 
-    [automation, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), SETTINGS)
+    [automation, _, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), SETTINGS)
 
     assert automation.last_run is not None
     assert automation.last_run.duration_seconds is None
@@ -99,14 +104,21 @@ def test_next_run_is_the_worker_schedule() -> None:
 def test_the_catalog_lists_every_automation() -> None:
     turnover = TurnoverOverview(seller_count=2, last_run=None, last_success_at=None, runs_last_24h=0)
 
-    reviews_card, turnover_card, fbs_card = automation_catalog(
+    reviews_card, turnover_card, fbs_card, checklist_card = automation_catalog(
         SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
         turnover,
         DistributionCatalogOverview(seller_count=3),
+        ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
         SETTINGS,
     )
 
-    assert (reviews_card.id, turnover_card.id, fbs_card.id) == ("wb-reviews", "wb-turnover", "wb-fbs-distribution")
+    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id) == (
+        "wb-reviews",
+        "wb-turnover",
+        "wb-fbs-distribution",
+        "wb-card-checklist",
+    )
+    assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
     assert (fbs_card.seller_count, fbs_card.status) == (3, "idle")
@@ -124,3 +136,23 @@ def test_the_turnover_card_points_at_its_nearest_daily_step() -> None:
     # Just past the last slot of the day the next step rolls over to tomorrow.
     late = next_turnover_run_at(SETTINGS, datetime(2026, 8, 18, 21, 30, tzinfo=UTC))
     assert late.day == 19
+
+
+def test_the_checklist_card_reports_collection_state() -> None:
+    """Сбор идёт по селлеру; ошибка хоть у одного красит карточку в «с ошибками»."""
+    collected = datetime(2026, 9, 10, 2, 0, tzinfo=UTC)
+    healthy = ChecklistOverview(seller_count=3, last_success_at=collected, failing=0)
+    failing = ChecklistOverview(seller_count=3, last_success_at=collected, failing=1)
+
+    *_, card = automation_catalog(quiet_overview(), quiet_turnover(), quiet_fbs(), healthy, SETTINGS)
+
+    assert card.status == "active"
+    assert card.last_success_at == "2026-09-10T02:00:00+00:00"
+    assert failing.status == "degraded"
+    # 05:00 МСК — 02:00 UTC: сразу после сбора следующий назначен на завтра.
+    after = next_checklist_run_at(SETTINGS, datetime(2026, 9, 10, 2, 30, tzinfo=UTC))
+    assert (after.hour, after.minute, after.day) == (SETTINGS.card_checklist.collect_hour, 0, 11)
+
+
+def quiet_overview() -> SyncOverview:
+    return SyncOverview(seller_count=0, last_run=None, last_success_at=None, runs_last_24h=0)

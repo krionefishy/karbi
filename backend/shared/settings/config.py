@@ -197,6 +197,29 @@ class FbsDistributionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CardChecklistConfig:
+    """Чек-лист карточки: когда перечитывать карточки и где граница «выполнено». Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # После утреннего снимка остатков (03:00) и ночного прогона отзывов: к
+    # рабочему дню таблица собрана из свежих чисел.
+    collect_hour: int = 5
+    collect_minute: int = 0
+    # Через сколько повторять сбор после неудачи. Ответ 4XX стоит WB десяти
+    # запросов, поэтому чаще раза в час долбить сломанный ключ незачем.
+    retry_minutes: int = 60
+    # Какие товары попадают в таблицу: только с остатком от стольких штук.
+    min_stock: int = 10
+    min_photos: int = 3
+    min_description_length: int = 1000
+    min_reviews: int = 1
+    characteristics_share: float = 0.8
+    # Справочник характеристик предмета меняется редко; неделя — компромисс
+    # между свежестью и запросами на каждый предмет каждого селлера.
+    subject_ttl_hours: int = 168
+
+
+@dataclass(frozen=True, slots=True)
 class RelayConfig:
     """The messenger relay outside Russia: the only host allowed to reach the messenger.
 
@@ -271,6 +294,7 @@ class Settings:
     relay: RelayConfig
     turnover: TurnoverConfig
     fbs_distribution: FbsDistributionConfig
+    card_checklist: CardChecklistConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -338,6 +362,21 @@ class Settings:
         for key in ("mirror_hour", "mirror_minute", "snapshot_max_age_minutes", "mirror_retry_minutes"):
             if key in fbs_distribution:
                 fbs_distribution[key] = int(fbs_distribution[key])
+        card_checklist = dict(data.get("card_checklist", {}))
+        for key in (
+            "collect_hour",
+            "collect_minute",
+            "retry_minutes",
+            "min_stock",
+            "min_photos",
+            "min_description_length",
+            "min_reviews",
+            "subject_ttl_hours",
+        ):
+            if key in card_checklist:
+                card_checklist[key] = int(card_checklist[key])
+        if "characteristics_share" in card_checklist:
+            card_checklist["characteristics_share"] = float(card_checklist["characteristics_share"])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -369,6 +408,7 @@ class Settings:
             relay=RelayConfig(**relay),
             turnover=TurnoverConfig(**turnover),
             fbs_distribution=FbsDistributionConfig(**fbs_distribution),
+            card_checklist=CardChecklistConfig(**card_checklist),
         )
         settings.validate_values()
         return settings
@@ -390,6 +430,19 @@ class Settings:
             raise ValueError("worker.job_retry_backoff_seconds must be positive")
         if self.worker.run_max_age_seconds <= self.worker.job_lease_seconds:
             raise ValueError("worker.run_max_age_seconds must exceed worker.job_lease_seconds")
+        checklist = self.card_checklist
+        if not 0 <= checklist.collect_hour <= 23:
+            raise ValueError("card_checklist.collect_hour must be between 0 and 23")
+        if not 0 <= checklist.collect_minute <= 59:
+            raise ValueError("card_checklist.collect_minute must be between 0 and 59")
+        if checklist.retry_minutes < 1:
+            raise ValueError("card_checklist.retry_minutes must be positive")
+        if min(checklist.min_stock, checklist.min_photos, checklist.min_description_length, checklist.min_reviews) < 0:
+            raise ValueError("card_checklist thresholds must not be negative")
+        if not 0 < checklist.characteristics_share <= 1:
+            raise ValueError("card_checklist.characteristics_share must be in (0, 1]")
+        if checklist.subject_ttl_hours < 1:
+            raise ValueError("card_checklist.subject_ttl_hours must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):
