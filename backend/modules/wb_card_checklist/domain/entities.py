@@ -41,6 +41,9 @@ class PriceFacts:
     discounted_price: float
     discount: int
     club_discount: int
+    # Цена для подписчиков WB Клуба. None — WB её не прислал, тогда клубной
+    # скидки нет и покупатель видит обычную цену со скидкой.
+    club_discounted_price: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

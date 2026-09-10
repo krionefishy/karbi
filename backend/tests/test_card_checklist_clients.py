@@ -96,8 +96,8 @@ async def test_prices_are_read_page_by_page(monkeypatch) -> None:
         return {
             "nmID": nm_id,
             "sizes": [
-                {"price": 179999, "discountedPrice": 8999.95},
-                {"price": 179999, "discountedPrice": 8899.95},
+                {"price": 179999, "discountedPrice": 8999.95, "clubDiscountedPrice": 8639.95},
+                {"price": 179999, "discountedPrice": 8899.95, "clubDiscountedPrice": 8543.95},
             ],
             "discount": discount,
             "clubDiscount": 4,
@@ -123,6 +123,7 @@ async def test_prices_are_read_page_by_page(monkeypatch) -> None:
     assert [price.article for price in prices] == ["1", "2", "3"]
     # На витрине покупатель видит самую низкую цену из размеров.
     assert (prices[0].price, prices[0].discounted_price, prices[0].discount) == (179999, 8899.95, 95)
+    assert prices[0].club_discounted_price == 8543.95
     assert prices[1].discount == 0
 
 

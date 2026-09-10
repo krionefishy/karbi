@@ -94,6 +94,7 @@ def evaluate(facts: ArticleFacts, thresholds: Thresholds) -> list[ItemState]:
         "photos": ItemState("photos", card.photo_count >= thresholds.min_photos, f"{card.photo_count} фото"),
         "video": ItemState("video", card.has_video, "есть" if card.has_video else "нет"),
         "discount": _discount(facts.price),
+        "club_discount": _club_discount(facts.price),
         **_reviews(facts.reviews),
     }
     return [computed[item.key] for item in ITEMS]
@@ -118,9 +119,21 @@ def _missing_note(missing: tuple[str, ...]) -> str | None:
 def _discount(price: PriceFacts | None) -> ItemState:
     if price is None:
         return ItemState("discount", None, "нет цены")
-    shown = f"{price.discounted_price:,.0f}".replace(",", " ")
     label = f"−{price.discount}%" if price.discount else "без скидки"
-    return ItemState("discount", price.discount > 0, f"{label} · {shown} ₽")
+    return ItemState("discount", price.discount > 0, f"{label} · {_rubles(price.discounted_price)}")
+
+
+def _club_discount(price: PriceFacts | None) -> ItemState:
+    if price is None:
+        return ItemState("club_discount", None, "нет цены")
+    if not price.club_discount:
+        return ItemState("club_discount", False, "без скидки")
+    club_price = price.club_discounted_price if price.club_discounted_price is not None else price.discounted_price
+    return ItemState("club_discount", True, f"−{price.club_discount}% · {_rubles(club_price)}")
+
+
+def _rubles(value: float) -> str:
+    return f"{value:,.0f} ₽".replace(",", " ")
 
 
 def _reviews(reviews: ReviewFacts | None) -> dict[str, ItemState]:

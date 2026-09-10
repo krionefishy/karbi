@@ -51,7 +51,7 @@ def facts(**overrides: Any) -> ArticleFacts:
     values: dict[str, Any] = {
         "card": card(),
         "characteristics": DIRECTORY,
-        "price": PriceFacts("100", 179999, 8999.95, 95, 4),
+        "price": PriceFacts("100", 179999, 8999.95, 95, 4, 8639.95),
         "reviews": ReviewFacts(total=52, with_photo=8, with_video=6),
     }
     values.update(overrides)
@@ -69,6 +69,7 @@ def test_only_what_wb_shows_is_in_the_table() -> None:
         "Фото",
         "Видео",
         "Скидка / СПП",
+        "Скидка WB Клуба",
         "Отзывы есть",
         "Отзывы с фото",
         "Отзывы с видео",
@@ -84,6 +85,7 @@ def test_a_complete_card_is_done_everywhere_it_can_be() -> None:
         "photos": True,
         "video": True,
         "discount": True,
+        "club_discount": True,
         "reviews_present": True,
         "reviews_with_photo": True,
         "reviews_with_video": True,
@@ -129,7 +131,14 @@ def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
 def test_missing_data_reads_as_unknown_not_as_failed() -> None:
     result = states(facts(characteristics=None, price=None, reviews=None))
 
-    for key in ("characteristics", "discount", "reviews_present", "reviews_with_photo", "reviews_with_video"):
+    for key in (
+        "characteristics",
+        "discount",
+        "club_discount",
+        "reviews_present",
+        "reviews_with_photo",
+        "reviews_with_video",
+    ):
         assert result[key].done is None, key
     assert result["characteristics"].detail == "справочник не прочитан"
     # Отзывы до первого подсчёта медиа: всего знаем, с фото — ещё нет.
@@ -144,3 +153,14 @@ def test_discount_shows_the_seller_discount_and_the_price_after_it() -> None:
 
     assert (state.done, state.detail) == (True, "−95% · 9 000 ₽")
     assert (no_discount.done, no_discount.detail) == (False, "без скидки · 1 000 ₽")
+
+
+def test_club_discount_shows_the_club_price() -> None:
+    club = states(facts())["club_discount"]
+    no_club = states(facts(price=PriceFacts("100", 1000, 900, 10, 0)))["club_discount"]
+    # Клубную цену WB не прислал — показываем обычную цену со скидкой.
+    without_price = states(facts(price=PriceFacts("100", 1000, 900, 10, 3)))["club_discount"]
+
+    assert (club.done, club.detail) == (True, "−4% · 8 640 ₽")
+    assert (no_club.done, no_club.detail) == (False, "без скидки")
+    assert without_price.detail == "−3% · 900 ₽"

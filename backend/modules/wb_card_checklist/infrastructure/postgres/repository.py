@@ -142,6 +142,7 @@ class ChecklistRepository:
                 "discounted_price": price.discounted_price,
                 "discount": price.discount,
                 "club_discount": price.club_discount,
+                "club_discounted_price": price.club_discounted_price,
                 "collected_at": now,
             }
             for price in unique.values()
@@ -158,6 +159,9 @@ class ChecklistRepository:
                 discounted_price=float(row.discounted_price),
                 discount=row.discount,
                 club_discount=row.club_discount,
+                club_discounted_price=float(row.club_discounted_price)
+                if row.club_discounted_price is not None
+                else None,
             )
             for row in rows
         }
