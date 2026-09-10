@@ -121,6 +121,7 @@ def parse_price(raw: Any) -> PriceFacts | None:
     sizes = [size for size in raw.get("sizes") or [] if isinstance(size, dict)]
     prices = [float(size.get("price") or 0) for size in sizes]
     discounted = [float(size.get("discountedPrice") or 0) for size in sizes]
+    club = [float(size["clubDiscountedPrice"]) for size in sizes if size.get("clubDiscountedPrice") is not None]
     return PriceFacts(
         article=str(raw["nmID"]),
         # Цены по размерам обычно одинаковы; если нет — на витрине покупатель
@@ -129,6 +130,7 @@ def parse_price(raw: Any) -> PriceFacts | None:
         discounted_price=min(discounted, default=0.0),
         discount=int(raw.get("discount") or 0),
         club_discount=int(raw.get("clubDiscount") or 0),
+        club_discounted_price=min(club, default=None),
     )
 
 

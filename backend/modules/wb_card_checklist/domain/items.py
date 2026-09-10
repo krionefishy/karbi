@@ -16,6 +16,7 @@ ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem("photos", "Фото", "Фото-контент установлен в карточку."),
     ChecklistItem("video", "Видео", "Видео установлено в карточку."),
     ChecklistItem("discount", "Скидка / СПП", "Скидка выставлена. СПП WB не отдаёт."),
+    ChecklistItem("club_discount", "Скидка WB Клуба", "Для подписчиков WB Клуба выставлена скидка."),
     ChecklistItem("reviews_present", "Отзывы есть", "На карточке есть отзывы."),
     ChecklistItem("reviews_with_photo", "Отзывы с фото", "Есть фото-отзывы."),
     ChecklistItem("reviews_with_video", "Отзывы с видео", "Есть видео-отзывы."),

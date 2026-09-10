@@ -90,6 +90,7 @@ class PriceFactsModel(WBCardChecklistBase):
     discounted_price: Mapped[float] = mapped_column(Numeric(12, 2), nullable=False, default=0)
     discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     club_discount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    club_discounted_price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
