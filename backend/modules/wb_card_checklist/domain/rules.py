@@ -36,7 +36,8 @@ NAMED_MISSING = 5
 class Thresholds:
     """Единственный порог среди пунктов — фото. Второй порог, остаток, отбирает строки, а не пункты."""
 
-    min_photos: int = 3
+    # По инструкции «фото-контент установлен»: хватает одного.
+    min_photos: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,8 +57,8 @@ class ArticleFacts:
 @dataclass(frozen=True, slots=True)
 class ItemState:
     key: str
-    # Выполнено ли по данным WB. None — данных нет или пункт справочный:
-    # «не знаем» не должно читаться как «не выполнено».
+    # Выполнено ли по данным WB. None — данных нет: «не знаем» не должно
+    # читаться как «не выполнено».
     done: bool | None
     # Что видит WB: «22/25», «8 с фото».
     detail: str | None = None
@@ -99,11 +100,11 @@ def evaluate(facts: ArticleFacts, thresholds: Thresholds) -> list[ItemState]:
 
 
 def _characteristics(facts: ArticleFacts) -> ItemState:
-    """Справка без правила: сколько заполнено и чего не хватает."""
+    """По инструкции: заполнены все характеристики, доступные в категории."""
     if not facts.characteristics:
         return ItemState("characteristics", None, "справочник не прочитан")
     fill = characteristics_fill(facts.card, facts.characteristics)
-    return ItemState("characteristics", None, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
+    return ItemState("characteristics", not fill.missing, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
 
 
 def _missing_note(missing: tuple[str, ...]) -> str | None:

@@ -266,7 +266,6 @@ export function CardChecklistPage() {
                   {checklist.items.map((item) => (
                     <span key={item.key} title={item.meaning}>
                       {item.title}
-                      {!item.counted && <em className="checklist-kind">справка</em>}
                     </span>
                   ))}
                   <span>Готово</span>
@@ -371,11 +370,11 @@ const toneIcons = { done: Check, missing: X, neutral: Minus };
 const toneLabels = { done: "есть", missing: "нет", neutral: "нет данных" };
 
 function ItemCell({ item, state }: { item: ChecklistItem; state: ItemState }) {
-  const tone = cellTone(item, state);
+  const tone = cellTone(state);
   const Icon = toneIcons[tone];
   return (
     <div className={`checklist-cell checklist-cell-${tone}`} title={cellHint(item, state)}>
-      {item.counted && <Icon size={15} aria-label={toneLabels[tone]} />}
+      <Icon size={15} aria-label={toneLabels[tone]} />
       <small>{state.detail ?? "нет данных"}</small>
     </div>
   );

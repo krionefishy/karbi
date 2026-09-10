@@ -200,17 +200,17 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     items = {state.key: state for state in beta.items}
     assert beta.stock == 15
     assert items["photos"].done
-    # Характеристики — справка: показываем, но не судим.
-    assert (items["characteristics"].done, items["characteristics"].detail) == (None, "3/3")
+    assert (items["characteristics"].done, items["characteristics"].detail) == (True, "3/3")
     # Отзывы у склейки общие: 3 у A и 2 у C — на карточке покупатель видит 5.
     assert items["reviews_present"].detail == "5 отз."
     assert (items["reviews_with_photo"].done, items["reviews_with_photo"].detail) == (True, "1 с фото")
     assert (items["reviews_with_video"].done, items["reviews_with_video"].detail) == (False, "0 с видео")
     assert (items["discount"].done, items["discount"].detail) == (True, "−50% · 500 ₽")
-    # Всё, кроме видео-отзывов: 6 из 7.
-    assert (beta.done, beta.total, beta.ready) == (6, 7, False)
+    # Всё, кроме видео-отзывов: 7 из 8.
+    assert (beta.done, beta.total, beta.ready) == (7, 8, False)
     alpha_items = {state.key: state for state in alpha.items}
-    assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (False, "1 фото")
+    # Одного фото по инструкции хватает.
+    assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (True, "1 фото")
     assert alpha_items["discount"].done is None
 
 
@@ -279,14 +279,15 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
         "Отзывы с фото",
         "Отзывы с видео",
     ]
-    assert header[14:] == ["Готово из 7", "Статус", "Комментарий"]
+    assert header[14:] == ["Готово из 8", "Статус", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
-    # Пункты — TRUE/FALSE, справочные характеристики — текстом.
-    assert second[6:14] == [True, "3/3", True, True, True, True, True, False]
-    assert second[14] == "=COUNTIF(G3:N3,TRUE)"
-    assert second[15] == '=IF(O3=7,"ГОТОВ","НЕ ГОТОВ")'
-    assert second[16] == "Проверить рич"
+    # В ячейке — то, что видит WB, результат — цветом.
+    assert second[6:14] == ["1500 симв.", "3/3", "5 фото", "есть", "−50% · 500 ₽", "5 отз.", "1 с фото", "0 с видео"]
+    fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 15)]
+    assert fills == ["C6EFCE"] * 7 + ["FFC7CE"]
+    assert second[14:17] == [7, "НЕ ГОТОВ", "Проверить рич"]
+    assert sheet["P3"].fill.fgColor.rgb[-6:] == "FFC7CE"
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")

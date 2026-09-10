@@ -3,12 +3,10 @@ import { describe, expect, it } from "vitest";
 import { cellHint, cellTone, notices, visibleRows } from "./table";
 import type { Checklist, ChecklistItem, ChecklistRow, ItemState } from "./types";
 
-const photos: ChecklistItem = { key: "photos", title: "Фото", meaning: "Достаточно фото.", counted: true };
 const characteristics: ChecklistItem = {
   key: "characteristics",
   title: "Характеристики",
-  meaning: "Сколько заполнено.",
-  counted: false,
+  meaning: "Заполнены все характеристики.",
 };
 
 function state(overrides: Partial<ItemState>): ItemState {
@@ -26,8 +24,8 @@ function row(article: string, ready: boolean, overrides: Partial<ChecklistRow> =
     card_created_at: null,
     stock: 20,
     items: [],
-    done: ready ? 7 : 3,
-    total: 7,
+    done: ready ? 8 : 3,
+    total: 8,
     ready,
     comment: "",
     ...overrides,
@@ -51,23 +49,22 @@ function checklist(overrides: Partial<Checklist> = {}): Checklist {
 
 describe("checklist table", () => {
   it("colours a cell by what WB shows", () => {
-    expect(cellTone(photos, state({ done: true }))).toBe("done");
-    expect(cellTone(photos, state({ done: false }))).toBe("missing");
+    expect(cellTone(state({ done: true }))).toBe("done");
+    expect(cellTone(state({ done: false }))).toBe("missing");
     // Нет данных — это «не знаем», а не «не выполнено».
-    expect(cellTone(photos, state({ done: null }))).toBe("neutral");
-    // Справочный пункт не красится вовсе.
-    expect(cellTone(characteristics, state({ key: "characteristics", done: null, detail: "22/25" }))).toBe("neutral");
+    expect(cellTone(state({ done: null }))).toBe("neutral");
   });
 
   it("puts WB's figure and the empty fields into the hint", () => {
     const hint = cellHint(
       characteristics,
-      state({ key: "characteristics", done: null, detail: "22/25", note: "Не заполнены: Цвет" }),
+      state({ key: "characteristics", done: false, detail: "22/25", note: "Не заполнены: Цвет" }),
     );
 
     expect(hint).toContain("WB: 22/25");
     expect(hint).toContain("Не заполнены: Цвет");
     expect(hint).not.toContain("Данных пока нет");
+    expect(cellHint(characteristics, state({ done: null }))).toContain("Данных пока нет");
   });
 
   it("filters by search and by readiness", () => {
