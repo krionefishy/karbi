@@ -26,6 +26,8 @@ export interface ChecklistRow {
   done: number;
   total: number;
   ready: boolean;
+  /** Чего не хватает словами — тот же текст, что в колонке «Примечание» выгрузки. */
+  note: string;
   comment: string;
 }
 

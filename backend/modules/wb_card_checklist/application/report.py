@@ -18,8 +18,8 @@ IDENTITY_WIDTHS = (14, 13, 22, 16, 36, 20)
 FIRST_ITEM_COLUMN = len(IDENTITY_HEADERS) + 1
 LAST_ITEM_COLUMN = FIRST_ITEM_COLUMN + len(ITEMS) - 1
 DONE_COLUMN = LAST_ITEM_COLUMN + 1
-STATUS_COLUMN = DONE_COLUMN + 1
-COMMENT_COLUMN = STATUS_COLUMN + 1
+NOTE_COLUMN = DONE_COLUMN + 1
+COMMENT_COLUMN = NOTE_COLUMN + 1
 
 # Цвета шапки — из таблицы, которую менеджеры вели руками: тёмная для
 # реквизитов, синяя для пунктов проверки.
@@ -28,6 +28,7 @@ ITEM_FILL = PatternFill("solid", fgColor="2E5F8A")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 CENTERED = Alignment(horizontal="center", vertical="center", wrap_text=True)
+WRAPPED = Alignment(vertical="center", wrap_text=True)
 
 # Выполнено — зелёный, нет — красный, как в интерфейсе. Ячейку без данных
 # не красим: «не знаем» не должно выглядеть как «не выполнено».
@@ -35,9 +36,6 @@ DONE_FILL = PatternFill("solid", fgColor="C6EFCE")
 DONE_FONT = Font(color="006100")
 MISSING_FILL = PatternFill("solid", fgColor="FFC7CE")
 MISSING_FONT = Font(color="9C0006")
-
-READY = "ГОТОВ"
-NOT_READY = "НЕ ГОТОВ"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,14 +55,14 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
 
     Each item cell holds WB's own figure («12 фото», «22/25») and its colour
     says whether the item is done. Excel cannot count by colour, so «готово»
-    and the status are written as values, not formulas.
+    is a value, not a formula; the note says in words what is missing.
     """
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Чек-лист"
     total = len(ITEMS)
 
-    headers = [*IDENTITY_HEADERS, *(item.title for item in ITEMS), f"Готово из {total}", "Статус", "Комментарий"]
+    headers = [*IDENTITY_HEADERS, *(item.title for item in ITEMS), f"Готово из {total}", "Примечание", "Комментарий"]
     sheet.append(headers)
     for column, _ in enumerate(headers, start=1):
         cell = sheet.cell(row=1, column=column)
@@ -85,7 +83,7 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
                 view.seller_name,
                 *(item.detail for item in row.items),
                 row.done,
-                READY if row.ready else NOT_READY,
+                row.note,
                 row.comment or None,
             ]
         )
@@ -93,20 +91,18 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
         # Артикул и баркод — текст: иначе Excel покажет баркод как 2,05E+12.
         sheet.cell(row=index, column=2).number_format = "@"
         sheet.cell(row=index, column=4).number_format = "@"
-        for column in range(FIRST_ITEM_COLUMN, STATUS_COLUMN + 1):
+        for column in range(FIRST_ITEM_COLUMN, DONE_COLUMN + 1):
             sheet.cell(row=index, column=column).alignment = CENTERED
+        sheet.cell(row=index, column=NOTE_COLUMN).alignment = WRAPPED
         for offset, item in enumerate(row.items):
             _paint(sheet.cell(row=index, column=FIRST_ITEM_COLUMN + offset), item.done)
-        status = sheet.cell(row=index, column=STATUS_COLUMN)
-        _paint(status, row.ready)
-        status.font = Font(bold=True, color=status.font.color.rgb if status.font.color else None)
 
     for column, width in enumerate(IDENTITY_WIDTHS, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     for column in range(FIRST_ITEM_COLUMN, LAST_ITEM_COLUMN + 1):
         sheet.column_dimensions[get_column_letter(column)].width = 15
     sheet.column_dimensions[get_column_letter(DONE_COLUMN)].width = 12
-    sheet.column_dimensions[get_column_letter(STATUS_COLUMN)].width = 13
+    sheet.column_dimensions[get_column_letter(NOTE_COLUMN)].width = 48
     sheet.column_dimensions[get_column_letter(COMMENT_COLUMN)].width = 36
     sheet.freeze_panes = sheet.cell(row=2, column=FIRST_ITEM_COLUMN)
 
@@ -135,7 +131,8 @@ def _instruction(sheet, min_stock: int) -> None:
         ("Откуда данные", "Всё берётся из данных WB, руками ничего не отмечается."),
         ("Цвет ячейки", "Зелёный — пункт выполнен, красный — нет. В ячейке — то, что видит WB: «12 фото», «22/25»."),
         ("Ячейка без цвета", "У WB нет данных по пункту: это «не знаем», а не «не выполнено»."),
-        (f"Колонка «Готово из {total}»", f"Сколько пунктов зелёные. «ГОТОВ» — когда зелёные все {total}."),
+        (f"Колонка «Готово из {total}»", "Сколько пунктов из всех зелёные."),
+        ("Колонка «Примечание»", "Чего не хватает и по каким пунктам у WB нет данных."),
         ("", ""),
         ("Пункт", "Что означает"),
     ]
@@ -143,9 +140,9 @@ def _instruction(sheet, min_stock: int) -> None:
     for values in rows:
         sheet.append(list(values))
     sheet["A1"].font = Font(bold=True, size=13)
-    for row in (3, 4, 5, 6, 7, 9):
+    for row in (3, 4, 5, 6, 7, 8, 10):
         sheet.cell(row=row, column=1).font = bold
-    sheet.cell(row=9, column=2).font = bold
+    sheet.cell(row=10, column=2).font = bold
     for line in sheet.iter_rows(min_row=3):
         for cell in line:
             cell.alignment = wrap

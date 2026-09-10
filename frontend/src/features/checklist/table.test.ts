@@ -27,6 +27,7 @@ function row(article: string, ready: boolean, overrides: Partial<ChecklistRow> =
     done: ready ? 8 : 3,
     total: 8,
     ready,
+    note: "",
     comment: "",
     ...overrides,
   };

@@ -47,6 +47,7 @@ def row_response(row: ChecklistRow) -> ChecklistRowResponse:
         done=row.done,
         total=row.total,
         ready=row.ready,
+        note=row.note,
         comment=row.comment,
     )
 
