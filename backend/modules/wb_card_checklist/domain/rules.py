@@ -93,6 +93,7 @@ def evaluate(facts: ArticleFacts, thresholds: Thresholds) -> list[ItemState]:
         "characteristics": _characteristics(facts),
         "photos": ItemState("photos", card.photo_count >= thresholds.min_photos, f"{card.photo_count} фото"),
         "video": ItemState("video", card.has_video, "есть" if card.has_video else "нет"),
+        "video_cover": ItemState("video_cover", card.has_video, "есть" if card.has_video else "нет"),
         "discount": _discount(facts.price),
         "club_discount": _club_discount(facts.price),
         **_reviews(facts.reviews),

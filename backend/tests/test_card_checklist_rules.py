@@ -68,6 +68,7 @@ def test_only_what_wb_shows_is_in_the_table() -> None:
         "Характеристики",
         "Фото",
         "Видео",
+        "Видеообложка",
         "Скидка / СПП",
         "Скидка WB Клуба",
         "Отзывы есть",
@@ -84,6 +85,7 @@ def test_a_complete_card_is_done_everywhere_it_can_be() -> None:
         "characteristics": True,
         "photos": True,
         "video": True,
+        "video_cover": True,
         "discount": True,
         "club_discount": True,
         "reviews_present": True,
@@ -99,6 +101,8 @@ def test_one_photo_and_one_video_are_enough() -> None:
 
     assert (result["photos"].done, result["photos"].detail) == (False, "0 фото")
     assert (result["video"].done, result["video"].detail) == (False, "нет")
+    # Видеообложка — то же видео карточки: отдельного признака у WB нет.
+    assert (result["video_cover"].done, result["video_cover"].detail) == (False, "нет")
     assert states(facts(card=card(photo_count=1)))["photos"].done
 
 
