@@ -19,6 +19,7 @@ from backend.shared.kafka_streams.topics import WBReviewsTopics
 from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
+NO_MEDIA = (0, 0)
 # Extra time on top of the job lease before Kafka considers the consumer dead.
 # The default 300s poll interval is shorter than a legitimate job, and a
 # rebalance in the middle of one means double work and a dead task.
@@ -159,7 +160,8 @@ class ReviewSyncConsumer:
                 await sellers.ensure_feedback_articles(seller_id, unknown)
                 articles = known | {card.article for card in unknown}
                 counts = {article: aggregation.counts.get(article, NO_RATINGS) for article in articles}
-                await reviews.upsert_daily_counts(seller_id, snapshot_date, counts)
+                media = {article: aggregation.media.get(article, NO_MEDIA) for article in articles}
+                await reviews.upsert_daily_counts(seller_id, snapshot_date, counts, media)
                 await reviews.complete_job(job_id, len(counts), aggregation.feedback_count)
             await reviews.finalize_run(run_id)
             sellers.mark_inbox(event_id, "WBReviewSyncRequested")

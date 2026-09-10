@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
@@ -31,6 +31,10 @@ class FeedbackAggregation:
     counts: dict[str, tuple[int, int, int, int, int]]
     products: dict[str, FeedbackProduct]
     feedback_count: int
+    # Сколько отзывов артикула пришли с фото и с видео. Считается тем же
+    # проходом: отдельный обход ради двух чисел стоил бы ещё одного полного
+    # сканирования отзывов селлера.
+    media: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
 class WBFeedbackClient:
@@ -53,19 +57,21 @@ class WBFeedbackClient:
         """
         counts: dict[str, list[int]] = {}
         products: dict[str, FeedbackProduct] = {}
+        media: dict[str, list[int]] = {}
         seen: set[bytes] = set()
         for path, extra_params in (
             ("/api/v1/feedbacks", {"isAnswered": "false"}),
             ("/api/v1/feedbacks", {"isAnswered": "true"}),
             ("/api/v1/feedbacks/archive", {}),
         ):
-            await self._consume_pages(seller_id, path, extra_params, counts, products, seen)
+            await self._consume_pages(seller_id, path, extra_params, counts, products, media, seen)
         return FeedbackAggregation(
             counts={
                 article: (values[0], values[1], values[2], values[3], values[4]) for article, values in counts.items()
             },
             products=products,
             feedback_count=len(seen),
+            media={article: (values[0], values[1]) for article, values in media.items()},
         )
 
     async def _consume_pages(
@@ -75,6 +81,7 @@ class WBFeedbackClient:
         extra_params: dict[str, str],
         counts: dict[str, list[int]],
         products: dict[str, FeedbackProduct],
+        media: dict[str, list[int]],
         seen: set[bytes],
     ) -> None:
         skip = 0
@@ -105,7 +112,7 @@ class WBFeedbackClient:
             if not isinstance(feedbacks, list):
                 raise WBFeedbackPermanentError("WB returned an invalid feedback list")
             for feedback in feedbacks:
-                self._accumulate(feedback, counts, products, seen)
+                self._accumulate(feedback, counts, products, media, seen)
             page_length = len(feedbacks)
             del feedbacks, payload
             if page_length < self.page_size:
@@ -117,6 +124,7 @@ class WBFeedbackClient:
         feedback: dict[str, Any],
         counts: dict[str, list[int]],
         products: dict[str, FeedbackProduct],
+        media: dict[str, list[int]],
         seen: set[bytes],
     ) -> None:
         feedback_id = feedback.get("id")
@@ -131,6 +139,14 @@ class WBFeedbackClient:
         seen.add(digest)
         article = str(article_value)
         counts.setdefault(article, [0, 0, 0, 0, 0])[rating_value - 1] += 1
+        # Пустой список фото и `video: null` WB присылает у отзывов без медиа;
+        # непустое значение другого вида считаем медиа — пропустить фото-отзыв
+        # хуже, чем посчитать странный.
+        photos = feedback.get("photoLinks")
+        video = feedback.get("video")
+        tally = media.setdefault(article, [0, 0])
+        tally[0] += 1 if photos else 0
+        tally[1] += 1 if video else 0
         imt_value = str(details.get("imtId") or "")
         products.setdefault(
             article,

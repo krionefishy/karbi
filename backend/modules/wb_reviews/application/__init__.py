@@ -16,6 +16,7 @@ from backend.modules.wb_reviews.application.sync import (
     ReviewSyncService,
     SyncOverview,
 )
+from backend.modules.wb_reviews.application.totals import ReviewTotalsReader
 
 __all__ = [
     "AUTOMATION_ID",
@@ -28,6 +29,7 @@ __all__ = [
     "ReviewReportFile",
     "ReviewReportService",
     "ReviewSyncService",
+    "ReviewTotalsReader",
     "ReviewsEnrollment",
     "SyncOverview",
 ]

@@ -46,6 +46,10 @@ class DailyReviewCountModel(WBReviewsBase):
     count_rating_3: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_rating_4: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_rating_5: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Сколько из этих отзывов с фото и с видео. NULL — срез снят до того, как
+    # мы начали их считать: это «не знаем», а не «ни одного».
+    count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
