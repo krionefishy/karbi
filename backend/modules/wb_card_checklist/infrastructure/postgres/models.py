@@ -93,23 +93,6 @@ class PriceFactsModel(WBCardChecklistBase):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class MarkModel(WBCardChecklistBase):
-    """A manager's tick on one item of one card.
-
-    Keyed by the article, not by a checklist row: a товар that dips under the
-    stock threshold drops out of the table and comes back with its ticks.
-    """
-
-    __tablename__ = "marks"
-
-    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    article: Mapped[str] = mapped_column(String(255), primary_key=True)
-    item: Mapped[str] = mapped_column(String(64), primary_key=True)
-    checked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-
 class CommentModel(WBCardChecklistBase):
     __tablename__ = "comments"
 

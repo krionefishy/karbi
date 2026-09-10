@@ -20,16 +20,7 @@ from backend.modules.wb_card_checklist.application.view import (
     ChecklistView,
     RefreshRequest,
 )
-from backend.modules.wb_card_checklist.domain import (
-    ITEMS_BY_KEY,
-    ArticleFacts,
-    CardFacts,
-    ItemKind,
-    ReviewFacts,
-    Thresholds,
-    accepts,
-    evaluate,
-)
+from backend.modules.wb_card_checklist.domain import ArticleFacts, CardFacts, ReviewFacts, Thresholds, evaluate
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository, RefreshRequestModel
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -47,20 +38,12 @@ def _reviews_state(totals: Mapping[str, ReviewCounts] | None) -> str:
     return REVIEWS_OK if totals else REVIEWS_NO_SNAPSHOT
 
 
-class UnknownItemError(Exception):
-    """No such item in the checklist."""
-
-
 class ArticleNotInChecklistError(Exception):
     """The card is not in the table right now: gone from the catalog or under the stock threshold."""
 
 
-class MarkRejectedError(Exception):
-    """The item cannot be set this way by hand; the message says why."""
-
-
 class ChecklistService:
-    """What the interface asks of the checklist: the table, ticks, comments, the xlsx."""
+    """What the interface asks of the checklist: the table, comments, the xlsx."""
 
     def __init__(
         self,
@@ -101,7 +84,6 @@ class ChecklistService:
         directory = await self.checklist.subject_characteristics(
             {card.subject_id for card in cards if card.subject_id is not None}
         )
-        marks = await self.checklist.marks(seller_id)
         comments = await self.checklist.comments(seller_id)
         reviews = self._card_reviews(cards, totals or {})
 
@@ -126,12 +108,12 @@ class ChecklistService:
                     subject_name=card.subject_name,
                     card_created_at=card.card_created_at,
                     stock=quantity,
-                    items=tuple(evaluate(facts, marks.get(card.article, {}), self.thresholds)),
+                    items=tuple(evaluate(facts, self.thresholds)),
                     comment=comments.get(card.article, ""),
                 )
             )
-        # Порядок стабильный, а не «неготовые сверху»: строка, которая уезжает
-        # из-под курсора после каждой галочки, мешает работать сильнее, чем помогает.
+        # Порядок стабильный, а не «неготовые сверху»: после каждого сбора
+        # строки иначе менялись бы местами, и искать свою пришлось бы заново.
         rows.sort(key=lambda row: (row.title.lower(), row.article))
         return ChecklistView(
             seller_id=seller_id,
@@ -144,23 +126,10 @@ class ChecklistService:
             rows=tuple(rows),
         )
 
-    async def set_mark(
-        self, seller_id: uuid.UUID, article: str, item: str, checked: bool, updated_by: uuid.UUID | None
-    ) -> None:
-        definition = ITEMS_BY_KEY.get(item)
-        if definition is None:
-            raise UnknownItemError(item)
-        row = await self._row(seller_id, article)
-        state = next(state for state in row.items if state.key == item)
-        if not accepts(state, checked):
-            if definition.kind is ItemKind.AUTO:
-                raise MarkRejectedError("Этот пункт проверяется по данным WB, вручную он не ставится")
-            raise MarkRejectedError("В данных WB этого пока нет — отмечать выполненным не на чем")
-        await self.checklist.set_mark(seller_id, article, item, checked, updated_by)
-        await self.session.commit()
-
     async def set_comment(self, seller_id: uuid.UUID, article: str, text: str, updated_by: uuid.UUID | None) -> None:
-        await self._row(seller_id, article)
+        view = await self.view(seller_id)
+        if not any(row.article == article for row in view.rows):
+            raise ArticleNotInChecklistError(article)
         await self.checklist.set_comment(seller_id, article, text, updated_by)
         await self.session.commit()
 
@@ -181,13 +150,6 @@ class ChecklistService:
         await self._enrolled(seller_id)
         request = await self.checklist.latest_refresh(seller_id)
         return self._refresh(request) if request else None
-
-    async def _row(self, seller_id: uuid.UUID, article: str) -> ChecklistRow:
-        view = await self.view(seller_id)
-        row = next((row for row in view.rows if row.article == article), None)
-        if row is None:
-            raise ArticleNotInChecklistError(article)
-        return row
 
     async def _enrolled(self, seller_id: uuid.UUID) -> str:
         seller = await self.sellers.get(seller_id)

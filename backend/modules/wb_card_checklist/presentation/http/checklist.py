@@ -11,9 +11,7 @@ from backend.modules.wb_card_checklist.application import (
     ChecklistRow,
     ChecklistService,
     ChecklistView,
-    MarkRejectedError,
     RefreshRequest,
-    UnknownItemError,
 )
 from backend.modules.wb_card_checklist.domain import ITEMS
 from backend.modules.wb_card_checklist.presentation.http.schemas import (
@@ -22,7 +20,6 @@ from backend.modules.wb_card_checklist.presentation.http.schemas import (
     ChecklistRowResponse,
     CommentRequest,
     ItemStateResponse,
-    MarkRequest,
     RefreshResponse,
 )
 from backend.modules.wb_core.application import SellerNotFoundError
@@ -45,19 +42,10 @@ def row_response(row: ChecklistRow) -> ChecklistRowResponse:
         card_created_at=row.card_created_at.isoformat() if row.card_created_at else None,
         stock=row.stock,
         items=[
-            ItemStateResponse(
-                key=item.key,
-                kind=item.kind.value,
-                checked=item.checked,
-                can_check=item.can_check,
-                detail=item.detail,
-                note=item.note,
-                warning=item.warning,
-                unknown=item.unknown,
-            )
-            for item in row.items
+            ItemStateResponse(key=item.key, done=item.done, detail=item.detail, note=item.note) for item in row.items
         ],
         done=row.done,
+        total=row.total,
         ready=row.ready,
         comment=row.comment,
     )
@@ -73,7 +61,7 @@ def checklist_response(view: ChecklistView) -> ChecklistResponse:
         reviews_state=view.reviews_state,
         min_stock=view.min_stock,
         items=[
-            ChecklistItemResponse(key=item.key, title=item.title, kind=item.kind.value, meaning=item.meaning)
+            ChecklistItemResponse(key=item.key, title=item.title, meaning=item.meaning, counted=item.counted)
             for item in ITEMS
         ],
         rows=[row_response(row) for row in view.rows],
@@ -100,29 +88,6 @@ async def seller_checklist(
     except SellerNotFoundError as error:
         raise not_enrolled() from error
     return checklist_response(view)
-
-
-@router.put("/sellers/{seller_id}/articles/{article}/items/{item}", status_code=status.HTTP_204_NO_CONTENT)
-@inject
-async def set_mark(
-    seller_id: uuid.UUID,
-    article: str,
-    item: str,
-    payload: MarkRequest,
-    principal: CurrentPrincipal,
-    service: FromDishka[ChecklistService],
-) -> Response:
-    try:
-        await service.set_mark(seller_id, article, item, payload.checked, principal.user_id)
-    except SellerNotFoundError as error:
-        raise not_enrolled() from error
-    except UnknownItemError as error:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Такого пункта в чек-листе нет") from error
-    except ArticleNotInChecklistError as error:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Этого товара сейчас нет в чек-листе") from error
-    except MarkRejectedError as error:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.put("/sellers/{seller_id}/articles/{article}/comment", status_code=status.HTTP_204_NO_CONTENT)

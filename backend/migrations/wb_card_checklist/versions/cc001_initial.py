@@ -58,16 +58,6 @@ def upgrade() -> None:
         schema=SCHEMA,
     )
     op.create_table(
-        "marks",
-        sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("article", sa.String(255), primary_key=True),
-        sa.Column("item", sa.String(64), primary_key=True),
-        sa.Column("checked", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("updated_by", UUID(as_uuid=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        schema=SCHEMA,
-    )
-    op.create_table(
         "comments",
         sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
         sa.Column("article", sa.String(255), primary_key=True),
@@ -110,7 +100,6 @@ def downgrade() -> None:
     for table in (
         "refresh_requests",
         "comments",
-        "marks",
         "price_facts",
         "subject_characteristics",
         "card_facts",

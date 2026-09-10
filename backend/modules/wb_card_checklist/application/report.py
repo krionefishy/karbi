@@ -8,10 +8,9 @@ from openpyxl import Workbook
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.datavalidation import DataValidation
 
 from backend.modules.wb_card_checklist.application.view import ChecklistView
-from backend.modules.wb_card_checklist.domain import ITEMS, ItemKind
+from backend.modules.wb_card_checklist.domain import COUNTED_ITEMS, ITEMS, ITEMS_BY_KEY
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -31,12 +30,6 @@ HEADER_FONT = Font(bold=True, color="FFFFFF")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 CENTERED = Alignment(horizontal="center", vertical="center")
 
-KIND_LABELS = {
-    ItemKind.AUTO: "Автоматически по данным WB",
-    ItemKind.CONFIRM: "Менеджер, когда WB видит факт",
-    ItemKind.MANUAL: "Менеджер вручную",
-}
-
 
 @dataclass(frozen=True, slots=True)
 class ChecklistReportFile:
@@ -51,15 +44,16 @@ class ChecklistReportFile:
 
 
 def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
-    """The checklist as the managers' own spreadsheet: same columns, same formulas.
+    """The checklist as a spreadsheet: identity columns, then what WB shows.
 
-    Items are written as TRUE/FALSE and the totals as formulas, not numbers,
-    so a manager who flips a cell in Excel sees the status follow.
+    Counted items are TRUE/FALSE (empty when WB gave no data), the reference
+    item carries its figure as text, and «готово» and the status are
+    formulas over the item columns, as in the managers' own table.
     """
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Чек-лист"
-    total = len(ITEMS)
+    total = len(COUNTED_ITEMS)
     done_letter = get_column_letter(DONE_COLUMN)
     first_letter = get_column_letter(FIRST_ITEM_COLUMN)
     last_letter = get_column_letter(LAST_ITEM_COLUMN)
@@ -84,7 +78,9 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
                 row.barcode,
                 row.title,
                 view.seller_name,
-                *(item.checked for item in row.items),
+                # COUNTIF считает только TRUE: текст справочного пункта и
+                # пустые ячейки «нет данных» в готовность не попадают.
+                *(item.done if ITEMS_BY_KEY[item.key].counted else item.detail for item in row.items),
                 f"=COUNTIF({first_letter}{index}:{last_letter}{index},TRUE)",
                 f'=IF({done_letter}{index}={total},"ГОТОВ","НЕ ГОТОВ")',
                 row.comment or None,
@@ -98,9 +94,6 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
             sheet.cell(row=index, column=column).alignment = CENTERED
 
     last_row = max(len(view.rows) + 1, 2)
-    validation = DataValidation(type="list", formula1='"TRUE,FALSE"', allow_blank=True)
-    sheet.add_data_validation(validation)
-    validation.add(f"{first_letter}2:{last_letter}{last_row}")
     status_range = f"{status_letter}2:{status_letter}{last_row}"
     sheet.conditional_formatting.add(
         status_range,
@@ -140,30 +133,26 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
 def _instruction(sheet, min_stock: int) -> None:
     bold = Font(bold=True)
     wrap = Alignment(wrap_text=True, vertical="top")
-    rows: list[tuple[str, str, str]] = [
-        ("Чек-лист карточки товара — выгрузка из сервиса", "", ""),
-        ("", "", ""),
-        ("Какие товары в таблице", f"Все карточки кабинета с остатком от {min_stock} шт. (WB и свои склады).", ""),
-        ("Реквизиты (A–F)", "Берутся из карточки WB, руками не заполняются.", ""),
-        (
-            f"Колонка «Готово из {len(ITEMS)}»",
-            f"Считается формулой: COUNTIF по пунктам строки. «ГОТОВ» — когда отмечены все {len(ITEMS)}.",
-            "",
-        ),
-        ("", "", ""),
-        ("Пункт", "Что означает", "Кто отмечает"),
+    total = len(COUNTED_ITEMS)
+    rows: list[tuple[str, str]] = [
+        ("Чек-лист карточки товара — выгрузка из сервиса", ""),
+        ("", ""),
+        ("Какие товары в таблице", f"Все карточки кабинета с остатком от {min_stock} шт. (WB и свои склады)."),
+        ("Откуда данные", "Всё берётся из данных WB, руками ничего не отмечается."),
+        (f"Колонка «Готово из {total}»", f"Формула COUNTIF по пунктам строки. «ГОТОВ» — когда выполнены все {total}."),
+        ("Пустая ячейка", "У WB нет данных по пункту: это «не знаем», а не «не выполнено»."),
+        ("", ""),
+        ("Пункт", "Что означает"),
     ]
-    rows.extend((item.title, item.meaning, KIND_LABELS[item.kind]) for item in ITEMS)
+    rows.extend((item.title, item.meaning) for item in ITEMS)
     for values in rows:
         sheet.append(list(values))
     sheet["A1"].font = Font(bold=True, size=13)
-    for row in (3, 4, 5, 7):
+    for row in (3, 4, 5, 6, 8):
         sheet.cell(row=row, column=1).font = bold
-    for column in range(1, 4):
-        sheet.cell(row=7, column=column).font = bold
+    sheet.cell(row=8, column=2).font = bold
     for line in sheet.iter_rows(min_row=3):
         for cell in line:
             cell.alignment = wrap
     sheet.column_dimensions["A"].width = 30
-    sheet.column_dimensions["B"].width = 80
-    sheet.column_dimensions["C"].width = 34
+    sheet.column_dimensions["B"].width = 90

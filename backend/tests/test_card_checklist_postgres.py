@@ -20,8 +20,6 @@ from backend.modules.wb_card_checklist.application import (
     ArticleNotInChecklistError,
     ChecklistService,
     CollectionService,
-    MarkRejectedError,
-    UnknownItemError,
 )
 from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, SubjectCharacteristic, Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import (
@@ -201,66 +199,38 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     alpha, beta = view.rows
     items = {state.key: state for state in beta.items}
     assert beta.stock == 15
-    assert items["photos"].checked
-    assert (items["characteristics"].can_check, items["characteristics"].detail) == (True, "3/3")
+    assert items["photos"].done
+    # Характеристики — справка: показываем, но не судим.
+    assert (items["characteristics"].done, items["characteristics"].detail) == (None, "3/3")
     # Отзывы у склейки общие: 3 у A и 2 у C — на карточке покупатель видит 5.
     assert items["reviews_present"].detail == "5 отз."
-    assert (items["reviews_with_photo"].detail, items["reviews_with_photo"].can_check) == ("1 с фото", True)
-    assert (items["reviews_with_video"].detail, items["reviews_with_video"].can_check) == ("0 с видео", False)
-    assert items["discount"].detail == "−50% · 500 ₽"
+    assert (items["reviews_with_photo"].done, items["reviews_with_photo"].detail) == (True, "1 с фото")
+    assert (items["reviews_with_video"].done, items["reviews_with_video"].detail) == (False, "0 с видео")
+    assert (items["discount"].done, items["discount"].detail) == (True, "−50% · 500 ₽")
+    # Всё, кроме видео-отзывов: 6 из 7.
+    assert (beta.done, beta.total, beta.ready) == (6, 7, False)
     alpha_items = {state.key: state for state in alpha.items}
-    assert (alpha_items["photos"].checked, alpha_items["photos"].detail) == (False, "1 фото")
-    assert alpha_items["discount"].unknown
+    assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (False, "1 фото")
+    assert alpha_items["discount"].done is None
 
 
-async def test_ticks_follow_the_kind_of_item(database: Database, seller: uuid.UUID) -> None:
+async def test_comments_stick_to_cards_in_the_table(database: Database, seller: uuid.UUID) -> None:
     await seed(database, seller)
     user = uuid.uuid4()
 
     async with database.session() as session:
         checklist = service(session)
-        await checklist.set_mark(seller, "A", "video_cover", True, user)
-        await checklist.set_mark(seller, "A", "description", True, user)
-        # Снять отметку, которую ставить не на чем, можно всегда.
-        await checklist.set_mark(seller, "A", "reviews_with_video", False, user)
-        with pytest.raises(MarkRejectedError, match="по данным WB"):
-            await checklist.set_mark(seller, "A", "photos", True, user)
-        with pytest.raises(MarkRejectedError, match="пока нет"):
-            await checklist.set_mark(seller, "A", "reviews_with_video", True, user)
-        with pytest.raises(ArticleNotInChecklistError):
-            await checklist.set_mark(seller, "B", "video_cover", True, user)
-        with pytest.raises(UnknownItemError):
-            await checklist.set_mark(seller, "A", "manager", True, user)
         await checklist.set_comment(seller, "A", "Ждём видео от подрядчика", user)
+        with pytest.raises(ArticleNotInChecklistError):
+            await checklist.set_comment(seller, "B", "ниже порога", user)
 
     async with database.session() as session:
         view = await service(session).view(seller)
-
-    row = next(row for row in view.rows if row.article == "A")
-    items = {state.key: state for state in row.items}
-    assert items["video_cover"].checked
-    assert items["description"].checked
-    assert row.comment == "Ждём видео от подрядчика"
-    # Автоматом: фото, видео, отзывы есть; руками: описание и видеообложка.
-    assert row.done == 5
+    assert next(row for row in view.rows if row.article == "A").comment == "Ждём видео от подрядчика"
 
     async with database.session() as session:
         await service(session).set_comment(seller, "A", "   ", user)
         assert (await ChecklistRepository(session).comments(seller)) == {}
-
-
-async def test_marks_outlive_a_dip_under_the_stock_threshold(database: Database, seller: uuid.UUID) -> None:
-    await seed(database, seller)
-    async with database.session() as session:
-        await service(session).set_mark(seller, "A", "rich_content", True, None)
-
-    async with database.session() as session:
-        dipped = await service(session, stock={"A": 3, "C": 10}).view(seller)
-        back = await service(session, stock={"A": 40, "C": 10}).view(seller)
-
-    assert [row.article for row in dipped.rows] == ["C"]
-    row = next(row for row in back.rows if row.article == "A")
-    assert next(state for state in row.items if state.key == "rich_content").checked
 
 
 async def test_without_neighbours_the_table_says_why(database: Database, seller: uuid.UUID) -> None:
@@ -299,15 +269,24 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     sheet = workbook["Чек-лист"]
     header = [cell.value for cell in sheet[1]]
     assert header[:6] == ["Дата заведения", "Артикул WB", "Артикул продавца", "Баркод", "Наименование товара", "ИП"]
-    assert header[6] == "Описание (SEO)"
-    assert header[17:] == ["Оценки прицеплены", "Готово из 12", "Статус", "Комментарий"]
+    assert header[6:14] == [
+        "Описание (SEO)",
+        "Характеристики",
+        "Фото",
+        "Видео",
+        "Скидка / СПП",
+        "Отзывы есть",
+        "Отзывы с фото",
+        "Отзывы с видео",
+    ]
+    assert header[14:] == ["Готово из 7", "Статус", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
-    assert second[8] is True  # фото
-    assert second[10] is False  # видеообложка — никто не отметил
-    assert second[18] == "=COUNTIF(G3:R3,TRUE)"
-    assert second[19] == '=IF(S3=12,"ГОТОВ","НЕ ГОТОВ")'
-    assert second[20] == "Проверить рич"
+    # Пункты — TRUE/FALSE, справочные характеристики — текстом.
+    assert second[6:14] == [True, "3/3", True, True, True, True, True, False]
+    assert second[14] == "=COUNTIF(G3:N3,TRUE)"
+    assert second[15] == '=IF(O3=7,"ГОТОВ","НЕ ГОТОВ")'
+    assert second[16] == "Проверить рич"
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")
