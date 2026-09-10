@@ -1,0 +1,79 @@
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+
+from backend.modules.wb_card_checklist.domain import ItemState
+
+STOCK_OK = "ok"
+# Селлер не подключён к оборачиваемости: остатков взять неоткуда.
+STOCK_NOT_CONNECTED = "not_connected"
+# Подключён, но свежих снимков остатков нет — сбор оборачиваемости стоит.
+STOCK_STALE = "stale"
+
+REVIEWS_OK = "ok"
+REVIEWS_NOT_CONNECTED = "not_connected"
+# Подключён к отзывам, но ночной прогон ещё ни разу не прошёл.
+REVIEWS_NO_SNAPSHOT = "no_snapshot"
+
+
+@dataclass(frozen=True, slots=True)
+class ChecklistRow:
+    article: str
+    vendor_code: str
+    barcode: str
+    title: str
+    photo_url: str
+    subject_name: str
+    card_created_at: datetime | None
+    stock: int
+    items: tuple[ItemState, ...]
+    comment: str
+
+    @property
+    def done(self) -> int:
+        return sum(1 for item in self.items if item.checked)
+
+    @property
+    def ready(self) -> bool:
+        return self.done == len(self.items)
+
+
+@dataclass(frozen=True, slots=True)
+class ChecklistView:
+    seller_id: uuid.UUID
+    seller_name: str
+    collected_at: datetime | None
+    collection_error: str | None
+    stock_state: str
+    reviews_state: str
+    min_stock: int
+    rows: tuple[ChecklistRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshRequest:
+    """State of a «обновить сейчас» press, as the interface polls it."""
+
+    status: str
+    requested_at: datetime
+    finished_at: datetime | None
+    error: str | None
+
+    @property
+    def in_progress(self) -> bool:
+        return self.status in ("queued", "running")
+
+
+@dataclass(frozen=True, slots=True)
+class ChecklistOverview:
+    seller_count: int
+    last_success_at: datetime | None
+    failing: int
+
+    @property
+    def status(self) -> str:
+        if self.last_success_at is None:
+            return "idle"
+        if self.failing:
+            return "degraded"
+        return "active"

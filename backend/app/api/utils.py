@@ -2,6 +2,16 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.app.api.schemas import AutomationResponse, AutomationRunResponse
+from backend.modules.wb_card_checklist.application import (
+    AUTOMATION_ID as WB_CHECKLIST_ID,
+)
+from backend.modules.wb_card_checklist.application import (
+    DESCRIPTION as WB_CHECKLIST_DESCRIPTION,
+)
+from backend.modules.wb_card_checklist.application import (
+    TITLE as WB_CHECKLIST_TITLE,
+)
+from backend.modules.wb_card_checklist.application import ChecklistOverview
 from backend.modules.wb_fbs_distribution.application import (
     AUTOMATION_ID as WB_FBS_ID,
 )
@@ -64,6 +74,12 @@ def next_turnover_run_at(settings: Settings, now: datetime | None = None) -> dat
     return _next_daily(timezone, moments, now)
 
 
+def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> datetime:
+    """The checklist re-reads cards once a day."""
+    checklist = settings.card_checklist
+    return _next_daily(ZoneInfo(checklist.timezone), [(checklist.collect_hour, checklist.collect_minute)], now)
+
+
 def _duration(started: datetime | None, finished: datetime | None) -> int | None:
     if not started or not finished:
         return None
@@ -107,6 +123,7 @@ def automation_catalog(
     reviews: SyncOverview,
     turnover: TurnoverOverview,
     fbs_distribution: DistributionCatalogOverview,
+    card_checklist: ChecklistOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -144,5 +161,18 @@ def automation_catalog(
             last_success_at=None,
             # Расписания ещё нет: модуль подключает селлеров, но ничего не запускает.
             next_run_at=None,
+        ),
+        AutomationResponse(
+            id=WB_CHECKLIST_ID,
+            title=WB_CHECKLIST_TITLE,
+            description=WB_CHECKLIST_DESCRIPTION,
+            status=card_checklist.status,
+            seller_count=card_checklist.seller_count,
+            # Сбор идёт по селлеру, а не прогоном: журнала прогонов у модуля нет,
+            # и выдумывать его ради карточки незачем.
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=card_checklist.last_success_at.isoformat() if card_checklist.last_success_at else None,
+            next_run_at=next_checklist_run_at(settings).isoformat(),
         ),
     ]

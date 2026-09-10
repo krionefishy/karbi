@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from zoneinfo import ZoneInfo
 
 from dishka import Provider, Scope, from_context, provide
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,9 @@ from backend.modules.notifications.infrastructure.postgres import NotificationRe
 from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
 from backend.modules.platform.infrastructure.postgres import UserRepository
+from backend.modules.wb_card_checklist.application import ChecklistEnrollment, ChecklistService
+from backend.modules.wb_card_checklist.domain import Thresholds
+from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import EgressGateway
@@ -30,9 +34,15 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsStockWriter,
     WBFbsWarehouseWriter,
 )
-from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
+from backend.modules.wb_reviews.application import (
+    ReviewReportService,
+    ReviewsEnrollment,
+    ReviewSyncService,
+    ReviewTotalsReader,
+)
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import (
+    CurrentStockReader,
     ReplenishmentReportService,
     TurnoverEnrollment,
     TurnoverService,
@@ -283,14 +293,59 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def checklist_repository(self, session: AsyncSession) -> ChecklistRepository:
+        return ChecklistRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def checklist_enrollment(self, checklist: ChecklistRepository) -> ChecklistEnrollment:
+        return ChecklistEnrollment(checklist)
+
+    @provide(scope=Scope.REQUEST)
+    def current_stock_reader(self, turnover: TurnoverRepository) -> CurrentStockReader:
+        return CurrentStockReader(turnover)
+
+    @provide(scope=Scope.REQUEST)
+    def review_totals_reader(self, reviews: ReviewSyncRepository) -> ReviewTotalsReader:
+        return ReviewTotalsReader(reviews)
+
+    @provide(scope=Scope.REQUEST)
+    def checklist_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        checklist: ChecklistRepository,
+        stock: CurrentStockReader,
+        reviews: ReviewTotalsReader,
+        settings: Settings,
+    ) -> ChecklistService:
+        """Остатки и отзывы чек-лист берёт у соседей через их порты, а не из их таблиц."""
+        config = settings.card_checklist
+        return ChecklistService(
+            session,
+            sellers,
+            checklist,
+            stock,
+            reviews,
+            thresholds=Thresholds(
+                min_photos=config.min_photos,
+                min_description_length=config.min_description_length,
+                min_reviews=config.min_reviews,
+                characteristics_share=config.characteristics_share,
+            ),
+            min_stock=config.min_stock,
+            timezone=ZoneInfo(config.timezone),
+        )
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
         turnover: TurnoverEnrollment,
         fbs_distribution: FbsDistributionEnrollment,
+        card_checklist: ChecklistEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution]
+        return [reviews, turnover, fbs_distribution, card_checklist]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(
