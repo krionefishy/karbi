@@ -206,9 +206,10 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     assert (items["reviews_with_photo"].done, items["reviews_with_photo"].detail) == (True, "1 с фото")
     assert (items["reviews_with_video"].done, items["reviews_with_video"].detail) == (False, "0 с видео")
     assert (items["discount"].done, items["discount"].detail) == (True, "−50% · 500 ₽")
-    # Клубной скидки у A нет, видео-отзывов тоже: 7 из 9.
+    # Клубной скидки у A нет, видео-отзывов тоже: 8 из 10.
     assert (items["club_discount"].done, items["club_discount"].detail) == (False, "без скидки")
-    assert (beta.done, beta.total, beta.ready) == (7, 9, False)
+    assert (items["video_cover"].done, items["video_cover"].detail) == (True, "есть")
+    assert (beta.done, beta.total, beta.ready) == (8, 10, False)
     alpha_items = {state.key: state for state in alpha.items}
     # Одного фото по инструкции хватает.
     assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (True, "1 фото")
@@ -270,25 +271,27 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     sheet = workbook["Чек-лист"]
     header = [cell.value for cell in sheet[1]]
     assert header[:6] == ["Дата заведения", "Артикул WB", "Артикул продавца", "Баркод", "Наименование товара", "ИП"]
-    assert header[6:15] == [
+    assert header[6:16] == [
         "Описание (SEO)",
         "Характеристики",
         "Фото",
         "Видео",
+        "Видеообложка",
         "Скидка / СПП",
         "Скидка WB Клуба",
         "Отзывы есть",
         "Отзывы с фото",
         "Отзывы с видео",
     ]
-    assert header[15:] == ["Готово из 9", "Статус", "Комментарий"]
+    assert header[16:] == ["Готово из 10", "Статус", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
     # В ячейке — то, что видит WB, результат — цветом.
-    assert second[6:15] == [
+    assert second[6:16] == [
         "1500 симв.",
         "3/3",
         "5 фото",
+        "есть",
         "есть",
         "−50% · 500 ₽",
         "без скидки",
@@ -297,10 +300,10 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
         "0 с видео",
     ]
     green, red = "C6EFCE", "FFC7CE"
-    fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 16)]
-    assert fills == [green] * 5 + [red] + [green] * 2 + [red]
-    assert second[15:18] == [7, "НЕ ГОТОВ", "Проверить рич"]
-    assert sheet["Q3"].fill.fgColor.rgb[-6:] == red
+    fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 17)]
+    assert fills == [green] * 6 + [red] + [green] * 2 + [red]
+    assert second[16:19] == [8, "НЕ ГОТОВ", "Проверить рич"]
+    assert sheet["R3"].fill.fgColor.rgb[-6:] == red
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")
