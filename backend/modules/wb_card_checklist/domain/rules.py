@@ -153,7 +153,8 @@ def _discount(price: PriceFacts | None, marks: Mapping[str, bool]) -> ItemState:
     if price is None:
         return _confirm("discount", None, marks, "нет цены")
     shown = f"{price.discounted_price:,.0f}".replace(",", " ")
-    return _confirm("discount", price.discount > 0, marks, f"−{price.discount}% · {shown} ₽")
+    label = f"−{price.discount}%" if price.discount else "без скидки"
+    return _confirm("discount", price.discount > 0, marks, f"{label} · {shown} ₽")
 
 
 def _reviews(reviews: ReviewFacts | None, marks: Mapping[str, bool]) -> dict[str, ItemState]:

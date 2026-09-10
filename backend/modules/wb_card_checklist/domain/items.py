@@ -32,7 +32,7 @@ ITEMS: tuple[ChecklistItem, ...] = (
         "characteristics",
         "Характеристики",
         ItemKind.CONFIRM,
-        "Заполнены все характеристики, доступные в категории.",
+        "Характеристики заполнены. WB подсказывает, какие поля категории пусты.",
     ),
     ChecklistItem("photos", "Фото", ItemKind.AUTO, "Фото-контент установлен в карточку."),
     ChecklistItem("video", "Видео", ItemKind.AUTO, "Видео установлено в карточку."),
