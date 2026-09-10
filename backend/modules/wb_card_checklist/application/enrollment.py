@@ -6,7 +6,7 @@ from backend.modules.wb_core.application import AutomationEnrollment
 AUTOMATION_ID = "wb-card-checklist"
 TITLE = "Чек-лист карточек Wildberries"
 DESCRIPTION = (
-    "Сверяет карточки с остатком по тринадцати пунктам готовности: что видно в данных WB, отмечает само, "
+    "Сверяет карточки с остатком по двенадцати пунктам готовности: что видно в данных WB, отмечает само, "
     "остальное — менеджер. Таблица выгружается в Excel."
 )
 

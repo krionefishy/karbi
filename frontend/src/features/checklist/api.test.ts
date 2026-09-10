@@ -11,10 +11,10 @@ describe("checklist api", () => {
     const request = vi.fn(async (_url: string, _init?: RequestInit) => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", request);
 
-    await setMark("seller-1", "1304367626", "cashback", true);
+    await setMark("seller-1", "1304367626", "rich_content", true);
 
     const [url, init] = request.mock.calls[0];
-    expect(url).toBe("/api/v1/wb/card-checklist/sellers/seller-1/articles/1304367626/items/cashback");
+    expect(url).toBe("/api/v1/wb/card-checklist/sellers/seller-1/articles/1304367626/items/rich_content");
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(String(init?.body))).toEqual({ checked: true });
   });
