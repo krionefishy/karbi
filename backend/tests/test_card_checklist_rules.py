@@ -179,4 +179,5 @@ def test_discount_shows_the_seller_discount_and_the_price_after_it() -> None:
 
     assert state.detail == "−95% · 9 000 ₽"
     assert state.can_check
-    assert not states(facts(price=PriceFacts("100", 1000, 1000, 0, 0)))["discount"].can_check
+    no_discount = states(facts(price=PriceFacts("100", 1000, 1000, 0, 0)))["discount"]
+    assert (no_discount.can_check, no_discount.detail) == (False, "без скидки · 1 000 ₽")
