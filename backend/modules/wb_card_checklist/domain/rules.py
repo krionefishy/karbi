@@ -1,4 +1,3 @@
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -28,18 +27,15 @@ SERVICE_CHARACTERISTICS = frozenset(
         15004139,  # Код ТН ВЭД
     }
 )
+# Сколько незаполненных характеристик называть в подсказке поимённо.
+NAMED_MISSING = 5
 
 
 @dataclass(frozen=True, slots=True)
 class Thresholds:
-    """Где проходит граница «выполнено». Все числа — допущения до ответа селлера."""
+    """Единственный порог среди пунктов — фото; остальное решается «есть или нет»."""
 
     min_photos: int = 3
-    min_description_length: int = 1000
-    min_reviews: int = 1
-    # Доля заполненных характеристик сверх обязательных и популярных: все
-    # до одной — недостижимая планка, в справочнике бывают поля «на всякий случай».
-    characteristics_share: float = 0.8
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +61,7 @@ class ItemState:
     can_check: bool
     # Что видит API: «25/38», «8 с фото». Пусто — сказать нечего.
     detail: str | None = None
-    # Пояснение к детали: каких ключевых характеристик не хватает.
+    # Пояснение к детали: каких характеристик не хватает.
     note: str | None = None
     # Отметка стоит, а факт, на котором она держалась, пропал.
     warning: str | None = None
@@ -77,42 +73,36 @@ class ItemState:
 class CharacteristicsFill:
     filled: int
     total: int
-    key_missing: tuple[str, ...]
+    missing: tuple[str, ...]
 
-    def complete(self, share: float) -> bool:
-        # round: 0.8 * 15 в двоичной арифметике — 12.000000000000002, и ceil
-        # без округления потребовал бы тринадцать.
-        return not self.key_missing and self.filled >= math.ceil(round(share * self.total, 9))
+    @property
+    def complete(self) -> bool:
+        return not self.missing
 
 
 def characteristics_fill(card: CardFacts, characteristics: Sequence[SubjectCharacteristic]) -> CharacteristicsFill:
     relevant = [
         item for item in characteristics if not item.named_field and item.charc_id not in SERVICE_CHARACTERISTICS
     ]
-    filled = [item for item in relevant if item.charc_id in card.characteristic_ids]
-    key_missing = tuple(
-        item.name
-        for item in relevant
-        if (item.required or item.popular) and item.charc_id not in card.characteristic_ids
-    )
-    return CharacteristicsFill(len(filled), len(relevant), key_missing)
+    missing = tuple(item.name for item in relevant if item.charc_id not in card.characteristic_ids)
+    return CharacteristicsFill(len(relevant) - len(missing), len(relevant), missing)
 
 
 def evaluate(facts: ArticleFacts, marks: Mapping[str, bool], thresholds: Thresholds) -> list[ItemState]:
-    """All thirteen items of one card, in the order of the table."""
+    """All items of one card, in the order of the table."""
     card = facts.card
     computed = {
         "description": _confirm(
             "description",
-            card.description_length >= thresholds.min_description_length,
+            card.description_length > 0,
             marks,
             f"{card.description_length} симв." if card.description_length else "нет описания",
         ),
-        "characteristics": _characteristics(facts, thresholds),
+        "characteristics": _characteristics(facts),
         "photos": _auto("photos", card.photo_count >= thresholds.min_photos, f"{card.photo_count} фото"),
         "video": _auto("video", card.has_video, "есть" if card.has_video else "нет"),
         "discount": _discount(facts.price, marks),
-        **_reviews(facts.reviews, marks, thresholds),
+        **_reviews(facts.reviews, marks),
     }
     return [computed.get(item.key) or _manual(item.key, marks) for item in ITEMS]
 
@@ -144,14 +134,19 @@ def _confirm(key: str, fact: bool | None, marks: Mapping[str, bool], detail: str
     return ItemState(key, ItemKind.CONFIRM, checked=checked, can_check=fact, detail=detail, warning=warning)
 
 
-def _characteristics(facts: ArticleFacts, thresholds: Thresholds) -> ItemState:
+def _characteristics(facts: ArticleFacts) -> ItemState:
     if not facts.characteristics:
         return _auto("characteristics", None, "справочник не прочитан")
     fill = characteristics_fill(facts.card, facts.characteristics)
-    note = f"Не заполнены: {', '.join(fill.key_missing)}" if fill.key_missing else None
-    return _auto(
-        "characteristics", fill.complete(thresholds.characteristics_share), f"{fill.filled}/{fill.total}", note
-    )
+    return _auto("characteristics", fill.complete, f"{fill.filled}/{fill.total}", _missing_note(fill.missing))
+
+
+def _missing_note(missing: tuple[str, ...]) -> str | None:
+    if not missing:
+        return None
+    named = ", ".join(missing[:NAMED_MISSING])
+    rest = len(missing) - NAMED_MISSING
+    return f"Не заполнены: {named}" + (f" и ещё {rest}" if rest > 0 else "")
 
 
 def _discount(price: PriceFacts | None, marks: Mapping[str, bool]) -> ItemState:
@@ -161,7 +156,7 @@ def _discount(price: PriceFacts | None, marks: Mapping[str, bool]) -> ItemState:
     return _confirm("discount", price.discount > 0, marks, f"−{price.discount}% · {shown} ₽")
 
 
-def _reviews(reviews: ReviewFacts | None, marks: Mapping[str, bool], thresholds: Thresholds) -> dict[str, ItemState]:
+def _reviews(reviews: ReviewFacts | None, marks: Mapping[str, bool]) -> dict[str, ItemState]:
     if reviews is None:
         return {
             "reviews_present": _auto("reviews_present", None, "нет среза"),
@@ -169,7 +164,7 @@ def _reviews(reviews: ReviewFacts | None, marks: Mapping[str, bool], thresholds:
             "reviews_with_video": _confirm("reviews_with_video", None, marks, "нет среза"),
         }
     return {
-        "reviews_present": _auto("reviews_present", reviews.total >= thresholds.min_reviews, f"{reviews.total} отз."),
+        "reviews_present": _auto("reviews_present", reviews.total > 0, f"{reviews.total} отз."),
         "reviews_with_photo": _media("reviews_with_photo", reviews.with_photo, "с фото", marks),
         "reviews_with_video": _media("reviews_with_video", reviews.with_video, "с видео", marks),
     }

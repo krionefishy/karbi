@@ -198,7 +198,7 @@ class FbsDistributionConfig:
 
 @dataclass(frozen=True, slots=True)
 class CardChecklistConfig:
-    """Чек-лист карточки: когда перечитывать карточки и где граница «выполнено». Часы московские."""
+    """Чек-лист карточки: когда перечитывать карточки и два порога, согласованных с селлером. Часы московские."""
 
     timezone: str = "Europe/Moscow"
     # После утреннего снимка остатков (03:00) и ночного прогона отзывов: к
@@ -210,10 +210,8 @@ class CardChecklistConfig:
     retry_minutes: int = 60
     # Какие товары попадают в таблицу: только с остатком от стольких штук.
     min_stock: int = 10
+    # Карточка беднее трёх фото в выдаче WB почти не показывается.
     min_photos: int = 3
-    min_description_length: int = 1000
-    min_reviews: int = 1
-    characteristics_share: float = 0.8
     # Справочник характеристик предмета меняется редко; неделя — компромисс
     # между свежестью и запросами на каждый предмет каждого селлера.
     subject_ttl_hours: int = 168
@@ -369,14 +367,10 @@ class Settings:
             "retry_minutes",
             "min_stock",
             "min_photos",
-            "min_description_length",
-            "min_reviews",
             "subject_ttl_hours",
         ):
             if key in card_checklist:
                 card_checklist[key] = int(card_checklist[key])
-        if "characteristics_share" in card_checklist:
-            card_checklist["characteristics_share"] = float(card_checklist["characteristics_share"])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -437,10 +431,8 @@ class Settings:
             raise ValueError("card_checklist.collect_minute must be between 0 and 59")
         if checklist.retry_minutes < 1:
             raise ValueError("card_checklist.retry_minutes must be positive")
-        if min(checklist.min_stock, checklist.min_photos, checklist.min_description_length, checklist.min_reviews) < 0:
+        if min(checklist.min_stock, checklist.min_photos) < 0:
             raise ValueError("card_checklist thresholds must not be negative")
-        if not 0 < checklist.characteristics_share <= 1:
-            raise ValueError("card_checklist.characteristics_share must be in (0, 1]")
         if checklist.subject_ttl_hours < 1:
             raise ValueError("card_checklist.subject_ttl_hours must be positive")
         if not self.turnover.stock_slot_hours:

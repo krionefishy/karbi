@@ -5,7 +5,7 @@ import type { Checklist, ChecklistRow, ItemState } from "./types";
 
 function state(overrides: Partial<ItemState>): ItemState {
   return {
-    key: "cashback",
+    key: "rich_content",
     kind: "manual",
     checked: false,
     can_check: true,
@@ -54,10 +54,10 @@ function checklist(rows: ChecklistRow[], overrides: Partial<Checklist> = {}): Ch
 describe("checklist table", () => {
   it("recounts the row when a tick lands", () => {
     const data = checklist([
-      row("1", [state({ key: "photos", kind: "auto", checked: true, can_check: false }), state({ key: "cashback" })]),
+      row("1", [state({ key: "photos", kind: "auto", checked: true, can_check: false }), state({ key: "rich_content" })]),
     ]);
 
-    const [updated] = applyMark(data, "1", "cashback", true).rows;
+    const [updated] = applyMark(data, "1", "rich_content", true).rows;
 
     expect(updated.done).toBe(2);
     expect(updated.ready).toBe(true);

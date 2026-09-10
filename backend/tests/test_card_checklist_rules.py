@@ -33,7 +33,7 @@ def card(**overrides: Any) -> CardFacts:
         "photo_count": 5,
         "description_length": 1500,
         "has_video": True,
-        "characteristic_ids": frozenset({1, 2, 3, 4}),
+        "characteristic_ids": frozenset({1, 2, 3, 4, 5}),
         "card_created_at": datetime(2026, 8, 1, tzinfo=UTC),
     }
     values.update(overrides)
@@ -75,6 +75,7 @@ def states(article_facts: ArticleFacts, marks: dict[str, bool] | None = None) ->
 
 
 def test_items_follow_the_spreadsheet_managers_kept_by_hand() -> None:
+    # Кэшбек из ручной таблицы решили не отслеживать.
     assert [item.title for item in ITEMS] == [
         "Описание (SEO)",
         "Характеристики",
@@ -82,7 +83,6 @@ def test_items_follow_the_spreadsheet_managers_kept_by_hand() -> None:
         "Видео",
         "Видеообложка",
         "Рич-контент",
-        "Кэшбек",
         "Скидка / СПП",
         "Отзывы за баллы",
         "Отзывы есть",
@@ -91,48 +91,54 @@ def test_items_follow_the_spreadsheet_managers_kept_by_hand() -> None:
         "Оценки прицеплены",
     ]
     manual = {item.key for item in ITEMS if item.kind is ItemKind.MANUAL}
-    assert manual == {"video_cover", "rich_content", "cashback", "reviews_for_points", "ratings_linked"}
+    assert manual == {"video_cover", "rich_content", "reviews_for_points", "ratings_linked"}
 
 
-def test_characteristics_skip_service_codes_and_named_fields() -> None:
+def test_characteristics_count_only_what_the_category_really_asks_for() -> None:
     fill = characteristics_fill(card(), DIRECTORY)
 
-    assert fill == CharacteristicsFill(filled=4, total=5, key_missing=())
-    assert fill.complete(0.8)
-    assert states(facts())["characteristics"].detail == "4/5"
+    # ИКПУ и «Описание» в справочнике есть, но в полноту не входят.
+    assert fill == CharacteristicsFill(filled=5, total=5, missing=())
+    assert fill.complete
+    assert states(facts())["characteristics"].detail == "5/5"
 
 
-def test_a_missing_popular_characteristic_fails_even_above_the_share() -> None:
-    state = states(facts(card=card(characteristic_ids=frozenset({2, 3, 4, 5}))))["characteristics"]
+def test_one_empty_characteristic_is_enough_to_fail() -> None:
+    state = states(facts(card=card(characteristic_ids=frozenset({1, 2, 3, 4}))))["characteristics"]
 
     assert not state.checked
     assert state.detail == "4/5"
-    assert state.note == "Не заполнены: Поле 1"
+    assert state.note == "Не заполнены: Поле 5"
 
 
-def test_share_is_not_thrown_off_by_binary_fractions() -> None:
-    # 0.8 × 15 в двоичной арифметике чуть больше двенадцати.
-    assert CharacteristicsFill(filled=12, total=15, key_missing=()).complete(0.8)
-    assert not CharacteristicsFill(filled=11, total=15, key_missing=()).complete(0.8)
+def test_a_long_list_of_empty_characteristics_is_cut_short() -> None:
+    directory = tuple(charc(index) for index in range(1, 9))
+    state = states(facts(card=card(characteristic_ids=frozenset()), characteristics=directory))["characteristics"]
+
+    assert state.note == "Не заполнены: Поле 1, Поле 2, Поле 3, Поле 4, Поле 5 и ещё 3"
 
 
 def test_automatic_items_follow_the_card() -> None:
-    result = states(facts(card=card(photo_count=2, has_video=False)))
+    result = states(facts(card=card(photo_count=2, has_video=False), reviews=ReviewFacts(0, 0, 0)))
 
     assert (result["photos"].checked, result["photos"].detail) == (False, "2 фото")
     assert (result["video"].checked, result["video"].detail) == (False, "нет")
-    assert result["reviews_present"].checked
+    assert (result["reviews_present"].checked, result["reviews_present"].detail) == (False, "0 отз.")
+    assert states(facts(card=card(photo_count=3)))["photos"].checked
     assert not accepts(result["photos"], True)
     assert not accepts(result["photos"], False)
 
 
 def test_a_confirmed_item_needs_the_fact_before_a_tick() -> None:
-    state = states(facts(card=card(description_length=300)))["description"]
+    empty = states(facts(card=card(description_length=0)))["description"]
+    short = states(facts(card=card(description_length=300)))["description"]
 
-    assert (state.checked, state.can_check, state.detail) == (False, False, "300 симв.")
-    assert not accepts(state, True)
+    assert (empty.checked, empty.can_check, empty.detail) == (False, False, "нет описания")
+    assert not accepts(empty, True)
     # Снять свою отметку можно всегда — даже когда ставить её уже не на чем.
-    assert accepts(state, False)
+    assert accepts(empty, False)
+    # Порога длины нет: любое описание — повод менеджеру его проверить.
+    assert (short.can_check, short.detail) == (True, "300 симв.")
 
 
 def test_a_tick_stays_when_the_fact_is_gone_but_says_so() -> None:
@@ -157,9 +163,9 @@ def test_missing_data_reads_as_unknown_not_as_failed() -> None:
 
 
 def test_manual_items_carry_the_managers_mark() -> None:
-    result = states(facts(), {"cashback": True})
+    result = states(facts(), {"video_cover": True})
 
-    assert result["cashback"].checked
+    assert result["video_cover"].checked
     assert not result["rich_content"].checked
     assert accepts(result["rich_content"], True)
 

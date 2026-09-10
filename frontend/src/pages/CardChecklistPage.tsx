@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Download, RefreshCw } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { ApiError } from "../api/http";
 import { AppHeader } from "../components/AppHeader";
@@ -281,7 +281,10 @@ export function CardChecklistPage() {
                   Только неготовые ({rows.length - ready})
                 </label>
               </div>
-              <section className="checklist-scroll">
+              <section
+                className="checklist-scroll"
+                style={{ "--checklist-items": checklist.items.length } as CSSProperties}
+              >
                 <div className="checklist-head">
                   <span className="checklist-sticky">Товар</span>
                   <span>Остаток</span>

@@ -38,7 +38,6 @@ ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem("video", "Видео", ItemKind.AUTO, "Видео установлено в карточку."),
     ChecklistItem("video_cover", "Видеообложка", ItemKind.MANUAL, "Видеообложка установлена."),
     ChecklistItem("rich_content", "Рич-контент", ItemKind.MANUAL, "Рич-контент собран и опубликован."),
-    ChecklistItem("cashback", "Кэшбек", ItemKind.MANUAL, "На товар настроен кэшбек."),
     ChecklistItem("discount", "Скидка / СПП", ItemKind.CONFIRM, "Скидка выставлена, цена на витрине рыночная."),
     ChecklistItem(
         "reviews_for_points",

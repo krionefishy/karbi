@@ -219,7 +219,7 @@ async def test_ticks_follow_the_kind_of_item(database: Database, seller: uuid.UU
 
     async with database.session() as session:
         checklist = service(session)
-        await checklist.set_mark(seller, "A", "cashback", True, user)
+        await checklist.set_mark(seller, "A", "video_cover", True, user)
         await checklist.set_mark(seller, "A", "description", True, user)
         # Снять отметку, которую ставить не на чем, можно всегда.
         await checklist.set_mark(seller, "A", "reviews_with_video", False, user)
@@ -228,7 +228,7 @@ async def test_ticks_follow_the_kind_of_item(database: Database, seller: uuid.UU
         with pytest.raises(MarkRejectedError, match="пока нет"):
             await checklist.set_mark(seller, "A", "reviews_with_video", True, user)
         with pytest.raises(ArticleNotInChecklistError):
-            await checklist.set_mark(seller, "B", "cashback", True, user)
+            await checklist.set_mark(seller, "B", "video_cover", True, user)
         with pytest.raises(UnknownItemError):
             await checklist.set_mark(seller, "A", "manager", True, user)
         await checklist.set_comment(seller, "A", "Ждём видео от подрядчика", user)
@@ -238,10 +238,10 @@ async def test_ticks_follow_the_kind_of_item(database: Database, seller: uuid.UU
 
     row = next(row for row in view.rows if row.article == "A")
     items = {state.key: state for state in row.items}
-    assert items["cashback"].checked
+    assert items["video_cover"].checked
     assert items["description"].checked
     assert row.comment == "Ждём видео от подрядчика"
-    # Автоматом: характеристики, фото, видео, отзывы есть; руками: описание и кэшбек.
+    # Автоматом: характеристики, фото, видео, отзывы есть; руками: описание и видеообложка.
     assert row.done == 6
 
     async with database.session() as session:
@@ -300,14 +300,14 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     header = [cell.value for cell in sheet[1]]
     assert header[:6] == ["Дата заведения", "Артикул WB", "Артикул продавца", "Баркод", "Наименование товара", "ИП"]
     assert header[6] == "Описание (SEO)"
-    assert header[18:] == ["Оценки прицеплены", "Готово из 13", "Статус", "Комментарий"]
+    assert header[17:] == ["Оценки прицеплены", "Готово из 12", "Статус", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
     assert second[7] is True  # характеристики
     assert second[10] is False  # видеообложка — никто не отметил
-    assert second[19] == "=COUNTIF(G3:S3,TRUE)"
-    assert second[20] == '=IF(T3=13,"ГОТОВ","НЕ ГОТОВ")'
-    assert second[21] == "Проверить рич"
+    assert second[18] == "=COUNTIF(G3:R3,TRUE)"
+    assert second[19] == '=IF(S3=12,"ГОТОВ","НЕ ГОТОВ")'
+    assert second[20] == "Проверить рич"
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")

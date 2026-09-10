@@ -326,12 +326,7 @@ class SessionProvider(Provider):
             checklist,
             stock,
             reviews,
-            thresholds=Thresholds(
-                min_photos=config.min_photos,
-                min_description_length=config.min_description_length,
-                min_reviews=config.min_reviews,
-                characteristics_share=config.characteristics_share,
-            ),
+            thresholds=Thresholds(min_photos=config.min_photos),
             min_stock=config.min_stock,
             timezone=ZoneInfo(config.timezone),
         )
