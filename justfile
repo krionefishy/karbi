@@ -48,6 +48,7 @@ test-migrate:
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_turnover upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_distribution upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_card_checklist upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_stocks upgrade head
 
 test-all: test-infra-up test-migrate
     CONFIG_PATH={{ test_config }} uv run pytest
@@ -73,7 +74,10 @@ migrate-wb-fbs-distribution:
 migrate-wb-card-checklist:
     uv run alembic -n wb_card_checklist upgrade head
 
-migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist
+migrate-wb-fbs-stocks:
+    uv run alembic -n wb_fbs_stocks upgrade head
+
+migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-fbs-stocks
 
 compose-up:
     {{ compose }} up -d --build
@@ -100,6 +104,7 @@ prod-deploy:
     @test "$({{ prod_compose }} ps --status running -q wb-turnover-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-fbs-distribution-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-card-checklist-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q wb-fbs-stocks-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 
 # Start production containers without rebuilding images.

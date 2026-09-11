@@ -1,9 +1,16 @@
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
-from backend.app.api.utils import automation_catalog, next_checklist_run_at, next_run_at, next_turnover_run_at
+from backend.app.api.utils import (
+    automation_catalog,
+    next_checklist_run_at,
+    next_fbs_stocks_run_at,
+    next_run_at,
+    next_turnover_run_at,
+)
 from backend.modules.wb_card_checklist.application import ChecklistOverview
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
+from backend.modules.wb_fbs_stocks.application import BoardOverview
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
 from backend.modules.wb_turnover.application import TurnoverOverview
@@ -24,6 +31,27 @@ def quiet_fbs() -> DistributionCatalogOverview:
 
 def quiet_checklist() -> ChecklistOverview:
     return ChecklistOverview(seller_count=0, last_success_at=None, failing=0)
+
+
+def quiet_stocks() -> BoardOverview:
+    return BoardOverview(seller_count=0, last_success_at=None, failing=0)
+
+
+def test_the_stocks_card_points_at_the_most_stale_cabinet() -> None:
+    """Опрос идёт по кабинетам: следующий сбор — у того, кого собирали раньше всех."""
+    now = datetime(2026, 9, 11, 10, 30, tzinfo=UTC)
+    poll = SETTINGS.fbs_stocks.poll_minutes
+    fresh = datetime(2026, 9, 11, 10, 0, tzinfo=UTC)
+    stale = datetime(2026, 9, 11, 8, 30, tzinfo=UTC)
+
+    spread = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=stale, uncollected=0)
+    # Самый старый сбор в 08:30 уже просрочен — следующий сбор не позже «сейчас».
+    assert next_fbs_stocks_run_at(SETTINGS, spread, now) == now
+    even = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=fresh, uncollected=0)
+    assert next_fbs_stocks_run_at(SETTINGS, even, now) == fresh + timedelta(minutes=poll)
+    # Кабинет без единого сбора уже в очереди.
+    never = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=fresh, uncollected=1)
+    assert next_fbs_stocks_run_at(SETTINGS, never, now) == now
 
 
 def run(status: str, *, started: datetime | None = None, finished: datetime | None = None) -> ReviewSyncRun:
@@ -51,7 +79,9 @@ def test_catalog_reports_the_run_that_actually_happened() -> None:
         runs_last_24h=2,
     )
 
-    [automation, _, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), SETTINGS)
+    [automation, *_] = automation_catalog(
+        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), SETTINGS
+    )
 
     assert automation.id == "wb-reviews"
     assert automation.seller_count == 4
@@ -82,7 +112,9 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
         runs_last_24h=1,
     )
 
-    [automation, _, _, _] = automation_catalog(overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), SETTINGS)
+    [automation, *_] = automation_catalog(
+        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), SETTINGS
+    )
 
     assert automation.last_run is not None
     assert automation.last_run.duration_seconds is None
@@ -104,19 +136,21 @@ def test_next_run_is_the_worker_schedule() -> None:
 def test_the_catalog_lists_every_automation() -> None:
     turnover = TurnoverOverview(seller_count=2, last_run=None, last_success_at=None, runs_last_24h=0)
 
-    reviews_card, turnover_card, fbs_card, checklist_card = automation_catalog(
+    reviews_card, turnover_card, fbs_card, checklist_card, stocks_card = automation_catalog(
         SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
         turnover,
         DistributionCatalogOverview(seller_count=3),
         ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
+        BoardOverview(seller_count=5, last_success_at=None, failing=0),
         SETTINGS,
     )
 
-    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id) == (
+    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id, stocks_card.id) == (
         "wb-reviews",
         "wb-turnover",
         "wb-fbs-distribution",
         "wb-card-checklist",
+        "wb-fbs-stocks",
     )
     assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
@@ -144,7 +178,7 @@ def test_the_checklist_card_reports_collection_state() -> None:
     healthy = ChecklistOverview(seller_count=3, last_success_at=collected, failing=0)
     failing = ChecklistOverview(seller_count=3, last_success_at=collected, failing=1)
 
-    *_, card = automation_catalog(quiet_overview(), quiet_turnover(), quiet_fbs(), healthy, SETTINGS)
+    *_, card, _ = automation_catalog(quiet_overview(), quiet_turnover(), quiet_fbs(), healthy, quiet_stocks(), SETTINGS)
 
     assert card.status == "active"
     assert card.last_success_at == "2026-09-10T02:00:00+00:00"

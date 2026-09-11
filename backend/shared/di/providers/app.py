@@ -34,6 +34,8 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsStockWriter,
     WBFbsWarehouseWriter,
 )
+from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
+from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
 from backend.modules.wb_reviews.application import (
     ReviewReportService,
     ReviewsEnrollment,
@@ -332,15 +334,34 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def fbs_stocks_repository(self, session: AsyncSession) -> FbsStocksRepository:
+        return FbsStocksRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_stocks_enrollment(self, stocks: FbsStocksRepository) -> FbsStocksEnrollment:
+        return FbsStocksEnrollment(stocks)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_stocks_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        stocks: FbsStocksRepository,
+        settings: Settings,
+    ) -> FbsStocksService:
+        return FbsStocksService(session, sellers, stocks, timezone=ZoneInfo(settings.fbs_stocks.timezone))
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
         turnover: TurnoverEnrollment,
         fbs_distribution: FbsDistributionEnrollment,
         card_checklist: ChecklistEnrollment,
+        fbs_stocks: FbsStocksEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution, card_checklist]
+        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

@@ -9,6 +9,7 @@ from backend.modules.wb_card_checklist.presentation.http import router as wb_car
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
 from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
+from backend.modules.wb_fbs_stocks.presentation.http import router as wb_fbs_stocks_router
 from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
@@ -22,6 +23,7 @@ router.include_router(wb_turnover_router)
 router.include_router(wb_fbs_distribution_router)
 router.include_router(onec_router)
 router.include_router(wb_card_checklist_router)
+router.include_router(wb_fbs_stocks_router)
 router.include_router(automations_router)
 
 

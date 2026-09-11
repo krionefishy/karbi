@@ -22,6 +22,16 @@ from backend.modules.wb_fbs_distribution.application import (
     TITLE as WB_FBS_TITLE,
 )
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
+from backend.modules.wb_fbs_stocks.application import (
+    AUTOMATION_ID as WB_FBS_STOCKS_ID,
+)
+from backend.modules.wb_fbs_stocks.application import (
+    DESCRIPTION as WB_FBS_STOCKS_DESCRIPTION,
+)
+from backend.modules.wb_fbs_stocks.application import (
+    TITLE as WB_FBS_STOCKS_TITLE,
+)
+from backend.modules.wb_fbs_stocks.application import BoardOverview
 from backend.modules.wb_reviews.application import (
     AUTOMATION_ID as WB_REVIEWS_ID,
 )
@@ -80,6 +90,18 @@ def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> da
     return _next_daily(ZoneInfo(checklist.timezone), [(checklist.collect_hour, checklist.collect_minute)], now)
 
 
+def next_fbs_stocks_run_at(settings: Settings, overview: BoardOverview, now: datetime | None = None) -> datetime:
+    """Опрос интервальный и по кабинетам: следующий — у самого давно собранного.
+
+    Кабинет без единого сбора уже в очереди, поэтому «сейчас»; иначе — через
+    `poll_minutes` после самого старого сбора, но не раньше, чем сейчас.
+    """
+    moment = now or datetime.now(ZoneInfo(settings.fbs_stocks.timezone))
+    if overview.uncollected or overview.earliest_collected_at is None:
+        return moment
+    return max(moment, overview.earliest_collected_at + timedelta(minutes=settings.fbs_stocks.poll_minutes))
+
+
 def _duration(started: datetime | None, finished: datetime | None) -> int | None:
     if not started or not finished:
         return None
@@ -124,6 +146,7 @@ def automation_catalog(
     turnover: TurnoverOverview,
     fbs_distribution: DistributionCatalogOverview,
     card_checklist: ChecklistOverview,
+    fbs_stocks: BoardOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -174,5 +197,16 @@ def automation_catalog(
             last_run=None,
             last_success_at=card_checklist.last_success_at.isoformat() if card_checklist.last_success_at else None,
             next_run_at=next_checklist_run_at(settings).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_FBS_STOCKS_ID,
+            title=WB_FBS_STOCKS_TITLE,
+            description=WB_FBS_STOCKS_DESCRIPTION,
+            status=fbs_stocks.status,
+            seller_count=fbs_stocks.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=fbs_stocks.last_success_at.isoformat() if fbs_stocks.last_success_at else None,
+            next_run_at=next_fbs_stocks_run_at(settings, fbs_stocks).isoformat(),
         ),
     ]

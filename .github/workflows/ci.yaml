@@ -99,6 +99,9 @@ jobs:
       - name: Apply WB card checklist migrations
         run: uv run alembic -n wb_card_checklist upgrade head
 
+      - name: Apply WB FBS stocks migrations
+        run: uv run alembic -n wb_fbs_stocks upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

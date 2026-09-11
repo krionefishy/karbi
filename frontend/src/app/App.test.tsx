@@ -10,6 +10,8 @@ vi.mock("../pages/AutomationsPage", () => ({ AutomationsPage: () => <div>кат�
 vi.mock("../pages/ReviewsPage", () => ({ ReviewsPage: () => <div>отзывы</div> }));
 vi.mock("../pages/TurnoverPage", () => ({ TurnoverPage: () => <div>оборачиваемость</div> }));
 vi.mock("../pages/FbsDistributionPage", () => ({ FbsDistributionPage: () => <div>распределение FBS</div> }));
+vi.mock("../pages/CardChecklistPage", () => ({ CardChecklistPage: () => <div>чек-лист</div> }));
+vi.mock("../pages/FbsStocksPage", () => ({ FbsStocksPage: () => <div>остатки FBS</div> }));
 vi.mock("../pages/SellersPage", () => ({ SellersPage: () => <div>селлеры</div> }));
 vi.mock("../pages/LoginPage", () => ({ LoginPage: () => <div>вход</div> }));
 vi.mock("../pages/admin/EmployeesPage", () => ({ EmployeesPage: () => <div>сотрудники</div> }));
@@ -40,6 +42,8 @@ describe("маршруты автоматизаций", () => {
     ["/automations/wb-reviews", "отзывы"],
     ["/automations/wb-turnover", "оборачиваемость"],
     ["/automations/wb-fbs-distribution", "распределение FBS"],
+    ["/automations/wb-card-checklist", "чек-лист"],
+    ["/automations/wb-fbs-stocks", "остатки FBS"],
   ])("%s открывает свою страницу", (path, expected) => {
     open(path);
 

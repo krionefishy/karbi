@@ -278,6 +278,19 @@ class EgressConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FbsStocksConfig:
+    """Таблица остатков FBS: как часто опрашивать склады кабинетов."""
+
+    timezone: str = "Europe/Moscow"
+    # Селлер правит кабинет днём и хочет видеть результат в тот же день, а
+    # каждый опрос — запрос на склад: раз в час на ~35 складов кабинета терпимо.
+    poll_minutes: int = 60
+    # Пауза перед повтором после неудачи: не чаще четверти часа долбить ключ,
+    # который отвечает ошибкой.
+    retry_minutes: int = 15
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     app: AppConfig
     database: DatabaseConfig
@@ -293,6 +306,7 @@ class Settings:
     turnover: TurnoverConfig
     fbs_distribution: FbsDistributionConfig
     card_checklist: CardChecklistConfig
+    fbs_stocks: FbsStocksConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -371,6 +385,10 @@ class Settings:
         ):
             if key in card_checklist:
                 card_checklist[key] = int(card_checklist[key])
+        fbs_stocks = dict(data.get("fbs_stocks", {}))
+        for key in ("poll_minutes", "retry_minutes"):
+            if key in fbs_stocks:
+                fbs_stocks[key] = int(fbs_stocks[key])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -403,6 +421,7 @@ class Settings:
             turnover=TurnoverConfig(**turnover),
             fbs_distribution=FbsDistributionConfig(**fbs_distribution),
             card_checklist=CardChecklistConfig(**card_checklist),
+            fbs_stocks=FbsStocksConfig(**fbs_stocks),
         )
         settings.validate_values()
         return settings
@@ -435,6 +454,10 @@ class Settings:
             raise ValueError("card_checklist thresholds must not be negative")
         if checklist.subject_ttl_hours < 1:
             raise ValueError("card_checklist.subject_ttl_hours must be positive")
+        if self.fbs_stocks.poll_minutes < 1:
+            raise ValueError("fbs_stocks.poll_minutes must be positive")
+        if self.fbs_stocks.retry_minutes < 1:
+            raise ValueError("fbs_stocks.retry_minutes must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

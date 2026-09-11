@@ -11,6 +11,7 @@ import { CardChecklistPage } from "../pages/CardChecklistPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
 import { FbsDistributionPage } from "../pages/FbsDistributionPage";
+import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
 
 const queryClient = new QueryClient({
@@ -33,6 +34,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
         <Route path="/automations/wb-fbs-distribution" element={<FbsDistributionPage />} />
         <Route path="/automations/wb-card-checklist" element={<CardChecklistPage />} />
+        <Route path="/automations/wb-fbs-stocks" element={<FbsStocksPage />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />
