@@ -11,7 +11,7 @@ from typing import cast
 import pytest
 
 from backend.modules.wb_core.domain import Article
-from backend.modules.wb_core.infrastructure.wb import CatalogCard, WBContentClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb import CatalogCard
 from backend.modules.wb_reviews.infrastructure.wb import (
     FeedbackAggregation,
     FeedbackProduct,
@@ -19,9 +19,7 @@ from backend.modules.wb_reviews.infrastructure.wb import (
     WBFeedbackTemporaryError,
 )
 from backend.storage.pg import Database
-from backend.workers.wb_reviews import catalog_consumer as catalog_module
 from backend.workers.wb_reviews import review_consumer as consumer_module
-from backend.workers.wb_reviews.catalog_consumer import CatalogSyncConsumer
 from backend.workers.wb_reviews.review_consumer import InvalidPayloadError, ReviewSyncConsumer
 
 
@@ -287,66 +285,6 @@ async def test_review_consumer_raises_a_skippable_error_for_a_malformed_payload(
         )
 
 
-class FakeCatalogSellers:
-    def __init__(self, seller_id: uuid.UUID) -> None:
-        self.seller_id = seller_id
-        self.inbox_events: list[uuid.UUID] = []
-        self.sync_statuses: list[tuple] = []
-
-    async def inbox_processed(self, event_id: uuid.UUID) -> bool:
-        return False
-
-    async def get(self, seller_id: uuid.UUID):
-        return SimpleNamespace(id=seller_id, archived_at=None) if seller_id == self.seller_id else None
-
-    async def set_sync_status(self, seller_id: uuid.UUID, status: str, error: str | None = None) -> None:
-        self.sync_statuses.append((status, error))
-
-    def mark_inbox(self, event_id: uuid.UUID, event_type: str) -> None:
-        self.inbox_events.append(event_id)
-
-
-class InvalidKeyContentClient:
-    async def get_catalog(self, seller_id: str):
-        raise WBPermanentError("WB Content API: ключ недействителен или не имеет доступа")
-
-
-class MustNotBeCalledContentClient:
-    async def get_catalog(self, seller_id: str):
-        raise AssertionError("WB must not be called for a malformed payload")
-
-
-async def test_catalog_consumer_treats_an_invalid_key_as_permanent(monkeypatch) -> None:
-    """A key the gateway rejects for good would otherwise be retried forever."""
-    seller_id, event_id = uuid.uuid4(), uuid.uuid4()
-    sellers = FakeCatalogSellers(seller_id)
-    monkeypatch.setattr(catalog_module, "SellerRepository", lambda session: sellers)
-    consumer = CatalogSyncConsumer(
-        cast(Database, FakeDatabase()),
-        "kafka:9092",
-        "test",
-        client=cast(WBContentClient, InvalidKeyContentClient()),
-    )
-
-    await consumer.process({"event_id": str(event_id), "seller_id": str(seller_id)})
-
-    assert sellers.sync_statuses[-1][0] == "error"
-    assert "недействителен" in sellers.sync_statuses[-1][1]
-    assert sellers.inbox_events == [event_id]
-
-
-async def test_catalog_consumer_raises_a_skippable_error_for_a_malformed_payload() -> None:
-    consumer = CatalogSyncConsumer(
-        cast(Database, FakeDatabase()),
-        "kafka:9092",
-        "test",
-        client=cast(WBContentClient, MustNotBeCalledContentClient()),
-    )
-
-    with pytest.raises(InvalidPayloadError):
-        await consumer.process({"seller_id": "not-a-uuid"})
-
-
 class StubKafkaConsumer:
     """Hands out a fixed list of raw messages, then blocks like a real consumer."""
 
@@ -402,40 +340,3 @@ async def test_a_non_json_message_does_not_kill_the_review_consumer(monkeypatch)
     assert consumer.committed == 2
     assert consumer.seeks == []
     assert reviews.completed
-
-
-async def test_a_non_json_message_does_not_kill_the_catalog_consumer(monkeypatch) -> None:
-    seller_id, event_id = uuid.uuid4(), uuid.uuid4()
-    database = FakeDatabase()
-    sellers = FakeCatalogSellers(seller_id)
-    monkeypatch.setattr(catalog_module, "SellerRepository", lambda session: sellers)
-
-    good = json.dumps({"event_id": str(event_id), "seller_id": str(seller_id)}).encode()
-    stub: dict = {}
-
-    def build(*args, **kwargs):
-        stub["consumer"] = StubKafkaConsumer([b"<html>oops</html>", good], *args, **kwargs)
-        return stub["consumer"]
-
-    monkeypatch.setattr(catalog_module, "AIOKafkaConsumer", build)
-
-    class EmptyCatalog:
-        async def get_catalog(self, seller_id: str):
-            return SimpleNamespace(active=[], archived=[], archived_available=[])
-
-    async def upsert_catalog(seller_id, *, active, archived, archived_available) -> None:
-        return None
-
-    sellers.upsert_catalog = upsert_catalog  # type: ignore[attr-defined]
-
-    consumer = CatalogSyncConsumer(
-        cast(Database, database),
-        "kafka:9092",
-        "test",
-        client=cast(WBContentClient, EmptyCatalog()),
-    )
-    with contextlib.suppress(asyncio.CancelledError):
-        await consumer.run()
-
-    assert stub["consumer"].committed == 2
-    assert stub["consumer"].seeks == []

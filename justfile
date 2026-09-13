@@ -97,7 +97,7 @@ prod-deploy:
     {{ prod_compose }} config --quiet
     {{ prod_compose }} build
     {{ prod_compose }} up -d --remove-orphans
-    @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
+    @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker wb-core-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
     @test "$({{ prod_compose }} ps --status running -q wb-reviews-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q outbox-publisher | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q notifications-worker | wc -l | tr -d ' ')" = "1"
@@ -105,6 +105,7 @@ prod-deploy:
     @test "$({{ prod_compose }} ps --status running -q wb-fbs-distribution-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-card-checklist-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-fbs-stocks-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q wb-core-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 
 # Start production containers without rebuilding images.

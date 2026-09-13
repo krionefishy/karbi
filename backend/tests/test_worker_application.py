@@ -15,7 +15,6 @@ def test_worker_application_can_be_created() -> None:
     application = WBReviewsWorkerApplication(settings)
 
     assert application.settings is settings
-    assert application.catalog_consumer is None
     assert application.review_consumer is None
 
 

@@ -160,7 +160,7 @@ async def test_feedback_client_retries_the_same_page_after_a_transport_failure(m
 async def test_feedback_client_fails_loudly_at_the_pagination_ceiling(monkeypatch) -> None:
     """WB stops serving pages around 200k; a snapshot cut off there must not be
     written to the database as if it were complete."""
-    monkeypatch.setattr("backend.modules.wb_reviews.infrastructure.wb.client.MAX_PAGINATION_DEPTH", 2)
+    monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.feedbacks.MAX_PAGINATION_DEPTH", 2)
 
     with respx.mock as router:
         stub = EgressStub(router)

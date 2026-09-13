@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
-from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
+from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 MARKETPLACE_BUCKET = "marketplace"
 # WB accepts at most a thousand identifiers per stock request.

@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
 from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 
 FEEDBACKS_BUCKET = "feedbacks"
@@ -11,11 +11,6 @@ FEEDBACKS_BUCKET = "feedbacks"
 # is deliberate: a snapshot silently cut off at the ceiling would be written to
 # the database as if it were complete.
 MAX_PAGINATION_DEPTH = 200_000
-
-
-# Исторические имена модуля отзывов; наполнение теперь общее для всех клиентов.
-WBFeedbackPermanentError = WBPermanentError
-WBFeedbackTemporaryError = WBTemporaryError
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +82,7 @@ class WBFeedbackClient:
         skip = 0
         while True:
             if skip >= MAX_PAGINATION_DEPTH:
-                raise WBFeedbackPermanentError(
+                raise WBPermanentError(
                     f"WB Feedbacks API: пагинация {path} упёрлась в потолок {MAX_PAGINATION_DEPTH} отзывов, "
                     "снапшот был бы усечён"
                 )
@@ -104,13 +99,13 @@ class WBFeedbackClient:
                 or {}
             )
             if payload.get("error"):
-                raise WBFeedbackPermanentError(str(payload.get("errorText") or "WB rejected feedback request"))
+                raise WBPermanentError(str(payload.get("errorText") or "WB rejected feedback request"))
             data = payload.get("data") or {}
             if not isinstance(data, dict):
-                raise WBFeedbackPermanentError("WB returned an invalid feedback payload")
+                raise WBPermanentError("WB returned an invalid feedback payload")
             feedbacks = data.get("feedbacks", [])
             if not isinstance(feedbacks, list):
-                raise WBFeedbackPermanentError("WB returned an invalid feedback list")
+                raise WBPermanentError("WB returned an invalid feedback list")
             for feedback in feedbacks:
                 self._accumulate(feedback, counts, products, media, seen)
             page_length = len(feedbacks)

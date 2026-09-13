@@ -1,14 +1,14 @@
-from backend.modules.wb_turnover.infrastructure.wb.analytics import (
+# Клиенты остатков переехали в wb_core: их же вызывает зеркало WB. Имена
+# оставлены здесь, пока оборачиваемость собирает остатки сама.
+from backend.modules.wb_core.infrastructure.wb import (
     ANALYTICS_BUCKET,
+    CHRT_CHUNK,
+    MARKETPLACE_BUCKET,
     MAX_PAGES,
     PAGE_LIMIT,
     FBOStockRow,
-    WBAnalyticsClient,
-)
-from backend.modules.wb_turnover.infrastructure.wb.marketplace import (
-    CHRT_CHUNK,
-    MARKETPLACE_BUCKET,
     Warehouse,
+    WBAnalyticsClient,
     WBMarketplaceClient,
 )
 from backend.modules.wb_turnover.infrastructure.wb.statistics import (

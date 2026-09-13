@@ -291,6 +291,27 @@ class FbsStocksConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreMirrorConfig:
+    """Зеркало WB в wb_core: когда воркер обходит всех активных селлеров. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Те же четыре среза, что у оборачиваемости: когда она перейдёт на зеркало,
+    # её ряд снимков не сдвинется.
+    stock_slot_hours: tuple[int, ...] = (3, 9, 15, 21)
+    # Каталог по расписанию, а не только по событию: новая карточка селлера
+    # иначе не появится, пока кто-то не нажмёт «обновить».
+    catalog_hour: int = 2
+    catalog_minute: int = 30
+    # Отзывы — три полных прохода по фидбэкам селлера, раз в сутки достаточно.
+    reviews_hour: int = 4
+    reviews_minute: int = 0
+    # Пауза перед повтором после неудачи: ключ, отвечающий ошибкой, не долбим.
+    retry_minutes: int = 30
+    # Сколько дней остаток считается пригодным для потребителей зеркала.
+    stock_fresh_days: int = 2
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     app: AppConfig
     database: DatabaseConfig
@@ -307,6 +328,7 @@ class Settings:
     fbs_distribution: FbsDistributionConfig
     card_checklist: CardChecklistConfig
     fbs_stocks: FbsStocksConfig
+    core_mirror: CoreMirrorConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -389,6 +411,19 @@ class Settings:
         for key in ("poll_minutes", "retry_minutes"):
             if key in fbs_stocks:
                 fbs_stocks[key] = int(fbs_stocks[key])
+        core_mirror = dict(data.get("core_mirror", {}))
+        for key in (
+            "catalog_hour",
+            "catalog_minute",
+            "reviews_hour",
+            "reviews_minute",
+            "retry_minutes",
+            "stock_fresh_days",
+        ):
+            if key in core_mirror:
+                core_mirror[key] = int(core_mirror[key])
+        if "stock_slot_hours" in core_mirror:
+            core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -422,6 +457,7 @@ class Settings:
             fbs_distribution=FbsDistributionConfig(**fbs_distribution),
             card_checklist=CardChecklistConfig(**card_checklist),
             fbs_stocks=FbsStocksConfig(**fbs_stocks),
+            core_mirror=CoreMirrorConfig(**core_mirror),
         )
         settings.validate_values()
         return settings
@@ -458,6 +494,19 @@ class Settings:
             raise ValueError("fbs_stocks.poll_minutes must be positive")
         if self.fbs_stocks.retry_minutes < 1:
             raise ValueError("fbs_stocks.retry_minutes must be positive")
+        mirror = self.core_mirror
+        if not mirror.stock_slot_hours or any(not 0 <= hour <= 23 for hour in mirror.stock_slot_hours):
+            raise ValueError("core_mirror.stock_slot_hours must contain hours between 0 and 23")
+        if len(set(mirror.stock_slot_hours)) != len(mirror.stock_slot_hours):
+            raise ValueError("core_mirror.stock_slot_hours must not repeat an hour")
+        for name, hour, minute in (
+            ("catalog", mirror.catalog_hour, mirror.catalog_minute),
+            ("reviews", mirror.reviews_hour, mirror.reviews_minute),
+        ):
+            if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+                raise ValueError(f"core_mirror.{name}_hour/minute must be a valid time of day")
+        if mirror.retry_minutes < 1 or mirror.stock_fresh_days < 1:
+            raise ValueError("core_mirror.retry_minutes and stock_fresh_days must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

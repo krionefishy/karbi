@@ -129,3 +129,65 @@ class InboxEventModel(WBCoreBase):
     event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     event_type: Mapped[str] = mapped_column(String(255), nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MirrorStateModel(WBCoreBase):
+    """Как прошёл последний сбор зеркала по селлеру и виду данных.
+
+    Строка на пару «селлер + вид», а не колонки в `sellers`: виды собираются
+    по разному расписанию и падают независимо, а реестр про зеркало знать не
+    обязан. Попытка отмечается до сети: упавший процесс не должен превращаться
+    в селлера, которого спрашивают снова и снова.
+    """
+
+    __tablename__ = "mirror_state"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (CheckConstraint("kind IN ('catalog', 'stocks', 'reviews')", name="ck_wb_core_mirror_state_kind"),)
+
+
+class StockFactModel(WBCoreBase):
+    """Текущий остаток карточки — копия ответа WB, переписывается каждым сбором."""
+
+    __tablename__ = "stock_facts"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    fbo_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fbo_quantity_full: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fbs_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FbsWarehouseStockModel(WBCoreBase):
+    """Остаток FBS по складам продавца — тот же обход, что и сумма, но в разрезе."""
+
+    __tablename__ = "fbs_warehouse_stocks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ReviewFactModel(WBCoreBase):
+    """Отзывы карточки по звёздам на момент сбора. Медиа NULL — не считали."""
+
+    __tablename__ = "review_facts"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    count_rating_1: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count_rating_2: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count_rating_3: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count_rating_4: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count_rating_5: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

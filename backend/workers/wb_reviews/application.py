@@ -4,12 +4,11 @@ import signal
 from collections.abc import Callable, Coroutine
 
 from backend.infrastructure.logging import configure_logging
-from backend.modules.wb_core.infrastructure.wb import EgressGateway, WBContentClient
+from backend.modules.wb_core.infrastructure.wb import EgressGateway
 from backend.modules.wb_reviews.infrastructure.wb import WBFeedbackClient
 from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
-from backend.workers.wb_reviews.catalog_consumer import CatalogSyncConsumer
 from backend.workers.wb_reviews.review_consumer import ReviewSyncConsumer
 from backend.workers.wb_reviews.worker import WBReviewsWorker
 
@@ -34,31 +33,24 @@ class WBReviewsWorkerApplication:
             job_max_attempts=self.settings.worker.job_max_attempts,
             run_max_age_seconds=self.settings.worker.run_max_age_seconds,
         )
-        self.catalog_consumer, self.review_consumer = self._create_consumers()
+        self.review_consumer = self._create_consumer()
 
-    def _create_consumers(self) -> tuple[CatalogSyncConsumer | None, ReviewSyncConsumer | None]:
+    def _create_consumer(self) -> ReviewSyncConsumer | None:
+        """Консьюмер каталога отсюда уехал в wb-core-worker: каталог нужен всем, а не отзывам."""
         if not self.settings.kafka.enabled:
-            return None, None
+            return None
         worker = self.settings.worker
         # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
         gateway = EgressGateway(self.settings.egress)
-        return (
-            CatalogSyncConsumer(
-                self.database,
-                self.settings.kafka.bootstrap_servers,
-                f"{self.settings.kafka.consumer_group}.wb.catalog",
-                client=WBContentClient(gateway),
-            ),
-            ReviewSyncConsumer(
-                self.database,
-                self.settings.kafka.bootstrap_servers,
-                f"{self.settings.kafka.consumer_group}.wb.reviews",
-                worker.feedback_page_size,
-                lease_seconds=worker.job_lease_seconds,
-                max_attempts=worker.job_max_attempts,
-                retry_backoff_seconds=worker.job_retry_backoff_seconds,
-                client=WBFeedbackClient(gateway, page_size=worker.feedback_page_size),
-            ),
+        return ReviewSyncConsumer(
+            self.database,
+            self.settings.kafka.bootstrap_servers,
+            f"{self.settings.kafka.consumer_group}.wb.reviews",
+            worker.feedback_page_size,
+            lease_seconds=worker.job_lease_seconds,
+            max_attempts=worker.job_max_attempts,
+            retry_backoff_seconds=worker.job_retry_backoff_seconds,
+            client=WBFeedbackClient(gateway, page_size=worker.feedback_page_size),
         )
 
     async def run(self) -> None:
@@ -72,8 +64,8 @@ class WBReviewsWorkerApplication:
             )
             tasks: list[asyncio.Task[None]] = []
             if self.settings.kafka.enabled:
-                if self.catalog_consumer is None or self.review_consumer is None:
-                    raise RuntimeError("WB consumers are not configured")
+                if self.review_consumer is None:
+                    raise RuntimeError("WB review consumer is not configured")
                 await ensure_topics(
                     bootstrap_servers=self.settings.kafka.bootstrap_servers,
                     partitions=self.settings.kafka.topic_partitions,
@@ -81,13 +73,9 @@ class WBReviewsWorkerApplication:
                 )
                 tasks = [
                     asyncio.create_task(
-                        self._supervise("wb-catalog-consumer", self.catalog_consumer.run),
-                        name="wb-catalog-consumer",
-                    ),
-                    asyncio.create_task(
                         self._supervise("wb-review-consumer", self.review_consumer.run),
                         name="wb-review-consumer",
-                    ),
+                    )
                 ]
             try:
                 await self.worker.run()

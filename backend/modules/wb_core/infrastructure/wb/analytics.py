@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from typing import Any
 
-from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
+from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 ANALYTICS_BUCKET = "analytics"
 # WB accepts this page size; every seller we have fits in a single page.

@@ -5,31 +5,42 @@ import uuid
 
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
+from backend.modules.wb_core.application import MirrorService, SellerGoneError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.wb import WBContentClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.shared.kafka_streams.topics import WBCoreTopics
 from backend.storage.pg import Database
-from backend.workers.wb_reviews.review_consumer import POLL_INTERVAL_MARGIN_MS, InvalidPayloadError
 
 # A throttled catalog fetch legitimately outlives Kafka's default 300s poll
 # interval; a rebalance in the middle of one just doubles the WB traffic.
-DEFAULT_MAX_POLL_INTERVAL_MS = 1_800_000 + POLL_INTERVAL_MARGIN_MS
+DEFAULT_MAX_POLL_INTERVAL_MS = 1_800_000 + 60_000
+EVENT_TYPE = "WBCatalogSyncRequested"
+
+
+class InvalidPayloadError(Exception):
+    """The message can never be processed; retrying it would poison the partition."""
 
 
 class CatalogSyncConsumer:
+    """Внеочередной синк каталога по событию реестра: выдан ключ, нажата кнопка.
+
+    Сам синк делает зеркало; консьюмер отвечает за идемпотентность события и
+    за то, чтобы временная ошибка WB не стала пропущенным сообщением.
+    """
+
     def __init__(
         self,
         database: Database,
         bootstrap_servers: str,
         group_id: str,
         *,
-        client: WBContentClient,
+        mirror: MirrorService,
         max_poll_interval_ms: int = DEFAULT_MAX_POLL_INTERVAL_MS,
     ) -> None:
         self.database = database
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
-        self.client = client
+        self.mirror = mirror
         self.max_poll_interval_ms = max_poll_interval_ms
         self.logger = logging.getLogger("wb.catalog.consumer")
 
@@ -78,49 +89,17 @@ class CatalogSyncConsumer:
         except (KeyError, TypeError, ValueError) as error:
             raise InvalidPayloadError(str(error)) from error
         async with self.database.session() as session:
-            repository = SellerRepository(session)
-            if await repository.inbox_processed(event_id):
+            if await SellerRepository(session).inbox_processed(event_id):
                 return
-            seller = await repository.get(seller_id)
-            if seller is None or seller.archived_at is not None:
-                # Событие, опубликованное до архивации, доживает в Kafka дольше
-                # селлера: обрабатывать его — значит дёргать шлюз за
-                # отключённого и записывать ему ошибку синка.
-                repository.mark_inbox(event_id, "WBCatalogSyncRequested")
-                await session.commit()
-                return
-            await repository.set_sync_status(seller_id, "syncing")
-            await session.commit()
         try:
-            catalog = await self.client.get_catalog(str(seller_id))
-        except WBPermanentError as error:
-            async with self.database.session() as session:
-                repository = SellerRepository(session)
-                await repository.set_sync_status(seller_id, "error", str(error))
-                repository.mark_inbox(event_id, "WBCatalogSyncRequested")
-                await session.commit()
-            return
+            await self.mirror.sync_catalog(seller_id)
+        except SellerGoneError:
+            # Событие, опубликованное до архивации, доживает в Kafka дольше
+            # селлера: обрабатывать его — значит дёргать шлюз за отключённого.
+            self.logger.info("catalog_sync_seller_gone", extra={"seller_id": str(seller_id)})
+        except WBPermanentError:
+            # Причина уже записана в статус синка; повтор того же события её не изменит.
+            pass
         async with self.database.session() as session:
-            repository = SellerRepository(session)
-            if await repository.get(seller_id) is None:
-                repository.mark_inbox(event_id, "WBCatalogSyncRequested")
-                await session.commit()
-                return
-            await repository.upsert_catalog(
-                seller_id,
-                active=catalog.active,
-                archived=catalog.archived,
-                archived_available=catalog.archived_available,
-            )
-            await repository.set_sync_status(seller_id, "success")
-            repository.mark_inbox(event_id, "WBCatalogSyncRequested")
+            SellerRepository(session).mark_inbox(event_id, EVENT_TYPE)
             await session.commit()
-        self.logger.info(
-            "catalog_synced",
-            extra={
-                "seller_id": str(seller_id),
-                "active": len(catalog.active),
-                "archived": len(catalog.archived),
-                "archived_available": catalog.archived_available,
-            },
-        )
