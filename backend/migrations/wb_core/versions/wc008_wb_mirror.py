@@ -6,8 +6,8 @@
 карточке, не наш расчёт.
 
 `mirror_state` — отметки сбора по виду: у каталога, остатков и отзывов своё
-расписание и свои ошибки. Ссылок на `sellers` нет, как и у `tracked_sellers`
-автоматизаций: удаление селлера чистит эти таблицы явно.
+расписание и свои ошибки. Ссылка на `sellers` с каскадом, как у `articles`:
+таблицы в той же схеме, и удаление селлера убирает зеркало вместе с каталогом.
 """
 
 import sqlalchemy as sa
@@ -25,7 +25,9 @@ SCHEMA = "wb_core"
 def upgrade() -> None:
     op.create_table(
         "mirror_state",
-        sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "seller_id", UUID(as_uuid=True), sa.ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+        ),
         sa.Column("kind", sa.String(16), primary_key=True),
         sa.Column("collected_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("attempted_at", sa.DateTime(timezone=True), nullable=True),
@@ -35,7 +37,9 @@ def upgrade() -> None:
     )
     op.create_table(
         "stock_facts",
-        sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "seller_id", UUID(as_uuid=True), sa.ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+        ),
         sa.Column("article", sa.String(255), primary_key=True),
         sa.Column("fbo_quantity", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("fbo_quantity_full", sa.Integer(), nullable=False, server_default="0"),
@@ -45,7 +49,9 @@ def upgrade() -> None:
     )
     op.create_table(
         "fbs_warehouse_stocks",
-        sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "seller_id", UUID(as_uuid=True), sa.ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+        ),
         sa.Column("article", sa.String(255), primary_key=True),
         sa.Column("warehouse_id", sa.BigInteger(), primary_key=True),
         sa.Column("quantity", sa.Integer(), nullable=False, server_default="0"),
@@ -54,7 +60,9 @@ def upgrade() -> None:
     )
     op.create_table(
         "review_facts",
-        sa.Column("seller_id", UUID(as_uuid=True), primary_key=True),
+        sa.Column(
+            "seller_id", UUID(as_uuid=True), sa.ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+        ),
         sa.Column("article", sa.String(255), primary_key=True),
         sa.Column("count_rating_1", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("count_rating_2", sa.Integer(), nullable=False, server_default="0"),

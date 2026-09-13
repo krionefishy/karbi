@@ -3,7 +3,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -182,11 +182,13 @@ class MirrorRepository:
             for row in rows
         }
 
-    # --- lifecycle --------------------------------------------------------------
+    # --- catalog ----------------------------------------------------------------
 
-    async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        for model in (MirrorStateModel, StockFactModel, FbsWarehouseStockModel, ReviewFactModel):
-            await self.session.execute(delete(model).where(model.seller_id == seller_id))
+    async def lock_catalog(self, seller_id: uuid.UUID) -> None:
+        """Транзакционная блокировка на селлера: вторая запись каталога ждёт первую."""
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:seller_id))"), {"seller_id": str(seller_id)}
+        )
 
     async def _insert(self, model: Any, rows: list[dict[str, Any]]) -> None:
         for offset in range(0, len(rows), _INSERT_CHUNK):

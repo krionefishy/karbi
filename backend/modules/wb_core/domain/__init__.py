@@ -1,5 +1,6 @@
 from backend.modules.wb_core.domain.entities import (
     ARTICLE_STATES,
+    EGRESS_SERVABLE,
     MARKETPLACE_OZON,
     MARKETPLACE_WB,
     Article,
@@ -16,6 +17,7 @@ from backend.modules.wb_core.domain.mirror import (
 
 __all__ = [
     "ARTICLE_STATES",
+    "EGRESS_SERVABLE",
     "MARKETPLACE_OZON",
     "MARKETPLACE_WB",
     "MIRROR_CATALOG",

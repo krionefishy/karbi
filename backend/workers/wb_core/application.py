@@ -66,14 +66,9 @@ class WBCoreWorkerApplication:
             await self.database.connect(self.settings.database.url, pool_size=2, max_overflow=2)
             tasks: list[asyncio.Task[None]] = []
             if self.catalog_consumer is not None:
-                await ensure_topics(
-                    bootstrap_servers=self.settings.kafka.bootstrap_servers,
-                    partitions=self.settings.kafka.topic_partitions,
-                    replication_factor=self.settings.kafka.topic_replication_factor,
-                )
                 tasks = [
                     asyncio.create_task(
-                        self._supervise("wb-catalog-consumer", self.catalog_consumer.run),
+                        self._supervise("wb-catalog-consumer", self._run_consumer),
                         name="wb-catalog-consumer",
                     )
                 ]
@@ -86,6 +81,17 @@ class WBCoreWorkerApplication:
                     await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             await self.database.disconnect()
+
+    async def _run_consumer(self) -> None:
+        """Топики — забота консьюмера, а не расписания: недоступный Kafka не должен
+        останавливать сбор остатков, которому Kafka не нужен."""
+        assert self.catalog_consumer is not None
+        await ensure_topics(
+            bootstrap_servers=self.settings.kafka.bootstrap_servers,
+            partitions=self.settings.kafka.topic_partitions,
+            replication_factor=self.settings.kafka.topic_replication_factor,
+        )
+        await self.catalog_consumer.run()
 
     async def _supervise(self, name: str, factory: Callable[[], Coroutine[None, None, None]]) -> None:
         """Keep the consumer alive for the life of the worker: a consumer loop

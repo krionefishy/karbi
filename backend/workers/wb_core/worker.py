@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import structlog
 
 from backend.modules.wb_core.application import MirrorService, SellerGoneError
-from backend.modules.wb_core.domain import MIRROR_CATALOG, MIRROR_REVIEWS, MIRROR_STOCKS
+from backend.modules.wb_core.domain import EGRESS_SERVABLE, MIRROR_CATALOG, MIRROR_REVIEWS, MIRROR_STOCKS
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.shared.heartbeat import touch_heartbeat
@@ -59,9 +59,10 @@ class WBCoreWorker:
         self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
+        # Каталог первым: остатки и отзывы ключуются его размерами и карточками.
         now = self._now()
-        await self.collect_due(MIRROR_STOCKS, now)
         await self.collect_due(MIRROR_CATALOG, now)
+        await self.collect_due(MIRROR_STOCKS, now)
         await self.collect_due(MIRROR_REVIEWS, now)
 
     def due_since(self, kind: str, now: datetime) -> datetime:
@@ -87,12 +88,31 @@ class WBCoreWorker:
         since = self.due_since(kind, now)
         retry_after = now - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
-            active = [seller.id for seller in await SellerRepository(session).list_sellers()]
-            due = await MirrorRepository(session).sellers_due(kind, active, since=since, retry_after=retry_after)
+            # Только селлеры с рабочим ключом на шлюзе: остальных шлюз отвергнет,
+            # и ошибка зеркала заслонила бы настоящую причину — недоставленный ключ.
+            candidates = [
+                seller.id
+                for seller in await SellerRepository(session).list_sellers()
+                if seller.egress_status in EGRESS_SERVABLE
+            ]
+            mirror = MirrorRepository(session)
+            if kind != MIRROR_CATALOG:
+                # Без каталога нечем ключевать остатки и отзывы: у нового селлера
+                # первый сбор остатков дал бы нули на весь срез.
+                catalog = await mirror.states(MIRROR_CATALOG)
+                candidates = [
+                    seller_id
+                    for seller_id in candidates
+                    if seller_id in catalog and catalog[seller_id].collected_at is not None
+                ]
+            due = await mirror.sellers_due(kind, candidates, since=since, retry_after=retry_after)
         collected = 0
         for seller_id in due:
             if self._stop.is_set():
                 break
+            # Один селлер — минуты под троттлингом, а healthcheck ждёт heartbeat
+            # не реже раза в четверть часа: отмечаемся перед каждым.
+            touch_heartbeat()
             if await self.collect(kind, seller_id) is None:
                 collected += 1
         return collected

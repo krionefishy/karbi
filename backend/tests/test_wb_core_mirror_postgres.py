@@ -131,7 +131,7 @@ async def database() -> AsyncIterator[Database]:
 @pytest_asyncio.fixture
 async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
     async with database.session() as session:
-        model = SellerModel(name="ИП Зеркало", catalog_sync_status="success")
+        model = SellerModel(name="ИП Зеркало", catalog_sync_status="success", egress_status="verified")
         session.add(model)
         await session.flush()
         seller_id = model.id
@@ -143,7 +143,6 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
         yield seller_id
     finally:
         async with database.session() as session:
-            await MirrorRepository(session).purge_seller(seller_id)
             await session.execute(delete(SellerModel).where(SellerModel.id == seller_id))
             await session.commit()
 
@@ -284,6 +283,9 @@ async def test_a_never_collected_seller_is_due_at_once_and_then_waits_for_the_ne
     database: Database, seller: uuid.UUID
 ) -> None:
     service = mirror(database)
+    # Остатки ключуются размерами каталога: пока каталог не собран, срез остатков не берётся.
+    assert await worker(database, service, at(10)).collect_due(MIRROR_STOCKS, at(10)) == 0
+    assert await worker(database, service, at(10)).collect_due(MIRROR_CATALOG, at(10)) == 1
 
     assert await worker(database, service, at(10)).collect_due(MIRROR_STOCKS, at(10)) == 1
     # Собран в 10:00 — срез 09:00 закрыт, до 15:00 делать нечего.
@@ -292,6 +294,7 @@ async def test_a_never_collected_seller_is_due_at_once_and_then_waits_for_the_ne
 
 
 async def test_a_failed_seller_waits_for_the_retry_pause(database: Database, seller: uuid.UUID) -> None:
+    await mirror(database).sync_catalog(seller, now=at(9))
     failing = mirror(database, marketplace=FakeMarketplace({}, failing=True))
 
     assert await worker(database, failing, at(10)).collect_due(MIRROR_STOCKS, at(10)) == 0
@@ -309,4 +312,28 @@ async def test_an_archived_seller_is_not_mirrored(database: Database, seller: uu
         assert await SellerRepository(session).archive(seller)
         await session.commit()
 
-    assert await worker(database, mirror(database), at(10)).collect_due(MIRROR_STOCKS, at(10)) == 0
+    assert await worker(database, mirror(database), at(10)).collect_due(MIRROR_CATALOG, at(10)) == 0
+
+
+async def test_a_seller_without_a_servable_key_is_not_mirrored(database: Database, seller: uuid.UUID) -> None:
+    """Шлюз его отвергнет, а ошибка зеркала заслонила бы настоящую причину — недоставленный ключ."""
+    async with database.session() as session:
+        await SellerRepository(session).set_egress_state(seller, status="key_invalid", error="rejected")
+        await session.commit()
+
+    assert await worker(database, mirror(database), at(10)).collect_due(MIRROR_CATALOG, at(10)) == 0
+    async with database.session() as session:
+        model = await SellerRepository(session).get(seller)
+    assert model is not None and model.catalog_sync_status == "success"
+
+
+async def test_a_failed_mirror_reads_as_stalled_rather_than_not_yet(database: Database, seller: uuid.UUID) -> None:
+    """Иначе чек-лист обещал бы данные «в ближайший час» при отозванном ключе."""
+    moment = datetime(2026, 9, 13, 6, 0, tzinfo=UTC)
+    failing = mirror(database, marketplace=FakeMarketplace({}, failing=True))
+    with pytest.raises(WBTemporaryError):
+        await failing.collect_stocks(seller, now=moment)
+
+    async with database.session() as session:
+        assert await StockMirror(session).stock(seller, fresh_since=moment) == {}
+        assert await ReviewMirror(session).totals(seller) is None

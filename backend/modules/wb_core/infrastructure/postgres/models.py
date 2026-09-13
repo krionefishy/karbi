@@ -138,11 +138,16 @@ class MirrorStateModel(WBCoreBase):
     по разному расписанию и падают независимо, а реестр про зеркало знать не
     обязан. Попытка отмечается до сети: упавший процесс не должен превращаться
     в селлера, которого спрашивают снова и снова.
+
+    Ссылка на селлера с каскадом, как у `articles`: зеркало живёт в той же
+    схеме, и удаление селлера убирает его вместе с каталогом.
     """
 
     __tablename__ = "mirror_state"
 
-    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
     kind: Mapped[str] = mapped_column(String(16), primary_key=True)
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -156,7 +161,9 @@ class StockFactModel(WBCoreBase):
 
     __tablename__ = "stock_facts"
 
-    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
     article: Mapped[str] = mapped_column(String(255), primary_key=True)
     fbo_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     fbo_quantity_full: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -169,7 +176,9 @@ class FbsWarehouseStockModel(WBCoreBase):
 
     __tablename__ = "fbs_warehouse_stocks"
 
-    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
     article: Mapped[str] = mapped_column(String(255), primary_key=True)
     warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -181,7 +190,9 @@ class ReviewFactModel(WBCoreBase):
 
     __tablename__ = "review_facts"
 
-    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
     article: Mapped[str] = mapped_column(String(255), primary_key=True)
     count_rating_1: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_rating_2: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

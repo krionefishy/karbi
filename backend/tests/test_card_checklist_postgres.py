@@ -149,7 +149,6 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
     finally:
         async with database.session() as session:
             await ChecklistRepository(session).purge_seller(seller_id)
-            await MirrorRepository(session).purge_seller(seller_id)
             await session.execute(
                 delete(SubjectCharacteristicsModel).where(SubjectCharacteristicsModel.subject_id == SUBJECT)
             )

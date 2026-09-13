@@ -118,6 +118,10 @@ class FbsDistributionWorker:
         retry_after = now.astimezone(UTC) - timedelta(minutes=self.config.mirror_retry_minutes)
         async with self.database.session() as session:
             due = await FbsDistributionRepository(session).sellers_due_for_sync(since, retry_after=retry_after)
+            # Архивный кабинет остаётся подключённым до отключения, но ключа его
+            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
+            active = {seller.id for seller in await SellerRepository(session).list_sellers()}
+        due = [seller_id for seller_id in due if seller_id in active]
         synced = 0
         for seller_id in due:
             if self._stop.is_set():

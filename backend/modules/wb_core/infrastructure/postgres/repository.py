@@ -10,13 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
-    FbsWarehouseStockModel,
     InboxEventModel,
-    MirrorStateModel,
     OutboxEventModel,
-    ReviewFactModel,
     SellerModel,
-    StockFactModel,
 )
 from backend.modules.wb_core.infrastructure.wb import CatalogCard
 
@@ -117,9 +113,6 @@ class SellerRepository:
         if seller is None:
             return False
         await self._drop_pending_sync_events(seller_id)
-        # Зеркало без ссылки на селлера, как и данные автоматизаций: чистится явно.
-        for model in (MirrorStateModel, StockFactModel, FbsWarehouseStockModel, ReviewFactModel):
-            await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.session.delete(seller)
         return True
 

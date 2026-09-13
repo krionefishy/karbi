@@ -90,26 +90,31 @@ class MirrorService:
             await session.commit()
         try:
             catalog = await self.content.get_catalog(str(seller_id))
-        except WBPermanentError as error:
-            # Ключ отозван или права урезаны: статус синка нужен реестру,
-            # чтобы админка показала причину, а не «идёт синхронизация».
-            await self._fail(seller_id, MIRROR_CATALOG, str(error), sync_status="error")
+            async with self.database.session() as session:
+                sellers = SellerRepository(session)
+                mirror = MirrorRepository(session)
+                await self._ensure_alive(session, seller_id)
+                # Расписание и консьюмер события могут синхронизировать одного
+                # селлера одновременно; две записи каталога вперемешку — тупик
+                # в Postgres, поэтому запись идёт по очереди.
+                await mirror.lock_catalog(seller_id)
+                await sellers.upsert_catalog(
+                    seller_id,
+                    active=catalog.active,
+                    archived=catalog.archived,
+                    archived_available=catalog.archived_available,
+                )
+                await sellers.set_sync_status(seller_id, "success")
+                await mirror.mark_collected(seller_id, MIRROR_CATALOG, now=stamp)
+                await session.commit()
+        except SellerGoneError:
             raise
-        except WBTemporaryError as error:
-            await self._fail(seller_id, MIRROR_CATALOG, str(error), sync_status="queued")
+        except Exception as error:
+            # Любая неудача — «ошибка» с текстом, а не «идёт синхронизация»
+            # навсегда и не «в очереди» без события: по этим двум статусам
+            # интерфейс ждёт результата и опрашивает сервер.
+            await self._fail(seller_id, MIRROR_CATALOG, str(error) or error.__class__.__name__, sync_status="error")
             raise
-        async with self.database.session() as session:
-            sellers = SellerRepository(session)
-            await self._ensure_alive(session, seller_id)
-            await sellers.upsert_catalog(
-                seller_id,
-                active=catalog.active,
-                archived=catalog.archived,
-                archived_available=catalog.archived_available,
-            )
-            await sellers.set_sync_status(seller_id, "success")
-            await MirrorRepository(session).mark_collected(seller_id, MIRROR_CATALOG, now=stamp)
-            await session.commit()
         outcome = CatalogOutcome(len(catalog.active), len(catalog.archived), catalog.archived_available)
         self.logger.info("catalog_synced", extra={"seller_id": str(seller_id), **asdict(outcome)})
         return outcome
@@ -257,7 +262,5 @@ class MirrorService:
         async with self.database.session() as session:
             await MirrorRepository(session).mark_failed(seller_id, kind, error)
             if sync_status is not None:
-                await SellerRepository(session).set_sync_status(
-                    seller_id, sync_status, error if sync_status == "error" else None
-                )
+                await SellerRepository(session).set_sync_status(seller_id, sync_status, error)
             await session.commit()
