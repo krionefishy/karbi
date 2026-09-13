@@ -9,7 +9,12 @@ from backend.modules.notifications.infrastructure.postgres import NotificationRe
 from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
 from backend.modules.platform.infrastructure.postgres import UserRepository
-from backend.modules.wb_card_checklist.application import ChecklistEnrollment, ChecklistService
+from backend.modules.wb_card_checklist.application import (
+    ChecklistEnrollment,
+    ChecklistService,
+    MirrorReviewSource,
+    MirrorStockSource,
+)
 from backend.modules.wb_card_checklist.domain import Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
@@ -36,19 +41,9 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
 )
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
-from backend.modules.wb_reviews.application import (
-    ReviewReportService,
-    ReviewsEnrollment,
-    ReviewSyncService,
-    ReviewTotalsReader,
-)
+from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
-from backend.modules.wb_turnover.application import (
-    CurrentStockReader,
-    ReplenishmentReportService,
-    TurnoverEnrollment,
-    TurnoverService,
-)
+from backend.modules.wb_turnover.application import ReplenishmentReportService, TurnoverEnrollment, TurnoverService
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.settings import Settings
@@ -303,31 +298,21 @@ class SessionProvider(Provider):
         return ChecklistEnrollment(checklist)
 
     @provide(scope=Scope.REQUEST)
-    def current_stock_reader(self, turnover: TurnoverRepository) -> CurrentStockReader:
-        return CurrentStockReader(turnover)
-
-    @provide(scope=Scope.REQUEST)
-    def review_totals_reader(self, reviews: ReviewSyncRepository) -> ReviewTotalsReader:
-        return ReviewTotalsReader(reviews)
-
-    @provide(scope=Scope.REQUEST)
     def checklist_service(
         self,
         session: AsyncSession,
         sellers: SellerRepository,
         checklist: ChecklistRepository,
-        stock: CurrentStockReader,
-        reviews: ReviewTotalsReader,
         settings: Settings,
     ) -> ChecklistService:
-        """Остатки и отзывы чек-лист берёт у соседей через их порты, а не из их таблиц."""
+        """Остатки и отзывы чек-лист читает из зеркала wb_core, а не у соседних автоматизаций."""
         config = settings.card_checklist
         return ChecklistService(
             session,
             sellers,
             checklist,
-            stock,
-            reviews,
+            MirrorStockSource(session, fresh_days=settings.core_mirror.stock_fresh_days),
+            MirrorReviewSource(session),
             thresholds=Thresholds(min_photos=config.min_photos),
             min_stock=config.min_stock,
             timezone=ZoneInfo(config.timezone),

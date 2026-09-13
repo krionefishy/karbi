@@ -5,14 +5,15 @@ from datetime import datetime
 from backend.modules.wb_card_checklist.domain import ITEMS, ITEMS_BY_KEY, ItemState
 
 STOCK_OK = "ok"
-# Селлер не подключён к оборачиваемости: остатков взять неоткуда.
+# Зеркало wb_core до селлера ещё не доходило: сразу после подключения, до
+# ближайшего оборота wb-core-worker. Ключ исторический, фронт его знает.
 STOCK_NOT_CONNECTED = "not_connected"
-# Подключён, но свежих снимков остатков нет — сбор оборачиваемости стоит.
+# Зеркало есть, но последний сбор остатков старше двух суток — сбор стоит.
 STOCK_STALE = "stale"
 
 REVIEWS_OK = "ok"
 REVIEWS_NOT_CONNECTED = "not_connected"
-# Подключён к отзывам, но ночной прогон ещё ни разу не прошёл.
+# Зеркало собрано, но ни у одной карточки отзывов нет.
 REVIEWS_NO_SNAPSHOT = "no_snapshot"
 
 

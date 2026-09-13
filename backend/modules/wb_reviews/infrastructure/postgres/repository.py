@@ -6,7 +6,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_reviews.domain import DailyRatings, ReviewSyncRun, ReviewTotals
+from backend.modules.wb_reviews.domain import DailyRatings, ReviewSyncRun
 from backend.modules.wb_reviews.infrastructure.postgres.models import (
     DailyReviewCountModel,
     ReviewSyncJobModel,
@@ -367,38 +367,6 @@ class ReviewSyncRepository:
                 },
             )
             await self.session.execute(statement)
-
-    async def latest_totals(self, seller_id: uuid.UUID) -> dict[str, ReviewTotals]:
-        """Every article of the seller as of the last day we have a snapshot for.
-
-        The nightly run writes a row for every article it knows, so the latest
-        date is one complete picture — mixing articles from different days
-        would compare numbers taken at different moments.
-        """
-        latest = await self.session.scalar(
-            select(func.max(DailyReviewCountModel.date)).where(DailyReviewCountModel.seller_id == seller_id)
-        )
-        if latest is None:
-            return {}
-        rows = await self.session.scalars(
-            select(DailyReviewCountModel).where(
-                DailyReviewCountModel.seller_id == seller_id, DailyReviewCountModel.date == latest
-            )
-        )
-        return {
-            row.article: ReviewTotals(
-                article=row.article,
-                date=row.date,
-                total=row.count_rating_1
-                + row.count_rating_2
-                + row.count_rating_3
-                + row.count_rating_4
-                + row.count_rating_5,
-                with_photo=row.count_with_photo,
-                with_video=row.count_with_video,
-            )
-            for row in rows
-        }
 
     async def history(self, seller_id: uuid.UUID, days: int) -> list[DailyRatings]:
         since = datetime.now(MOSCOW).date() - timedelta(days=days - 1)

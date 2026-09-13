@@ -12,6 +12,7 @@ from backend.modules.wb_card_checklist.application.report import (
     ChecklistReportFile,
     render_workbook,
 )
+from backend.modules.wb_card_checklist.application.sources import MirrorReviewSource, MirrorStockSource
 from backend.modules.wb_card_checklist.application.view import (
     REVIEWS_NO_SNAPSHOT,
     REVIEWS_NOT_CONNECTED,
@@ -45,6 +46,8 @@ __all__ = [
     "ChecklistView",
     "CollectionResult",
     "CollectionService",
+    "MirrorReviewSource",
+    "MirrorStockSource",
     "RefreshRequest",
     "ReviewCounts",
     "ReviewSource",

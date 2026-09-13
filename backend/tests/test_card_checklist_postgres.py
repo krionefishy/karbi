@@ -20,6 +20,8 @@ from backend.modules.wb_card_checklist.application import (
     ArticleNotInChecklistError,
     ChecklistService,
     CollectionService,
+    MirrorReviewSource,
+    MirrorStockSource,
 )
 from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, SubjectCharacteristic, Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import (
@@ -28,13 +30,10 @@ from backend.modules.wb_card_checklist.infrastructure.postgres import (
     TrackedSellerModel,
 )
 from backend.modules.wb_card_checklist.infrastructure.wb import WBCardClient, WBPricesClient
-from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.domain import MIRROR_REVIEWS, MIRROR_STOCKS, ReviewFact, StockFact
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError
-from backend.modules.wb_reviews.application import ReviewTotalsReader
-from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
-from backend.modules.wb_turnover.application import CurrentStockReader
-from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 from backend.tests.egress_stub import make_gateway
@@ -150,8 +149,7 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
     finally:
         async with database.session() as session:
             await ChecklistRepository(session).purge_seller(seller_id)
-            await ReviewSyncRepository(session).purge_seller(seller_id)
-            await TurnoverRepository(session).purge_seller(seller_id)
+            await MirrorRepository(session).purge_seller(seller_id)
             await session.execute(
                 delete(SubjectCharacteristicsModel).where(SubjectCharacteristicsModel.subject_id == SUBJECT)
             )
@@ -393,34 +391,38 @@ async def test_worker_collects_once_a_day_and_serves_the_button(database: Databa
     assert tracked is not None and tracked.collected_at is not None and tracked.collected_at >= collected_at
 
 
-async def test_neighbours_hand_over_stock_and_reviews_only_to_their_own(database: Database, seller: uuid.UUID) -> None:
+async def test_the_mirror_hands_over_stock_and_reviews_once_it_has_collected_the_seller(
+    database: Database, seller: uuid.UUID
+) -> None:
+    """Подключение к другим автоматизациям не нужно: зеркало обходит всех активных селлеров."""
     today = date(2026, 9, 10)
+    moment = datetime(2026, 9, 10, 6, 0, tzinfo=UTC)
     async with database.session() as session:
-        stock = CurrentStockReader(TurnoverRepository(session))
-        totals = ReviewTotalsReader(ReviewSyncRepository(session))
+        stock = MirrorStockSource(session, fresh_days=2)
+        totals = MirrorReviewSource(session)
         assert await stock.stock(seller, today) is None
         assert await totals.totals(seller) is None
 
-        turnover = TurnoverRepository(session)
-        await turnover.track(seller)
-        await turnover.upsert_snapshots(seller, today - timedelta(days=5), 0, "fbo", {"A": (99, 99, 0, 0)})
-        reviews = ReviewSyncRepository(session)
-        await reviews.track(seller)
+        mirror = MirrorRepository(session)
+        await mirror.record_attempt(seller, MIRROR_STOCKS, now=moment - timedelta(days=5))
+        await mirror.replace_stocks(seller, [StockFact("A", 99, 99, 0)], {}, now=moment - timedelta(days=5))
+        await mirror.mark_collected(seller, MIRROR_STOCKS, now=moment - timedelta(days=5))
         await session.commit()
-        # Снимок пятидневной давности — это не «текущий остаток».
+        # Сбор пятидневной давности — это не «текущий остаток».
         assert await stock.stock(seller, today) == {}
-        assert await totals.totals(seller) == {}
 
-        await turnover.upsert_snapshots(seller, today, 1, "fbo", {"A": (7, 7, 0, 0)})
-        await turnover.upsert_snapshots(seller, today, 1, "fbs", {"A": (5, 5, 0, 0)})
-        await reviews.upsert_daily_counts(seller, today - timedelta(days=1), {"A": (0, 0, 0, 1, 2)}, {"A": (1, 1)})
-        await reviews.upsert_daily_counts(seller, today, {"A": (0, 0, 1, 1, 2)})
+        await mirror.record_attempt(seller, MIRROR_STOCKS, now=moment)
+        await mirror.replace_stocks(seller, [StockFact("A", 7, 7, 5)], {}, now=moment)
+        await mirror.mark_collected(seller, MIRROR_STOCKS, now=moment)
+        await mirror.record_attempt(seller, MIRROR_REVIEWS, now=moment)
+        await mirror.replace_reviews(seller, [ReviewFact("A", (0, 0, 1, 1, 2), None, None)], now=moment)
+        await mirror.mark_collected(seller, MIRROR_REVIEWS, now=moment)
         await session.commit()
 
         assert await stock.stock(seller, today) == {"A": 12}
         latest = (await totals.totals(seller) or {})["A"]
-    # Последний срез снят без подсчёта медиа: «не знаем», а не ноль.
-    assert (latest.date, latest.total, latest.with_photo, latest.with_video) == (today, 4, None, None)
+    # Медиа не считали: «не знаем», а не ноль.
+    assert (latest.total, latest.with_photo, latest.with_video) == (4, None, None)
 
 
 async def test_a_refresh_left_running_by_a_dead_worker_is_closed(database: Database, seller: uuid.UUID) -> None:

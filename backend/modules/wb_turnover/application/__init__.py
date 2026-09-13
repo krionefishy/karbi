@@ -20,7 +20,6 @@ from backend.modules.wb_turnover.application.replenishment import (
     ReplenishmentReportFile,
     ReplenishmentReportService,
 )
-from backend.modules.wb_turnover.application.stock import CurrentStockReader
 
 __all__ = [
     "AUTOMATION_ID",
@@ -30,7 +29,6 @@ __all__ = [
     "ArticleTurnover",
     "CalculationService",
     "CollectionService",
-    "CurrentStockReader",
     "DigestResult",
     "DigestService",
     "NotificationBotMissingError",
