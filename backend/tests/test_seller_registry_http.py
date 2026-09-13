@@ -109,7 +109,8 @@ async def test_archiving_releases_the_key_and_hides_the_seller(registry) -> None
     assert (await client.get(f"{API}/wb/sellers")).json() == []
     archived = (await client.get(f"{API}/wb/sellers", params={"include_archived": True})).json()
     assert archived[0]["archived_at"] is not None
-    assert archived[0]["automations"] == []
+    # Подключение остаётся за селлером: восстановят — вернётся в автоматизацию сам.
+    assert archived[0]["automations"] == ["wb-reviews"]
     assert (await client.get(f"{API}/automations/wb-reviews/sellers")).json() == []
     # The archived seller may not be collected for, and the same key can be
     # handed to a new one: it never lived in this base, and the gateway was

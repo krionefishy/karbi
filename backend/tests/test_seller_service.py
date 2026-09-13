@@ -310,7 +310,8 @@ async def test_leaving_an_automation_keeps_the_seller_and_his_data() -> None:
     assert [seller.id for seller in await service.list_sellers()] == [repository.seller_id]
 
 
-async def test_archiving_detaches_from_every_automation_but_keeps_history() -> None:
+async def test_archiving_hides_the_seller_but_keeps_enrollments_and_history() -> None:
+    """Отвязка при архивации заставляла бы собирать подключения заново после восстановления."""
     service, repository, _, enrollment, gateway = service_fixture()
     await service.enroll("wb-reviews", repository.seller_id)
 
@@ -319,10 +320,15 @@ async def test_archiving_detaches_from_every_automation_but_keeps_history() -> N
     assert archived.is_archived
     assert archived.egress_status == "disabled"
     assert gateway.disabled == [str(repository.seller_id)]
-    assert enrollment.enrolled == set()
+    assert enrollment.enrolled == {repository.seller_id}
     assert enrollment.purged == []
     assert await service.list_sellers() == []
+    assert await service.enrolled("wb-reviews") == []
     assert [seller.id for seller in await service.list_sellers(include_archived=True)] == [repository.seller_id]
+
+    await service.restore(repository.seller_id, "wb-api-key-restored")
+
+    assert [seller.id for seller in await service.enrolled("wb-reviews")] == [repository.seller_id]
 
 
 async def test_an_archived_seller_is_not_collected_for() -> None:

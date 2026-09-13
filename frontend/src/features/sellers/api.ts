@@ -15,7 +15,7 @@ export const createSeller = (payload: SellerInput) =>
 export const updateSeller = (sellerId: string, payload: Partial<SellerInput>) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}`, { method: "PATCH", body: JSON.stringify(payload) });
 
-/** Retire the seller: he leaves every automation, everything collected stays. */
+/** Retire the seller: hidden from every automation until restored, everything collected stays. */
 export const archiveSeller = (sellerId: string) =>
   apiRequest<void>(`/api/v1/wb/sellers/${sellerId}`, { method: "DELETE" });
 

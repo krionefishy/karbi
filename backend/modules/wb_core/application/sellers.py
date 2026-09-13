@@ -113,14 +113,15 @@ class SellerService:
         return await self._reload(seller_id)
 
     async def archive(self, seller_id: uuid.UUID) -> Seller:
-        """Retire the seller: he leaves every automation, collected data stays.
+        """Retire the seller: collected data and his automation enrollments stay.
 
-        На шлюзе селлер отключается, но его IP остаётся закреплённым: вернувшись,
-        он не засветится в WB со второго адреса.
+        Подключения не трогаем: списки автоматизаций и их воркеры и так не видят
+        архивных, а отвязывать значило бы, что после восстановления оператор
+        собирает подключения заново. На шлюзе селлер отключается, но его IP
+        остаётся закреплённым: вернувшись, он не засветится в WB со второго
+        адреса.
         """
         await self._active(seller_id)
-        for enrollment in self.enrollments:
-            await enrollment.detach(seller_id)
         await self.repository.archive(seller_id)
         await self.session.commit()
         await self._disable_on_egress(seller_id)
