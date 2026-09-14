@@ -54,7 +54,7 @@ export function FbsStocksBoard({ board, onNote, onRemove, onAdd, adding }: Props
       <section className="checklist-scroll" style={{ "--stocks-template": template } as CSSProperties}>
         <div className="stocks-head">
           <span className="checklist-sticky">Заметка</span>
-          <span>Баркод</span>
+          <span className="stocks-sticky-barcode">Баркод</span>
           <span>Товар</span>
           {board.groups.map((group) => (
             <GroupHeader
@@ -158,7 +158,7 @@ function BoardRow({ row, board, collapsed, onNote, onRemove }: RowProps) {
           }}
         />
       </div>
-      <span className="stocks-barcode">{row.barcode}</span>
+      <span className="stocks-barcode stocks-sticky-barcode">{row.barcode}</span>
       <span className="stocks-product">
         {row.in_catalog ? (
           <>

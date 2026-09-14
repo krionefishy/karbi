@@ -37,7 +37,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
       <div className="checklist-scroll" style={{ "--stocks-template": template } as CSSProperties}>
         <div className="stocks-head">
           <span className="checklist-sticky">Заметка</span>
-          <span>Баркод</span>
+          <span className="stocks-sticky-barcode">Баркод</span>
           <span className="stocks-group-head stocks-group-static">{own?.title ?? "Наш склад"}</span>
           {ownColumns.map((column) => (
             <span key={column.warehouse_id} className="stocks-column-head" title={column.name}>
@@ -53,7 +53,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
         {board.rows.map((row) => (
           <div className="stocks-row" key={row.barcode}>
             <span className="checklist-sticky stocks-note-static">{row.note || "—"}</span>
-            <span className="stocks-barcode">{row.barcode}</span>
+            <span className="stocks-barcode stocks-sticky-barcode">{row.barcode}</span>
             <Cell value={own ? (row.totals[own.id] ?? 0) : 0} group />
             {ownColumns.map((column) => (
               <Cell key={column.warehouse_id} value={row.amounts[String(column.warehouse_id)] ?? 0} />

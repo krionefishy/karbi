@@ -556,6 +556,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .stocks-group-static { cursor: default; }
 .stocks-column-head { overflow: hidden; white-space: normal; }
 .stocks-barcode { font: 500 12px "JetBrains Mono", monospace; }
+/* Баркод едет вместе с заметкой: при прокрутке к дальним складам строку иначе не опознать.
+   Смещение равно ширине первого столбца в gridTemplate (features/fbsStocks/board.ts). */
+.stocks-sticky-barcode { position: sticky; left: 200px; z-index: 1; background: inherit; box-shadow: 1px 0 0 var(--line); }
 .stocks-product strong { font-size: 12px; line-height: 1.3; }
 .stocks-product em { color: var(--muted); font-size: 11px; font-style: normal; }
 .stocks-unknown { color: var(--gold); font-size: 11px; font-style: normal; }
