@@ -559,6 +559,11 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 /* Баркод едет вместе с заметкой: при прокрутке к дальним складам строку иначе не опознать.
    Смещение равно ширине первого столбца в gridTemplate (features/fbsStocks/board.ts). */
 .stocks-sticky-barcode { position: sticky; left: 200px; z-index: 1; background: inherit; box-shadow: 1px 0 0 var(--line); }
+/* Таблица прокручивается внутри себя, а не страницей: только так шапка липнет сверху,
+   а заметка с баркодом — слева. Список баркодов растёт, без шапки дальний склад не опознать. */
+.stocks-scroll { max-height: calc(100vh - 230px); overflow: auto; }
+.stocks-scroll .stocks-head { position: sticky; top: 0; z-index: 2; }
+.stocks-scroll .stocks-head .checklist-sticky, .stocks-scroll .stocks-head .stocks-sticky-barcode { z-index: 3; }
 .stocks-product strong { font-size: 12px; line-height: 1.3; }
 .stocks-product em { color: var(--muted); font-size: 11px; font-style: normal; }
 .stocks-unknown { color: var(--gold); font-size: 11px; font-style: normal; }

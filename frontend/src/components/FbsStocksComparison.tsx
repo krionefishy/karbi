@@ -5,8 +5,8 @@ import { getBoards } from "../features/fbsStocks/api";
 import type { StocksBoard } from "../features/fbsStocks/types";
 
 /**
- * Лист «Сравнение»: все кабинеты друг под другом. Свои склады раскрыты, округа
- * стоят суммами — чтобы увидеть, где товар лежит у нас и чего не хватает в регионе.
+ * Лист «Сравнение»: все кабинеты друг под другом. Свои склады раскрыты, фулфилменты
+ * и округа стоят суммами — чтобы увидеть, где товар лежит у нас и чего не хватает в регионе.
  */
 export function FbsStocksComparison() {
   const { data: boards = [], isLoading } = useQuery({ queryKey: ["fbs-stocks-boards"], queryFn: getBoards });
@@ -23,9 +23,9 @@ export function FbsStocksComparison() {
 
 function ComparisonBlock({ board }: { board: StocksBoard }) {
   const own = board.groups.find((group) => group.kind === "own");
-  const districts = board.groups.filter((group) => group.kind === "district");
+  const summaries = board.groups.filter((group) => group.kind !== "own");
   const ownColumns = own?.columns ?? [];
-  const template = ["200px", "150px", "112px", ...ownColumns.map(() => "96px"), ...districts.map(() => "128px")].join(" ");
+  const template = ["200px", "150px", "112px", ...ownColumns.map(() => "96px"), ...summaries.map(() => "128px")].join(" ");
   return (
     <section className="card stocks-compare" aria-label={`Сравнение: ${board.seller_name}`}>
       <div className="card-head">
@@ -34,7 +34,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
           <span className="muted">{board.rows.length} баркодов</span>
         </div>
       </div>
-      <div className="checklist-scroll" style={{ "--stocks-template": template } as CSSProperties}>
+      <div className="checklist-scroll stocks-scroll" style={{ "--stocks-template": template } as CSSProperties}>
         <div className="stocks-head">
           <span className="checklist-sticky">Заметка</span>
           <span className="stocks-sticky-barcode">Баркод</span>
@@ -44,7 +44,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
               {column.name}
             </span>
           ))}
-          {districts.map((group) => (
+          {summaries.map((group) => (
             <span key={group.id} className="stocks-group-head stocks-group-static">
               {group.title}
             </span>
@@ -58,7 +58,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
             {ownColumns.map((column) => (
               <Cell key={column.warehouse_id} value={row.amounts[String(column.warehouse_id)] ?? 0} />
             ))}
-            {districts.map((group) => (
+            {summaries.map((group) => (
               <Cell key={group.id} value={row.totals[group.id] ?? 0} group />
             ))}
           </div>

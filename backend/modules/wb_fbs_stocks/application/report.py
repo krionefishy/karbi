@@ -96,7 +96,7 @@ def _seller_sheet(sheet, view: BoardView) -> None:
 
 
 def _comparison_sheet(sheet, views: Sequence[BoardView]) -> None:
-    """Все кабинеты друг под другом: свои склады раскрыты, округа — суммами."""
+    """Все кабинеты друг под другом: свои склады раскрыты, фулфилменты и округа — суммами."""
     sheet.sheet_properties.outlinePr = Outline(summaryRight=False, summaryBelow=False)
     own_width = max((len(view.own_group.columns) if view.own_group else 0 for view in views), default=0)
     district_start = FIRST_DATA_COLUMN + 1 + own_width
@@ -104,7 +104,7 @@ def _comparison_sheet(sheet, views: Sequence[BoardView]) -> None:
     last_column = FIRST_DATA_COLUMN
     for view in views:
         own = view.own_group
-        districts = view.district_groups
+        districts = view.summary_groups
         sheet.cell(row=row_index, column=NOTE_COLUMN, value=view.seller_name)
         sheet.cell(row=row_index, column=BARCODE_COLUMN, value="Баркод")
         sheet.cell(row=row_index, column=FIRST_DATA_COLUMN, value=own.title if own else "Наш склад")

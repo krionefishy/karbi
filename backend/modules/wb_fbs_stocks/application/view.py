@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.modules.wb_fbs_stocks.domain import GROUP_DISTRICT, GROUP_OWN
+from backend.modules.wb_fbs_stocks.domain import GROUP_OWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +58,9 @@ class BoardView:
         return next((group for group in self.groups if group.kind == GROUP_OWN), None)
 
     @property
-    def district_groups(self) -> tuple[GroupView, ...]:
-        return tuple(group for group in self.groups if group.kind == GROUP_DISTRICT)
+    def summary_groups(self) -> tuple[GroupView, ...]:
+        """Группы, которые лист «Сравнение» показывает одной суммой: всё, кроме своих складов."""
+        return tuple(group for group in self.groups if group.kind != GROUP_OWN)
 
 
 @dataclass(frozen=True, slots=True)

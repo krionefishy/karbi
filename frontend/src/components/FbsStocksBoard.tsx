@@ -51,7 +51,7 @@ export function FbsStocksBoard({ board, onNote, onRemove, onAdd, adding }: Props
           {collapsed.size ? "Раскрыть группы" : "Свернуть группы"}
         </button>
       </div>
-      <section className="checklist-scroll" style={{ "--stocks-template": template } as CSSProperties}>
+      <section className="checklist-scroll stocks-scroll" style={{ "--stocks-template": template } as CSSProperties}>
         <div className="stocks-head">
           <span className="checklist-sticky">Заметка</span>
           <span className="stocks-sticky-barcode">Баркод</span>
