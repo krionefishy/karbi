@@ -42,12 +42,14 @@ class FakeClient(WBFbsStocksClient):
         self.served_warehouses = warehouses
         self.served_stocks = stocks
         self.asked: list[int] = []
+        self.skus_asked: list[list[str]] = []
 
     async def warehouses(self, seller_id: str) -> list[SellerWarehouse]:
         return list(self.served_warehouses)
 
     async def stocks(self, seller_id: str, warehouse_id: int, skus) -> dict[str, int]:
         self.asked.append(warehouse_id)
+        self.skus_asked.append(list(skus))
         return {sku: amount for sku, amount in self.served_stocks.get(warehouse_id, {}).items() if sku in skus}
 
 
@@ -205,6 +207,37 @@ async def test_notes_and_removal_follow_the_barcode(database: Database, seller: 
         await board.remove_barcode(seller, UNKNOWN)
         view = await board.view(seller)
     assert [(row.barcode, row.note) for row in view.rows] == [(FEN, "стоит в 1С")]
+
+
+async def test_a_hidden_barcode_leaves_the_table_and_the_poll_but_keeps_its_note(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await seed(database, seller)
+    async with database.session() as session:
+        board = service(session)
+        await board.set_note(seller, UNKNOWN, "дубль карточки", None)
+        await board.set_hidden(seller, UNKNOWN, True)
+        with pytest.raises(BoardConflictError):
+            await board.set_hidden(seller, "нет такого", True)
+        view = await board.view(seller)
+        assert [row.barcode for row in view.rows] == [FEN]
+        assert [(row.barcode, row.note) for row in view.hidden] == [(UNKNOWN, "дубль карточки")]
+        assert await board.refresh_state(seller) is None
+
+    client = fake_client()
+    async with database.session() as session:
+        result = await CollectionService(session, FbsStocksRepository(session), client).collect(seller)
+    assert result.barcodes == 1
+    assert all(UNKNOWN not in skus for skus in client.skus_asked)
+
+    # Возврат ставит обновление в очередь: остаток по строке устарел, пока она была скрыта.
+    async with database.session() as session:
+        board = service(session)
+        await board.set_hidden(seller, UNKNOWN, False)
+        view = await board.view(seller)
+        assert [row.barcode for row in view.rows] == [FEN, UNKNOWN]
+        assert view.hidden == ()
+        assert await board.refresh_state(seller) is not None
 
 
 async def test_group_edits_keep_one_place_per_warehouse(database: Database, seller: uuid.UUID) -> None:

@@ -16,6 +16,7 @@ import {
   getBoard,
   getRefreshState,
   removeBarcode,
+  setHidden,
   requestRefresh,
   requestRefreshAll,
   setNote,
@@ -139,9 +140,14 @@ export function FbsStocksPage() {
     onError: fail("Не удалось сохранить заметку"),
     onSettled: invalidateBoards,
   });
+  const hideMutation = useMutation({
+    mutationFn: ({ barcode, hidden }: { barcode: string; hidden: boolean }) => setHidden(sellerId, barcode, hidden),
+    onError: fail("Не удалось изменить видимость баркода"),
+    onSettled: invalidateBoards,
+  });
   const removeMutation = useMutation({
     mutationFn: (barcode: string) => removeBarcode(sellerId, barcode),
-    onError: fail("Не удалось убрать баркод"),
+    onError: fail("Не удалось удалить баркод"),
     onSettled: invalidateBoards,
   });
   const addMutation = useMutation({
@@ -275,6 +281,7 @@ export function FbsStocksPage() {
             <FbsStocksBoard
               board={board}
               onNote={(barcode, note) => noteMutation.mutate({ barcode, note })}
+              onHide={(barcode, hidden) => hideMutation.mutate({ barcode, hidden })}
               onRemove={(barcode) => removeMutation.mutate(barcode)}
               onAdd={(text) => addMutation.mutate(text)}
               adding={addMutation.isPending}

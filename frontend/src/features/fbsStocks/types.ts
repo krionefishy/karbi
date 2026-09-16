@@ -33,6 +33,15 @@ export interface StocksBoard {
   collection_error: string | null;
   groups: StocksGroup[];
   rows: StocksRow[];
+  /** Скрытые строки: не в таблице и не в опросе, но возвращаются одним нажатием. */
+  hidden: StocksHiddenRow[];
+}
+
+export interface StocksHiddenRow {
+  barcode: string;
+  note: string;
+  title: string;
+  hidden_at: string;
 }
 
 export interface WarehouseSetup {

@@ -45,6 +45,16 @@ class RowView:
 
 
 @dataclass(frozen=True, slots=True)
+class HiddenRowView:
+    """Скрытая строка: в таблице и опросе её нет, но вернуть можно одним нажатием."""
+
+    barcode: str
+    note: str
+    title: str
+    hidden_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class BoardView:
     seller_id: uuid.UUID
     seller_name: str
@@ -52,6 +62,7 @@ class BoardView:
     collection_error: str | None
     groups: tuple[GroupView, ...]
     rows: tuple[RowView, ...]
+    hidden: tuple[HiddenRowView, ...] = ()
 
     @property
     def own_group(self) -> GroupView | None:

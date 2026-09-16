@@ -35,7 +35,8 @@ class CollectionService:
     async def collect(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> CollectionResult:
         """Временные ошибки WB уходят наверх: воркер повторит кабинет позже."""
         columns = await self.stocks.columns(seller_id)
-        barcodes = [row.barcode for row in await self.stocks.barcodes(seller_id)]
+        # Скрытые строки не опрашиваются: их остаток никому не нужен, а запросы — бюджет WB.
+        barcodes = [row.barcode for row in await self.stocks.barcodes(seller_id) if not row.hidden]
         await self.session.commit()
 
         warehouses = await self.client.warehouses(str(seller_id))

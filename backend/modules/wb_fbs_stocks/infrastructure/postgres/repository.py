@@ -251,9 +251,24 @@ class FbsStocksRepository:
             .order_by(BarcodeModel.position, BarcodeModel.added_at, BarcodeModel.barcode)
         )
         return [
-            BoardBarcode(barcode=row.barcode, note=row.note, position=row.position, added_at=row.added_at)
+            BoardBarcode(
+                barcode=row.barcode,
+                note=row.note,
+                position=row.position,
+                added_at=row.added_at,
+                hidden_at=row.hidden_at,
+            )
             for row in rows
         ]
+
+    async def set_hidden(self, seller_id: uuid.UUID, barcode: str, hidden: bool) -> bool:
+        result = await self.session.execute(
+            update(BarcodeModel)
+            .where(BarcodeModel.seller_id == seller_id, BarcodeModel.barcode == barcode)
+            .values(hidden_at=datetime.now(UTC) if hidden else None)
+            .returning(BarcodeModel.barcode)
+        )
+        return bool(result.all())
 
     async def add_barcodes(self, seller_id: uuid.UUID, barcodes: Sequence[str], added_by: uuid.UUID | None) -> int:
         """Дописать баркоды в конец списка. Уже вписанные пропускаются, не задваиваются."""

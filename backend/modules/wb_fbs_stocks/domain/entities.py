@@ -56,6 +56,11 @@ class BoardBarcode:
     note: str
     position: int
     added_at: datetime
+    hidden_at: datetime | None = None
+
+    @property
+    def hidden(self) -> bool:
+        return self.hidden_at is not None
 
 
 @dataclass(frozen=True, slots=True)

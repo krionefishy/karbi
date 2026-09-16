@@ -99,6 +99,9 @@ class BarcodeModel(WBFbsStocksBase):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note_updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     note_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Скрытая строка не показывается и не опрашивается, но остаётся: вернуть её
+    # проще, чем вписать заново вместе с заметкой.
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class StockFactModel(WBFbsStocksBase):

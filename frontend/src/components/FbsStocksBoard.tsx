@@ -1,19 +1,20 @@
-import { ChevronsLeftRight, Minus, Plus, Trash2 } from "lucide-react";
+import { ChevronsLeftRight, EyeOff, Minus, Plus, Trash2, Undo2 } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 
 import { gridTemplate, notices, rowCells, visibleRows } from "../features/fbsStocks/board";
-import type { StocksBoard, StocksRow } from "../features/fbsStocks/types";
+import type { StocksBoard, StocksHiddenRow, StocksRow } from "../features/fbsStocks/types";
 
 interface Props {
   board: StocksBoard;
   onNote: (barcode: string, note: string) => void;
+  onHide: (barcode: string, hidden: boolean) => void;
   onRemove: (barcode: string) => void;
   onAdd: (text: string) => void;
   adding: boolean;
 }
 
 /** Таблица кабинета: заметка, баркод, товар и столбцы по группам. Группы сворачиваются, нули красные. */
-export function FbsStocksBoard({ board, onNote, onRemove, onAdd, adding }: Props) {
+export function FbsStocksBoard({ board, onNote, onHide, onRemove, onAdd, adding }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
@@ -74,7 +75,7 @@ export function FbsStocksBoard({ board, onNote, onRemove, onAdd, adding }: Props
             board={board}
             collapsed={collapsed}
             onNote={(note) => onNote(row.barcode, note)}
-            onRemove={() => onRemove(row.barcode)}
+            onHide={() => onHide(row.barcode, true)}
           />
         ))}
         {rows.length === 0 && board.rows.length > 0 && <span className="fbs-row-empty">Ничего не нашлось.</span>}
@@ -100,6 +101,7 @@ export function FbsStocksBoard({ board, onNote, onRemove, onAdd, adding }: Props
           {adding ? "Добавляем…" : "Добавить баркоды"}
         </button>
       </form>
+      <HiddenRows rows={board.hidden} onShow={(barcode) => onHide(barcode, false)} onRemove={onRemove} />
     </>
   );
 }
@@ -138,10 +140,10 @@ interface RowProps {
   board: StocksBoard;
   collapsed: Set<string>;
   onNote: (note: string) => void;
-  onRemove: () => void;
+  onHide: () => void;
 }
 
-function BoardRow({ row, board, collapsed, onNote, onRemove }: RowProps) {
+function BoardRow({ row, board, collapsed, onNote, onHide }: RowProps) {
   const cells = rowCells(row, board.groups, collapsed);
   return (
     <div className="stocks-row">
@@ -187,9 +189,45 @@ function BoardRow({ row, board, collapsed, onNote, onRemove }: RowProps) {
           {cell.value}
         </span>
       ))}
-      <button type="button" className="stocks-remove" onClick={onRemove} aria-label={`Убрать ${row.barcode} из таблицы`}>
-        <Trash2 size={13} />
+      <button type="button" className="stocks-remove" onClick={onHide} aria-label={`Скрыть ${row.barcode}`} title="Скрыть">
+        <EyeOff size={13} />
       </button>
     </div>
+  );
+}
+
+interface HiddenProps {
+  rows: StocksHiddenRow[];
+  onShow: (barcode: string) => void;
+  onRemove: (barcode: string) => void;
+}
+
+/** Свёрнутый список скрытых строк: вернуть в таблицу или стереть насовсем. */
+function HiddenRows({ rows, onShow, onRemove }: HiddenProps) {
+  if (rows.length === 0) return null;
+  return (
+    <details className="stocks-hidden">
+      <summary>Скрытые баркоды ({rows.length})</summary>
+      <ul className="stocks-hidden-list">
+        {rows.map((row) => (
+          <li key={row.barcode} className="stocks-hidden-row">
+            <span className="stocks-hidden-barcode">{row.barcode}</span>
+            <span className="stocks-hidden-title">{row.title || row.note || "—"}</span>
+            <button type="button" className="stocks-hidden-action" onClick={() => onShow(row.barcode)}>
+              <Undo2 size={13} /> Вернуть
+            </button>
+            <button
+              type="button"
+              className="stocks-hidden-action stocks-hidden-delete"
+              onClick={() => {
+                if (window.confirm(`Удалить ${row.barcode} насовсем вместе с заметкой?`)) onRemove(row.barcode);
+              }}
+            >
+              <Trash2 size={13} /> Удалить
+            </button>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }

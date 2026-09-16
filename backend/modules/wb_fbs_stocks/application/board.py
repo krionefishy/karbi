@@ -15,6 +15,7 @@ from backend.modules.wb_fbs_stocks.application.view import (
     BoardView,
     ColumnView,
     GroupView,
+    HiddenRowView,
     RefreshRequest,
     RowView,
     SetupView,
@@ -71,9 +72,20 @@ class FbsStocksService:
         sizes = await self.sellers.list_barcode_sizes(seller_id)
         articles = {article.article: article for article in await self.sellers.list_articles(seller_id)}
         rows: list[RowView] = []
+        hidden: list[HiddenRowView] = []
         for item in await self.stocks.barcodes(seller_id):
             known = sizes.get(item.barcode)
             article = articles.get(known[1]) if known else None
+            if item.hidden_at is not None:
+                hidden.append(
+                    HiddenRowView(
+                        barcode=item.barcode,
+                        note=item.note,
+                        title=article.name if article else "",
+                        hidden_at=item.hidden_at,
+                    )
+                )
+                continue
             rows.append(
                 RowView(
                     barcode=item.barcode,
@@ -92,6 +104,7 @@ class FbsStocksService:
             collection_error=tracked.collection_error if tracked else None,
             groups=groups,
             rows=tuple(rows),
+            hidden=tuple(hidden),
         )
 
     async def views(self) -> list[BoardView]:
@@ -182,6 +195,15 @@ class FbsStocksService:
         added = await self.stocks.add_barcodes(seller_id, barcodes, added_by)
         await self.session.commit()
         return added
+
+    async def set_hidden(self, seller_id: uuid.UUID, barcode: str, hidden: bool) -> None:
+        """Скрыть строку или вернуть. Возвращённая попадёт в ближайший опрос."""
+        await self._enrolled(seller_id)
+        if not await self.stocks.set_hidden(seller_id, barcode, hidden):
+            raise BoardConflictError("Такого баркода в таблице нет")
+        if not hidden:
+            await self.stocks.request_refresh(seller_id, None)
+        await self.session.commit()
 
     async def remove_barcode(self, seller_id: uuid.UUID, barcode: str) -> None:
         await self._enrolled(seller_id)

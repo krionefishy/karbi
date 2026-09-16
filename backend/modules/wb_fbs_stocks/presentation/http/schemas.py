@@ -29,6 +29,17 @@ class RowResponse(BaseModel):
     totals: dict[str, int]
 
 
+class HiddenRowResponse(BaseModel):
+    barcode: str
+    note: str
+    title: str
+    hidden_at: str
+
+
+class HiddenRequest(BaseModel):
+    hidden: bool
+
+
 class BoardResponse(BaseModel):
     seller_id: uuid.UUID
     seller_name: str
@@ -36,6 +47,7 @@ class BoardResponse(BaseModel):
     collection_error: str | None
     groups: list[GroupResponse]
     rows: list[RowResponse]
+    hidden: list[HiddenRowResponse] = []
 
 
 class WarehouseSetupResponse(BaseModel):

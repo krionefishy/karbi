@@ -25,6 +25,8 @@ from backend.modules.wb_fbs_stocks.presentation.http.schemas import (
     GroupOrderRequest,
     GroupRequest,
     GroupResponse,
+    HiddenRequest,
+    HiddenRowResponse,
     NoteRequest,
     RefreshAllResponse,
     RefreshResponse,
@@ -74,6 +76,10 @@ def board_response(view: BoardView) -> BoardResponse:
                 totals={str(group.id): row.group_total(group) for group in view.groups},
             )
             for row in view.rows
+        ],
+        hidden=[
+            HiddenRowResponse(barcode=row.barcode, note=row.note, title=row.title, hidden_at=row.hidden_at.isoformat())
+            for row in view.hidden
         ],
     )
 
@@ -243,6 +249,25 @@ async def remove_barcode(
         raise not_enrolled() from error
     except BoardConflictError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/sellers/{seller_id}/barcodes/{barcode}/hidden", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def set_hidden(
+    seller_id: uuid.UUID,
+    barcode: str,
+    payload: HiddenRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[FbsStocksService],
+) -> Response:
+    """Скрыть строку из таблицы и опроса или вернуть её."""
+    try:
+        await service.set_hidden(seller_id, barcode, payload.hidden)
+    except SellerNotFoundError as error:
+        raise not_enrolled() from error
+    except BoardConflictError as error:
+        raise conflict(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -41,6 +41,7 @@ function board(overrides: Partial<StocksBoard> = {}): StocksBoard {
     collection_error: null,
     groups: [own, northwest],
     rows: [row()],
+    hidden: [],
     ...overrides,
   };
 }
