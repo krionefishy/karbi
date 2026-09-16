@@ -3,16 +3,21 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.domain import ReviewFact, StockFact
+from backend.modules.wb_core.domain import FbsOrder, FbsSupply, ReviewFact, SellerWarehouse, StockFact, WbOffice
 from backend.modules.wb_core.infrastructure.postgres.models import (
+    FbsOrderArchiveMonthModel,
+    FbsOrderModel,
+    FbsSupplyModel,
     FbsWarehouseStockModel,
     MirrorStateModel,
     ReviewFactModel,
+    SellerWarehouseModel,
     StockFactModel,
+    WbOfficeModel,
 )
 
 _INSERT_CHUNK = 1000
@@ -181,6 +186,247 @@ class MirrorRepository:
             )
             for row in rows
         }
+
+    # --- склады продавца и объекты WB ---------------------------------------------
+
+    async def replace_seller_warehouses(
+        self, seller_id: uuid.UUID, warehouses: Iterable[SellerWarehouse], *, now: datetime
+    ) -> None:
+        await self.session.execute(delete(SellerWarehouseModel).where(SellerWarehouseModel.seller_id == seller_id))
+        await self._insert(
+            SellerWarehouseModel,
+            [
+                {
+                    "seller_id": seller_id,
+                    "warehouse_id": warehouse.warehouse_id,
+                    "name": warehouse.name,
+                    "office_id": warehouse.office_id,
+                    "collected_at": now,
+                }
+                for warehouse in warehouses
+            ],
+        )
+
+    async def seller_warehouses(self, seller_id: uuid.UUID) -> dict[int, SellerWarehouse]:
+        rows = await self.session.scalars(
+            select(SellerWarehouseModel).where(SellerWarehouseModel.seller_id == seller_id)
+        )
+        return {row.warehouse_id: SellerWarehouse(row.warehouse_id, row.name, row.office_id) for row in rows}
+
+    async def upsert_offices(self, offices: Iterable[WbOffice], *, now: datetime) -> None:
+        """Справочник общий, поэтому не переписывается целиком: объект, пропавший из
+        ответа одного кабинета, у другого может быть ещё на месте."""
+        rows = [
+            {
+                "office_id": office.office_id,
+                "name": office.name,
+                "city": office.city,
+                "address": office.address,
+                "collected_at": now,
+            }
+            for office in offices
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(WbOfficeModel).values(rows[offset : offset + _INSERT_CHUNK])
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["office_id"],
+                    set_={
+                        "name": statement.excluded.name,
+                        "city": statement.excluded.city,
+                        "address": statement.excluded.address,
+                        "collected_at": statement.excluded.collected_at,
+                    },
+                )
+            )
+
+    async def offices_by_ids(self, office_ids: Iterable[int]) -> dict[int, WbOffice]:
+        wanted = {office_id for office_id in office_ids if office_id}
+        if not wanted:
+            return {}
+        rows = await self.session.scalars(select(WbOfficeModel).where(WbOfficeModel.office_id.in_(wanted)))
+        return {row.office_id: WbOffice(row.office_id, row.name, row.city, row.address) for row in rows}
+
+    # --- сборочные задания ----------------------------------------------------------
+
+    async def upsert_orders(self, seller_id: uuid.UUID, orders: Iterable[FbsOrder], *, now: datetime) -> int:
+        """Задание перечитывается, пока не попадёт в поставку: `supply_id` и то, что
+        известно только архиву, не затираются пустотой."""
+        rows = [
+            {
+                "seller_id": seller_id,
+                "order_id": order.order_id,
+                "rid": order.rid,
+                "order_uid": order.order_uid,
+                "created_at": order.created_at,
+                "warehouse_id": order.warehouse_id,
+                "supply_id": order.supply_id,
+                "office_id": order.office_id,
+                "nm_id": order.nm_id,
+                "chrt_id": order.chrt_id,
+                "sku": order.sku,
+                "price_kopecks": order.price_kopecks,
+                "sticker_id": order.sticker_id,
+                "supplier_status": order.supplier_status,
+                "wb_status": order.wb_status,
+                "source": order.source,
+                "collected_at": now,
+            }
+            for order in orders
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(FbsOrderModel).values(rows[offset : offset + _INSERT_CHUNK])
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "order_id"],
+                    set_={
+                        "rid": excluded.rid,
+                        "order_uid": excluded.order_uid,
+                        "created_at": excluded.created_at,
+                        "warehouse_id": excluded.warehouse_id,
+                        "supply_id": func.coalesce(excluded.supply_id, FbsOrderModel.supply_id),
+                        "office_id": func.coalesce(excluded.office_id, FbsOrderModel.office_id),
+                        "nm_id": excluded.nm_id,
+                        "chrt_id": excluded.chrt_id,
+                        "sku": excluded.sku,
+                        "price_kopecks": excluded.price_kopecks,
+                        "sticker_id": func.coalesce(excluded.sticker_id, FbsOrderModel.sticker_id),
+                        "supplier_status": func.coalesce(excluded.supplier_status, FbsOrderModel.supplier_status),
+                        "wb_status": func.coalesce(excluded.wb_status, FbsOrderModel.wb_status),
+                        "source": excluded.source,
+                        "collected_at": excluded.collected_at,
+                    },
+                )
+            )
+        return len(rows)
+
+    async def orders_by_keys(
+        self,
+        seller_id: uuid.UUID,
+        *,
+        rids: Iterable[str] = (),
+        order_ids: Iterable[int] = (),
+        sticker_ids: Iterable[int] = (),
+    ) -> list[FbsOrder]:
+        conditions = []
+        if rid_set := {rid for rid in rids if rid}:
+            conditions.append(FbsOrderModel.rid.in_(rid_set))
+        if id_set := {order_id for order_id in order_ids if order_id}:
+            conditions.append(FbsOrderModel.order_id.in_(id_set))
+        if sticker_set := {sticker for sticker in sticker_ids if sticker}:
+            conditions.append(FbsOrderModel.sticker_id.in_(sticker_set))
+        if not conditions:
+            return []
+        query = select(FbsOrderModel).where(FbsOrderModel.seller_id == seller_id)
+        rows = await self.session.scalars(query.where(conditions[0] if len(conditions) == 1 else or_(*conditions)))
+        return [self._order(row) for row in rows]
+
+    async def latest_order_at(self, seller_id: uuid.UUID) -> datetime | None:
+        return await self.session.scalar(
+            select(func.max(FbsOrderModel.created_at)).where(FbsOrderModel.seller_id == seller_id)
+        )
+
+    async def archive_months_done(self, seller_id: uuid.UUID) -> set[tuple[int, int]]:
+        rows = await self.session.execute(
+            select(FbsOrderArchiveMonthModel.year, FbsOrderArchiveMonthModel.month).where(
+                FbsOrderArchiveMonthModel.seller_id == seller_id
+            )
+        )
+        return {(int(year), int(month)) for year, month in rows.all()}
+
+    async def mark_archive_month(self, seller_id: uuid.UUID, year: int, month: int, *, now: datetime) -> None:
+        statement = insert(FbsOrderArchiveMonthModel).values(
+            seller_id=seller_id, year=year, month=month, collected_at=now
+        )
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "year", "month"], set_={"collected_at": statement.excluded.collected_at}
+            )
+        )
+
+    async def prune_orders(self, before: datetime) -> int:
+        result = await self.session.execute(delete(FbsOrderModel).where(FbsOrderModel.created_at < before))
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    # --- поставки ---------------------------------------------------------------------
+
+    async def upsert_supplies(self, seller_id: uuid.UUID, supplies: Iterable[FbsSupply], *, now: datetime) -> int:
+        rows = [
+            {
+                "seller_id": seller_id,
+                "supply_id": supply.supply_id,
+                "name": supply.name,
+                "created_at": supply.created_at,
+                "closed_at": supply.closed_at,
+                "scan_dt": supply.scan_dt,
+                "destination_office_id": supply.destination_office_id,
+                "done": supply.done,
+                "cargo_type": supply.cargo_type,
+                "collected_at": now,
+            }
+            for supply in supplies
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(FbsSupplyModel).values(rows[offset : offset + _INSERT_CHUNK])
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "supply_id"],
+                    set_={
+                        "name": excluded.name,
+                        "created_at": excluded.created_at,
+                        "closed_at": excluded.closed_at,
+                        "scan_dt": excluded.scan_dt,
+                        "destination_office_id": excluded.destination_office_id,
+                        "done": excluded.done,
+                        "cargo_type": excluded.cargo_type,
+                        "collected_at": excluded.collected_at,
+                    },
+                )
+            )
+        return len(rows)
+
+    async def supplies_by_ids(self, seller_id: uuid.UUID, supply_ids: Iterable[str]) -> dict[str, FbsSupply]:
+        wanted = {supply_id for supply_id in supply_ids if supply_id}
+        if not wanted:
+            return {}
+        rows = await self.session.scalars(
+            select(FbsSupplyModel).where(FbsSupplyModel.seller_id == seller_id, FbsSupplyModel.supply_id.in_(wanted))
+        )
+        return {
+            row.supply_id: FbsSupply(
+                supply_id=row.supply_id,
+                name=row.name,
+                created_at=row.created_at,
+                closed_at=row.closed_at,
+                scan_dt=row.scan_dt,
+                destination_office_id=row.destination_office_id,
+                done=row.done,
+                cargo_type=row.cargo_type,
+            )
+            for row in rows
+        }
+
+    @staticmethod
+    def _order(row: FbsOrderModel) -> FbsOrder:
+        return FbsOrder(
+            order_id=row.order_id,
+            rid=row.rid,
+            order_uid=row.order_uid,
+            created_at=row.created_at,
+            warehouse_id=row.warehouse_id,
+            supply_id=row.supply_id,
+            office_id=row.office_id,
+            nm_id=row.nm_id,
+            chrt_id=row.chrt_id,
+            sku=row.sku,
+            price_kopecks=row.price_kopecks,
+            sticker_id=row.sticker_id,
+            supplier_status=row.supplier_status,
+            wb_status=row.wb_status,
+            source=row.source,
+        )
 
     # --- catalog ----------------------------------------------------------------
 

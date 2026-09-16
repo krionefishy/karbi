@@ -1,13 +1,20 @@
 import asyncio
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import structlog
 
 from backend.modules.wb_core.application import MirrorService, SellerGoneError
-from backend.modules.wb_core.domain import EGRESS_SERVABLE, MIRROR_CATALOG, MIRROR_REVIEWS, MIRROR_STOCKS
+from backend.modules.wb_core.domain import (
+    EGRESS_SERVABLE,
+    MIRROR_CATALOG,
+    MIRROR_ORDERS,
+    MIRROR_REVIEWS,
+    MIRROR_STOCKS,
+    MIRROR_SUPPLIES,
+)
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.shared.heartbeat import touch_heartbeat
@@ -16,7 +23,7 @@ from backend.storage.pg import Database
 
 
 class WBCoreWorker:
-    """Обход всех активных селлеров реестра: каталог, остатки, отзывы.
+    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки.
 
     Подключение к автоматизациям на зеркало не влияет — оно нужно любой из
     них, и собирается один раз. Отметка сбора хранится на паре «селлер + вид»;
@@ -40,6 +47,7 @@ class WBCoreWorker:
         self._now = now or (lambda: datetime.now(UTC))
         self.logger = structlog.get_logger("wb_core_worker")
         self._stop = asyncio.Event()
+        self._pruned_on: date | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -64,6 +72,24 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_CATALOG, now)
         await self.collect_due(MIRROR_STOCKS, now)
         await self.collect_due(MIRROR_REVIEWS, now)
+        await self.collect_due(MIRROR_ORDERS, now)
+        await self.collect_due(MIRROR_SUPPLIES, now)
+        await self.prune(now)
+
+    async def prune(self, now: datetime) -> int:
+        """Задания старше срока хранения — раз в сутки; штрафы на них давно пришли."""
+        today = now.astimezone(self.timezone).date()
+        if self._pruned_on == today:
+            return 0
+        async with self.database.session() as session:
+            removed = await MirrorRepository(session).prune_orders(
+                now - timedelta(days=self.config.orders_retention_days)
+            )
+            await session.commit()
+        self._pruned_on = today
+        if removed:
+            self.logger.info("wb_core_orders_pruned", removed=removed)
+        return removed
 
     def due_since(self, kind: str, now: datetime) -> datetime:
         """Момент последнего наступившего сбора этого вида.
@@ -71,11 +97,16 @@ class WBCoreWorker:
         Селлер, собранный позже, уже отработал. До наступления часа сравниваем
         с предыдущим срезом, иначе перезапуск в полночь собрал бы всех заново.
         """
+        if kind == MIRROR_ORDERS:
+            # Задания — интервалом, а не по часам: свежие перечитываются, пока не лягут в поставку.
+            return now - timedelta(minutes=self.config.orders_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
         elif kind == MIRROR_CATALOG:
             marks = [(self.config.catalog_hour, self.config.catalog_minute)]
+        elif kind == MIRROR_SUPPLIES:
+            marks = [(self.config.supplies_hour, self.config.supplies_minute)]
         else:
             marks = [(self.config.reviews_hour, self.config.reviews_minute)]
         candidates = [local.replace(hour=hour, minute=minute, second=0, microsecond=0) for hour, minute in marks]
@@ -123,6 +154,8 @@ class WBCoreWorker:
             MIRROR_STOCKS: self.mirror.collect_stocks,
             MIRROR_CATALOG: self.mirror.sync_catalog,
             MIRROR_REVIEWS: self.mirror.collect_reviews,
+            MIRROR_ORDERS: self.mirror.collect_orders,
+            MIRROR_SUPPLIES: self.mirror.collect_supplies,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

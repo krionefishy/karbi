@@ -44,6 +44,7 @@ class WBCoreWorkerApplication:
             analytics=WBAnalyticsClient(gateway),
             marketplace=WBMarketplaceClient(gateway),
             feedbacks=WBFeedbackClient(gateway, page_size=self.settings.worker.feedback_page_size),
+            orders_history_months=self.settings.core_mirror.orders_history_months,
         )
         self.worker = WBCoreWorker(self.database, self.mirror, self.settings)
         self.catalog_consumer = self._create_consumer()

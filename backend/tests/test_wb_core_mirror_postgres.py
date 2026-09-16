@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -7,8 +8,19 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete
 
-from backend.modules.wb_core.application import MirrorService, ReviewMirror, StockMirror
-from backend.modules.wb_core.domain import MIRROR_CATALOG, MIRROR_REVIEWS, MIRROR_STOCKS
+from backend.modules.wb_core.application import MirrorService, OrderMirror, ReviewMirror, StockMirror
+from backend.modules.wb_core.domain import (
+    MIRROR_CATALOG,
+    MIRROR_ORDERS,
+    MIRROR_REVIEWS,
+    MIRROR_STOCKS,
+    MIRROR_SUPPLIES,
+    ORDER_SOURCE_ARCHIVE,
+    ORDER_SOURCE_LIVE,
+    FbsOrder,
+    FbsSupply,
+    WbOffice,
+)
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb import (
@@ -51,14 +63,67 @@ class FakeAnalytics(WBAnalyticsClient):
         return list(self.rows)
 
 
+def order(
+    order_id: int, *, supply: str | None, created: datetime, source: str = ORDER_SOURCE_LIVE, sticker: int | None = None
+) -> FbsOrder:
+    return FbsOrder(
+        order_id=order_id,
+        rid=f"eAK.r{order_id}.0.0",
+        order_uid=f"r{order_id}",
+        created_at=created,
+        warehouse_id=KAZAN.id,
+        supply_id=supply,
+        office_id=15,
+        nm_id=int(FAN),
+        chrt_id=FAN_CHRT,
+        sku="2053999917338",
+        price_kopecks=107300,
+        sticker_id=sticker,
+        supplier_status="complete" if source == ORDER_SOURCE_ARCHIVE else None,
+        wb_status="sold" if source == ORDER_SOURCE_ARCHIVE else None,
+        source=source,
+    )
+
+
+SUPPLY = FbsSupply(
+    supply_id="WB-GI-1",
+    name="Поставка от 01.09.2026",
+    created_at=datetime(2026, 9, 1, 8, 0, tzinfo=UTC),
+    closed_at=datetime(2026, 9, 1, 9, 0, tzinfo=UTC),
+    scan_dt=datetime(2026, 9, 1, 12, 0, tzinfo=UTC),
+    destination_office_id=15,
+    done=True,
+    cargo_type=1,
+)
+KOLEDINO = WbOffice(15, "Коледино", "Подольск", "Коледино, 1")
+
+
 class FakeMarketplace(WBMarketplaceClient):
     def __init__(self, declared: dict[int, dict[int, int]], *, failing: bool = False) -> None:
         super().__init__(make_gateway())
         self.declared = declared
         self.failing = failing
+        self.live: list[FbsOrder] = []
+        self.archive: dict[tuple[int, int], list[FbsOrder]] = {}
+        self.archive_calls: list[tuple[int, int]] = []
+        self.order_windows: list[tuple[datetime, datetime]] = []
 
     async def warehouses(self, seller_id: str) -> list[Warehouse]:
         return [KAZAN, PITER]
+
+    async def orders(self, seller_id: str, *, date_from: datetime, date_to: datetime) -> list[FbsOrder]:
+        self.order_windows.append((date_from, date_to))
+        return [item for item in self.live if date_from <= item.created_at <= date_to]
+
+    async def archive_orders(self, seller_id: str, year: int, month: int) -> list[FbsOrder]:
+        self.archive_calls.append((year, month))
+        return list(self.archive.get((year, month), []))
+
+    async def supplies(self, seller_id: str) -> list[FbsSupply]:
+        return [SUPPLY]
+
+    async def offices(self, seller_id: str) -> list[WbOffice]:
+        return [KOLEDINO]
 
     async def stocks(self, seller_id: str, warehouse_id: int, chrt_ids: list[int]) -> dict[int, int]:
         if self.failing:
@@ -337,3 +402,106 @@ async def test_a_failed_mirror_reads_as_stalled_rather_than_not_yet(database: Da
     async with database.session() as session:
         assert await StockMirror(session).stock(seller, fresh_since=moment) == {}
         assert await ReviewMirror(session).totals(seller) is None
+
+
+# --- задания и поставки -----------------------------------------------------------
+
+
+async def test_orders_are_mirrored_live_and_from_the_archive_once(database: Database, seller: uuid.UUID) -> None:
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    marketplace = FakeMarketplace({})
+    marketplace.live = [order(1, supply=None, created=now - timedelta(days=1))]
+    marketplace.archive[(2026, 4)] = [
+        order(
+            9,
+            supply="WB-GI-old",
+            created=datetime(2026, 4, 3, tzinfo=UTC),
+            source=ORDER_SOURCE_ARCHIVE,
+            sticker=33811984302,
+        )
+    ]
+    service = mirror(database, marketplace=marketplace)
+
+    first = await service.collect_orders(seller, now=now)
+
+    assert (first.live, first.archived) == (1, 1)
+    # Глубина 6 месяцев минус живые 3: архив спрошен по месяцам с марта по июнь, старшие первыми.
+    assert marketplace.archive_calls == [(2026, 3), (2026, 4), (2026, 5), (2026, 6)]
+    assert first.months == 4
+    # Первое живое окно — три месяца назад.
+    assert marketplace.order_windows[0][0] == now - timedelta(days=90)
+
+    # Задание легло в поставку: повторный сбор перечитывает свежие и дозаполняет supply_id,
+    # а архив второй раз не трогает.
+    marketplace.live = [order(1, supply="WB-GI-1", created=now - timedelta(days=1))]
+    second = await service.collect_orders(seller, now=now + timedelta(hours=1))
+
+    assert second.months == 0 and len(marketplace.archive_calls) == 4
+    assert marketplace.order_windows[-1][0] == now - timedelta(days=1) - timedelta(days=3)
+    async with database.session() as session:
+        found = await MirrorRepository(session).orders_by_keys(seller, order_ids=[1, 9])
+    by_id = {item.order_id: item for item in found}
+    assert by_id[1].supply_id == "WB-GI-1"
+    assert (by_id[9].sticker_id, by_id[9].wb_status, by_id[9].source) == (33811984302, "sold", ORDER_SOURCE_ARCHIVE)
+
+
+async def test_order_mirror_resolves_by_rid_order_id_and_sticker(database: Database, seller: uuid.UUID) -> None:
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    marketplace = FakeMarketplace({})
+    marketplace.live = [order(1, supply="WB-GI-1", created=now - timedelta(days=2))]
+    marketplace.archive[(2026, 5)] = [
+        order(
+            9,
+            supply="WB-GI-1",
+            created=datetime(2026, 5, 3, tzinfo=UTC),
+            source=ORDER_SOURCE_ARCHIVE,
+            sticker=33811984302,
+        )
+    ]
+    service = mirror(database, marketplace=marketplace)
+    await service.collect_orders(seller, now=now)
+    await service.collect_supplies(seller, now=now)
+
+    async with database.session() as session:
+        traces = await OrderMirror(session).resolve(
+            seller, rids=["eAK.r1.0.0"], order_ids=[9], sticker_ids=[33811984302, 5]
+        )
+
+    # Каждое найденное задание отвечает всеми своими ключами; несуществующий стикер 5 не отвечает ничем.
+    assert {"eAK.r1.0.0", "1", "9", "33811984302"} <= set(traces) and "5" not in traces
+    trace = traces["eAK.r1.0.0"]
+    assert trace.warehouse_name == KAZAN.name
+    assert trace.supply is not None and trace.supply.scan_dt == SUPPLY.scan_dt
+    assert trace.destination_office_name == "Коледино"
+    assert traces["33811984302"].order.order_id == 9
+
+
+async def test_old_orders_are_pruned_once_a_day(database: Database, seller: uuid.UUID) -> None:
+    now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    marketplace = FakeMarketplace({})
+    marketplace.archive[(2026, 4)] = [
+        order(9, supply=None, created=datetime(2026, 4, 3, tzinfo=UTC), source=ORDER_SOURCE_ARCHIVE)
+    ]
+    await mirror(database, marketplace=marketplace).collect_orders(seller, now=now)
+
+    keeper = WBCoreWorker(database, mirror(database), SETTINGS, now=lambda: now)
+    keeper.config = replace(keeper.config, orders_retention_days=100)
+    assert await keeper.prune(now) == 1
+    assert await keeper.prune(now) == 0
+
+
+async def test_orders_are_due_by_interval_and_supplies_daily(database: Database, seller: uuid.UUID) -> None:
+    service = mirror(database)
+    await service.sync_catalog(seller, now=at(9))
+    schedule = WBCoreWorker(database, service, SETTINGS)
+
+    assert schedule.due_since(MIRROR_ORDERS, at(10)) == at(10) - timedelta(
+        minutes=SETTINGS.core_mirror.orders_interval_minutes
+    )
+    assert schedule.due_since(MIRROR_SUPPLIES, at(10)) == at(5)
+
+    assert await worker(database, service, at(10)).collect_due(MIRROR_ORDERS, at(10)) == 1
+    assert await worker(database, service, at(10, 30)).collect_due(MIRROR_ORDERS, at(10, 30)) == 0
+    assert await worker(database, service, at(11, 5)).collect_due(MIRROR_ORDERS, at(11, 5)) == 1
+    assert await worker(database, service, at(10)).collect_due(MIRROR_SUPPLIES, at(10)) == 1
+    assert await worker(database, service, at(12)).collect_due(MIRROR_SUPPLIES, at(12)) == 0

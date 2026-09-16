@@ -3,6 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -153,7 +155,11 @@ class MirrorStateModel(WBCoreBase):
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    __table_args__ = (CheckConstraint("kind IN ('catalog', 'stocks', 'reviews')", name="ck_wb_core_mirror_state_kind"),)
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies')", name="ck_wb_core_mirror_state_kind"
+        ),
+    )
 
 
 class StockFactModel(WBCoreBase):
@@ -201,4 +207,100 @@ class ReviewFactModel(WBCoreBase):
     count_rating_5: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SellerWarehouseModel(WBCoreBase):
+    """Склады продавца в кабинете WB: имя к `warehouseId` задания. Переписывается каждым сбором."""
+
+    __tablename__ = "seller_warehouses"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    office_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WbOfficeModel(WBCoreBase):
+    """Справочник объектов WB. Общий: у всех кабинетов один и тот же список."""
+
+    __tablename__ = "wb_offices"
+
+    office_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    city: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    address: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FbsOrderModel(WBCoreBase):
+    """Сборочное задание FBS — копия ответа WB.
+
+    Живой список отдаёт три месяца, архив — старше; поля, которых у живого нет
+    (стикер, статусы), остаются NULL до архива. `supply_id` дозаполняется
+    повторным чтением свежих заданий: в поставку их кладут не сразу.
+    """
+
+    __tablename__ = "fbs_orders"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    order_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    rid: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    order_uid: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    warehouse_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    supply_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    office_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    nm_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    sku: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    price_kopecks: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    sticker_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    supplier_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    wb_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("source IN ('live', 'archive')", name="ck_wb_core_fbs_orders_source"),
+        Index("ix_wb_core_fbs_orders_rid", "seller_id", "rid"),
+        Index("ix_wb_core_fbs_orders_sticker", "seller_id", "sticker_id"),
+        Index("ix_wb_core_fbs_orders_created", "seller_id", "created_at"),
+    )
+
+
+class FbsOrderArchiveMonthModel(WBCoreBase):
+    """Какие архивные месяцы заданий уже сняты: архив неизменяем, второй раз его не читают."""
+
+    __tablename__ = "fbs_order_archive_months"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    month: Mapped[int] = mapped_column(Integer, primary_key=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FbsSupplyModel(WBCoreBase):
+    """Поставка FBS: чем и когда сдали задания на объект WB."""
+
+    __tablename__ = "fbs_supplies"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    supply_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scan_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    destination_office_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cargo_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

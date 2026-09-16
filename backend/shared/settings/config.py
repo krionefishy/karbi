@@ -309,6 +309,14 @@ class CoreMirrorConfig:
     retry_minutes: int = 30
     # Сколько дней остаток считается пригодным для потребителей зеркала.
     stock_fresh_days: int = 2
+    # Сборочные задания FBS: свежие перечитываются каждый час, пока не лягут в
+    # поставку; живой список WB помнит три месяца, дальше архив помесячно.
+    orders_interval_minutes: int = 60
+    orders_history_months: int = 6
+    orders_retention_days: int = 400
+    # Поставки, склады продавца и объекты WB — раз в сутки, до сбора штрафов.
+    supplies_hour: int = 5
+    supplies_minute: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,6 +427,11 @@ class Settings:
             "reviews_minute",
             "retry_minutes",
             "stock_fresh_days",
+            "orders_interval_minutes",
+            "orders_history_months",
+            "orders_retention_days",
+            "supplies_hour",
+            "supplies_minute",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -502,11 +515,14 @@ class Settings:
         for name, hour, minute in (
             ("catalog", mirror.catalog_hour, mirror.catalog_minute),
             ("reviews", mirror.reviews_hour, mirror.reviews_minute),
+            ("supplies", mirror.supplies_hour, mirror.supplies_minute),
         ):
             if not 0 <= hour <= 23 or not 0 <= minute <= 59:
                 raise ValueError(f"core_mirror.{name}_hour/minute must be a valid time of day")
         if mirror.retry_minutes < 1 or mirror.stock_fresh_days < 1:
             raise ValueError("core_mirror.retry_minutes and stock_fresh_days must be positive")
+        if min(mirror.orders_interval_minutes, mirror.orders_history_months, mirror.orders_retention_days) < 1:
+            raise ValueError("core_mirror.orders_* must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

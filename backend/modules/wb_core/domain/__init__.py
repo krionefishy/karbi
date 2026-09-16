@@ -9,10 +9,18 @@ from backend.modules.wb_core.domain.entities import (
 from backend.modules.wb_core.domain.mirror import (
     MIRROR_CATALOG,
     MIRROR_KINDS,
+    MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
+    MIRROR_SUPPLIES,
+    ORDER_SOURCE_ARCHIVE,
+    ORDER_SOURCE_LIVE,
+    FbsOrder,
+    FbsSupply,
     ReviewFact,
+    SellerWarehouse,
     StockFact,
+    WbOffice,
 )
 
 __all__ = [
@@ -22,10 +30,18 @@ __all__ = [
     "MARKETPLACE_WB",
     "MIRROR_CATALOG",
     "MIRROR_KINDS",
+    "MIRROR_ORDERS",
     "MIRROR_REVIEWS",
     "MIRROR_STOCKS",
+    "MIRROR_SUPPLIES",
+    "ORDER_SOURCE_ARCHIVE",
+    "ORDER_SOURCE_LIVE",
     "Article",
+    "FbsOrder",
+    "FbsSupply",
     "ReviewFact",
     "Seller",
+    "SellerWarehouse",
     "StockFact",
+    "WbOffice",
 ]

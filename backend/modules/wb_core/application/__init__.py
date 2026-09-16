@@ -2,11 +2,13 @@ from backend.modules.wb_core.application.enrollment import AutomationEnrollment
 from backend.modules.wb_core.application.mirror import (
     CatalogOutcome,
     MirrorService,
+    OrdersOutcome,
     ReviewsOutcome,
     SellerGoneError,
     StocksOutcome,
+    SuppliesOutcome,
 )
-from backend.modules.wb_core.application.mirror_ports import ReviewMirror, StockMirror
+from backend.modules.wb_core.application.mirror_ports import OrderMirror, OrderTrace, ReviewMirror, StockMirror
 from backend.modules.wb_core.application.sellers import (
     AutomationNotFoundError,
     DuplicateCredentialError,
@@ -21,6 +23,9 @@ __all__ = [
     "CatalogOutcome",
     "DuplicateCredentialError",
     "MirrorService",
+    "OrderMirror",
+    "OrderTrace",
+    "OrdersOutcome",
     "ReviewMirror",
     "ReviewsOutcome",
     "SellerArchivedError",
@@ -29,4 +34,5 @@ __all__ = [
     "SellerService",
     "StockMirror",
     "StocksOutcome",
+    "SuppliesOutcome",
 ]

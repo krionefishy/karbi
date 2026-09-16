@@ -3,13 +3,17 @@ import uuid
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
+    MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
+    MIRROR_SUPPLIES,
+    FbsOrder,
     ReviewFact,
+    SellerWarehouse,
     StockFact,
 )
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
@@ -27,6 +31,10 @@ from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
 NO_MEDIA = (0, 0)
+# Живой список заданий WB помнит столько; что старше, лежит в архиве помесячно.
+LIVE_ORDERS_MONTHS = 3
+# Свежие задания перечитываются с таким запасом: в поставку их кладут не сразу.
+ORDERS_OVERLAP = timedelta(days=3)
 
 
 class SellerGoneError(Exception):
@@ -52,8 +60,22 @@ class ReviewsOutcome:
     feedbacks: int
 
 
+@dataclass(frozen=True, slots=True)
+class OrdersOutcome:
+    live: int
+    archived: int
+    months: int
+
+
+@dataclass(frozen=True, slots=True)
+class SuppliesOutcome:
+    supplies: int
+    warehouses: int
+    offices: int
+
+
 class MirrorService:
-    """Зеркало WB по селлеру: каталог, остатки, отзывы.
+    """Зеркало WB по селлеру: каталог, остатки, отзывы, задания и поставки FBS.
 
     Каждая операция — один селлер, три фазы: отметить попытку, сходить в WB без
     открытой сессии, записать результат. Сессия на время сети закрыта нарочно:
@@ -72,12 +94,14 @@ class MirrorService:
         analytics: WBAnalyticsClient,
         marketplace: WBMarketplaceClient,
         feedbacks: WBFeedbackClient,
+        orders_history_months: int = 6,
     ) -> None:
         self.database = database
         self.content = content
         self.analytics = analytics
         self.marketplace = marketplace
         self.feedbacks = feedbacks
+        self.orders_history_months = orders_history_months
         self.logger = logging.getLogger("wb.core.mirror")
 
     # --- catalog ------------------------------------------------------------------
@@ -222,6 +246,95 @@ class MirrorService:
             await session.commit()
         outcome = ReviewsOutcome(len(facts), aggregation.feedback_count)
         self.logger.info("reviews_collected", extra={"seller_id": str(seller_id), **asdict(outcome)})
+        return outcome
+
+    # --- сборочные задания ------------------------------------------------------
+
+    async def collect_orders(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OrdersOutcome:
+        """Живые задания с перекрытием и архив по месяцам, которых ещё нет.
+
+        Живое окно начинается от последнего известного задания минус запас:
+        свежие задания перечитываются, пока у них не появится поставка. Архив
+        неизменяем, месяц читается один раз и отмечается.
+        """
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_ORDERS, stamp)
+            await session.commit()
+            mirror = MirrorRepository(session)
+            latest = await mirror.latest_order_at(seller_id)
+            done = await mirror.archive_months_done(seller_id)
+        live_floor = stamp - timedelta(days=30 * LIVE_ORDERS_MONTHS)
+        live_from = max(latest - ORDERS_OVERLAP, live_floor) if latest else live_floor
+        months = [month for month in self._archive_months(stamp) if month not in done]
+        try:
+            live = await self.marketplace.orders(seller_key, date_from=live_from, date_to=stamp)
+            archived: list[FbsOrder] = []
+            for year, month in months:
+                archived.extend(await self.marketplace.archive_orders(seller_key, year, month))
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_ORDERS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            await mirror.upsert_orders(seller_id, live, now=stamp)
+            await mirror.upsert_orders(seller_id, archived, now=stamp)
+            for year, month in months:
+                await mirror.mark_archive_month(seller_id, year, month, now=stamp)
+            await mirror.mark_collected(seller_id, MIRROR_ORDERS, now=stamp)
+            await session.commit()
+        outcome = OrdersOutcome(len(live), len(archived), len(months))
+        self.logger.info("orders_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    def _archive_months(self, now: datetime) -> list[tuple[int, int]]:
+        """Месяцы от глубины истории до границы живого списка, старшие первыми."""
+        first = now - timedelta(days=30 * self.orders_history_months)
+        last = now - timedelta(days=30 * LIVE_ORDERS_MONTHS)
+        year, month = first.year, first.month
+        months: list[tuple[int, int]] = []
+        while (year, month) <= (last.year, last.month):
+            months.append((year, month))
+            year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+        return months
+
+    # --- поставки, склады, объекты ------------------------------------------------
+
+    async def collect_supplies(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> SuppliesOutcome:
+        """Поставки кабинета целиком, склады продавца и справочник объектов WB.
+
+        Поставка меняется после создания (закрытие, скан QR), поэтому список
+        перечитывается весь: он идёт курсором от первой, а фильтра по дате у
+        метода нет. Объекты — общий справочник, но спросить его можно только
+        ключом, поэтому обновляется тем кабинетом, который сейчас собираем.
+        """
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_SUPPLIES, stamp)
+            await session.commit()
+        try:
+            warehouses = [
+                SellerWarehouse(item.id, item.name, item.office_id)
+                for item in await self.marketplace.warehouses(seller_key)
+            ]
+            supplies = await self.marketplace.supplies(seller_key)
+            offices = await self.marketplace.offices(seller_key)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_SUPPLIES, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            await mirror.replace_seller_warehouses(seller_id, warehouses, now=stamp)
+            await mirror.upsert_supplies(seller_id, supplies, now=stamp)
+            await mirror.upsert_offices(offices, now=stamp)
+            await mirror.mark_collected(seller_id, MIRROR_SUPPLIES, now=stamp)
+            await session.commit()
+        outcome = SuppliesOutcome(len(supplies), len(warehouses), len(offices))
+        self.logger.info("supplies_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
 
     @staticmethod
