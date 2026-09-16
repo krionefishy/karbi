@@ -586,3 +586,21 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .stocks-warehouse-row:last-child { border-bottom: 0; }
 .stocks-warehouse-row strong { display: block; font-size: 13px; }
 .stocks-warehouse-row em { font-size: 11px; font-style: normal; }
+
+/* Штрафы FBS: фильтры периода и итоги по группам над таблицей. */
+.penalties-toolbar { flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+.penalties-field { display: flex; flex-direction: column; }
+.penalties-field .field-label { margin-bottom: 5px; }
+.penalties-field input, .penalties-field select { height: 36px; padding: 0 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); font: inherit; font-size: 13px; }
+.penalties-field select { min-width: 200px; }
+.penalties-totals { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.penalties-totals article { display: flex; flex-direction: column; gap: 2px; min-width: 160px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); }
+.penalties-totals article span { color: var(--muted); font-size: 12px; }
+.penalties-totals article strong { font: 600 16px "JetBrains Mono", monospace; }
+.penalties-totals article small { color: var(--muted); font-size: 11px; }
+.penalties-total-all { border-color: var(--forest) !important; }
+.penalty-period { font-size: 12px; }
+.penalty-kind strong, .penalty-ids strong { font-size: 12px; line-height: 1.3; }
+.penalty-kind em, .penalty-ids em { overflow: hidden; color: var(--muted); font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.penalty-amount { color: var(--negative); }
+.penalties-lookup { margin: 0 0 14px; }
