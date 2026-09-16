@@ -157,7 +157,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .sync-state i { width: 6px; height: 6px; background: currentColor; }
 .sync-success { color: var(--positive); }.sync-error { color: var(--negative); }
 .reviews-content { flex: 1; padding: 30px 32px 64px; overflow: auto; }
-.reviews-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; max-width: 1320px; margin: 0 auto 26px; }
+.reviews-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 18px 24px; max-width: 1320px; margin: 0 auto 26px; }
 /* Левая половина ужимается, правая — нет: иначе кнопки и вкладки уезжают за
    край экрана раньше, чем заголовок согласится перенестись. */
 .reviews-heading > div:first-child { min-width: 0; }
@@ -174,8 +174,12 @@ button:disabled { cursor: not-allowed; opacity: .48; }
    краю имеет смысл, только когда под заголовком есть подпись. */
 .reviews-heading:not(:has(p)) { align-items: center; }
 .reviews-heading p { margin-bottom: 0; font-size: 13px; }
-.last-sync { text-align: right; }.last-sync strong { display: block; font-size: 13px; }
-.review-sync-actions { display: flex; align-items: center; gap: 18px; }
+.last-sync { text-align: right; white-space: nowrap; }.last-sync strong { display: block; font-size: 13px; }
+/* Вкладки, дата и кнопки не ужимаются, а переносятся на следующий ряд, когда
+   в один не помещаются: сжатая кнопка в три строки читается хуже второго ряда. */
+.review-sync-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 18px; margin-left: auto; }
+.review-sync-actions > * { flex: 0 0 auto; }
+.review-sync-actions .primary-button, .review-sync-actions .secondary-button { white-space: nowrap; }
 .review-sync-button { padding-right: 22px; padding-left: 22px; border-radius: 999px; }
 .review-sync-actions .catalog-status { padding-left: 18px; border-left: 1px solid var(--line); }
 .inline-error { max-width: 1320px; margin: -12px auto 18px; padding: 10px 12px; color: var(--negative); background: var(--negative-bg); border: 1px solid rgba(196,62,54,.24); font-size: 12px; }
