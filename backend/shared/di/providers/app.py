@@ -39,6 +39,8 @@ from backend.modules.wb_fbs_distribution.infrastructure.wb import (
     WBFbsStockWriter,
     WBFbsWarehouseWriter,
 )
+from backend.modules.wb_fbs_penalties.application import PenaltiesEnrollment, PenaltiesService
+from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
@@ -337,6 +339,31 @@ class SessionProvider(Provider):
         return FbsStocksService(session, sellers, stocks, timezone=ZoneInfo(settings.fbs_stocks.timezone))
 
     @provide(scope=Scope.REQUEST)
+    def fbs_penalties_repository(self, session: AsyncSession) -> PenaltiesRepository:
+        return PenaltiesRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_penalties_enrollment(self, penalties: PenaltiesRepository) -> PenaltiesEnrollment:
+        return PenaltiesEnrollment(penalties)
+
+    @provide(scope=Scope.REQUEST)
+    def fbs_penalties_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        penalties: PenaltiesRepository,
+        settings: Settings,
+    ) -> PenaltiesService:
+        """Задания и поставки штрафы читают из зеркала wb_core, а не собирают сами."""
+        return PenaltiesService(
+            session,
+            sellers,
+            penalties,
+            timezone=ZoneInfo(settings.fbs_penalties.timezone),
+            orders_history_months=settings.core_mirror.orders_history_months,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
@@ -344,9 +371,10 @@ class SessionProvider(Provider):
         fbs_distribution: FbsDistributionEnrollment,
         card_checklist: ChecklistEnrollment,
         fbs_stocks: FbsStocksEnrollment,
+        fbs_penalties: PenaltiesEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks]
+        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

@@ -320,6 +320,23 @@ class CoreMirrorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FbsPenaltiesConfig:
+    """Штрафы FBS: когда перечитывать фин. отчёт и на какую глубину. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # После утреннего сбора зеркала заданий и поставок (05:00): к строкам отчёта
+    # уже есть с чем сойтись.
+    collect_hour: int = 6
+    collect_minute: int = 30
+    # Лимит метода — запрос в минуту; повтор чаще получаса не имеет смысла.
+    retry_minutes: int = 30
+    # Строки отчёта появляются с задержкой в дни: обычное окно перекрывает две недели,
+    # первый сбор кабинета — три месяца, за штрафами она приходит спустя недели.
+    report_window_days: int = 14
+    report_backfill_days: int = 90
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     app: AppConfig
     database: DatabaseConfig
@@ -337,6 +354,7 @@ class Settings:
     card_checklist: CardChecklistConfig
     fbs_stocks: FbsStocksConfig
     core_mirror: CoreMirrorConfig
+    fbs_penalties: FbsPenaltiesConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -437,6 +455,10 @@ class Settings:
                 core_mirror[key] = int(core_mirror[key])
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
+        fbs_penalties = dict(data.get("fbs_penalties", {}))
+        for key in ("collect_hour", "collect_minute", "retry_minutes", "report_window_days", "report_backfill_days"):
+            if key in fbs_penalties:
+                fbs_penalties[key] = int(fbs_penalties[key])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -471,6 +493,7 @@ class Settings:
             card_checklist=CardChecklistConfig(**card_checklist),
             fbs_stocks=FbsStocksConfig(**fbs_stocks),
             core_mirror=CoreMirrorConfig(**core_mirror),
+            fbs_penalties=FbsPenaltiesConfig(**fbs_penalties),
         )
         settings.validate_values()
         return settings
@@ -523,6 +546,11 @@ class Settings:
             raise ValueError("core_mirror.retry_minutes and stock_fresh_days must be positive")
         if min(mirror.orders_interval_minutes, mirror.orders_history_months, mirror.orders_retention_days) < 1:
             raise ValueError("core_mirror.orders_* must be positive")
+        penalties = self.fbs_penalties
+        if not 0 <= penalties.collect_hour <= 23 or not 0 <= penalties.collect_minute <= 59:
+            raise ValueError("fbs_penalties.collect_hour/minute must be a valid time of day")
+        if min(penalties.retry_minutes, penalties.report_window_days, penalties.report_backfill_days) < 1:
+            raise ValueError("fbs_penalties.retry_minutes and report windows must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

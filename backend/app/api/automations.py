@@ -17,6 +17,7 @@ from backend.modules.wb_core.application import (
 from backend.modules.wb_core.presentation.http.schemas import SellerResponse
 from backend.modules.wb_core.presentation.http.utils import archived_conflict, not_found, seller_responses
 from backend.modules.wb_fbs_distribution.application import FbsDistributionService
+from backend.modules.wb_fbs_penalties.application import PenaltiesService
 from backend.modules.wb_fbs_stocks.application import FbsStocksService
 from backend.modules.wb_reviews.application import ReviewSyncService
 from backend.modules.wb_turnover.application import TurnoverService
@@ -38,6 +39,7 @@ async def automations(
     fbs_distribution: FromDishka[FbsDistributionService],
     card_checklist: FromDishka[ChecklistService],
     fbs_stocks: FromDishka[FbsStocksService],
+    fbs_penalties: FromDishka[PenaltiesService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
     return automation_catalog(
@@ -46,6 +48,7 @@ async def automations(
         await fbs_distribution.overview(),
         await card_checklist.overview(),
         await fbs_stocks.overview(),
+        await fbs_penalties.overview(),
         settings,
     )
 

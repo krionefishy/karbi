@@ -1,0 +1,272 @@
+import asyncio
+import re
+import uuid
+from collections import Counter, defaultdict
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from backend.modules.wb_core.application import OrderMirror, OrderTrace, SellerNotFoundError
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
+from backend.modules.wb_fbs_penalties.application.report import PenaltiesReportFile, render_workbook
+from backend.modules.wb_fbs_penalties.application.view import (
+    TRACE_FOUND,
+    TRACE_NO_ORDER,
+    TRACE_NO_SUPPLY,
+    GroupTotal,
+    LookupMiss,
+    LookupView,
+    PenaltiesOverview,
+    PenaltiesView,
+    PenaltyRowView,
+    RefreshRequest,
+    WarehouseOption,
+)
+from backend.modules.wb_fbs_penalties.domain import GROUP_TITLES, GROUPS, ReportRow
+from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository, RefreshRequestModel
+
+DIGITS = re.compile(r"^\d{6,20}$")
+SRID = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
+
+
+class PenaltiesQueryError(Exception):
+    """Запрос, по которому нечего показать: пустой список номеров, перевёрнутый период."""
+
+
+class PenaltiesService:
+    """Что интерфейс просит у штрафов: таблица за период, проверка номеров, выгрузка."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        penalties: PenaltiesRepository,
+        *,
+        timezone: ZoneInfo,
+        orders_history_months: int,
+    ) -> None:
+        self.session = session
+        self.sellers = sellers
+        self.penalties = penalties
+        self.orders = OrderMirror(session)
+        self.mirror = MirrorRepository(session)
+        self.timezone = timezone
+        self.orders_history_months = orders_history_months
+
+    async def overview(self) -> PenaltiesOverview:
+        enrolled = await self._enrolled_ids()
+        last_success_at, failing = await self.penalties.collection_summary(enrolled)
+        return PenaltiesOverview(seller_count=len(enrolled), last_success_at=last_success_at, failing=failing)
+
+    # --- reading ---------------------------------------------------------------
+
+    async def view(
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
+    ) -> PenaltiesView:
+        if date_from > date_to:
+            raise PenaltiesQueryError("Начало периода позже его конца")
+        seller_name = await self._enrolled(seller_id)
+        tracked = await self.penalties.tracked(seller_id)
+        rows = await self._enrich(seller_id, await self.penalties.rows_in_period(seller_id, date_from, date_to))
+        # Склады для фильтра — все, с которых в периоде уходили заказы со штрафами,
+        # плюс те, что есть в кабинете: так фильтр не прячет склад, у которого
+        # сегодня чисто.
+        warehouses = {
+            item.warehouse_id: item.name for item in (await self.mirror.seller_warehouses(seller_id)).values()
+        }
+        for row in rows:
+            if row.warehouse_id is not None and row.warehouse_name:
+                warehouses.setdefault(row.warehouse_id, row.warehouse_name)
+        if group:
+            rows = [row for row in rows if row.group == group]
+        if warehouse_id is not None:
+            rows = [row for row in rows if row.warehouse_id == warehouse_id]
+        return PenaltiesView(
+            seller_id=seller_id,
+            seller_name=seller_name,
+            date_from=date_from,
+            date_to=date_to,
+            collected_at=tracked.collected_at if tracked else None,
+            collection_error=tracked.collection_error if tracked else None,
+            rows=tuple(rows),
+            totals=self._totals(rows),
+            warehouses=tuple(
+                WarehouseOption(warehouse_id, name)
+                for warehouse_id, name in sorted(warehouses.items(), key=lambda item: item[1].lower())
+            ),
+        )
+
+    async def lookup(self, seller_id: uuid.UUID, raw_keys: Sequence[str]) -> LookupView:
+        """Вставленные номера: стикер МП, номер сборочного задания или `srid`.
+
+        Сначала ищем в строках отчёта — там и штраф, и все номера; чего в отчёте
+        нет, ищем среди заданий зеркала — без суммы, но со складом и поставкой.
+        """
+        await self._enrolled(seller_id)
+        keys = list(dict.fromkeys(key.strip() for key in raw_keys if key.strip()))
+        if not keys:
+            raise PenaltiesQueryError("Вставьте хотя бы один номер")
+        numbers = [int(key) for key in keys if DIGITS.match(key)]
+        srids = [key for key in keys if not DIGITS.match(key) and SRID.match(key)]
+        found = await self.penalties.rows_by_keys(seller_id, srids=srids, assembly_ids=numbers, sticker_ids=numbers)
+        views = await self._enrich(seller_id, found)
+        matched = {key for view in views for key in self._row_keys(view.row)}
+        rest = [key for key in keys if key not in matched]
+
+        misses: list[LookupMiss] = []
+        if rest:
+            rest_numbers = [int(key) for key in rest if DIGITS.match(key)]
+            traces = await self.orders.resolve(
+                seller_id,
+                rids=[key for key in rest if not DIGITS.match(key)],
+                order_ids=rest_numbers,
+                sticker_ids=rest_numbers,
+            )
+            seen: set[int] = set()
+            for key in rest:
+                trace = traces.get(key)
+                if trace is None:
+                    misses.append(LookupMiss(key, self._miss_reason(key)))
+                    continue
+                if trace.order.order_id in seen:
+                    continue
+                seen.add(trace.order.order_id)
+                views.append(self._from_trace(trace))
+        return LookupView(rows=tuple(views), missing=tuple(misses))
+
+    async def export(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> PenaltiesReportFile:
+        view = await self.view(seller_id, date_from, date_to)
+        content = await asyncio.to_thread(render_workbook, view)
+        return PenaltiesReportFile(seller_name=view.seller_name, date_from=date_from, date_to=date_to, content=content)
+
+    # --- refresh ----------------------------------------------------------------
+
+    async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None = None) -> RefreshRequest:
+        await self._enrolled(seller_id)
+        request = await self.penalties.request_refresh(seller_id, requested_by)
+        await self.session.commit()
+        return self._refresh(request)
+
+    async def refresh_state(self, seller_id: uuid.UUID) -> RefreshRequest | None:
+        await self._enrolled(seller_id)
+        request = await self.penalties.latest_refresh(seller_id)
+        return self._refresh(request) if request else None
+
+    # --- helpers ----------------------------------------------------------------------
+
+    async def _enrich(self, seller_id: uuid.UUID, rows: list[ReportRow]) -> list[PenaltyRowView]:
+        traces = await self.orders.resolve(
+            seller_id,
+            rids=[row.srid for row in rows if row.srid],
+            order_ids=[row.assembly_id for row in rows if row.assembly_id],
+            sticker_ids=[row.sticker_id for row in rows if row.sticker_id],
+        )
+        views: list[PenaltyRowView] = []
+        for row in rows:
+            trace = next((traces[key] for key in self._row_keys(row) if key in traces), None)
+            if trace is None:
+                views.append(PenaltyRowView(row, TRACE_NO_ORDER, None, None, None, None, None, None, None))
+                continue
+            views.append(self._from_trace(trace, row))
+        return views
+
+    @staticmethod
+    def _from_trace(trace: OrderTrace, row: ReportRow | None = None) -> PenaltyRowView:
+        order, supply = trace.order, trace.supply
+        return PenaltyRowView(
+            row=row or PenaltiesService._stub_row(trace),
+            trace=TRACE_FOUND if supply else TRACE_NO_SUPPLY,
+            warehouse_id=order.warehouse_id,
+            warehouse_name=trace.warehouse_name or f"склад {order.warehouse_id}",
+            order_created_at=order.created_at,
+            supply_id=order.supply_id,
+            supply_created_at=supply.created_at if supply else None,
+            supply_scan_dt=supply.scan_dt if supply else None,
+            destination_office_name=trace.destination_office_name,
+        )
+
+    @staticmethod
+    def _stub_row(trace: OrderTrace) -> ReportRow:
+        """Задание без строки отчёта: штрафа по нему нет, есть только логистика."""
+        order = trace.order
+        day = order.created_at.date()
+        return ReportRow(
+            rrd_id=0,
+            realizationreport_id=0,
+            date_from=day,
+            date_to=day,
+            create_dt=None,
+            srid=order.rid,
+            assembly_id=order.order_id,
+            sticker_id=order.sticker_id,
+            order_dt=order.created_at,
+            sale_dt=None,
+            rr_dt=None,
+            nm_id=order.nm_id,
+            sa_name="",
+            subject_name="",
+            barcode=order.sku,
+            ts_name="",
+            bonus_type_name="",
+            supplier_oper_name="",
+            delivery_method="FBS",
+            office_name="",
+            penalty=0.0,
+            deduction=0.0,
+            rebill_logistic_cost=0.0,
+            storage_fee=0.0,
+            additional_payment=0.0,
+            acceptance=0.0,
+        )
+
+    def _miss_reason(self, key: str) -> str:
+        if DIGITS.match(key) or SRID.match(key):
+            return f"нет ни в отчётах, ни среди заданий за {self.orders_history_months} мес.: проверьте кабинет и номер"
+        return "не похоже ни на стикер, ни на номер задания, ни на srid"
+
+    @staticmethod
+    def _row_keys(row: ReportRow) -> list[str]:
+        return [key for key in (row.srid, str(row.assembly_id or ""), str(row.sticker_id or "")) if key]
+
+    @staticmethod
+    def _totals(rows: list[PenaltyRowView]) -> tuple[GroupTotal, ...]:
+        counts: Counter[str] = Counter()
+        amounts: defaultdict[str, float] = defaultdict(float)
+        for view in rows:
+            counts[view.group] += 1
+            amounts[view.group] += view.row.amount
+        return tuple(
+            GroupTotal(group, GROUP_TITLES[group], counts[group], round(amounts[group], 2))
+            for group in GROUPS
+            if counts[group]
+        )
+
+    async def _enrolled_ids(self) -> set[uuid.UUID]:
+        tracked = await self.penalties.tracked_seller_ids()
+        active = {seller.id for seller in await self.sellers.list_sellers()}
+        return tracked & active
+
+    async def _enrolled(self, seller_id: uuid.UUID) -> str:
+        seller = await self.sellers.get(seller_id)
+        if seller is None or seller.archived_at is not None:
+            raise SellerNotFoundError
+        if await self.penalties.tracked(seller_id) is None:
+            raise SellerNotFoundError
+        return seller.name
+
+    @staticmethod
+    def _refresh(request: RefreshRequestModel) -> RefreshRequest:
+        return RefreshRequest(
+            status=request.status,
+            requested_at=request.requested_at or datetime.now(UTC),
+            finished_at=request.finished_at,
+            error=request.error,
+        )

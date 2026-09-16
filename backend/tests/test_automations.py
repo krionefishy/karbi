@@ -10,6 +10,7 @@ from backend.app.api.utils import (
 )
 from backend.modules.wb_card_checklist.application import ChecklistOverview
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
+from backend.modules.wb_fbs_penalties.application import PenaltiesOverview
 from backend.modules.wb_fbs_stocks.application import BoardOverview
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
@@ -35,6 +36,10 @@ def quiet_checklist() -> ChecklistOverview:
 
 def quiet_stocks() -> BoardOverview:
     return BoardOverview(seller_count=0, last_success_at=None, failing=0)
+
+
+def quiet_penalties() -> PenaltiesOverview:
+    return PenaltiesOverview(seller_count=0, last_success_at=None, failing=0)
 
 
 def test_the_stocks_card_points_at_the_most_stale_cabinet() -> None:
@@ -80,7 +85,7 @@ def test_catalog_reports_the_run_that_actually_happened() -> None:
     )
 
     [automation, *_] = automation_catalog(
-        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), SETTINGS
+        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), quiet_penalties(), SETTINGS
     )
 
     assert automation.id == "wb-reviews"
@@ -113,7 +118,7 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
     )
 
     [automation, *_] = automation_catalog(
-        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), SETTINGS
+        overview, quiet_turnover(), quiet_fbs(), quiet_checklist(), quiet_stocks(), quiet_penalties(), SETTINGS
     )
 
     assert automation.last_run is not None
@@ -136,22 +141,25 @@ def test_next_run_is_the_worker_schedule() -> None:
 def test_the_catalog_lists_every_automation() -> None:
     turnover = TurnoverOverview(seller_count=2, last_run=None, last_success_at=None, runs_last_24h=0)
 
-    reviews_card, turnover_card, fbs_card, checklist_card, stocks_card = automation_catalog(
+    reviews_card, turnover_card, fbs_card, checklist_card, stocks_card, penalties_card = automation_catalog(
         SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
         turnover,
         DistributionCatalogOverview(seller_count=3),
         ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
         BoardOverview(seller_count=5, last_success_at=None, failing=0),
+        PenaltiesOverview(seller_count=1, last_success_at=None, failing=0),
         SETTINGS,
     )
 
-    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id, stocks_card.id) == (
+    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id, stocks_card.id, penalties_card.id) == (
         "wb-reviews",
         "wb-turnover",
         "wb-fbs-distribution",
         "wb-card-checklist",
         "wb-fbs-stocks",
+        "wb-fbs-penalties",
     )
+    assert (penalties_card.seller_count, penalties_card.status) == (1, "idle")
     assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
@@ -178,7 +186,9 @@ def test_the_checklist_card_reports_collection_state() -> None:
     healthy = ChecklistOverview(seller_count=3, last_success_at=collected, failing=0)
     failing = ChecklistOverview(seller_count=3, last_success_at=collected, failing=1)
 
-    *_, card, _ = automation_catalog(quiet_overview(), quiet_turnover(), quiet_fbs(), healthy, quiet_stocks(), SETTINGS)
+    *_, card, _, _ = automation_catalog(
+        quiet_overview(), quiet_turnover(), quiet_fbs(), healthy, quiet_stocks(), quiet_penalties(), SETTINGS
+    )
 
     assert card.status == "active"
     assert card.last_success_at == "2026-09-10T02:00:00+00:00"

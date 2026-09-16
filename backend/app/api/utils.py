@@ -22,6 +22,16 @@ from backend.modules.wb_fbs_distribution.application import (
     TITLE as WB_FBS_TITLE,
 )
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
+from backend.modules.wb_fbs_penalties.application import (
+    AUTOMATION_ID as WB_FBS_PENALTIES_ID,
+)
+from backend.modules.wb_fbs_penalties.application import (
+    DESCRIPTION as WB_FBS_PENALTIES_DESCRIPTION,
+)
+from backend.modules.wb_fbs_penalties.application import (
+    TITLE as WB_FBS_PENALTIES_TITLE,
+)
+from backend.modules.wb_fbs_penalties.application import PenaltiesOverview
 from backend.modules.wb_fbs_stocks.application import (
     AUTOMATION_ID as WB_FBS_STOCKS_ID,
 )
@@ -90,6 +100,11 @@ def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> da
     return _next_daily(ZoneInfo(checklist.timezone), [(checklist.collect_hour, checklist.collect_minute)], now)
 
 
+def next_penalties_run_at(settings: Settings, now: datetime | None = None) -> datetime:
+    penalties = settings.fbs_penalties
+    return _next_daily(ZoneInfo(penalties.timezone), [(penalties.collect_hour, penalties.collect_minute)], now)
+
+
 def next_fbs_stocks_run_at(settings: Settings, overview: BoardOverview, now: datetime | None = None) -> datetime:
     """Опрос интервальный и по кабинетам: следующий — у самого давно собранного.
 
@@ -147,6 +162,7 @@ def automation_catalog(
     fbs_distribution: DistributionCatalogOverview,
     card_checklist: ChecklistOverview,
     fbs_stocks: BoardOverview,
+    fbs_penalties: PenaltiesOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -208,5 +224,16 @@ def automation_catalog(
             last_run=None,
             last_success_at=fbs_stocks.last_success_at.isoformat() if fbs_stocks.last_success_at else None,
             next_run_at=next_fbs_stocks_run_at(settings, fbs_stocks).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_FBS_PENALTIES_ID,
+            title=WB_FBS_PENALTIES_TITLE,
+            description=WB_FBS_PENALTIES_DESCRIPTION,
+            status=fbs_penalties.status,
+            seller_count=fbs_penalties.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=fbs_penalties.last_success_at.isoformat() if fbs_penalties.last_success_at else None,
+            next_run_at=next_penalties_run_at(settings).isoformat(),
         ),
     ]
