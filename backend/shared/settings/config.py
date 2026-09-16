@@ -324,10 +324,9 @@ class FbsPenaltiesConfig:
     """Штрафы FBS: когда перечитывать фин. отчёт и на какую глубину. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # После утреннего сбора зеркала заданий и поставок (05:00): к строкам отчёта
-    # уже есть с чем сойтись.
-    collect_hour: int = 6
-    collect_minute: int = 30
+    # Суточный отчёт за день появляется на следующий день, час неизвестен: список
+    # спрашивается каждые `poll_hours` — это один запрос, а читаются только новые.
+    poll_hours: int = 2
     # Лимит детализации — запрос в минуту, его держит шлюз; пауза нужна только
     # после настоящей ошибки и чтобы дочитать оставшиеся отчёты следующим проходом.
     retry_minutes: int = 10
@@ -460,8 +459,7 @@ class Settings:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
         for key in (
-            "collect_hour",
-            "collect_minute",
+            "poll_hours",
             "retry_minutes",
             "report_window_days",
             "report_backfill_days",
@@ -557,10 +555,9 @@ class Settings:
         if min(mirror.orders_interval_minutes, mirror.orders_history_months, mirror.orders_retention_days) < 1:
             raise ValueError("core_mirror.orders_* must be positive")
         penalties = self.fbs_penalties
-        if not 0 <= penalties.collect_hour <= 23 or not 0 <= penalties.collect_minute <= 59:
-            raise ValueError("fbs_penalties.collect_hour/minute must be a valid time of day")
         if (
             min(
+                penalties.poll_hours,
                 penalties.retry_minutes,
                 penalties.report_window_days,
                 penalties.report_backfill_days,

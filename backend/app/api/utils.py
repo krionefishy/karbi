@@ -100,9 +100,13 @@ def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> da
     return _next_daily(ZoneInfo(checklist.timezone), [(checklist.collect_hour, checklist.collect_minute)], now)
 
 
-def next_penalties_run_at(settings: Settings, now: datetime | None = None) -> datetime:
+def next_penalties_run_at(settings: Settings, overview: PenaltiesOverview, now: datetime | None = None) -> datetime:
+    """Опрос интервальный: следующий — через `poll_hours` после последнего удачного сбора."""
     penalties = settings.fbs_penalties
-    return _next_daily(ZoneInfo(penalties.timezone), [(penalties.collect_hour, penalties.collect_minute)], now)
+    moment = now or datetime.now(ZoneInfo(penalties.timezone))
+    if overview.last_success_at is None:
+        return moment
+    return max(moment, overview.last_success_at + timedelta(hours=penalties.poll_hours))
 
 
 def next_fbs_stocks_run_at(settings: Settings, overview: BoardOverview, now: datetime | None = None) -> datetime:
@@ -234,6 +238,6 @@ def automation_catalog(
             runs_last_24h=0,
             last_run=None,
             last_success_at=fbs_penalties.last_success_at.isoformat() if fbs_penalties.last_success_at else None,
-            next_run_at=next_penalties_run_at(settings).isoformat(),
+            next_run_at=next_penalties_run_at(settings, fbs_penalties).isoformat(),
         ),
     ]

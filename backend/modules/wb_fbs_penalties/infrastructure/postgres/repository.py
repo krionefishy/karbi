@@ -6,6 +6,7 @@ from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from backend.modules.wb_fbs_penalties.domain import (
     GROUP_DEDUCTIONS,
@@ -122,6 +123,34 @@ class PenaltiesRepository:
             )
         )
         return len(rows)
+
+    async def finish_covered_reports(self, seller_id: uuid.UUID, *, now: datetime) -> None:
+        """Отметить прочитанными отчёты, чей период целиком лежит в уже прочитанном.
+
+        Суточный отчёт — те же строки, что в недельном за ту же неделю (`rrd_id`
+        совпадает): кабинет, собранный по недельным отчётам, не перечитывает три
+        месяца суточных, а берёт только дни после последней недели.
+        """
+        covering = aliased(ReportModel)
+        covered = (
+            select(ReportModel.report_id)
+            .join(
+                covering,
+                (covering.seller_id == ReportModel.seller_id)
+                & (covering.report_id != ReportModel.report_id)
+                & covering.loaded_at.is_not(None)
+                & (covering.date_from <= ReportModel.date_from)
+                & (covering.date_to >= ReportModel.date_to)
+                # Строго шире: два отчёта за один и тот же период друг друга не заменяют.
+                & ((covering.date_to - covering.date_from) > (ReportModel.date_to - ReportModel.date_from)),
+            )
+            .where(ReportModel.seller_id == seller_id, ReportModel.loaded_at.is_(None))
+        )
+        await self.session.execute(
+            update(ReportModel)
+            .where(ReportModel.seller_id == seller_id, ReportModel.report_id.in_(covered))
+            .values(loaded_at=now)
+        )
 
     async def pending_reports(self, seller_id: uuid.UUID, *, limit: int) -> list[ReportModel]:
         """Отчёты с недочитанной детализацией, старшие первыми."""

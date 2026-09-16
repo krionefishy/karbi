@@ -125,16 +125,26 @@ REPORT_ID = 835082906
 class FakeFinance(WBFinanceClient):
     """Один отчёт со строками, отдаёт их страницами по `page_size`, как WB по `rrdId`."""
 
-    def __init__(self, rows: list[ReportRow], *, page_size: int = 1000, reports: int = 1) -> None:
+    def __init__(
+        self,
+        rows: list[ReportRow],
+        *,
+        page_size: int = 1000,
+        reports: int = 1,
+        headers: list[ReportHeader] | None = None,
+    ) -> None:
         super().__init__(make_gateway())
         self.rows_served = sorted(rows, key=lambda row: row.rrd_id)
         self.page_size = page_size
         self.report_ids = [REPORT_ID + index for index in range(reports)]
+        self.headers = headers
         self.list_calls: list[tuple[date, date]] = []
         self.page_calls: list[tuple[int, int]] = []
 
     async def reports(self, seller_id: str, date_from: date, date_to: date) -> list[ReportHeader]:
         self.list_calls.append((date_from, date_to))
+        if self.headers is not None:
+            return list(self.headers)
         return [
             ReportHeader(
                 report_id,
@@ -279,6 +289,25 @@ async def test_only_a_few_reports_per_run_and_the_seller_stays_due(database: Dat
     assert tracked is not None and tracked.collected_at is not None
 
 
+async def test_daily_reports_inside_a_loaded_weekly_one_are_not_reread(database: Database, seller: uuid.UUID) -> None:
+    """Кабинет собран по недельным отчётам; суточные за ту же неделю — те же строки."""
+    await collect(database, seller, ROWS)  # недельный REPORT_ID за TODAY-12..TODAY-6 прочитан
+    inside = ReportHeader(REPORT_ID + 100, TODAY - timedelta(days=9), TODAY - timedelta(days=9), None, 1, 0.0, 0.0)
+    after = ReportHeader(REPORT_ID + 101, TODAY - timedelta(days=3), TODAY - timedelta(days=3), None, 1, 0.0, 0.0)
+    client = FakeFinance(ROWS, headers=[inside, after])
+
+    async with database.session() as session:
+        result = await CollectionService(
+            session, PenaltiesRepository(session), client, window_days=14, backfill_days=90, reports_per_run=6
+        ).collect(seller)
+
+    assert [report_id for report_id, _ in client.page_calls] == [after.report_id]
+    assert (result.reports_loaded, result.more) == (1, False)
+    async with database.session() as session:
+        pending = await PenaltiesRepository(session).pending_report_count(seller)
+    assert pending == 0
+
+
 async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Database, seller: uuid.UUID) -> None:
     await collect(database, seller, ROWS)
 
@@ -370,14 +399,17 @@ async def test_export_writes_numbers_as_text_and_totals_on_top(database: Databas
     assert "57048832986" in stickers and sheet.cell(row=6, column=9).number_format == "@"
 
 
-async def test_worker_collects_once_a_day_and_serves_refresh(database: Database, seller: uuid.UUID) -> None:
+async def test_worker_collects_every_few_hours_and_serves_refresh(database: Database, seller: uuid.UUID) -> None:
     client = FakeFinance(ROWS)
     morning = datetime(2026, 9, 16, 7, 0, tzinfo=MOSCOW)
     worker = PenaltiesWorker(database, client, SETTINGS, now=lambda tz: morning.astimezone(tz))
 
     assert await worker.collect_due(morning) == 1
-    assert await worker.collect_due(morning + timedelta(hours=2)) == 0
-    assert len(client.list_calls) == 1
+    # Отметка сбора ставится настоящим временем: через час после него кабинет ещё не в очереди,
+    # а через сутки — снова да.
+    assert await worker.collect_due(datetime.now(UTC) + timedelta(hours=1)) == 0
+    assert await worker.collect_due(datetime.now(UTC) + timedelta(days=1)) == 1
+    assert len(client.list_calls) == 2
 
     async with database.session() as session:
         state = await service(session).request_refresh(seller, None)
@@ -387,4 +419,4 @@ async def test_worker_collects_once_a_day_and_serves_refresh(database: Database,
         done = await service(session).refresh_state(seller)
         tracked = await session.get(TrackedSellerModel, seller)
     assert done is not None and done.status == "success"
-    assert tracked is not None and tracked.collected_at is not None and len(client.list_calls) == 2
+    assert tracked is not None and tracked.collected_at is not None and len(client.list_calls) == 3

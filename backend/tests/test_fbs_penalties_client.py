@@ -63,7 +63,7 @@ def report_row(rrd_id: int, **overrides) -> dict:
     return row
 
 
-async def test_reports_keep_only_main_weekly_reports() -> None:
+async def test_reports_keep_only_main_daily_reports() -> None:
     with respx.mock as router:
         stub = EgressStub(router)
         stub.on("POST", LIST, body=[header(835082906), header(835082909, report_type=2), {"reportId": "x"}])
@@ -83,7 +83,7 @@ async def test_reports_keep_only_main_weekly_reports() -> None:
         "dateTo": "2026-09-16",
         "limit": 1000,
         "offset": 0,
-        "period": "weekly",
+        "period": "daily",
     }
 
 

@@ -65,7 +65,12 @@ class WBFinanceClient(WBJsonClient):
     category = "Финансы"
 
     async def reports(self, seller_id: str, date_from: date, date_to: date) -> list[ReportHeader]:
-        """Основные недельные отчёты, у которых период пересекается с окном."""
+        """Основные суточные отчёты, у которых период пересекается с окном.
+
+        Суточный отчёт за день D появляется на D+1 и состоит из тех же строк (те же
+        `rrdId`), что потом лягут в недельный: штрафы за вчера видны сегодня, а не в
+        понедельник.
+        """
         collected: list[ReportHeader] = []
         offset = 0
         while True:
@@ -78,7 +83,7 @@ class WBFinanceClient(WBJsonClient):
                     "dateTo": date_to.isoformat(),
                     "limit": LIST_LIMIT,
                     "offset": offset,
-                    "period": "weekly",
+                    "period": "daily",
                 },
             )
             rows = self._rows(payload, "список отчётов")

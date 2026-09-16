@@ -29,9 +29,10 @@ class CollectionService:
     заняла бы полчаса без heartbeat. Пока отчёты остаются, отметка сбора не
     ставится и кабинет остаётся в очереди.
 
-    Окно списка — `window_days` назад (первый сбор — `backfill_days`): новые
-    недельные отчёты появляются по понедельникам, а старые хранятся только
-    те, что успели собрать — хранятся лишь строки с удержаниями.
+    Окно списка — `window_days` назад (первый сбор — `backfill_days`). Отчёты
+    суточные: за день D отчёт появляется на D+1, поэтому воркер спрашивает список
+    каждые несколько часов, а не раз в сутки. Отчёт, целиком лежащий в уже
+    прочитанном (суточный внутри собранного недельного), не перечитывается.
     """
 
     def __init__(
@@ -65,6 +66,7 @@ class CollectionService:
             await self.session.rollback()
             return CollectionResult(len(headers), 0, 0, 0, skipped=True)
         await self.penalties.upsert_reports(seller_id, headers, now=stamp)
+        await self.penalties.finish_covered_reports(seller_id, now=stamp)
         await self.session.commit()
 
         loaded = rows_seen = rows_kept = 0

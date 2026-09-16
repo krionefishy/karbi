@@ -21,11 +21,11 @@ STALE_REFRESH = timedelta(hours=1)
 
 
 class PenaltiesWorker:
-    """Суточный сбор фин. отчёта плюс кнопка «Обновить».
+    """Сбор фин. отчёта каждые `poll_hours` плюс кнопка «Обновить».
 
-    Раз в сутки, после утреннего сбора зеркала заданий: строки отчёта
-    появляются с задержкой в дни, чаще их спрашивать незачем, а лимит метода —
-    запрос в минуту. После неудачи повтор через `retry_minutes`.
+    Отчёты суточные и появляются на следующий день в неизвестный час, поэтому
+    список спрашивается несколько раз в сутки (один запрос), а детализация
+    читается только у новых отчётов. После неудачи повтор через `retry_minutes`.
     """
 
     def __init__(
@@ -67,14 +67,8 @@ class PenaltiesWorker:
         await self.collect_due(self._now(self.timezone))
 
     def due_since(self, now: datetime) -> datetime:
-        """Момент последнего наступившего сбора: до часа сбора сравниваем со вчерашним."""
-        local = now.astimezone(self.timezone)
-        scheduled = local.replace(
-            hour=self.config.collect_hour, minute=self.config.collect_minute, second=0, microsecond=0
-        )
-        if scheduled > local:
-            scheduled -= timedelta(days=1)
-        return scheduled.astimezone(UTC)
+        """Кабинет пора собирать, если последний удачный сбор старше `poll_hours`."""
+        return now.astimezone(UTC) - timedelta(hours=self.config.poll_hours)
 
     async def collect_due(self, now: datetime) -> int:
         since = self.due_since(now)
