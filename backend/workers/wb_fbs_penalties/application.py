@@ -3,7 +3,7 @@ import signal
 
 from backend.infrastructure.logging import configure_logging
 from backend.modules.wb_core.infrastructure.wb import EgressGateway
-from backend.modules.wb_fbs_penalties.infrastructure.wb import WBRealizationClient
+from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
 from backend.workers.wb_fbs_penalties.worker import PenaltiesWorker
@@ -17,7 +17,7 @@ class PenaltiesWorkerApplication:
         configure_logging(self.settings.app.log_level)
         self.database = Database()
         self.worker = PenaltiesWorker(
-            self.database, WBRealizationClient(EgressGateway(self.settings.egress)), self.settings
+            self.database, WBFinanceClient(EgressGateway(self.settings.egress)), self.settings
         )
 
     async def run(self) -> None:

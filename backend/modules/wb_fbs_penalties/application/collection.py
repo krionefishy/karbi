@@ -1,81 +1,98 @@
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
-from backend.modules.wb_fbs_penalties.infrastructure.wb import WBRealizationClient
+from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
 
 
 @dataclass(frozen=True, slots=True)
 class CollectionResult:
-    date_from: date
-    date_to: date
-    seen: int
-    kept: int
-    # Догрузка ещё не закончена: кабинет остаётся в очереди на следующий проход.
+    reports_seen: int
+    reports_loaded: int
+    rows_seen: int
+    rows_kept: int
+    # Отчёты ещё остались: кабинет остаётся в очереди на следующий проход.
     more: bool = False
     # Кабинет отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
 class CollectionService:
-    """Перечитать детализацию отчёта реализации и оставить строки с удержаниями.
+    """Список отчётов реализации и детализация тех, что ещё не прочитаны.
 
-    Один запрос за проход: лимит метода у токенов селлеров — запрос в час, и
-    вторая страница подряд получила бы 429. Первичная догрузка идёт по
-    странице за проход с курсором на кабинете; пока она не закончена, отметка
-    сбора не ставится и кабинет остаётся в очереди. Обычное окно перекрывает
-    две недели: строки отчёта появляются с задержкой и дописываются задним
-    числом, а повтор по `rrd_id` ничего не задваивает.
+    Отчёт после формирования не меняется, поэтому читается один раз и
+    отмечается. За проход берётся не больше `reports_per_run` отчётов: у метода
+    лимит запрос в минуту, и первичная догрузка крупного кабинета иначе
+    заняла бы полчаса без heartbeat. Пока отчёты остаются, отметка сбора не
+    ставится и кабинет остаётся в очереди.
+
+    Окно списка — `window_days` назад (первый сбор — `backfill_days`): новые
+    недельные отчёты появляются по понедельникам, а старые хранятся только
+    те, что успели собрать — хранятся лишь строки с удержаниями.
     """
 
     def __init__(
         self,
         session: AsyncSession,
         penalties: PenaltiesRepository,
-        client: WBRealizationClient,
+        client: WBFinanceClient,
         *,
         window_days: int,
         backfill_days: int,
+        reports_per_run: int,
     ) -> None:
         self.session = session
         self.penalties = penalties
         self.client = client
         self.window_days = window_days
         self.backfill_days = backfill_days
+        self.reports_per_run = reports_per_run
 
     async def collect(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> CollectionResult:
         stamp = now or datetime.now(UTC)
         today = stamp.date()
+        seller_key = str(seller_id)
         tracked = await self.penalties.tracked(seller_id)
-        backfilling = tracked is not None and not tracked.backfill_done
-        if backfilling and tracked is not None and tracked.backfill_from is None:
-            await self.penalties.start_backfill(seller_id, today - timedelta(days=self.backfill_days), today)
-            tracked = await self.penalties.tracked(seller_id)
-        if backfilling and tracked is not None and tracked.backfill_from and tracked.backfill_to:
-            date_from, date_to, cursor = tracked.backfill_from, tracked.backfill_to, tracked.backfill_cursor
-        else:
-            date_from, date_to, cursor = today - timedelta(days=self.window_days), today, 0
+        depth = self.window_days if tracked is not None and tracked.collected_at is not None else self.backfill_days
         # Сеть идёт до первой записи: держать транзакцию весь запрос незачем.
         await self.session.commit()
 
-        page = await self.client.page(str(seller_id), date_from, date_to, cursor=cursor)
-        charged = [row for row in page.rows if row.charged]
-
+        headers = await self.client.reports(seller_key, today - timedelta(days=depth), today)
         if not await self.penalties.still_tracked(seller_id):
             await self.session.rollback()
-            return CollectionResult(date_from, date_to, len(page.rows), 0, skipped=True)
-        await self.penalties.upsert_rows(seller_id, charged, now=stamp)
-        more = False
-        if backfilling:
-            if page.exhausted:
-                await self.penalties.finish_backfill(seller_id)
-            else:
-                await self.penalties.advance_backfill(seller_id, page.cursor)
-                more = True
+            return CollectionResult(len(headers), 0, 0, 0, skipped=True)
+        await self.penalties.upsert_reports(seller_id, headers, now=stamp)
+        await self.session.commit()
+
+        loaded = rows_seen = rows_kept = 0
+        for report in await self.penalties.pending_reports(seller_id, limit=self.reports_per_run):
+            cursor = report.cursor
+            while True:
+                page = await self.client.page(seller_key, report.report_id, cursor=cursor)
+                charged = [row for row in page.rows if row.charged]
+                rows_seen += len(page.rows)
+                rows_kept += len(charged)
+                if not await self.penalties.still_tracked(seller_id):
+                    await self.session.rollback()
+                    return CollectionResult(len(headers), loaded, rows_seen, rows_kept, skipped=True)
+                await self.penalties.upsert_rows(seller_id, charged, now=stamp)
+                if page.exhausted:
+                    await self.penalties.finish_report(seller_id, report.report_id, now=stamp)
+                    loaded += 1
+                else:
+                    await self.penalties.advance_report(seller_id, report.report_id, page.cursor)
+                # Страница — отдельная транзакция: упавший на третьей странице
+                # процесс не должен перечитывать первые две.
+                await self.session.commit()
+                if page.exhausted:
+                    break
+                cursor = page.cursor
+
+        more = await self.penalties.pending_report_count(seller_id) > 0
         if not more:
             await self.penalties.finish_collection(seller_id, now=stamp)
         await self.session.commit()
-        return CollectionResult(date_from, date_to, len(page.rows), len(charged), more=more)
+        return CollectionResult(len(headers), loaded, rows_seen, rows_kept, more=more)

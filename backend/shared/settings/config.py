@@ -328,13 +328,15 @@ class FbsPenaltiesConfig:
     # уже есть с чем сойтись.
     collect_hour: int = 6
     collect_minute: int = 30
-    # Лимит метода у токенов селлеров — запрос в час (WB отвечает 429 с Retry-After
-    # на час): повтор раньше только сожжёт следующую попытку.
-    retry_minutes: int = 65
-    # Строки отчёта появляются с задержкой в дни: обычное окно перекрывает две недели,
+    # Лимит детализации — запрос в минуту, его держит шлюз; пауза нужна только
+    # после настоящей ошибки и чтобы дочитать оставшиеся отчёты следующим проходом.
+    retry_minutes: int = 10
+    # Список отчётов смотрится на две недели назад — новые появляются по понедельникам;
     # первый сбор кабинета — три месяца, за штрафами она приходит спустя недели.
     report_window_days: int = 14
     report_backfill_days: int = 90
+    # Сколько отчётов дочитывать за проход: по минуте на страницу, heartbeat раз в 15.
+    reports_per_run: int = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,7 +459,14 @@ class Settings:
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
-        for key in ("collect_hour", "collect_minute", "retry_minutes", "report_window_days", "report_backfill_days"):
+        for key in (
+            "collect_hour",
+            "collect_minute",
+            "retry_minutes",
+            "report_window_days",
+            "report_backfill_days",
+            "reports_per_run",
+        ):
             if key in fbs_penalties:
                 fbs_penalties[key] = int(fbs_penalties[key])
         telegram = dict(data.get("telegram", {}))
@@ -550,8 +559,16 @@ class Settings:
         penalties = self.fbs_penalties
         if not 0 <= penalties.collect_hour <= 23 or not 0 <= penalties.collect_minute <= 59:
             raise ValueError("fbs_penalties.collect_hour/minute must be a valid time of day")
-        if min(penalties.retry_minutes, penalties.report_window_days, penalties.report_backfill_days) < 1:
-            raise ValueError("fbs_penalties.retry_minutes and report windows must be positive")
+        if (
+            min(
+                penalties.retry_minutes,
+                penalties.report_window_days,
+                penalties.report_backfill_days,
+                penalties.reports_per_run,
+            )
+            < 1
+        ):
+            raise ValueError("fbs_penalties.retry_minutes, report windows and reports_per_run must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

@@ -5,6 +5,7 @@ from backend.modules.wb_fbs_penalties.domain.entities import (
     GROUP_STORAGE,
     GROUP_TITLES,
     GROUPS,
+    ReportHeader,
     ReportRow,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "GROUP_PENALTIES",
     "GROUP_STORAGE",
     "GROUP_TITLES",
+    "ReportHeader",
     "ReportRow",
 ]

@@ -10,13 +10,13 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_fbs_penalties.application import CollectionService
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
-from backend.modules.wb_fbs_penalties.infrastructure.wb import WBRealizationClient
+from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# Отчёт за три месяца — несколько страниц по минуте каждая (лимит WB). Запрос
-# «в работе» дольше часа живым быть не может: его бросил упавший процесс.
+# Проход — до шести отчётов по минуте на страницу (лимит WB). Запрос «в работе»
+# дольше часа живым быть не может: его бросил упавший процесс.
 STALE_REFRESH = timedelta(hours=1)
 
 
@@ -31,7 +31,7 @@ class PenaltiesWorker:
     def __init__(
         self,
         database: Database,
-        client: WBRealizationClient,
+        client: WBFinanceClient,
         settings: Settings,
         *,
         now: Callable[[ZoneInfo], datetime] | None = None,
@@ -122,6 +122,7 @@ class PenaltiesWorker:
                     self.client,
                     window_days=self.config.report_window_days,
                     backfill_days=self.config.report_backfill_days,
+                    reports_per_run=self.config.reports_per_run,
                 )
                 result = await service.collect(seller_id)
         except (WBPermanentError, WBTemporaryError) as error:
@@ -135,10 +136,10 @@ class PenaltiesWorker:
         self.logger.info(
             "fbs_penalties_collected",
             seller_id=str(seller_id),
-            date_from=result.date_from.isoformat(),
-            date_to=result.date_to.isoformat(),
-            seen=result.seen,
-            kept=result.kept,
+            reports_seen=result.reports_seen,
+            reports_loaded=result.reports_loaded,
+            rows_seen=result.rows_seen,
+            rows_kept=result.rows_kept,
             more=result.more,
             skipped=result.skipped,
         )

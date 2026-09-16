@@ -3,11 +3,11 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     CheckConstraint,
     Date,
     DateTime,
     Index,
+    Integer,
     MetaData,
     Numeric,
     String,
@@ -34,12 +34,30 @@ class TrackedSellerModel(WBFbsPenaltiesBase):
     # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Первичная догрузка — по странице за проход: лимит метода у токенов селлеров
-    # один запрос в час, а три месяца крупного кабинета в одну страницу не влезают.
-    backfill_from: Mapped[date | None] = mapped_column(Date, nullable=True)
-    backfill_to: Mapped[date | None] = mapped_column(Date, nullable=True)
-    backfill_cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    backfill_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class ReportModel(WBFbsPenaltiesBase):
+    """Отчёт реализации из списка WB и докуда дочитана его детализация.
+
+    Отчёт после формирования не меняется, поэтому грузится один раз; `cursor` —
+    `rrdId` последней прочитанной строки, `loaded_at` — детализация дочитана.
+    """
+
+    __tablename__ = "reports"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    report_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    create_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    report_type: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    penalty_sum: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
+    deduction_sum: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
+    cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_wb_fbs_penalties_reports_period", "seller_id", "date_from"),)
 
 
 class ReportRowModel(WBFbsPenaltiesBase):

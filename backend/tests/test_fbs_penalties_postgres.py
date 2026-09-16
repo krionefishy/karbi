@@ -28,9 +28,13 @@ from backend.modules.wb_fbs_penalties.application import (
     PenaltiesQueryError,
     PenaltiesService,
 )
-from backend.modules.wb_fbs_penalties.domain import GROUP_PENALTIES, GROUP_STORAGE, ReportRow
-from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository, TrackedSellerModel
-from backend.modules.wb_fbs_penalties.infrastructure.wb import ReportPage, WBRealizationClient
+from backend.modules.wb_fbs_penalties.domain import GROUP_PENALTIES, GROUP_STORAGE, ReportHeader, ReportRow
+from backend.modules.wb_fbs_penalties.infrastructure.postgres import (
+    PenaltiesRepository,
+    ReportModel,
+    TrackedSellerModel,
+)
+from backend.modules.wb_fbs_penalties.infrastructure.wb import ReportPage, WBFinanceClient
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 from backend.tests.egress_stub import make_gateway
@@ -115,17 +119,37 @@ def order(order_id: int, rid: str, *, supply: str | None, sticker: int | None = 
     )
 
 
-class FakeRealization(WBRealizationClient):
-    """Отдаёт строки страницами по `page_size`, как WB по `rrdid`."""
+REPORT_ID = 835082906
 
-    def __init__(self, rows: list[ReportRow], *, page_size: int = 1000) -> None:
+
+class FakeFinance(WBFinanceClient):
+    """Один отчёт со строками, отдаёт их страницами по `page_size`, как WB по `rrdId`."""
+
+    def __init__(self, rows: list[ReportRow], *, page_size: int = 1000, reports: int = 1) -> None:
         super().__init__(make_gateway())
         self.rows_served = sorted(rows, key=lambda row: row.rrd_id)
         self.page_size = page_size
-        self.calls: list[tuple[date, date, int]] = []
+        self.report_ids = [REPORT_ID + index for index in range(reports)]
+        self.list_calls: list[tuple[date, date]] = []
+        self.page_calls: list[tuple[int, int]] = []
 
-    async def page(self, seller_id: str, date_from: date, date_to: date, *, cursor: int = 0) -> ReportPage:
-        self.calls.append((date_from, date_to, cursor))
+    async def reports(self, seller_id: str, date_from: date, date_to: date) -> list[ReportHeader]:
+        self.list_calls.append((date_from, date_to))
+        return [
+            ReportHeader(
+                report_id,
+                TODAY - timedelta(days=12),
+                TODAY - timedelta(days=6),
+                TODAY - timedelta(days=5),
+                1,
+                573.04,
+                0.0,
+            )
+            for report_id in self.report_ids
+        ]
+
+    async def page(self, seller_id: str, report_id: int, *, cursor: int = 0) -> ReportPage:
+        self.page_calls.append((report_id, cursor))
         rest = [row for row in self.rows_served if row.rrd_id > cursor]
         chunk = rest[: self.page_size]
         return ReportPage(
@@ -189,51 +213,70 @@ ROWS = [
 
 
 async def collect(
-    database: Database, seller_id: uuid.UUID, rows: list[ReportRow], *, now: datetime = NOW, page_size: int = 1000
-) -> FakeRealization:
-    client = FakeRealization(rows, page_size=page_size)
+    database: Database,
+    seller_id: uuid.UUID,
+    rows: list[ReportRow],
+    *,
+    now: datetime = NOW,
+    page_size: int = 1000,
+    reports: int = 1,
+    per_run: int = 6,
+) -> FakeFinance:
+    client = FakeFinance(rows, page_size=page_size, reports=reports)
     async with database.session() as session:
         await CollectionService(
-            session, PenaltiesRepository(session), client, window_days=14, backfill_days=90
+            session, PenaltiesRepository(session), client, window_days=14, backfill_days=90, reports_per_run=per_run
         ).collect(seller_id, now=now)
     return client
 
 
-async def test_collection_keeps_only_charged_rows_and_backfills_on_first_run(
+async def test_collection_keeps_only_charged_rows_and_lists_three_months_first(
     database: Database, seller: uuid.UUID
 ) -> None:
     client = await collect(database, seller, ROWS)
-    assert client.calls == [(TODAY - timedelta(days=90), TODAY, 0)]
+    assert client.list_calls == [(TODAY - timedelta(days=90), TODAY)]
+    assert client.page_calls == [(REPORT_ID, 0)]
 
     async with database.session() as session:
         stored = await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)
+        report = await session.get(ReportModel, (seller, REPORT_ID))
         tracked = await session.get(TrackedSellerModel, seller)
-    # Строка без удержаний (4) не хранится; догрузка уложилась в страницу и закрыта.
+    # Строка без удержаний (4) не хранится; отчёт дочитан, кабинет собран.
     assert sorted(row.rrd_id for row in stored) == [1, 2, 3]
-    assert tracked is not None and tracked.backfill_done and tracked.collected_at is not None
+    assert report is not None and report.loaded_at is not None and report.penalty_sum == 573.04
+    assert tracked is not None and tracked.collected_at is not None
 
+    # Повторный сбор смотрит список на две недели, а дочитанный отчёт не перечитывает.
     again = await collect(database, seller, ROWS, now=NOW + timedelta(days=1))
-    assert again.calls == [(TODAY + timedelta(days=1) - timedelta(days=14), TODAY + timedelta(days=1), 0)]
+    assert again.list_calls == [(TODAY + timedelta(days=1) - timedelta(days=14), TODAY + timedelta(days=1))]
+    assert again.page_calls == []
+
+
+async def test_a_long_report_is_read_page_by_page_within_one_run(database: Database, seller: uuid.UUID) -> None:
+    client = await collect(database, seller, ROWS, page_size=3)
+    # Полная страница → вторая с курсором 3; неполная закрывает отчёт.
+    assert client.page_calls == [(REPORT_ID, 0), (REPORT_ID, 3)]
     async with database.session() as session:
-        assert len(await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)) == 3
+        report = await session.get(ReportModel, (seller, REPORT_ID))
+        tracked = await session.get(TrackedSellerModel, seller)
+    assert report is not None and report.loaded_at is not None and report.cursor == 3
+    assert tracked is not None and tracked.collected_at is not None
 
 
-async def test_backfill_takes_one_page_per_run_and_keeps_the_seller_due(database: Database, seller: uuid.UUID) -> None:
-    """Лимит метода — запрос в час: вторая страница ждёт следующего прохода, а не следующего дня."""
-    first = await collect(database, seller, ROWS, page_size=3)
-    assert first.calls == [(TODAY - timedelta(days=90), TODAY, 0)]
+async def test_only_a_few_reports_per_run_and_the_seller_stays_due(database: Database, seller: uuid.UUID) -> None:
+    """Лимит метода — запрос в минуту: восемь отчётов дочитываются за два прохода, не за один."""
+    first = await collect(database, seller, ROWS, reports=8, per_run=6)
+    assert len(first.page_calls) == 6
     async with database.session() as session:
         tracked = await session.get(TrackedSellerModel, seller)
-        assert tracked is not None and not tracked.backfill_done and tracked.backfill_cursor == 3
-        assert tracked.collected_at is None
-        assert len(await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)) == 3
+        pending = await PenaltiesRepository(session).pending_report_count(seller)
+    assert tracked is not None and tracked.collected_at is None and pending == 2
 
-    second = await collect(database, seller, ROWS, page_size=3, now=NOW + timedelta(hours=1))
-    # Тот же период и курсор с прошлой страницы; страница неполная — догрузка закрыта.
-    assert second.calls == [(TODAY - timedelta(days=90), TODAY, 3)]
+    second = await collect(database, seller, ROWS, reports=8, per_run=6, now=NOW + timedelta(minutes=10))
+    assert [report_id for report_id, _ in second.page_calls] == [REPORT_ID + 6, REPORT_ID + 7]
     async with database.session() as session:
         tracked = await session.get(TrackedSellerModel, seller)
-        assert tracked is not None and tracked.backfill_done and tracked.collected_at is not None
+    assert tracked is not None and tracked.collected_at is not None
 
 
 async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Database, seller: uuid.UUID) -> None:
@@ -303,13 +346,13 @@ async def test_export_writes_numbers_as_text_and_totals_on_top(database: Databas
 
 
 async def test_worker_collects_once_a_day_and_serves_refresh(database: Database, seller: uuid.UUID) -> None:
-    client = FakeRealization(ROWS)
+    client = FakeFinance(ROWS)
     morning = datetime(2026, 9, 16, 7, 0, tzinfo=MOSCOW)
     worker = PenaltiesWorker(database, client, SETTINGS, now=lambda tz: morning.astimezone(tz))
 
     assert await worker.collect_due(morning) == 1
     assert await worker.collect_due(morning + timedelta(hours=2)) == 0
-    assert len(client.calls) == 1
+    assert len(client.list_calls) == 1
 
     async with database.session() as session:
         state = await service(session).request_refresh(seller, None)
@@ -319,4 +362,4 @@ async def test_worker_collects_once_a_day_and_serves_refresh(database: Database,
         done = await service(session).refresh_state(seller)
         tracked = await session.get(TrackedSellerModel, seller)
     assert done is not None and done.status == "success"
-    assert tracked is not None and tracked.collected_at is not None and len(client.calls) == 2
+    assert tracked is not None and tracked.collected_at is not None and len(client.list_calls) == 2

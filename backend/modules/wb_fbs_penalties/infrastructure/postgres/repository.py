@@ -7,9 +7,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_fbs_penalties.domain import ReportRow
+from backend.modules.wb_fbs_penalties.domain import ReportHeader, ReportRow
 from backend.modules.wb_fbs_penalties.infrastructure.postgres.models import (
     RefreshRequestModel,
+    ReportModel,
     ReportRowModel,
     TrackedSellerModel,
 )
@@ -37,7 +38,7 @@ class PenaltiesRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        for model in (ReportRowModel, RefreshRequestModel):
+        for model in (ReportRowModel, ReportModel, RefreshRequestModel):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
 
@@ -78,21 +79,73 @@ class PenaltiesRepository:
             .values(collected_at=now, collection_error=None)
         )
 
-    async def start_backfill(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> None:
+    # --- reports ----------------------------------------------------------
+
+    async def upsert_reports(self, seller_id: uuid.UUID, headers: Iterable[ReportHeader], *, now: datetime) -> int:
+        """Список отчётов: новые появляются, известные обновляют суммы; курсор и отметка загрузки не трогаются."""
+        rows = [
+            {
+                "seller_id": seller_id,
+                "report_id": header.report_id,
+                "date_from": header.date_from,
+                "date_to": header.date_to,
+                "create_date": header.create_date,
+                "report_type": header.report_type,
+                "penalty_sum": header.penalty_sum,
+                "deduction_sum": header.deduction_sum,
+                "seen_at": now,
+            }
+            for header in headers
+        ]
+        if not rows:
+            return 0
+        statement = insert(ReportModel).values(rows)
+        excluded = statement.excluded
         await self.session.execute(
-            update(TrackedSellerModel)
-            .where(TrackedSellerModel.seller_id == seller_id)
-            .values(backfill_from=date_from, backfill_to=date_to, backfill_cursor=0, backfill_done=False)
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "report_id"],
+                set_={
+                    "date_from": excluded.date_from,
+                    "date_to": excluded.date_to,
+                    "create_date": excluded.create_date,
+                    "penalty_sum": excluded.penalty_sum,
+                    "deduction_sum": excluded.deduction_sum,
+                    "seen_at": excluded.seen_at,
+                },
+            )
+        )
+        return len(rows)
+
+    async def pending_reports(self, seller_id: uuid.UUID, *, limit: int) -> list[ReportModel]:
+        """Отчёты с недочитанной детализацией, старшие первыми."""
+        rows = await self.session.scalars(
+            select(ReportModel)
+            .where(ReportModel.seller_id == seller_id, ReportModel.loaded_at.is_(None))
+            .order_by(ReportModel.date_from, ReportModel.report_id)
+            .limit(limit)
+        )
+        return list(rows)
+
+    async def pending_report_count(self, seller_id: uuid.UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count()).where(ReportModel.seller_id == seller_id, ReportModel.loaded_at.is_(None))
+            )
+            or 0
         )
 
-    async def advance_backfill(self, seller_id: uuid.UUID, cursor: int) -> None:
+    async def advance_report(self, seller_id: uuid.UUID, report_id: int, cursor: int) -> None:
         await self.session.execute(
-            update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(backfill_cursor=cursor)
+            update(ReportModel)
+            .where(ReportModel.seller_id == seller_id, ReportModel.report_id == report_id)
+            .values(cursor=cursor)
         )
 
-    async def finish_backfill(self, seller_id: uuid.UUID) -> None:
+    async def finish_report(self, seller_id: uuid.UUID, report_id: int, *, now: datetime) -> None:
         await self.session.execute(
-            update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(backfill_done=True)
+            update(ReportModel)
+            .where(ReportModel.seller_id == seller_id, ReportModel.report_id == report_id)
+            .values(loaded_at=now)
         )
 
     async def fail_collection(self, seller_id: uuid.UUID, error: str) -> None:

@@ -18,6 +18,19 @@ GROUP_TITLES = {
 
 
 @dataclass(frozen=True, slots=True)
+class ReportHeader:
+    """Отчёт реализации из списка: единица сбора. После формирования не меняется."""
+
+    report_id: int
+    date_from: date
+    date_to: date
+    create_date: date | None
+    report_type: int
+    penalty_sum: float
+    deduction_sum: float
+
+
+@dataclass(frozen=True, slots=True)
 class ReportRow:
     """Строка детализации отчёта реализации WB — как отдал API, без пересчёта.
 
