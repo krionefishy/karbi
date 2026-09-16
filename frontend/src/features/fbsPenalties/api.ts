@@ -20,8 +20,9 @@ export const getPenalties = (sellerId: string, filter: PenaltiesFilter) =>
 export const lookupPenalties = (sellerId: string, text: string) =>
   apiRequest<Lookup>(`${base(sellerId)}/lookup`, { method: "POST", body: JSON.stringify({ keys: [text] }) });
 
+/** Книга с тем, что открыто на экране: период, вкладка группы и склад, все страницы разом. */
 export const downloadPenalties = (sellerId: string, filter: PenaltiesFilter) =>
-  apiDownload(`${base(sellerId)}/export?${query({ ...filter, group: "", warehouseId: null, page: 1 })}`);
+  apiDownload(`${base(sellerId)}/export?${query(filter)}`);
 
 export const requestRefresh = (sellerId: string) =>
   apiRequest<RefreshState>(`${base(sellerId)}/refresh`, { method: "POST" });

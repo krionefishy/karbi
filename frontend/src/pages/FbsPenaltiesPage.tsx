@@ -215,10 +215,12 @@ export function FbsPenaltiesPage() {
                     className="primary-button"
                     disabled={exportMutation.isPending || invalidRange}
                     onClick={() => exportMutation.mutate()}
-                    title="Книга по кабинету за выбранный период"
+                    title="Книга по кабинету за выбранный период: открытая вкладка и склад, все страницы"
                   >
                     <Download size={15} />
-                    {exportMutation.isPending ? "Собираем…" : "Выгрузить в Excel"}
+                    {exportMutation.isPending
+                      ? "Собираем…"
+                      : `Выгрузить в Excel${filter.group ? `: ${GROUP_OPTIONS.find((o) => o.value === filter.group)?.label ?? ""}` : ""}`}
                   </button>
                 </>
               )}

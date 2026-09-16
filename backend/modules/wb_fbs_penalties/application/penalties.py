@@ -3,6 +3,7 @@ import re
 import uuid
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -166,10 +167,24 @@ class PenaltiesService:
                 views.append(self._from_trace(trace))
         return LookupView(rows=tuple(views), missing=tuple(misses))
 
-    async def export(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> PenaltiesReportFile:
-        view = await self.view(seller_id, date_from, date_to)
+    async def export(
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
+    ) -> PenaltiesReportFile:
+        """Книга с тем, что открыто на экране: период, вкладка группы, склад — все страницы разом."""
+        view = await self.view(seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id)
+        if group:
+            # Итоги сверху — по тому, что в файле, а не по всем группам периода.
+            view = replace(view, totals=self._totals(list(view.rows)))
         content = await asyncio.to_thread(render_workbook, view)
-        return PenaltiesReportFile(seller_name=view.seller_name, date_from=date_from, date_to=date_to, content=content)
+        return PenaltiesReportFile(
+            seller_name=view.seller_name, date_from=date_from, date_to=date_to, group=group, content=content
+        )
 
     # --- refresh ----------------------------------------------------------------
 

@@ -157,10 +157,12 @@ async def export_penalties(
     service: FromDishka[PenaltiesService],
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    group: str | None = Query(default=None),
+    warehouse: int | None = Query(default=None),
 ) -> Response:
     start, end = _period(date_from, date_to)
     try:
-        report = await service.export(seller_id, start, end)
+        report = await service.export(seller_id, start, end, group=group or None, warehouse_id=warehouse)
     except SellerNotFoundError as error:
         raise not_enrolled() from error
     except PenaltiesQueryError as error:
@@ -169,7 +171,9 @@ async def export_penalties(
     return Response(
         content=report.content,
         media_type=XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": f"attachment; filename=\"{report.filename}\"; filename*=UTF-8''{encoded}"},
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{report.ascii_filename}\"; filename*=UTF-8''{encoded}"
+        },
     )
 
 

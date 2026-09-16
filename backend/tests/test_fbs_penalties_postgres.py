@@ -348,6 +348,20 @@ async def test_export_writes_numbers_as_text_and_totals_on_top(database: Databas
         report = await service(session).export(seller, TODAY - timedelta(days=30), TODAY)
 
     assert report.filename.startswith("fbs_penalties_ИП_Штрафы_")
+    # В заголовок идёт только ASCII: кириллица в `filename=` роняла выгрузку.
+    assert (
+        report.ascii_filename
+        == f"fbs_penalties_seller_{(TODAY - timedelta(days=30)).isoformat()}_{TODAY.isoformat()}.xlsx"
+    )
+    report.ascii_filename.encode("latin-1")
+
+    async with database.session() as session:
+        only = await service(session).export(seller, TODAY - timedelta(days=30), TODAY, group=GROUP_PENALTIES)
+    assert "_penalties_" in only.filename
+    sheet = load_workbook(io.BytesIO(only.content))["Штрафы"]
+    # Итоги сверху — по тому, что в файле: одна группа, две строки.
+    assert sheet["A2"].value == "Штрафы" and sheet["B2"].value == 2
+    assert sheet["A3"].value != "Хранение и приёмка"
     sheet = load_workbook(io.BytesIO(report.content))["Штрафы"]
     assert sheet["A2"].value == "Штрафы" and sheet["B2"].value == 2 and sheet["C2"].value == 573.04
     header = [cell.value for cell in sheet[5]]

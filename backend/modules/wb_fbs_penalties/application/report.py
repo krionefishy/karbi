@@ -48,11 +48,24 @@ class PenaltiesReportFile:
     date_from: date
     date_to: date
     content: bytes
+    group: str | None = None
 
     @property
     def filename(self) -> str:
+        """Имя с названием кабинета — как она увидит файл в загрузках."""
         name = re.sub(r"[^\w-]+", "_", self.seller_name, flags=re.UNICODE).strip("_") or "seller"
-        return f"fbs_penalties_{name}_{self.date_from.isoformat()}_{self.date_to.isoformat()}.xlsx"
+        return self._filename(name)
+
+    @property
+    def ascii_filename(self) -> str:
+        """То же для `filename=` в заголовке: HTTP-заголовок не переносит кириллицу, а
+        кабинеты называются по-русски — иначе выгрузка падает пятисоткой."""
+        name = re.sub(r"[^A-Za-z0-9-]+", "_", self.seller_name).strip("_") or "seller"
+        return self._filename(name)
+
+    def _filename(self, name: str) -> str:
+        group = f"_{self.group}" if self.group else ""
+        return f"fbs_penalties_{name}{group}_{self.date_from.isoformat()}_{self.date_to.isoformat()}.xlsx"
 
 
 def render_workbook(view: PenaltiesView) -> bytes:
