@@ -56,8 +56,13 @@ class PenaltiesView:
     collected_at: datetime | None
     collection_error: str | None
     rows: tuple[PenaltyRowView, ...]
+    # Итоги по всем группам за период — вкладкам нужны счётчики и тогда, когда
+    # открыта одна группа. Фильтр по складу их сужает, страница — нет.
     totals: tuple[GroupTotal, ...]
     warehouses: tuple[WarehouseOption, ...]
+    page: int = 1
+    page_size: int | None = None
+    total_rows: int = 0
 
 
 @dataclass(frozen=True, slots=True)

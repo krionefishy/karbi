@@ -11,15 +11,17 @@ function query(filter: PenaltiesFilter): string {
   return params.toString();
 }
 
+export const PAGE_SIZE = 200;
+
 export const getPenalties = (sellerId: string, filter: PenaltiesFilter) =>
-  apiRequest<Penalties>(`${base(sellerId)}?${query(filter)}`);
+  apiRequest<Penalties>(`${base(sellerId)}?${query(filter)}&page=${filter.page}&page_size=${PAGE_SIZE}`);
 
 /** Вставленный текст: стикеры или номера заказов — по одному в строке, через запятую или пробел. */
 export const lookupPenalties = (sellerId: string, text: string) =>
   apiRequest<Lookup>(`${base(sellerId)}/lookup`, { method: "POST", body: JSON.stringify({ keys: [text] }) });
 
 export const downloadPenalties = (sellerId: string, filter: PenaltiesFilter) =>
-  apiDownload(`${base(sellerId)}/export?${query({ ...filter, group: "", warehouseId: null })}`);
+  apiDownload(`${base(sellerId)}/export?${query({ ...filter, group: "", warehouseId: null, page: 1 })}`);
 
 export const requestRefresh = (sellerId: string) =>
   apiRequest<RefreshState>(`${base(sellerId)}/refresh`, { method: "POST" });

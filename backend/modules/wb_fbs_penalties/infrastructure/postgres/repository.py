@@ -2,12 +2,19 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_fbs_penalties.domain import ReportHeader, ReportRow
+from backend.modules.wb_fbs_penalties.domain import (
+    GROUP_DEDUCTIONS,
+    GROUP_LOGISTICS,
+    GROUP_PENALTIES,
+    GROUP_STORAGE,
+    ReportHeader,
+    ReportRow,
+)
 from backend.modules.wb_fbs_penalties.infrastructure.postgres.models import (
     RefreshRequestModel,
     ReportModel,
@@ -247,18 +254,92 @@ class PenaltiesRepository:
             )
         return len(values)
 
-    async def rows_in_period(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> list[ReportRow]:
-        """Строки по дате операции отчёта (`rr_dt`); свежие сверху."""
-        rows = await self.session.scalars(
+    async def rows_in_period(
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[ReportRow]:
+        """Строки по дате операции отчёта (`rr_dt`); свежие сверху, страницей — если просят.
+
+        Группа и страница режутся в SQL: логистика за месяц — двадцать тысяч строк,
+        поднимать их в память ради одной страницы не за чем.
+        """
+        statement = (
             select(ReportRowModel)
-            .where(
-                ReportRowModel.seller_id == seller_id,
-                ReportRowModel.rr_dt >= date_from,
-                ReportRowModel.rr_dt <= date_to,
-            )
+            .where(*self._period(seller_id, date_from, date_to, group))
             .order_by(ReportRowModel.rr_dt.desc(), ReportRowModel.rrd_id.desc())
+            .offset(offset)
         )
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = await self.session.scalars(statement)
         return [self._row(row) for row in rows]
+
+    async def count_in_period(
+        self, seller_id: uuid.UUID, date_from: date, date_to: date, *, group: str | None = None
+    ) -> int:
+        return (
+            await self.session.scalar(
+                select(func.count())
+                .select_from(ReportRowModel)
+                .where(*self._period(seller_id, date_from, date_to, group))
+            )
+            or 0
+        )
+
+    async def totals_in_period(
+        self, seller_id: uuid.UUID, date_from: date, date_to: date
+    ) -> dict[str, tuple[int, float]]:
+        """Строк и сумма по каждой группе за период — те же правила, что у `ReportRow.group`."""
+        group = self._group_expr()
+        result = await self.session.execute(
+            select(group, func.count(), func.sum(self._amount_expr()))
+            .where(*self._period(seller_id, date_from, date_to, None))
+            .group_by(group)
+        )
+        return {name: (int(count), round(float(amount or 0), 2)) for name, count, amount in result if name}
+
+    def _period(self, seller_id: uuid.UUID, date_from: date, date_to: date, group: str | None) -> list:
+        conditions = [
+            ReportRowModel.seller_id == seller_id,
+            ReportRowModel.rr_dt >= date_from,
+            ReportRowModel.rr_dt <= date_to,
+        ]
+        if group:
+            conditions.append(self._group_expr() == group)
+        return conditions
+
+    @staticmethod
+    def _group_expr():  # noqa: ANN205 — выражение SQLAlchemy, тип у него не для чтения
+        """`ReportRow.group` на языке SQL: первая ненулевая сумма решает, куда строка попала."""
+        return case(
+            (ReportRowModel.penalty != 0, GROUP_PENALTIES),
+            (or_(ReportRowModel.deduction != 0, ReportRowModel.additional_payment != 0), GROUP_DEDUCTIONS),
+            (ReportRowModel.rebill_logistic_cost != 0, GROUP_LOGISTICS),
+            (or_(ReportRowModel.storage_fee != 0, ReportRowModel.acceptance != 0), GROUP_STORAGE),
+            else_=None,
+        )
+
+    @staticmethod
+    def _amount_expr():  # noqa: ANN205
+        return case(
+            (ReportRowModel.penalty != 0, ReportRowModel.penalty),
+            (
+                or_(ReportRowModel.deduction != 0, ReportRowModel.additional_payment != 0),
+                ReportRowModel.deduction + ReportRowModel.additional_payment,
+            ),
+            (ReportRowModel.rebill_logistic_cost != 0, ReportRowModel.rebill_logistic_cost),
+            (
+                or_(ReportRowModel.storage_fee != 0, ReportRowModel.acceptance != 0),
+                ReportRowModel.storage_fee + ReportRowModel.acceptance,
+            ),
+            else_=0,
+        )
 
     async def rows_by_keys(
         self,

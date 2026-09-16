@@ -603,6 +603,10 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .penalties-field .field-label { margin-bottom: 5px; }
 .penalties-field input, .penalties-field select { height: 36px; padding: 0 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); font: inherit; font-size: 13px; }
 .penalties-field select { min-width: 200px; }
+.penalties-groups { margin-bottom: 12px; }
+.penalties-groups button small { margin-left: 7px; font-size: 11px; opacity: .75; }
+.penalties-pager { display: flex; gap: 14px; align-items: center; justify-content: center; margin-top: 14px; color: var(--muted); font-size: 13px; }
+.penalties-pager .secondary-button { height: 34px; padding: 0 12px; }
 .penalties-totals { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
 .penalties-totals article { display: flex; flex-direction: column; gap: 2px; min-width: 160px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); }
 .penalties-totals article span { color: var(--muted); font-size: 12px; }

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { defaultPeriod, money, periodLabel } from "./period";
 
 describe("период штрафов", () => {
-  it("по умолчанию — последние 30 дней", () => {
-    expect(defaultPeriod(new Date(2026, 8, 16))).toEqual({ dateFrom: "2026-08-17", dateTo: "2026-09-16" });
+  it("по умолчанию — последняя неделя", () => {
+    expect(defaultPeriod(new Date(2026, 8, 16))).toEqual({ dateFrom: "2026-09-09", dateTo: "2026-09-16" });
   });
 
   it("неделя отчёта читается по-русски", () => {

@@ -303,10 +303,21 @@ async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Da
     async with database.session() as session:
         only_penalties = await service(session).view(seller, TODAY - timedelta(days=30), TODAY, group=GROUP_PENALTIES)
         outside = await service(session).view(seller, TODAY - timedelta(days=2), TODAY)
-    assert [item.row.rrd_id for item in only_penalties.rows] == [1, 2] or sorted(
-        item.row.rrd_id for item in only_penalties.rows
-    ) == [1, 2]
+        first = await service(session).view(seller, TODAY - timedelta(days=30), TODAY, page=1, page_size=2)
+        last = await service(session).view(seller, TODAY - timedelta(days=30), TODAY, page=2, page_size=2)
+        kazan = await service(session).view(
+            seller, TODAY - timedelta(days=30), TODAY, warehouse_id=KAZAN.warehouse_id, page=1, page_size=1
+        )
+    assert sorted(item.row.rrd_id for item in only_penalties.rows) == [1, 2]
+    # Итоги — за весь период, вкладкам нужны счётчики всех групп и на странице одной.
+    assert {t.group for t in only_penalties.totals} == {GROUP_PENALTIES, GROUP_STORAGE}
+    assert only_penalties.total_rows == 2
     assert outside.rows == ()
+    assert (len(first.rows), len(last.rows), first.total_rows, last.page) == (2, 1, 3, 2)
+    assert {item.row.rrd_id for item in first.rows} | {item.row.rrd_id for item in last.rows} == {1, 2, 3}
+    # Фильтр по складу знает только зеркало, поэтому и итоги считаются по отфильтрованным строкам.
+    assert (kazan.total_rows, len(kazan.rows)) == (2, 1)
+    assert {t.group: t.count for t in kazan.totals} == {GROUP_PENALTIES: 2}
 
     with pytest.raises(PenaltiesQueryError):
         async with database.session() as session:

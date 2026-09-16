@@ -70,25 +70,46 @@ class PenaltiesService:
         *,
         group: str | None = None,
         warehouse_id: int | None = None,
+        page: int = 1,
+        page_size: int | None = None,
     ) -> PenaltiesView:
+        """Страница удержаний за период; `page_size=None` — всё сразу, для выгрузки.
+
+        Без фильтра по складу страница и итоги считаются в SQL, а зеркало заданий
+        спрашивается только о строках страницы. Склад известен лишь из зеркала,
+        поэтому с этим фильтром строки периода поднимаются целиком.
+        """
         if date_from > date_to:
             raise PenaltiesQueryError("Начало периода позже его конца")
         seller_name = await self._enrolled(seller_id)
         tracked = await self.penalties.tracked(seller_id)
-        rows = await self._enrich(seller_id, await self.penalties.rows_in_period(seller_id, date_from, date_to))
-        # Склады для фильтра — все, с которых в периоде уходили заказы со штрафами,
-        # плюс те, что есть в кабинете: так фильтр не прячет склад, у которого
-        # сегодня чисто.
+        offset = (page - 1) * (page_size or 0)
+        # Склады для фильтра — все, что есть в кабинете, плюс те, с которых в периоде
+        # уходили заказы: так фильтр не прячет склад, у которого сегодня чисто.
         warehouses = {
             item.warehouse_id: item.name for item in (await self.mirror.seller_warehouses(seller_id)).values()
         }
+        if warehouse_id is None:
+            rows = await self._enrich(
+                seller_id,
+                await self.penalties.rows_in_period(
+                    seller_id, date_from, date_to, group=group, limit=page_size, offset=offset
+                ),
+            )
+            total_rows = await self.penalties.count_in_period(seller_id, date_from, date_to, group=group)
+            by_group = await self.penalties.totals_in_period(seller_id, date_from, date_to)
+            totals = tuple(GroupTotal(name, GROUP_TITLES[name], *by_group[name]) for name in GROUPS if name in by_group)
+        else:
+            rows = await self._enrich(seller_id, await self.penalties.rows_in_period(seller_id, date_from, date_to))
+            rows = [row for row in rows if row.warehouse_id == warehouse_id]
+            totals = self._totals(rows)
+            if group:
+                rows = [row for row in rows if row.group == group]
+            total_rows = len(rows)
+            rows = rows[offset : offset + page_size] if page_size else rows
         for row in rows:
             if row.warehouse_id is not None and row.warehouse_name:
                 warehouses.setdefault(row.warehouse_id, row.warehouse_name)
-        if group:
-            rows = [row for row in rows if row.group == group]
-        if warehouse_id is not None:
-            rows = [row for row in rows if row.warehouse_id == warehouse_id]
         return PenaltiesView(
             seller_id=seller_id,
             seller_name=seller_name,
@@ -97,11 +118,14 @@ class PenaltiesService:
             collected_at=tracked.collected_at if tracked else None,
             collection_error=tracked.collection_error if tracked else None,
             rows=tuple(rows),
-            totals=self._totals(rows),
+            totals=totals,
             warehouses=tuple(
                 WarehouseOption(warehouse_id, name)
                 for warehouse_id, name in sorted(warehouses.items(), key=lambda item: item[1].lower())
             ),
+            page=page,
+            page_size=page_size,
+            total_rows=total_rows,
         )
 
     async def lookup(self, seller_id: uuid.UUID, raw_keys: Sequence[str]) -> LookupView:

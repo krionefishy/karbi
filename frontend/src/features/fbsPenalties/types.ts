@@ -47,9 +47,13 @@ export interface Penalties {
   date_to: string;
   collected_at: string | null;
   collection_error: string | null;
+  /** Одна страница строк; итоги — за весь период. */
   rows: PenaltyRow[];
   totals: GroupTotal[];
   warehouses: WarehouseOption[];
+  page: number;
+  page_size: number;
+  total_rows: number;
 }
 
 export interface LookupMiss {
@@ -75,4 +79,5 @@ export interface PenaltiesFilter {
   dateTo: string;
   group: DeductionGroup | "";
   warehouseId: number | null;
+  page: number;
 }

@@ -30,7 +30,8 @@ from backend.modules.wb_fbs_penalties.presentation.http.schemas import (
 router = APIRouter(prefix="/wb/fbs-penalties", tags=["wb-fbs-penalties"])
 
 SPLIT = re.compile(r"[\s,;]+")
-DEFAULT_PERIOD_DAYS = 30
+DEFAULT_PERIOD_DAYS = 7
+DEFAULT_PAGE_SIZE = 200
 
 
 def not_enrolled() -> HTTPException:
@@ -82,6 +83,9 @@ def penalties_response(view: PenaltiesView) -> PenaltiesResponse:
         rows=[row_response(item) for item in view.rows],
         totals=[GroupTotalResponse(group=t.group, title=t.title, count=t.count, amount=t.amount) for t in view.totals],
         warehouses=[WarehouseOptionResponse(warehouse_id=w.warehouse_id, name=w.name) for w in view.warehouses],
+        page=view.page,
+        page_size=view.page_size or max(len(view.rows), 1),
+        total_rows=view.total_rows,
     )
 
 
@@ -111,10 +115,14 @@ async def seller_penalties(
     date_to: date | None = Query(default=None),
     group: str | None = Query(default=None),
     warehouse: int | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=1000),
 ) -> PenaltiesResponse:
     start, end = _period(date_from, date_to)
     try:
-        view = await service.view(seller_id, start, end, group=group or None, warehouse_id=warehouse)
+        view = await service.view(
+            seller_id, start, end, group=group or None, warehouse_id=warehouse, page=page, page_size=page_size
+        )
     except SellerNotFoundError as error:
         raise not_enrolled() from error
     except PenaltiesQueryError as error:

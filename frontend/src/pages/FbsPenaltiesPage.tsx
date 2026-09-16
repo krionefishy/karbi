@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -17,7 +17,7 @@ import {
   requestRefresh,
 } from "../features/fbsPenalties/api";
 import { defaultPeriod, money } from "../features/fbsPenalties/period";
-import type { DeductionGroup, Lookup, PenaltiesFilter } from "../features/fbsPenalties/types";
+import type { DeductionGroup, GroupTotal, Lookup, PenaltiesFilter } from "../features/fbsPenalties/types";
 import {
   attachSeller,
   detachSeller,
@@ -43,11 +43,18 @@ const GROUP_OPTIONS: { value: DeductionGroup | ""; label: string }[] = [
   { value: "storage", label: "Хранение и приёмка" },
 ];
 
+/** Строк в группе за период; пустая группа — все вместе. */
+function groupCount(totals: GroupTotal[], group: DeductionGroup | ""): number {
+  return totals.filter((item) => !group || item.group === group).reduce((sum, item) => sum + item.count, 0);
+}
+
 export function FbsPenaltiesPage() {
   const queryClient = useQueryClient();
   const [sellerId, setSellerId] = useState("");
   const [tab, setTab] = useState<Tab>("table");
-  const [filter, setFilter] = useState<PenaltiesFilter>({ ...defaultPeriod(), group: "", warehouseId: null });
+  const [filter, setFilter] = useState<PenaltiesFilter>({ ...defaultPeriod(), group: "", warehouseId: null, page: 1 });
+  /** Любая смена фильтра возвращает на первую страницу: нумерация старого списка к новому не относится. */
+  const changeFilter = (patch: Partial<PenaltiesFilter>) => setFilter({ ...filter, ...patch, page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
@@ -257,7 +264,7 @@ export function FbsPenaltiesPage() {
                   <input
                     type="date"
                     value={filter.dateFrom}
-                    onChange={(event) => setFilter({ ...filter, dateFrom: event.target.value })}
+                    onChange={(event) => changeFilter({ dateFrom: event.target.value })}
                   />
                 </label>
                 <label className="penalties-field">
@@ -265,28 +272,15 @@ export function FbsPenaltiesPage() {
                   <input
                     type="date"
                     value={filter.dateTo}
-                    onChange={(event) => setFilter({ ...filter, dateTo: event.target.value })}
+                    onChange={(event) => changeFilter({ dateTo: event.target.value })}
                   />
-                </label>
-                <label className="penalties-field">
-                  <span className="field-label">Группа</span>
-                  <select
-                    value={filter.group}
-                    onChange={(event) => setFilter({ ...filter, group: event.target.value as DeductionGroup | "" })}
-                  >
-                    {GROUP_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
                 </label>
                 <label className="penalties-field">
                   <span className="field-label">Склад продавца</span>
                   <select
                     value={filter.warehouseId ?? ""}
                     onChange={(event) =>
-                      setFilter({ ...filter, warehouseId: event.target.value ? Number(event.target.value) : null })
+                      changeFilter({ warehouseId: event.target.value ? Number(event.target.value) : null })
                     }
                   >
                     <option value="">Все склады</option>
@@ -297,6 +291,24 @@ export function FbsPenaltiesPage() {
                     ))}
                   </select>
                 </label>
+              </div>
+              <div className="mode-switch penalties-groups" role="tablist" aria-label="Группы удержаний">
+                {GROUP_OPTIONS.map((option) => {
+                  const count = groupCount(penalties?.totals ?? [], option.value);
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="tab"
+                      aria-selected={filter.group === option.value}
+                      className={filter.group === option.value ? "mode-active" : undefined}
+                      onClick={() => changeFilter({ group: option.value })}
+                    >
+                      {option.label}
+                      {penalties && <small>{count}</small>}
+                    </button>
+                  );
+                })}
               </div>
               {invalidRange ? (
                 <p className="form-error" role="alert">
@@ -318,7 +330,7 @@ export function FbsPenaltiesPage() {
                       <article className="penalties-total-all">
                         <span>Всего</span>
                         <strong>{money(total)}</strong>
-                        <small>{penalties.rows.length} стр.</small>
+                        <small>{groupCount(penalties.totals, "")} стр.</small>
                       </article>
                     )}
                   </div>
@@ -330,6 +342,30 @@ export function FbsPenaltiesPage() {
                         : "Отчёт ещё не собран: подождите ближайшего сбора или нажмите «Обновить данные»."
                     }
                   />
+                  {penalties.total_rows > penalties.page_size && (
+                    <nav className="penalties-pager" aria-label="Страницы">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={filter.page <= 1}
+                        onClick={() => setFilter({ ...filter, page: filter.page - 1 })}
+                      >
+                        <ChevronLeft size={15} /> Назад
+                      </button>
+                      <span>
+                        {(penalties.page - 1) * penalties.page_size + 1}–
+                        {Math.min(penalties.page * penalties.page_size, penalties.total_rows)} из {penalties.total_rows}
+                      </span>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={penalties.page * penalties.page_size >= penalties.total_rows}
+                        onClick={() => setFilter({ ...filter, page: filter.page + 1 })}
+                      >
+                        Вперёд <ChevronRight size={15} />
+                      </button>
+                    </nav>
+                  )}
                 </>
               )}
             </>

@@ -46,6 +46,9 @@ class PenaltiesResponse(BaseModel):
     rows: list[PenaltyRowResponse]
     totals: list[GroupTotalResponse]
     warehouses: list[WarehouseOptionResponse]
+    page: int
+    page_size: int
+    total_rows: int
 
 
 class LookupRequest(BaseModel):

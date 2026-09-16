@@ -1,8 +1,8 @@
-/** Период по умолчанию — последние 30 дней по дате операции отчёта, в местном календаре. */
+/** Период по умолчанию — последняя неделя по дате операции отчёта, в местном календаре: отчёт WB недельный. */
 export function defaultPeriod(today = new Date()): { dateFrom: string; dateTo: string } {
   const to = new Date(today);
   const from = new Date(today);
-  from.setDate(from.getDate() - 30);
+  from.setDate(from.getDate() - 7);
   return { dateFrom: isoDay(from), dateTo: isoDay(to) };
 }
 
