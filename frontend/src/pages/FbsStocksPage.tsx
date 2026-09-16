@@ -29,6 +29,7 @@ import {
   retrySellerSync,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
+import { staleRefreshError } from "../features/refresh";
 
 const AUTOMATION_ID = "wb-fbs-stocks";
 const AUTOMATION_TITLE = "Остатки FBS по складам";
@@ -108,6 +109,7 @@ export function FbsStocksPage() {
     refetchInterval: (query) => (query.state.data?.in_progress ? 3000 : false),
   });
   const refreshing = Boolean(refreshState?.in_progress);
+  const refreshError = staleRefreshError(refreshState, board?.collected_at);
   useEffect(() => {
     if (refreshState?.status === "success") void invalidateBoards();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -247,9 +249,7 @@ export function FbsStocksPage() {
           </div>
 
           {actionError && <div className="inline-error">{actionError}</div>}
-          {tab !== "comparison" && refreshState?.status === "error" && !refreshing && (
-            <div className="inline-error">Обновление не удалось: {refreshState.error ?? "неизвестная ошибка"}</div>
-          )}
+          {tab !== "comparison" && refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
           {tab !== "comparison" && board?.collection_error && (
             <div className="checklist-notice">Последний сбор: {board.collection_error}</div>
           )}

@@ -24,6 +24,7 @@ import {
   retrySellerSync,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
+import { staleRefreshError } from "../features/refresh";
 
 const AUTOMATION_ID = "wb-card-checklist";
 const AUTOMATION_TITLE = "Чек-лист карточек Wildberries";
@@ -96,6 +97,7 @@ export function CardChecklistPage() {
     refetchInterval: (query) => (query.state.data?.in_progress ? 3000 : false),
   });
   const refreshing = Boolean(refreshState?.in_progress);
+  const refreshError = staleRefreshError(refreshState, checklist?.collected_at);
   useEffect(() => {
     if (refreshState?.status === "success") {
       void queryClient.invalidateQueries({ queryKey: ["card-checklist", sellerId] });
@@ -196,9 +198,7 @@ export function CardChecklistPage() {
           </div>
 
           {actionError && <div className="inline-error">{actionError}</div>}
-          {refreshState?.status === "error" && !refreshing && (
-            <div className="inline-error">Обновление не удалось: {refreshState.error ?? "неизвестная ошибка"}</div>
-          )}
+          {refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
           {checklist?.collection_error && (
             <div className="checklist-notice">Последний сбор: {checklist.collection_error}</div>
           )}

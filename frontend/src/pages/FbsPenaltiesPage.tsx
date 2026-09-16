@@ -26,6 +26,7 @@ import {
   retrySellerSync,
 } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
+import { staleRefreshError } from "../features/refresh";
 
 const AUTOMATION_ID = "wb-fbs-penalties";
 const AUTOMATION_TITLE = "Штрафы FBS";
@@ -116,6 +117,7 @@ export function FbsPenaltiesPage() {
     refetchInterval: (query) => (query.state.data?.in_progress ? 3000 : false),
   });
   const refreshing = Boolean(refreshState?.in_progress);
+  const refreshError = staleRefreshError(refreshState, penalties?.collected_at);
   useEffect(() => {
     if (refreshState?.status === "success") void invalidatePenalties();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,9 +219,7 @@ export function FbsPenaltiesPage() {
           </div>
 
           {actionError && <div className="inline-error">{actionError}</div>}
-          {refreshState?.status === "error" && !refreshing && (
-            <div className="inline-error">Обновление не удалось: {refreshState.error ?? "неизвестная ошибка"}</div>
-          )}
+          {refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
           {penalties?.collection_error && (
             <div className="checklist-notice">Последний сбор: {penalties.collection_error}</div>
           )}
