@@ -30,7 +30,7 @@ from backend.modules.wb_fbs_penalties.application import (
 )
 from backend.modules.wb_fbs_penalties.domain import GROUP_PENALTIES, GROUP_STORAGE, ReportRow
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository, TrackedSellerModel
-from backend.modules.wb_fbs_penalties.infrastructure.wb import WBRealizationClient
+from backend.modules.wb_fbs_penalties.infrastructure.wb import ReportPage, WBRealizationClient
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 from backend.tests.egress_stub import make_gateway
@@ -116,14 +116,21 @@ def order(order_id: int, rid: str, *, supply: str | None, sticker: int | None = 
 
 
 class FakeRealization(WBRealizationClient):
-    def __init__(self, rows: list[ReportRow]) -> None:
-        super().__init__(make_gateway())
-        self.rows_served = rows
-        self.calls: list[tuple[date, date]] = []
+    """Отдаёт строки страницами по `page_size`, как WB по `rrdid`."""
 
-    async def rows(self, seller_id: str, date_from: date, date_to: date) -> list[ReportRow]:
-        self.calls.append((date_from, date_to))
-        return list(self.rows_served)
+    def __init__(self, rows: list[ReportRow], *, page_size: int = 1000) -> None:
+        super().__init__(make_gateway())
+        self.rows_served = sorted(rows, key=lambda row: row.rrd_id)
+        self.page_size = page_size
+        self.calls: list[tuple[date, date, int]] = []
+
+    async def page(self, seller_id: str, date_from: date, date_to: date, *, cursor: int = 0) -> ReportPage:
+        self.calls.append((date_from, date_to, cursor))
+        rest = [row for row in self.rows_served if row.rrd_id > cursor]
+        chunk = rest[: self.page_size]
+        return ReportPage(
+            rows=chunk, cursor=chunk[-1].rrd_id if chunk else cursor, exhausted=len(chunk) < self.page_size
+        )
 
 
 @pytest_asyncio.fixture
@@ -182,9 +189,9 @@ ROWS = [
 
 
 async def collect(
-    database: Database, seller_id: uuid.UUID, rows: list[ReportRow], *, now: datetime = NOW
+    database: Database, seller_id: uuid.UUID, rows: list[ReportRow], *, now: datetime = NOW, page_size: int = 1000
 ) -> FakeRealization:
-    client = FakeRealization(rows)
+    client = FakeRealization(rows, page_size=page_size)
     async with database.session() as session:
         await CollectionService(
             session, PenaltiesRepository(session), client, window_days=14, backfill_days=90
@@ -196,17 +203,37 @@ async def test_collection_keeps_only_charged_rows_and_backfills_on_first_run(
     database: Database, seller: uuid.UUID
 ) -> None:
     client = await collect(database, seller, ROWS)
-    assert client.calls == [(TODAY - timedelta(days=90), TODAY)]
+    assert client.calls == [(TODAY - timedelta(days=90), TODAY, 0)]
 
     async with database.session() as session:
         stored = await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)
-    # Строка без удержаний (4) не хранится; повторный сбор берёт короткое окно и ничего не задваивает.
+        tracked = await session.get(TrackedSellerModel, seller)
+    # Строка без удержаний (4) не хранится; догрузка уложилась в страницу и закрыта.
     assert sorted(row.rrd_id for row in stored) == [1, 2, 3]
+    assert tracked is not None and tracked.backfill_done and tracked.collected_at is not None
 
     again = await collect(database, seller, ROWS, now=NOW + timedelta(days=1))
-    assert again.calls == [(TODAY + timedelta(days=1) - timedelta(days=14), TODAY + timedelta(days=1))]
+    assert again.calls == [(TODAY + timedelta(days=1) - timedelta(days=14), TODAY + timedelta(days=1), 0)]
     async with database.session() as session:
         assert len(await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)) == 3
+
+
+async def test_backfill_takes_one_page_per_run_and_keeps_the_seller_due(database: Database, seller: uuid.UUID) -> None:
+    """Лимит метода — запрос в час: вторая страница ждёт следующего прохода, а не следующего дня."""
+    first = await collect(database, seller, ROWS, page_size=3)
+    assert first.calls == [(TODAY - timedelta(days=90), TODAY, 0)]
+    async with database.session() as session:
+        tracked = await session.get(TrackedSellerModel, seller)
+        assert tracked is not None and not tracked.backfill_done and tracked.backfill_cursor == 3
+        assert tracked.collected_at is None
+        assert len(await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)) == 3
+
+    second = await collect(database, seller, ROWS, page_size=3, now=NOW + timedelta(hours=1))
+    # Тот же период и курсор с прошлой страницы; страница неполная — догрузка закрыта.
+    assert second.calls == [(TODAY - timedelta(days=90), TODAY, 3)]
+    async with database.session() as session:
+        tracked = await session.get(TrackedSellerModel, seller)
+        assert tracked is not None and tracked.backfill_done and tracked.collected_at is not None
 
 
 async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Database, seller: uuid.UUID) -> None:

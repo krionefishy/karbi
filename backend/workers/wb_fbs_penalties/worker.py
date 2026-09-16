@@ -139,6 +139,7 @@ class PenaltiesWorker:
             date_to=result.date_to.isoformat(),
             seen=result.seen,
             kept=result.kept,
+            more=result.more,
             skipped=result.skipped,
         )
         return None

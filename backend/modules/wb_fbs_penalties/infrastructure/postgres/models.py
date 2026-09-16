@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -33,6 +34,12 @@ class TrackedSellerModel(WBFbsPenaltiesBase):
     # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Первичная догрузка — по странице за проход: лимит метода у токенов селлеров
+    # один запрос в час, а три месяца крупного кабинета в одну страницу не влезают.
+    backfill_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    backfill_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    backfill_cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    backfill_done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class ReportRowModel(WBFbsPenaltiesBase):

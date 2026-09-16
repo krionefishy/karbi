@@ -44,27 +44,29 @@ def report_row(rrd_id: int, **overrides) -> dict:
     return row
 
 
-async def test_rows_are_paged_by_rrdid_until_a_short_page(monkeypatch) -> None:
-    """Страница режется по `limit`; следующая начинается с последнего `rrd_id`."""
+async def test_a_page_reports_its_cursor_and_whether_more_follows(monkeypatch) -> None:
+    """Одна страница за вызов: лимит метода — запрос в час, курсор — `rrd_id` последней строки."""
+    import datetime
+
     monkeypatch.setattr(client_module, "PAGE_LIMIT", 2)
     with respx.mock as router:
         stub = EgressStub(router)
-
-        def reply(payload: dict) -> tuple[int, list]:
-            cursor = int(payload["query"]["rrdid"])
-            if cursor == 0:
-                return 200, [report_row(1), report_row(2, penalty=0, storage_fee=12.5)]
-            return 200, [report_row(3, penalty=0)]
-
-        stub.on("GET", PATH, reply=reply)
-        rows = await WBRealizationClient(make_gateway()).rows(
-            SELLER, date_from=__import__("datetime").date(2026, 9, 1), date_to=__import__("datetime").date(2026, 9, 7)
-        )
+        stub.on("GET", PATH, body=[report_row(1), report_row(2, penalty=0, storage_fee=12.5)])
+        client = WBRealizationClient(make_gateway())
+        page = await client.page(SELLER, datetime.date(2026, 9, 1), datetime.date(2026, 9, 7), cursor=0)
+        stub.on("GET", PATH, body=[report_row(3, penalty=0)])
+        stub._rules.reverse()
+        tail = await client.page(SELLER, datetime.date(2026, 9, 1), datetime.date(2026, 9, 7), cursor=page.cursor)
 
     assert [call["query"]["rrdid"] for call in stub.requests_to(PATH)] == [0, 2]
-    assert stub.requests_to(PATH)[0]["query"]["dateFrom"] == "2026-09-01"
-    assert [row.rrd_id for row in rows] == [1, 2, 3]
-    fined, stored, clean = rows
+    assert stub.requests_to(PATH)[0]["query"] == {
+        "dateFrom": "2026-09-01",
+        "dateTo": "2026-09-07",
+        "limit": 2,
+        "rrdid": 0,
+    }
+    assert (page.cursor, page.exhausted) == (2, False)
+    fined, stored = page.rows
     assert (fined.group, fined.amount, fined.sticker_id, fined.assembly_id) == (
         GROUP_PENALTIES,
         198.06,
@@ -72,19 +74,20 @@ async def test_rows_are_paged_by_rrdid_until_a_short_page(monkeypatch) -> None:
         5551052438,
     )
     assert (stored.group, stored.amount) == (GROUP_STORAGE, 12.5)
-    assert clean.group is None and not clean.charged
     assert fined.srid == "er.i902a56689af4a0d1c940168af07cc057.0.0"
+    [clean] = tail.rows
+    assert clean.group is None and not clean.charged and tail.exhausted
 
 
-async def test_an_empty_report_is_an_empty_list() -> None:
+async def test_an_empty_report_is_an_exhausted_page() -> None:
     import datetime
 
     with respx.mock as router:
         EgressStub(router).on("GET", PATH, body=None)
-        rows = await WBRealizationClient(make_gateway()).rows(
+        page = await WBRealizationClient(make_gateway()).page(
             SELLER, datetime.date(2026, 9, 1), datetime.date(2026, 9, 7)
         )
-    assert rows == []
+    assert page.rows == [] and page.exhausted and page.cursor == 0
 
 
 async def test_a_non_list_answer_is_permanent() -> None:
@@ -93,4 +96,4 @@ async def test_a_non_list_answer_is_permanent() -> None:
     with respx.mock as router:
         EgressStub(router).on("GET", PATH, body={"error": True})
         with pytest.raises(WBPermanentError):
-            await WBRealizationClient(make_gateway()).rows(SELLER, datetime.date(2026, 9, 1), datetime.date(2026, 9, 7))
+            await WBRealizationClient(make_gateway()).page(SELLER, datetime.date(2026, 9, 1), datetime.date(2026, 9, 7))

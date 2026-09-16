@@ -78,6 +78,23 @@ class PenaltiesRepository:
             .values(collected_at=now, collection_error=None)
         )
 
+    async def start_backfill(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> None:
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(backfill_from=date_from, backfill_to=date_to, backfill_cursor=0, backfill_done=False)
+        )
+
+    async def advance_backfill(self, seller_id: uuid.UUID, cursor: int) -> None:
+        await self.session.execute(
+            update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(backfill_cursor=cursor)
+        )
+
+    async def finish_backfill(self, seller_id: uuid.UUID) -> None:
+        await self.session.execute(
+            update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(backfill_done=True)
+        )
+
     async def fail_collection(self, seller_id: uuid.UUID, error: str) -> None:
         """Прежние строки и их дата остаются; меняется только текст ошибки."""
         await self.session.execute(

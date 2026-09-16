@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -8,7 +9,14 @@ STATISTICS_BUCKET = "statistics"
 # Максимум строк за запрос по документации WB. Лимит метода — 1 запрос в
 # минуту, поэтому страницы берутся самыми крупными.
 PAGE_LIMIT = 100_000
-MAX_PAGES = 50
+
+
+@dataclass(frozen=True, slots=True)
+class ReportPage:
+    rows: list[ReportRow]
+    # `rrdid` для следующей страницы; при `exhausted` дальше страниц нет.
+    cursor: int
+    exhausted: bool
 
 
 class WBRealizationClient(WBJsonClient):
@@ -19,29 +27,27 @@ class WBRealizationClient(WBJsonClient):
     category = "Статистика"
     path = "/api/v5/supplier/reportDetailByPeriod"
 
-    async def rows(self, seller_id: str, date_from: date, date_to: date) -> list[ReportRow]:
-        """Все строки периода, страницами по `rrdid` — идентификатору последней строки."""
-        collected: list[ReportRow] = []
-        cursor = 0
-        for _ in range(MAX_PAGES):
-            payload = await self.request(
-                "GET",
-                self.path,
-                seller_id,
-                params={
-                    "dateFrom": date_from.isoformat(),
-                    "dateTo": date_to.isoformat(),
-                    "limit": PAGE_LIMIT,
-                    "rrdid": cursor,
-                },
-            )
-            page = self._rows(payload)
-            parsed = [row for raw in page if (row := self._row(raw)) is not None]
-            collected.extend(parsed)
-            if len(page) < PAGE_LIMIT or not parsed:
-                return collected
-            cursor = parsed[-1].rrd_id
-        raise WBPermanentError(f"{self.api_name}: отчёт реализации не закончился за {MAX_PAGES} страниц")
+    async def page(self, seller_id: str, date_from: date, date_to: date, *, cursor: int = 0) -> ReportPage:
+        """Одна страница детализации от `cursor` (`rrdid` последней строки прошлой страницы).
+
+        Один запрос за вызов нарочно: лимит метода у токенов селлеров — запрос в
+        час, и второй страницей за тот же проход WB ответил бы 429.
+        """
+        payload = await self.request(
+            "GET",
+            self.path,
+            seller_id,
+            params={
+                "dateFrom": date_from.isoformat(),
+                "dateTo": date_to.isoformat(),
+                "limit": PAGE_LIMIT,
+                "rrdid": cursor,
+            },
+        )
+        raw = self._rows(payload)
+        rows = [row for item in raw if (row := self._row(item)) is not None]
+        exhausted = len(raw) < PAGE_LIMIT or not rows
+        return ReportPage(rows=rows, cursor=rows[-1].rrd_id if rows else cursor, exhausted=exhausted)
 
     def _rows(self, payload: Any) -> list[dict]:
         if payload is None:
