@@ -3,9 +3,11 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, text, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import BigInteger, Integer, String, any_, bindparam, delete, func, or_, select, text, update
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.sql import ColumnElement
 
 from backend.modules.wb_core.domain import FbsOrder, FbsSupply, ReviewFact, SellerWarehouse, StockFact, WbOffice
 from backend.modules.wb_core.infrastructure.postgres.models import (
@@ -244,7 +246,9 @@ class MirrorRepository:
         wanted = {office_id for office_id in office_ids if office_id}
         if not wanted:
             return {}
-        rows = await self.session.scalars(select(WbOfficeModel).where(WbOfficeModel.office_id.in_(wanted)))
+        rows = await self.session.scalars(
+            select(WbOfficeModel).where(_any_of(WbOfficeModel.office_id, wanted, Integer))
+        )
         return {row.office_id: WbOffice(row.office_id, row.name, row.city, row.address) for row in rows}
 
     # --- сборочные задания ----------------------------------------------------------
@@ -311,11 +315,11 @@ class MirrorRepository:
     ) -> list[FbsOrder]:
         conditions = []
         if rid_set := {rid for rid in rids if rid}:
-            conditions.append(FbsOrderModel.rid.in_(rid_set))
+            conditions.append(_any_of(FbsOrderModel.rid, rid_set, String))
         if id_set := {order_id for order_id in order_ids if order_id}:
-            conditions.append(FbsOrderModel.order_id.in_(id_set))
+            conditions.append(_any_of(FbsOrderModel.order_id, id_set, BigInteger))
         if sticker_set := {sticker for sticker in sticker_ids if sticker}:
-            conditions.append(FbsOrderModel.sticker_id.in_(sticker_set))
+            conditions.append(_any_of(FbsOrderModel.sticker_id, sticker_set, BigInteger))
         if not conditions:
             return []
         query = select(FbsOrderModel).where(FbsOrderModel.seller_id == seller_id)
@@ -392,7 +396,9 @@ class MirrorRepository:
         if not wanted:
             return {}
         rows = await self.session.scalars(
-            select(FbsSupplyModel).where(FbsSupplyModel.seller_id == seller_id, FbsSupplyModel.supply_id.in_(wanted))
+            select(FbsSupplyModel).where(
+                FbsSupplyModel.seller_id == seller_id, _any_of(FbsSupplyModel.supply_id, wanted, String)
+            )
         )
         return {
             row.supply_id: FbsSupply(
@@ -439,3 +445,12 @@ class MirrorRepository:
     async def _insert(self, model: Any, rows: list[dict[str, Any]]) -> None:
         for offset in range(0, len(rows), _INSERT_CHUNK):
             await self.session.execute(insert(model).values(rows[offset : offset + _INSERT_CHUNK]))
+
+
+def _any_of(column: InstrumentedAttribute[Any], values: Iterable[Any], item_type: type) -> ColumnElement[bool]:
+    """`column = ANY(:values)` вместо `IN (...)`: список уходит одним параметром-массивом.
+
+    `IN` раскрывается в параметр на значение, а у asyncpg их не больше 32 767 —
+    выгрузка штрафов за неделю спрашивает зеркало о десятках тысяч заданий.
+    """
+    return column == any_(bindparam(None, list(values), type_=ARRAY(item_type)))

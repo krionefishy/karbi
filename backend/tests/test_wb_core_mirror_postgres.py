@@ -475,6 +475,13 @@ async def test_order_mirror_resolves_by_rid_order_id_and_sticker(database: Datab
     assert trace.destination_office_name == "Коледино"
     assert traces["33811984302"].order.order_id == 9
 
+    # Выгрузка за неделю спрашивает о десятках тысяч заданий: у asyncpg потолок 32 767 параметров.
+    async with database.session() as session:
+        many = await OrderMirror(session).resolve(
+            seller, rids=[f"r{i}" for i in range(20_000)], order_ids=[*range(10, 20_010), 9], sticker_ids=range(20_000)
+        )
+    assert "9" in many
+
 
 async def test_old_orders_are_pruned_once_a_day(database: Database, seller: uuid.UUID) -> None:
     now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
