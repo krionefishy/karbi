@@ -308,6 +308,33 @@ async def test_daily_reports_inside_a_loaded_weekly_one_are_not_reread(database:
     assert pending == 0
 
 
+async def test_rows_without_an_order_are_retraced_when_the_mirror_catches_up(
+    database: Database, seller: uuid.UUID
+) -> None:
+    """Зеркало снимает список раз в час: строка отчёта может лечь раньше задания."""
+    await collect(database, seller, ROWS)
+    async with database.session() as session:
+        before = await service(session).view(seller, TODAY - timedelta(days=30), TODAY)
+    assert {item.row.rrd_id: item.trace for item in before.rows}[3] == TRACE_NO_ORDER
+
+    async with database.session() as session:
+        await MirrorRepository(session).upsert_orders(
+            seller, [order(5551059999, "er.i999z.0.0", supply="WB-GI-1")], now=NOW
+        )
+        await session.commit()
+    # Сразу повторный сбор строку не трогает — не раньше чем через несколько часов.
+    await collect(database, seller, ROWS, now=NOW + timedelta(hours=1))
+    async with database.session() as session:
+        soon = await service(session).view(seller, TODAY - timedelta(days=30), TODAY)
+    assert {item.row.rrd_id: item.trace for item in soon.rows}[3] == TRACE_NO_ORDER
+
+    await collect(database, seller, ROWS, now=NOW + timedelta(hours=7))
+    async with database.session() as session:
+        later = await service(session).view(seller, TODAY - timedelta(days=30), TODAY)
+    traced = {item.row.rrd_id: item for item in later.rows}[3]
+    assert (traced.trace, traced.warehouse_name, traced.supply_id) == (TRACE_FOUND, KAZAN.name, "WB-GI-1")
+
+
 async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Database, seller: uuid.UUID) -> None:
     await collect(database, seller, ROWS)
 

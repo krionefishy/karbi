@@ -6,7 +6,7 @@ from backend.modules.wb_fbs_penalties.application.enrollment import (
     PenaltiesEnrollment,
 )
 from backend.modules.wb_fbs_penalties.application.penalties import PenaltiesQueryError, PenaltiesService
-from backend.modules.wb_fbs_penalties.application.report import XLSX_MEDIA_TYPE, PenaltiesReportFile, render_workbook
+from backend.modules.wb_fbs_penalties.application.report import XLSX_MEDIA_TYPE, PenaltiesReportFile, WorkbookWriter
 from backend.modules.wb_fbs_penalties.application.view import (
     TRACE_FOUND,
     TRACE_NO_ORDER,
@@ -43,5 +43,5 @@ __all__ = [
     "PenaltyRowView",
     "RefreshRequest",
     "WarehouseOption",
-    "render_workbook",
+    "WorkbookWriter",
 ]

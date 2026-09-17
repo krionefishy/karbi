@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime
 
 from sqlalchemy import case, delete, func, or_, select, update
@@ -13,8 +13,10 @@ from backend.modules.wb_fbs_penalties.domain import (
     GROUP_LOGISTICS,
     GROUP_PENALTIES,
     GROUP_STORAGE,
+    TRACE_FOUND,
     ReportHeader,
     ReportRow,
+    RowTrace,
 )
 from backend.modules.wb_fbs_penalties.infrastructure.postgres.models import (
     RefreshRequestModel,
@@ -290,17 +292,18 @@ class PenaltiesRepository:
         date_to: date,
         *,
         group: str | None = None,
+        warehouse_id: int | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[ReportRow]:
         """Строки по дате операции отчёта (`rr_dt`); свежие сверху, страницей — если просят.
 
-        Группа и страница режутся в SQL: логистика за месяц — двадцать тысяч строк,
-        поднимать их в память ради одной страницы не за чем.
+        Группа, склад и страница режутся в SQL: логистика за месяц — двадцать тысяч
+        строк, поднимать их в память ради одной страницы не за чем.
         """
         statement = (
             select(ReportRowModel)
-            .where(*self._period(seller_id, date_from, date_to, group))
+            .where(*self._period(seller_id, date_from, date_to, group, warehouse_id))
             .order_by(ReportRowModel.rr_dt.desc(), ReportRowModel.rrd_id.desc())
             .offset(offset)
         )
@@ -309,31 +312,120 @@ class PenaltiesRepository:
         rows = await self.session.scalars(statement)
         return [self._row(row) for row in rows]
 
+    async def iter_rows_in_period(
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
+        chunk: int = 5000,
+    ) -> AsyncIterator[list[ReportRow]]:
+        """Те же строки порциями — для выгрузки, чтобы не держать период целиком в памяти."""
+        offset = 0
+        while True:
+            rows = await self.rows_in_period(
+                seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id, limit=chunk, offset=offset
+            )
+            if not rows:
+                return
+            yield rows
+            if len(rows) < chunk:
+                return
+            offset += chunk
+
     async def count_in_period(
-        self, seller_id: uuid.UUID, date_from: date, date_to: date, *, group: str | None = None
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
     ) -> int:
         return (
             await self.session.scalar(
                 select(func.count())
                 .select_from(ReportRowModel)
-                .where(*self._period(seller_id, date_from, date_to, group))
+                .where(*self._period(seller_id, date_from, date_to, group, warehouse_id))
             )
             or 0
         )
 
     async def totals_in_period(
-        self, seller_id: uuid.UUID, date_from: date, date_to: date
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
     ) -> dict[str, tuple[int, float]]:
         """Строк и сумма по каждой группе за период — те же правила, что у `ReportRow.group`."""
-        group = self._group_expr()
+        group_expr = self._group_expr()
         result = await self.session.execute(
-            select(group, func.count(), func.sum(self._amount_expr()))
-            .where(*self._period(seller_id, date_from, date_to, None))
-            .group_by(group)
+            select(group_expr, func.count(), func.sum(self._amount_expr()))
+            .where(*self._period(seller_id, date_from, date_to, group, warehouse_id))
+            .group_by(group_expr)
         )
         return {name: (int(count), round(float(amount or 0), 2)) for name, count, amount in result if name}
 
-    def _period(self, seller_id: uuid.UUID, date_from: date, date_to: date, group: str | None) -> list:
+    async def warehouses_in_period(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> dict[int, str]:
+        """Склады, с которых в периоде уходили заказы из отчёта, — для фильтра."""
+        result = await self.session.execute(
+            select(ReportRowModel.warehouse_id, func.max(ReportRowModel.warehouse_name))
+            .where(*self._period(seller_id, date_from, date_to, None, None), ReportRowModel.warehouse_id.is_not(None))
+            .group_by(ReportRowModel.warehouse_id)
+        )
+        return {int(warehouse_id): name or f"склад {warehouse_id}" for warehouse_id, name in result}
+
+    async def rows_to_trace(
+        self, seller_id: uuid.UUID, *, since: date, stale_before: datetime, limit: int
+    ) -> list[ReportRow]:
+        """Строки, которые пора свести с заданием: ни разу не сводили, либо задание не
+        нашлось, а строка свежая — зеркало могло его застать позже."""
+        rows = await self.session.scalars(
+            select(ReportRowModel)
+            .where(
+                ReportRowModel.seller_id == seller_id,
+                or_(
+                    ReportRowModel.traced_at.is_(None),
+                    (ReportRowModel.trace != TRACE_FOUND)
+                    & (ReportRowModel.rr_dt >= since)
+                    & (ReportRowModel.traced_at < stale_before),
+                ),
+            )
+            .order_by(ReportRowModel.rrd_id)
+            .limit(limit)
+        )
+        return [self._row(row) for row in rows]
+
+    async def set_traces(self, seller_id: uuid.UUID, traces: Mapping[int, RowTrace], *, now: datetime) -> None:
+        values = [
+            {
+                "seller_id": seller_id,
+                "rrd_id": rrd_id,
+                "trace": trace.trace,
+                "warehouse_id": trace.warehouse_id,
+                "warehouse_name": trace.warehouse_name[:255] if trace.warehouse_name else None,
+                "order_created_at": trace.order_created_at,
+                "supply_id": trace.supply_id[:32] if trace.supply_id else None,
+                "supply_created_at": trace.supply_created_at,
+                "supply_scan_dt": trace.supply_scan_dt,
+                "destination_office_name": (
+                    trace.destination_office_name[:255] if trace.destination_office_name else None
+                ),
+                "traced_at": now,
+            }
+            for rrd_id, trace in traces.items()
+        ]
+        for offset in range(0, len(values), _CHUNK):
+            await self.session.execute(update(ReportRowModel), values[offset : offset + _CHUNK])
+
+    def _period(
+        self, seller_id: uuid.UUID, date_from: date, date_to: date, group: str | None, warehouse_id: int | None
+    ) -> list:
         conditions = [
             ReportRowModel.seller_id == seller_id,
             ReportRowModel.rr_dt >= date_from,
@@ -341,6 +433,8 @@ class PenaltiesRepository:
         ]
         if group:
             conditions.append(self._group_expr() == group)
+        if warehouse_id is not None:
+            conditions.append(ReportRowModel.warehouse_id == warehouse_id)
         return conditions
 
     @staticmethod
@@ -497,4 +591,14 @@ class PenaltiesRepository:
             storage_fee=float(model.storage_fee or 0),
             additional_payment=float(model.additional_payment or 0),
             acceptance=float(model.acceptance or 0),
+            trace=RowTrace(
+                trace=model.trace,
+                warehouse_id=model.warehouse_id,
+                warehouse_name=model.warehouse_name,
+                order_created_at=model.order_created_at,
+                supply_id=model.supply_id,
+                supply_created_at=model.supply_created_at,
+                supply_scan_dt=model.supply_scan_dt,
+                destination_office_name=model.destination_office_name,
+            ),
         )

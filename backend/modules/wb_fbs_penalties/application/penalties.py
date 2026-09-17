@@ -1,7 +1,6 @@
 import asyncio
 import re
 import uuid
-from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -11,11 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import OrderMirror, OrderTrace, SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
-from backend.modules.wb_fbs_penalties.application.report import PenaltiesReportFile, render_workbook
+from backend.modules.wb_fbs_penalties.application.report import PenaltiesReportFile, WorkbookWriter
+from backend.modules.wb_fbs_penalties.application.tracing import row_keys, row_trace
 from backend.modules.wb_fbs_penalties.application.view import (
-    TRACE_FOUND,
-    TRACE_NO_ORDER,
-    TRACE_NO_SUPPLY,
     GroupTotal,
     LookupMiss,
     LookupView,
@@ -74,43 +71,30 @@ class PenaltiesService:
         page: int = 1,
         page_size: int | None = None,
     ) -> PenaltiesView:
-        """Страница удержаний за период; `page_size=None` — всё сразу, для выгрузки.
+        """Страница удержаний за период; `page_size=None` — всё сразу.
 
-        Без фильтра по складу страница и итоги считаются в SQL, а зеркало заданий
-        спрашивается только о строках страницы. Склад известен лишь из зеркала,
-        поэтому с этим фильтром строки периода поднимаются целиком.
+        Склад и поставка сведены при сборе и лежат на строке, поэтому страница,
+        итоги и фильтры — запросы к одной таблице модуля.
         """
         if date_from > date_to:
             raise PenaltiesQueryError("Начало периода позже его конца")
         seller_name = await self._enrolled(seller_id)
         tracked = await self.penalties.tracked(seller_id)
         offset = (page - 1) * (page_size or 0)
+        rows = await self.penalties.rows_in_period(
+            seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id, limit=page_size, offset=offset
+        )
+        total_rows = await self.penalties.count_in_period(
+            seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id
+        )
+        totals = await self._totals(seller_id, date_from, date_to, warehouse_id=warehouse_id)
         # Склады для фильтра — все, что есть в кабинете, плюс те, с которых в периоде
         # уходили заказы: так фильтр не прячет склад, у которого сегодня чисто.
         warehouses = {
             item.warehouse_id: item.name for item in (await self.mirror.seller_warehouses(seller_id)).values()
         }
-        if warehouse_id is None:
-            rows = await self._enrich(
-                seller_id,
-                await self.penalties.rows_in_period(
-                    seller_id, date_from, date_to, group=group, limit=page_size, offset=offset
-                ),
-            )
-            total_rows = await self.penalties.count_in_period(seller_id, date_from, date_to, group=group)
-            by_group = await self.penalties.totals_in_period(seller_id, date_from, date_to)
-            totals = tuple(GroupTotal(name, GROUP_TITLES[name], *by_group[name]) for name in GROUPS if name in by_group)
-        else:
-            rows = await self._enrich(seller_id, await self.penalties.rows_in_period(seller_id, date_from, date_to))
-            rows = [row for row in rows if row.warehouse_id == warehouse_id]
-            totals = self._totals(rows)
-            if group:
-                rows = [row for row in rows if row.group == group]
-            total_rows = len(rows)
-            rows = rows[offset : offset + page_size] if page_size else rows
-        for row in rows:
-            if row.warehouse_id is not None and row.warehouse_name:
-                warehouses.setdefault(row.warehouse_id, row.warehouse_name)
+        for warehouse, name in (await self.penalties.warehouses_in_period(seller_id, date_from, date_to)).items():
+            warehouses.setdefault(warehouse, name)
         return PenaltiesView(
             seller_id=seller_id,
             seller_name=seller_name,
@@ -118,7 +102,7 @@ class PenaltiesService:
             date_to=date_to,
             collected_at=tracked.collected_at if tracked else None,
             collection_error=tracked.collection_error if tracked else None,
-            rows=tuple(rows),
+            rows=tuple(PenaltyRowView(row) for row in rows),
             totals=totals,
             warehouses=tuple(
                 WarehouseOption(warehouse_id, name)
@@ -142,8 +126,8 @@ class PenaltiesService:
         numbers = [int(key) for key in keys if DIGITS.match(key)]
         srids = [key for key in keys if not DIGITS.match(key) and SRID.match(key)]
         found = await self.penalties.rows_by_keys(seller_id, srids=srids, assembly_ids=numbers, sticker_ids=numbers)
-        views = await self._enrich(seller_id, found)
-        matched = {key for view in views for key in self._row_keys(view.row)}
+        views = [PenaltyRowView(row) for row in found]
+        matched = {key for view in views for key in row_keys(view.row)}
         rest = [key for key in keys if key not in matched]
 
         misses: list[LookupMiss] = []
@@ -176,14 +160,24 @@ class PenaltiesService:
         group: str | None = None,
         warehouse_id: int | None = None,
     ) -> PenaltiesReportFile:
-        """Книга с тем, что открыто на экране: период, вкладка группы, склад — все страницы разом."""
-        view = await self.view(seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id)
-        if group:
-            # Итоги сверху — по тому, что в файле, а не по всем группам периода.
-            view = replace(view, totals=self._totals(list(view.rows)))
-        content = await asyncio.to_thread(render_workbook, view)
+        """Книга с тем, что открыто на экране: период, вкладка группы, склад — все страницы разом.
+
+        Строки идут из базы порциями и сразу пишутся в книгу: период целиком в
+        памяти не держится ни в Python, ни в openpyxl.
+        """
+        if date_from > date_to:
+            raise PenaltiesQueryError("Начало периода позже его конца")
+        seller_name = await self._enrolled(seller_id)
+        # Итоги сверху — по тому, что в файле, а не по всем группам периода.
+        totals = await self._totals(seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id)
+        writer = WorkbookWriter(seller_name, date_from, date_to, totals)
+        async for chunk in self.penalties.iter_rows_in_period(
+            seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id
+        ):
+            await asyncio.to_thread(writer.add, [PenaltyRowView(row) for row in chunk])
+        content = await asyncio.to_thread(writer.finish)
         return PenaltiesReportFile(
-            seller_name=view.seller_name, date_from=date_from, date_to=date_to, group=group, content=content
+            seller_name=seller_name, date_from=date_from, date_to=date_to, group=group, content=content
         )
 
     # --- refresh ----------------------------------------------------------------
@@ -201,36 +195,24 @@ class PenaltiesService:
 
     # --- helpers ----------------------------------------------------------------------
 
-    async def _enrich(self, seller_id: uuid.UUID, rows: list[ReportRow]) -> list[PenaltyRowView]:
-        traces = await self.orders.resolve(
-            seller_id,
-            rids=[row.srid for row in rows if row.srid],
-            order_ids=[row.assembly_id for row in rows if row.assembly_id],
-            sticker_ids=[row.sticker_id for row in rows if row.sticker_id],
+    async def _totals(
+        self,
+        seller_id: uuid.UUID,
+        date_from: date,
+        date_to: date,
+        *,
+        group: str | None = None,
+        warehouse_id: int | None = None,
+    ) -> tuple[GroupTotal, ...]:
+        by_group = await self.penalties.totals_in_period(
+            seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id
         )
-        views: list[PenaltyRowView] = []
-        for row in rows:
-            trace = next((traces[key] for key in self._row_keys(row) if key in traces), None)
-            if trace is None:
-                views.append(PenaltyRowView(row, TRACE_NO_ORDER, None, None, None, None, None, None, None))
-                continue
-            views.append(self._from_trace(trace, row))
-        return views
+        return tuple(GroupTotal(name, GROUP_TITLES[name], *by_group[name]) for name in GROUPS if name in by_group)
 
     @staticmethod
-    def _from_trace(trace: OrderTrace, row: ReportRow | None = None) -> PenaltyRowView:
-        order, supply = trace.order, trace.supply
-        return PenaltyRowView(
-            row=row or PenaltiesService._stub_row(trace),
-            trace=TRACE_FOUND if supply else TRACE_NO_SUPPLY,
-            warehouse_id=order.warehouse_id,
-            warehouse_name=trace.warehouse_name or f"склад {order.warehouse_id}",
-            order_created_at=order.created_at,
-            supply_id=order.supply_id,
-            supply_created_at=supply.created_at if supply else None,
-            supply_scan_dt=supply.scan_dt if supply else None,
-            destination_office_name=trace.destination_office_name,
-        )
+    def _from_trace(trace: OrderTrace) -> PenaltyRowView:
+        """Задание без строки отчёта: штрафа по нему нет, есть склад и поставка."""
+        return PenaltyRowView(replace(PenaltiesService._stub_row(trace), trace=row_trace(trace)))
 
     @staticmethod
     def _stub_row(trace: OrderTrace) -> ReportRow:
@@ -270,23 +252,6 @@ class PenaltiesService:
         if DIGITS.match(key) or SRID.match(key):
             return f"нет ни в отчётах, ни среди заданий за {self.orders_history_months} мес.: проверьте кабинет и номер"
         return "не похоже ни на стикер, ни на номер задания, ни на srid"
-
-    @staticmethod
-    def _row_keys(row: ReportRow) -> list[str]:
-        return [key for key in (row.srid, str(row.assembly_id or ""), str(row.sticker_id or "")) if key]
-
-    @staticmethod
-    def _totals(rows: list[PenaltyRowView]) -> tuple[GroupTotal, ...]:
-        counts: Counter[str] = Counter()
-        amounts: defaultdict[str, float] = defaultdict(float)
-        for view in rows:
-            counts[view.group] += 1
-            amounts[view.group] += view.row.amount
-        return tuple(
-            GroupTotal(group, GROUP_TITLES[group], counts[group], round(amounts[group], 2))
-            for group in GROUPS
-            if counts[group]
-        )
 
     async def _enrolled_ids(self) -> set[uuid.UUID]:
         tracked = await self.penalties.tracked_seller_ids()

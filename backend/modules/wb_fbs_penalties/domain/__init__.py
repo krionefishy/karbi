@@ -5,8 +5,13 @@ from backend.modules.wb_fbs_penalties.domain.entities import (
     GROUP_STORAGE,
     GROUP_TITLES,
     GROUPS,
+    NO_ORDER_TRACE,
+    TRACE_FOUND,
+    TRACE_NO_ORDER,
+    TRACE_NO_SUPPLY,
     ReportHeader,
     ReportRow,
+    RowTrace,
 )
 
 __all__ = [
@@ -16,6 +21,11 @@ __all__ = [
     "GROUP_PENALTIES",
     "GROUP_STORAGE",
     "GROUP_TITLES",
+    "NO_ORDER_TRACE",
+    "TRACE_FOUND",
+    "TRACE_NO_ORDER",
+    "TRACE_NO_SUPPLY",
     "ReportHeader",
     "ReportRow",
+    "RowTrace",
 ]

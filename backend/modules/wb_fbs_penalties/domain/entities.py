@@ -16,6 +16,29 @@ GROUP_TITLES = {
     GROUP_STORAGE: "Хранение и приёмка",
 }
 
+# Как строка отчёта сошлась с заданием из зеркала. Считается один раз при сборе и
+# хранится на строке: страница, фильтр по складу и выгрузка — один SELECT.
+TRACE_FOUND = "found"  # задание и поставка есть
+TRACE_NO_SUPPLY = "no_supply"  # задание есть, в поставку не попало
+TRACE_NO_ORDER = "no_order"  # задания в зеркале нет (или ещё не искали)
+
+
+@dataclass(frozen=True, slots=True)
+class RowTrace:
+    """Склад продавца и поставка по строке отчёта — то, ради чего автоматизация."""
+
+    trace: str = TRACE_NO_ORDER
+    warehouse_id: int | None = None
+    warehouse_name: str | None = None
+    order_created_at: datetime | None = None
+    supply_id: str | None = None
+    supply_created_at: datetime | None = None
+    supply_scan_dt: datetime | None = None
+    destination_office_name: str | None = None
+
+
+NO_ORDER_TRACE = RowTrace()
+
 
 @dataclass(frozen=True, slots=True)
 class ReportHeader:
@@ -64,6 +87,7 @@ class ReportRow:
     storage_fee: float
     additional_payment: float
     acceptance: float
+    trace: RowTrace = NO_ORDER_TRACE
 
     @property
     def group(self) -> str | None:

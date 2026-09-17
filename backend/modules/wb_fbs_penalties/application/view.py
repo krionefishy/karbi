@@ -2,27 +2,54 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from backend.modules.wb_fbs_penalties.domain import GROUP_TITLES, ReportRow
+from backend.modules.wb_fbs_penalties.domain import (
+    GROUP_TITLES,
+    TRACE_FOUND,
+    TRACE_NO_ORDER,
+    TRACE_NO_SUPPLY,
+    ReportRow,
+)
 
-# Как строка отчёта сошлась с заданием из зеркала.
-TRACE_FOUND = "found"  # задание и поставка есть
-TRACE_NO_SUPPLY = "no_supply"  # задание есть, в поставку не попало
-TRACE_NO_ORDER = "no_order"  # задания в зеркале нет
+__all__ = ["TRACE_FOUND", "TRACE_NO_ORDER", "TRACE_NO_SUPPLY"]
 
 
 @dataclass(frozen=True, slots=True)
 class PenaltyRowView:
-    """Строка отчёта с удержанием и её логистика по зеркалу заданий."""
+    """Строка отчёта с удержанием и её логистика — как сохранена при сборе."""
 
     row: ReportRow
-    trace: str
-    warehouse_id: int | None
-    warehouse_name: str | None
-    order_created_at: datetime | None
-    supply_id: str | None
-    supply_created_at: datetime | None
-    supply_scan_dt: datetime | None
-    destination_office_name: str | None
+
+    @property
+    def trace(self) -> str:
+        return self.row.trace.trace
+
+    @property
+    def warehouse_id(self) -> int | None:
+        return self.row.trace.warehouse_id
+
+    @property
+    def warehouse_name(self) -> str | None:
+        return self.row.trace.warehouse_name
+
+    @property
+    def order_created_at(self) -> datetime | None:
+        return self.row.trace.order_created_at
+
+    @property
+    def supply_id(self) -> str | None:
+        return self.row.trace.supply_id
+
+    @property
+    def supply_created_at(self) -> datetime | None:
+        return self.row.trace.supply_created_at
+
+    @property
+    def supply_scan_dt(self) -> datetime | None:
+        return self.row.trace.supply_scan_dt
+
+    @property
+    def destination_office_name(self) -> str | None:
+        return self.row.trace.destination_office_name
 
     @property
     def group(self) -> str:

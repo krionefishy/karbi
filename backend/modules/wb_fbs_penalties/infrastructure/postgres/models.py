@@ -97,9 +97,21 @@ class ReportRowModel(WBFbsPenaltiesBase):
     additional_payment: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
     acceptance: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Сводка с заданием зеркала, посчитанная при сборе: страница, фильтр по складу и
+    # выгрузка читают одну таблицу. `traced_at` пуст — строку ещё не сводили.
+    trace: Mapped[str] = mapped_column(String(16), nullable=False, default="no_order", server_default="no_order")
+    warehouse_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    warehouse_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    order_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supply_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    supply_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    supply_scan_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    destination_office_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    traced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
         Index("ix_wb_fbs_penalties_rows_period", "seller_id", "rr_dt"),
+        Index("ix_wb_fbs_penalties_rows_warehouse", "seller_id", "warehouse_id", "rr_dt"),
         Index("ix_wb_fbs_penalties_rows_sticker", "seller_id", "sticker_id"),
         Index("ix_wb_fbs_penalties_rows_assembly", "seller_id", "assembly_id"),
         Index("ix_wb_fbs_penalties_rows_srid", "seller_id", "srid"),

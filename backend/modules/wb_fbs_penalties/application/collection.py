@@ -1,11 +1,22 @@
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.wb_core.application import OrderMirror
+from backend.modules.wb_fbs_penalties.application.tracing import row_keys, row_trace
+from backend.modules.wb_fbs_penalties.domain import NO_ORDER_TRACE, ReportRow, RowTrace
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
+
+# Досводка несведённых строк: столько дней назад зеркало ещё могло застать задание,
+# и не чаще раза в столько часов — чтобы не гонять зеркало по одним и тем же
+# отменённым заказам каждый проход.
+RETRACE_DAYS = 45
+RETRACE_HOURS = 6
+TRACE_CHUNK = 5000
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +59,7 @@ class CollectionService:
         self.session = session
         self.penalties = penalties
         self.client = client
+        self.orders = OrderMirror(session)
         self.window_days = window_days
         self.backfill_days = backfill_days
         self.reports_per_run = reports_per_run
@@ -81,6 +93,7 @@ class CollectionService:
                     await self.session.rollback()
                     return CollectionResult(len(headers), loaded, rows_seen, rows_kept, skipped=True)
                 await self.penalties.upsert_rows(seller_id, charged, now=stamp)
+                await self._trace(seller_id, charged, now=stamp)
                 if page.exhausted:
                     await self.penalties.finish_report(seller_id, report.report_id, now=stamp)
                     loaded += 1
@@ -93,8 +106,43 @@ class CollectionService:
                     break
                 cursor = page.cursor
 
+        if not await self.retrace(seller_id, now=stamp):
+            return CollectionResult(len(headers), loaded, rows_seen, rows_kept, skipped=True)
         more = await self.penalties.pending_report_count(seller_id) > 0
         if not more:
             await self.penalties.finish_collection(seller_id, now=stamp)
         await self.session.commit()
         return CollectionResult(len(headers), loaded, rows_seen, rows_kept, more=more)
+
+    async def retrace(self, seller_id: uuid.UUID, *, now: datetime) -> bool:
+        """Досвести строки без задания: зеркало снимает список раз в час и могло
+        застать заказ уже после того, как строка легла в отчёт. False — кабинет отключили."""
+        while True:
+            rows = await self.penalties.rows_to_trace(
+                seller_id,
+                since=now.date() - timedelta(days=RETRACE_DAYS),
+                stale_before=now - timedelta(hours=RETRACE_HOURS),
+                limit=TRACE_CHUNK,
+            )
+            if not rows:
+                return True
+            if not await self.penalties.still_tracked(seller_id):
+                await self.session.rollback()
+                return False
+            await self._trace(seller_id, rows, now=now)
+            await self.session.commit()
+
+    async def _trace(self, seller_id: uuid.UUID, rows: Sequence[ReportRow], *, now: datetime) -> None:
+        if not rows:
+            return
+        traces = await self.orders.resolve(
+            seller_id,
+            rids=[row.srid for row in rows if row.srid],
+            order_ids=[row.assembly_id for row in rows if row.assembly_id],
+            sticker_ids=[row.sticker_id for row in rows if row.sticker_id],
+        )
+        found: dict[int, RowTrace] = {}
+        for row in rows:
+            trace = next((traces[key] for key in row_keys(row) if key in traces), None)
+            found[row.rrd_id] = row_trace(trace) if trace else NO_ORDER_TRACE
+        await self.penalties.set_traces(seller_id, found, now=now)
