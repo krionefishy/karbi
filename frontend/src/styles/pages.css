@@ -379,8 +379,3 @@
   .page-container, .reviews-content { padding: var(--space-5); }
   .timeline-grid { grid-template-columns: minmax(210px, 1.8fr) repeat(7, minmax(72px, 1fr)); }
 }
-
-/* Колонка действий реестра закреплена справа: при прокрутке вбок кнопки не уезжают. */
-.registry-row { background: var(--surface); }
-.registry-head > :last-child, .registry-row > :last-child { position: sticky; right: 0; z-index: 1; background: inherit; box-shadow: -1px 0 0 var(--line); }
-.registry-row:hover { background: var(--surface-hover); }
