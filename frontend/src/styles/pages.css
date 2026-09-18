@@ -189,16 +189,19 @@
 .article-row strong { font-size: 13px; }
 .article-row code { color: var(--ink-muted); font-size: 12px; }
 .registry-actions { display: flex; align-items: center; gap: var(--space-4); }
-.registry-head, .registry-row { display: grid; grid-template-columns: minmax(220px, 1fr) 90px 130px 130px 130px minmax(160px, 1fr) 185px; align-items: center; border-bottom: 1px solid var(--line); }
+/* Колонки фиксированные, кроме автоматизаций: длинное содержимое переносится
+   и растит строку вниз, а не двигает соседние колонки. */
+.registry-head, .registry-row { display: grid; grid-template-columns: 200px 90px 120px 120px 120px minmax(220px, 1fr) 176px; align-items: center; border-bottom: 1px solid var(--line); }
+.registry-row > * { padding-top: 8px; padding-bottom: 8px; min-width: 0; overflow-wrap: anywhere; }
 .registry-row:last-child { border-bottom: 0; }
 .registry-head > *, .registry-row > * { padding: 0 var(--space-4); }
-.registry-row strong { font-size: 13px; }
+.registry-row strong { font-size: 13px; line-height: 18px; }
 .registry-name em { display: block; margin-top: 2px; color: var(--ink-muted); font-size: 12px; font-style: normal; }
 .registry-name .registry-error { color: var(--negative); }
 .registry-archived { background: var(--surface-sunken); }
 .registry-archived strong { color: var(--ink-muted); }
 .registry-automations { display: flex; min-width: 0; flex-wrap: wrap; gap: 4px; color: var(--ink-muted); font-size: 12px; }
-.automation-badge { display: inline-block; max-width: 100%; height: 22px; overflow: hidden; line-height: 22px; font-size: 12px; font-weight: 400; text-overflow: ellipsis; }
+.automation-badge { display: inline-block; max-width: 100%; height: auto; min-height: 22px; padding: 3px 8px; line-height: 16px; font-size: 12px; font-weight: 400; white-space: normal; }
 .registry-row-actions { display: flex; gap: 2px; }
 .registry-row-actions button, .seller-actions button, .fbs-region-move button, .stocks-remove { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; color: var(--ink-secondary); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
 .registry-row-actions button:hover, .fbs-region-move button:hover { color: var(--ink); background: var(--surface-hover); }

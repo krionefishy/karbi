@@ -110,7 +110,16 @@ input[type="range"] { accent-color: var(--accent); }
    а не обрезаются: на узком окне колонка действий иначе пропадает. */
 .timeline-table { overflow: hidden; }
 .article-catalog, .registry-table, .turnover-table, .fbs-table, .fbs-pool-table, .checklist-scroll, .card-scroll { overflow-x: auto; }
-.article-head, .article-row, .registry-head, .registry-row, .turnover-head, .turnover-row, .fbs-head, .fbs-row, .fbs-office-head, .fbs-office-row, .fbs-pool-head, .fbs-pool-row, .staff-head, .staff-row { min-width: max-content; }
+/* Шапка и строки — отдельные сетки, поэтому минимальная ширина у них одна и
+   та же числом: с max-content каждая считала бы fr-колонки по-своему, и
+   заголовки разъезжались бы с ячейками. Число = сумма минимумов колонок. */
+.registry-head, .registry-row { min-width: 1046px; }
+.turnover-head, .turnover-row { min-width: 1050px; }
+.article-head, .article-row { min-width: 810px; }
+.fbs-head, .fbs-row { min-width: 950px; }
+.fbs-office-head, .fbs-office-row { min-width: 990px; }
+.fbs-pool-head, .fbs-pool-row { min-width: 820px; }
+.staff-head, .staff-row { min-width: 860px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 52px; padding: 0 var(--space-5); border-bottom: 1px solid var(--line); }
 .card-head h2 { margin: 0; }
 .card-head-title { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
