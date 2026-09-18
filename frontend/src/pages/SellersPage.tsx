@@ -3,7 +3,7 @@ import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Store, Tras
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
+import { Shell } from "../components/Shell";
 import {
   ConfirmDialog,
   OzonCredentialsDialog,
@@ -134,12 +134,10 @@ export function SellersPage() {
   });
 
   return (
-    <div className="app-page">
-      <AppHeader />
+    <Shell>
       <main className="page-container sellers-page">
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Рабочее пространство</p>
             <h1>Селлеры</h1>
             <p className="muted">
               Общий реестр. Отсюда селлера заводят и убирают, а автоматизации только подключают его
@@ -363,6 +361,6 @@ export function SellersPage() {
           onSubmit={(apiKey) => restoreMutation.mutate(apiKey)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

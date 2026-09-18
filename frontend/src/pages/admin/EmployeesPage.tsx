@@ -3,7 +3,7 @@ import { Ban, CircleCheck, KeyRound, Plus, Shield, ShieldOff } from "lucide-reac
 import { useState } from "react";
 
 import { ApiError } from "../../api/http";
-import { AdminHeader } from "../../components/AdminHeader";
+import { Shell } from "../../components/Shell";
 import { EmployeeDialog, IssuedPasswordDialog } from "../../components/EmployeeDialog";
 import { createEmployee, getEmployees, resetEmployeePassword, updateEmployee } from "../../features/admin/api";
 import type { Employee, IssuedPassword } from "../../features/admin/types";
@@ -52,12 +52,10 @@ export function EmployeesPage() {
   });
 
   return (
-    <div className="app-page">
-      <AdminHeader />
+    <Shell admin>
       <main className="page-container">
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Доступ</p>
             <h1>Сотрудники</h1>
             <p className="muted">
               Учётные записи для входа в интерфейс. Пароль генерируется системой и показывается один раз —
@@ -156,6 +154,6 @@ export function EmployeesPage() {
         />
       )}
       {issued && <IssuedPasswordDialog issued={issued} onClose={() => setIssued(null)} />}
-    </div>
+    </Shell>
   );
 }

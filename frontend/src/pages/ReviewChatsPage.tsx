@@ -3,12 +3,12 @@ import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ReviewChatsDays } from "../components/ReviewChatsDays";
 import { ReviewChatsDialogs } from "../components/ReviewChatsDialogs";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import { downloadReviewChats, getReviewChats } from "../features/reviewChats/api";
 import { defaultPeriod, percent, rateShift, share } from "../features/reviewChats/format";
 import type {
@@ -165,10 +165,10 @@ export function ReviewChatsPage() {
   const shift = chats ? rateShift(chats.followed, chats.bare) : null;
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current={AUTOMATION_TITLE} />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current={AUTOMATION_TITLE}
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -179,10 +179,11 @@ export function ReviewChatsPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / Чат с покупателями</p>
               <h1>{AUTOMATION_TITLE}</h1>
               <p className="muted">
                 {selected
@@ -360,7 +361,6 @@ export function ReviewChatsPage() {
             </>
           )}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -383,6 +383,6 @@ export function ReviewChatsPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

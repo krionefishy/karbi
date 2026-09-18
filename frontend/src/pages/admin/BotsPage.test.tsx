@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationBot } from "../../features/admin/types";
 import { BotsPage } from "./BotsPage";
 
-vi.mock("../../components/AdminHeader", () => ({ AdminHeader: () => null }));
+vi.mock("../../components/Shell", () => ({ Shell: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 
 const { getBots, createBot, deleteBot } = vi.hoisted(() => ({
   getBots: vi.fn(),

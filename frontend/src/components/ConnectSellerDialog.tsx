@@ -42,7 +42,6 @@ export function ConnectSellerDialog({
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Подключение к автоматизации</p>
         <h2 id="connect-dialog-title">{automationTitle}</h2>
         <p className="muted">
           Селлер живёт в общем реестре. Подключение к автоматизации ничего не создаёт и ничего не

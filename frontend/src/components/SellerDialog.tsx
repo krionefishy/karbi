@@ -32,7 +32,6 @@ export function SellerDialog({ seller, pending, error, onClose, onSubmit }: Prop
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Wildberries / подключение</p>
         <h2 id="seller-dialog-title">{seller ? "Редактировать селлера" : "Добавить селлера"}</h2>
         <p className="muted">
           Ключ хранится в зашифрованном виде и никогда не отображается после сохранения.
@@ -150,7 +149,6 @@ export function RestoreSellerDialog({ seller, pending, error, onClose, onSubmit 
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Wildberries / восстановление</p>
         <h2 id="restore-dialog-title">Вернуть «{seller.name}» в работу</h2>
         <p className="muted">
           При архивации ключ был удалён — введите его заново. История, собранная до архивации, на
@@ -218,7 +216,6 @@ export function OzonCredentialsDialog({
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Ozon / подключение</p>
         <h2 id="ozon-dialog-title">
           {missing ? `Подключить Ozon для «${seller.name}»` : `Учётка Ozon «${seller.name}»`}
         </h2>

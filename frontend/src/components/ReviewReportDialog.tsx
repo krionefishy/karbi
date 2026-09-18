@@ -37,7 +37,6 @@ export function ReviewReportDialog({ sellerName, pending, error, onClose, onSubm
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Wildberries / отзывы</p>
         <h2 id="review-report-dialog-title">Отчёт по отзывам</h2>
         <p className="muted">
           Excel-файл по «{sellerName}»: артикул, название и количество отзывов на каждую дату

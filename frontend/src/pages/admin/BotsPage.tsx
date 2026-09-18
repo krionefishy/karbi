@@ -3,7 +3,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../../api/http";
-import { AdminHeader } from "../../components/AdminHeader";
+import { Shell } from "../../components/Shell";
 import { BotDialog } from "../../components/BotDialog";
 import { createBot, deleteBot, getBots } from "../../features/admin/api";
 
@@ -35,12 +35,10 @@ export function BotsPage() {
   });
 
   return (
-    <div className="app-page">
-      <AdminHeader />
+    <Shell admin>
       <main className="page-container">
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Уведомления</p>
             <h1>Боты</h1>
             <p className="muted">
               Через них уходят уведомления селлерам. Токены хранятся в сервисе доставки за пределами РФ и в
@@ -124,6 +122,6 @@ export function BotsPage() {
           onSubmit={(value) => createMutation.mutate(value)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

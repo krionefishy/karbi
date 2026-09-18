@@ -3,10 +3,10 @@ import { Check, Download, Minus, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import {
   downloadChecklist,
   getChecklist,
@@ -137,10 +137,10 @@ export function CardChecklistPage() {
   const warnings = checklist ? notices(checklist) : [];
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current="Чек-лист карточек" />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current="Чек-лист карточек"
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -151,10 +151,11 @@ export function CardChecklistPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / карточки</p>
               <h1>Чек-лист карточек</h1>
               <p className="muted">
                 Карточки с остатком от {checklist?.min_stock ?? 10} шт.
@@ -284,7 +285,6 @@ export function CardChecklistPage() {
             </>
           )}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -307,7 +307,7 @@ export function CardChecklistPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }
 

@@ -22,7 +22,6 @@ export function EmployeeDialog({ pending, error, onClose, onSubmit }: CreateProp
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Доступ / сотрудники</p>
         <h2 id="employee-dialog-title">Добавить сотрудника</h2>
         <p className="muted">Пароль сгенерирует система и покажет один раз — придумывать его не нужно.</p>
         <form className="seller-form" onSubmit={submit}>
@@ -69,7 +68,6 @@ export function IssuedPasswordDialog({ issued, onClose }: PasswordProps) {
   return (
     <div className="modal-overlay" role="presentation">
       <section className="seller-dialog" role="dialog" aria-modal="true" aria-labelledby="issued-password-title">
-        <p className="eyebrow">Доступ / сотрудники</p>
         <h2 id="issued-password-title">Пароль для {issued.user.username}</h2>
         <p className="muted">
           Показывается один раз. Закроете окно — узнать пароль будет нельзя, только выдать новый.

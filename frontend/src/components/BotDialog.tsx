@@ -32,7 +32,6 @@ export function BotDialog({ pending, error, onClose, onSubmit }: Props) {
         <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
           <X size={18} />
         </button>
-        <p className="eyebrow">Уведомления / боты</p>
         <h2 id="bot-dialog-title">Подключить бота</h2>
         <p className="muted">
           Токен получите у @BotFather. Он уедет в сервис доставки и здесь не сохранится — показать его

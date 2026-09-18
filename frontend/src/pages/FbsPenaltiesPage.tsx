@@ -3,12 +3,12 @@ import { ChevronLeft, ChevronRight, Download, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { FbsPenaltiesLookup } from "../components/FbsPenaltiesLookup";
 import { FbsPenaltiesTable } from "../components/FbsPenaltiesTable";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import {
   downloadPenalties,
   getPenalties,
@@ -160,10 +160,10 @@ export function FbsPenaltiesPage() {
   const total = penalties?.totals.reduce((sum, item) => sum + item.amount, 0) ?? 0;
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current={AUTOMATION_TITLE} />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current={AUTOMATION_TITLE}
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -174,10 +174,11 @@ export function FbsPenaltiesPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / FBS</p>
               <h1>{AUTOMATION_TITLE}</h1>
               <p className="muted">
                 {selected
@@ -373,7 +374,6 @@ export function FbsPenaltiesPage() {
             </>
           )}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -396,6 +396,6 @@ export function FbsPenaltiesPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

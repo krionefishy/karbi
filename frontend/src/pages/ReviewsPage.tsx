@@ -3,12 +3,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ArticleFilters } from "../components/ArticleFilters";
 import { ReviewTimeline } from "../components/ReviewTimeline";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog, SellerDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import { ReviewReportDialog } from "../components/ReviewReportDialog";
 import {
   downloadReviewReport,
@@ -223,10 +223,10 @@ export function ReviewsPage() {
   };
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current="Wildberries Reviews" />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current="Мониторинг отзывов"
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -238,10 +238,11 @@ export function ReviewsPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / товары</p>
               <h1>Мониторинг отзывов</h1>
               <p className="muted">
                 Каталог товаров и подготовка ежедневных снимков отзывов
@@ -411,7 +412,6 @@ export function ReviewsPage() {
             </div>
           )}
         </main>
-      </div>
       {reportOpen && selected && (
         <ReviewReportDialog
           sellerName={selected.name}
@@ -451,6 +451,6 @@ export function ReviewsPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

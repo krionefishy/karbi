@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Automation } from "../features/automations/types";
 import { AutomationsPage } from "./AutomationsPage";
 
-vi.mock("../components/AppHeader", () => ({ AppHeader: () => null }));
+vi.mock("../components/Shell", () => ({ Shell: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
 
 const automation: Automation = {
   id: "wb-reviews",

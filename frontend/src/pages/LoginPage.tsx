@@ -1,4 +1,4 @@
-import { Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 
@@ -36,16 +36,10 @@ export function LoginPage() {
 
   return (
     <main className="login-page">
-      <div className="login-brand">
-        <span className="wordmark wordmark-large">MARKETPLACE AUTO</span>
-        <span className="status-badge"><span /> Внутренняя система</span>
-      </div>
       <section className="login-panel">
-        <div className="corner corner-tl" /><div className="corner corner-tr" />
-        <div className="corner corner-bl" /><div className="corner corner-br" />
-        <p className="eyebrow">Единый контур автоматизаций</p>
+        <span className="wordmark wordmark-large">Marketplace Auto</span>
         <h1>Вход в систему</h1>
-        <p className="muted login-intro">Используйте корпоративные данные для доступа к отчётам и автоматизациям.</p>
+        <p className="login-intro">Используйте корпоративные данные для доступа к отчётам и автоматизациям.</p>
         <form onSubmit={handleSubmit} className="login-form">
           <label>
             <span className="field-label">Логин</span>
@@ -63,9 +57,8 @@ export function LoginPage() {
           {error && <p className="form-error" role="alert">{error}</p>}
           <button className="primary-button login-button" disabled={pending}>{pending ? "Входим…" : "Войти"}</button>
         </form>
-        <div className="security-note"><LockKeyhole size={15} /><span>Соединение защищено. Не передавайте данные для входа третьим лицам.</span></div>
+        <p className="security-note">Соединение защищено. Не передавайте данные для входа третьим лицам.</p>
       </section>
-      <footer className="login-footer">MARKETPLACE AUTO / INTERNAL AUTOMATION PLATFORM</footer>
     </main>
   );
 }

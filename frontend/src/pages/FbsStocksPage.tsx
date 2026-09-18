@@ -3,13 +3,13 @@ import { Download, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { FbsStocksBoard } from "../components/FbsStocksBoard";
 import { FbsStocksComparison } from "../components/FbsStocksComparison";
 import { FbsStocksSetup } from "../components/FbsStocksSetup";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import {
   addBarcodes,
   downloadBoard,
@@ -167,10 +167,10 @@ export function FbsStocksPage() {
   const selected = sellers.find((seller) => seller.id === sellerId);
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current={AUTOMATION_TITLE} />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current={AUTOMATION_TITLE}
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={(id) => {
@@ -184,10 +184,11 @@ export function FbsStocksPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / FBS</p>
               <h1>
                 {tab === "comparison"
                   ? "Сравнение по кабинетам"
@@ -300,7 +301,6 @@ export function FbsStocksPage() {
             />
           ) : null}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -323,6 +323,6 @@ export function FbsStocksPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

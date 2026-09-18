@@ -3,10 +3,10 @@ import { Copy, Download, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import {
   attachSeller,
   detachSeller,
@@ -148,10 +148,10 @@ export function TurnoverPage() {
   const alerting = belowThreshold(articles, threshold);
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current="Оборачиваемость" />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current="Оборачиваемость"
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -162,10 +162,11 @@ export function TurnoverPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
-              <p className="eyebrow">Wildberries / запасы</p>
               <h1>Оборачиваемость</h1>
               <p className="muted">
                 На сколько дней хватит текущего остатка при нынешнем темпе заказов
@@ -347,7 +348,6 @@ export function TurnoverPage() {
             </>
           )}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -370,6 +370,6 @@ export function TurnoverPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

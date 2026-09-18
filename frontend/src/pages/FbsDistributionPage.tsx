@@ -3,7 +3,6 @@ import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
-import { AppHeader } from "../components/AppHeader";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { FbsMappingPanel } from "../components/FbsMappingPanel";
 import { FbsPlanPanel } from "../components/FbsPlanPanel";
@@ -11,7 +10,8 @@ import { FbsSetupPanel } from "../components/FbsSetupPanel";
 import { FbsStockPanel } from "../components/FbsStockPanel";
 import { FbsWarehouseAdmin } from "../components/FbsWarehouseAdmin";
 import { ConfirmDialog } from "../components/SellerDialog";
-import { SellerSidebar } from "../components/SellerSidebar";
+import { SellerSwitcher } from "../components/SellerSwitcher";
+import { Shell } from "../components/Shell";
 import {
   getQueue,
   getSellerOverview,
@@ -139,10 +139,10 @@ export function FbsDistributionPage() {
   const regionTitles = new Map((setup?.regions ?? []).map((item) => [item.code, item.title]));
 
   return (
-    <div className="app-page reviews-shell">
-      <AppHeader current={AUTOMATION_TITLE} />
-      <div className="reviews-workspace">
-        <SellerSidebar
+    <Shell
+      current={AUTOMATION_TITLE}
+      seller={
+        <SellerSwitcher
           sellers={sellers}
           selectedId={sellerId}
           onSelect={setSellerId}
@@ -153,6 +153,8 @@ export function FbsDistributionPage() {
           onDetach={setDetaching}
           onRetry={(seller) => retryMutation.mutate(seller.id)}
         />
+      }
+    >
         <main className="reviews-content">
           <div className="reviews-heading">
             <div>
@@ -370,7 +372,6 @@ export function FbsDistributionPage() {
             </>
           )}
         </main>
-      </div>
 
       {connecting && (
         <ConnectSellerDialog
@@ -404,6 +405,6 @@ export function FbsDistributionPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-    </div>
+    </Shell>
   );
 }

@@ -1,18 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  ArrowRight,
-  ClipboardCheck,
-  Gauge,
-  Grid3x3,
-  MessagesSquare,
-  MessageSquareText,
-  ReceiptText,
-  Warehouse,
-} from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { AppHeader } from "../components/AppHeader";
+import { Shell } from "../components/Shell";
 import { getAutomations, getPlatformReadiness } from "../features/automations/api";
+import { automationIcon } from "../features/automations/nav";
 import type { AutomationStatus } from "../features/automations/types";
 
 const statusLabels: Record<AutomationStatus, string> = {
@@ -34,16 +26,6 @@ const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", 
 
 function momentLabel(value: string | null, fallback = "—") {
   return value ? momentFormatter.format(new Date(value)) : fallback;
-}
-
-function automationIcon(id: string) {
-  if (id === "wb-turnover") return <Gauge size={22} />;
-  if (id === "wb-fbs-distribution") return <Warehouse size={22} />;
-  if (id === "wb-card-checklist") return <ClipboardCheck size={22} />;
-  if (id === "wb-fbs-stocks") return <Grid3x3 size={22} />;
-  if (id === "wb-fbs-penalties") return <ReceiptText size={22} />;
-  if (id === "wb-review-chats") return <MessagesSquare size={22} />;
-  return <MessageSquareText size={22} />;
 }
 
 function durationLabel(seconds: number | null) {
@@ -69,12 +51,10 @@ export function AutomationsPage() {
   }[readinessState];
 
   return (
-    <div className="app-page">
-      <AppHeader />
+    <Shell>
       <main className="page-container automations-page">
         <div className="page-heading">
           <div>
-            <p className="eyebrow">Рабочее пространство</p>
             <h1>Автоматизации</h1>
             <p className="muted">Выберите процесс, с данными которого хотите работать.</p>
           </div>
@@ -87,11 +67,12 @@ export function AutomationsPage() {
         ) : (
           <section className="automation-grid" aria-label="Доступные автоматизации">
             {data.map((automation) => {
+              const Icon = automationIcon(automation.id);
               return (
                 <article className="automation-card automation-active" key={automation.id}>
                   <div className="automation-card-top">
                     <span className="automation-icon">
-                      {automationIcon(automation.id)}
+                      <Icon size={20} />
                     </span>
                     <span className={`status-badge status-${automation.status}`}>
                       <span />
@@ -134,7 +115,7 @@ export function AutomationsPage() {
                       </dd>
                     </div>
                   </dl>
-                  <Link className="primary-button card-action" to={`/automations/${automation.id}`}>
+                  <Link className="secondary-button card-action" to={`/automations/${automation.id}`}>
                     Открыть <ArrowRight size={16} />
                   </Link>
                 </article>
@@ -155,6 +136,6 @@ export function AutomationsPage() {
           </section>
         )}
       </main>
-    </div>
+    </Shell>
   );
 }
