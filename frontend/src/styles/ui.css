@@ -106,8 +106,11 @@ input[type="range"] { accent-color: var(--accent); }
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
 }
 .card { margin-bottom: var(--space-6); overflow: hidden; }
-.timeline-table, .article-catalog, .registry-table, .turnover-table, .fbs-table, .fbs-pool-table, .checklist-scroll { overflow: hidden; }
-.fbs-table, .fbs-pool-table, .checklist-scroll, .card-scroll { overflow-x: auto; }
+/* Сетки-таблицы с фиксированными колонками листаются вбок внутри панели,
+   а не обрезаются: на узком окне колонка действий иначе пропадает. */
+.timeline-table { overflow: hidden; }
+.article-catalog, .registry-table, .turnover-table, .fbs-table, .fbs-pool-table, .checklist-scroll, .card-scroll { overflow-x: auto; }
+.article-head, .article-row, .registry-head, .registry-row, .turnover-head, .turnover-row, .fbs-head, .fbs-row, .fbs-office-head, .fbs-office-row, .fbs-pool-head, .fbs-pool-row, .staff-head, .staff-row { min-width: max-content; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 52px; padding: 0 var(--space-5); border-bottom: 1px solid var(--line); }
 .card-head h2 { margin: 0; }
 .card-head-title { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
