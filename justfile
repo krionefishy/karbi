@@ -50,6 +50,7 @@ test-migrate:
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_card_checklist upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_stocks upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_penalties upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_review_chats upgrade head
 
 test-all: test-infra-up test-migrate
     CONFIG_PATH={{ test_config }} uv run pytest
@@ -81,7 +82,10 @@ migrate-wb-fbs-stocks:
 migrate-wb-fbs-penalties:
     uv run alembic -n wb_fbs_penalties upgrade head
 
-migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-fbs-stocks migrate-wb-fbs-penalties
+migrate-wb-review-chats:
+    uv run alembic -n wb_review_chats upgrade head
+
+migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-fbs-stocks migrate-wb-fbs-penalties migrate-wb-review-chats
 
 compose-up:
     {{ compose }} up -d --build

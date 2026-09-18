@@ -1,5 +1,4 @@
 import io
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -12,6 +11,7 @@ from openpyxl.utils import get_column_letter
 
 from backend.modules.wb_fbs_penalties.application.view import GroupTotal, PenaltyRowView
 from backend.modules.wb_fbs_penalties.domain import TRACE_FOUND, TRACE_NO_ORDER, TRACE_NO_SUPPLY
+from backend.shared.exports import export_stem
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -56,15 +56,12 @@ class PenaltiesReportFile:
     @property
     def filename(self) -> str:
         """Имя с названием кабинета — как она увидит файл в загрузках."""
-        name = re.sub(r"[^\w-]+", "_", self.seller_name, flags=re.UNICODE).strip("_") or "seller"
-        return self._filename(name)
+        return self._filename(export_stem(self.seller_name))
 
     @property
     def ascii_filename(self) -> str:
-        """То же для `filename=` в заголовке: HTTP-заголовок не переносит кириллицу, а
-        кабинеты называются по-русски — иначе выгрузка падает пятисоткой."""
-        name = re.sub(r"[^A-Za-z0-9-]+", "_", self.seller_name).strip("_") or "seller"
-        return self._filename(name)
+        """То же для `filename=` в заголовке: иначе выгрузка падает пятисоткой на кириллице."""
+        return self._filename(export_stem(self.seller_name, ascii_only=True))
 
     def _filename(self, name: str) -> str:
         group = f"_{self.group}" if self.group else ""

@@ -43,6 +43,8 @@ from backend.modules.wb_fbs_penalties.application import PenaltiesEnrollment, Pe
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
+from backend.modules.wb_review_chats.application import ReviewChatsEnrollment, ReviewChatsService
+from backend.modules.wb_review_chats.infrastructure.postgres import ReviewChatsRepository
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_turnover.application import ReplenishmentReportService, TurnoverEnrollment, TurnoverService
@@ -364,6 +366,32 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def review_chats_repository(self, session: AsyncSession) -> ReviewChatsRepository:
+        return ReviewChatsRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def review_chats_enrollment(self, tracked: ReviewChatsRepository) -> ReviewChatsEnrollment:
+        return ReviewChatsEnrollment(tracked)
+
+    @provide(scope=Scope.REQUEST)
+    def review_chats_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        tracked: ReviewChatsRepository,
+        settings: Settings,
+    ) -> ReviewChatsService:
+        """Своего сбора нет: события чатов читаются из зеркала wb_core."""
+        return ReviewChatsService(
+            session,
+            sellers,
+            tracked,
+            timezone=ZoneInfo(settings.review_chats.timezone),
+            reply_window_hours=settings.review_chats.reply_window_hours,
+            max_period_days=settings.review_chats.max_period_days,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
@@ -372,9 +400,10 @@ class SessionProvider(Provider):
         card_checklist: ChecklistEnrollment,
         fbs_stocks: FbsStocksEnrollment,
         fbs_penalties: PenaltiesEnrollment,
+        review_chats: ReviewChatsEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties]
+        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties, review_chats]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

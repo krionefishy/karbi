@@ -1,5 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, ClipboardCheck, Gauge, Grid3x3, MessageSquareText, ReceiptText, Warehouse } from "lucide-react";
+import {
+  ArrowRight,
+  ClipboardCheck,
+  Gauge,
+  Grid3x3,
+  MessagesSquare,
+  MessageSquareText,
+  ReceiptText,
+  Warehouse,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { AppHeader } from "../components/AppHeader";
@@ -33,6 +42,7 @@ function automationIcon(id: string) {
   if (id === "wb-card-checklist") return <ClipboardCheck size={22} />;
   if (id === "wb-fbs-stocks") return <Grid3x3 size={22} />;
   if (id === "wb-fbs-penalties") return <ReceiptText size={22} />;
+  if (id === "wb-review-chats") return <MessagesSquare size={22} />;
   return <MessageSquareText size={22} />;
 }
 

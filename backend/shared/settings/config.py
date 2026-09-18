@@ -327,6 +327,18 @@ class CoreMirrorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ReviewChatsConfig:
+    """Чаты после отзыва: как считать ответ покупателя. Своего сбора нет — читает зеркало чатов."""
+
+    timezone: str = "Europe/Moscow"
+    # Сколько ждём ответа. Чат у покупателя с продавцом один: без окна вопрос про
+    # другой заказ через две недели засчитался бы как ответ на наше сообщение.
+    reply_window_hours: int = 48
+    # Отчёт считается при чтении, потолок периода держит запрос в разумных пределах.
+    max_period_days: int = 92
+
+
+@dataclass(frozen=True, slots=True)
 class FbsPenaltiesConfig:
     """Штрафы FBS: когда перечитывать фин. отчёт и на какую глубину. Часы московские."""
 
@@ -364,6 +376,7 @@ class Settings:
     fbs_stocks: FbsStocksConfig
     core_mirror: CoreMirrorConfig
     fbs_penalties: FbsPenaltiesConfig
+    review_chats: ReviewChatsConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -468,6 +481,10 @@ class Settings:
                 core_mirror[key] = int(core_mirror[key])
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
+        review_chats = dict(data.get("review_chats", {}))
+        for key in ("reply_window_hours", "max_period_days"):
+            if key in review_chats:
+                review_chats[key] = int(review_chats[key])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
         for key in (
             "poll_hours",
@@ -513,6 +530,7 @@ class Settings:
             fbs_stocks=FbsStocksConfig(**fbs_stocks),
             core_mirror=CoreMirrorConfig(**core_mirror),
             fbs_penalties=FbsPenaltiesConfig(**fbs_penalties),
+            review_chats=ReviewChatsConfig(**review_chats),
         )
         settings.validate_values()
         return settings
@@ -575,6 +593,8 @@ class Settings:
             < 1
         ):
             raise ValueError("core_mirror.chats_* must be positive")
+        if min(self.review_chats.reply_window_hours, self.review_chats.max_period_days) < 1:
+            raise ValueError("review_chats.reply_window_hours and max_period_days must be positive")
         penalties = self.fbs_penalties
         if (
             min(

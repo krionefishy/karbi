@@ -105,6 +105,9 @@ jobs:
       - name: Apply WB FBS penalties migrations
         run: uv run alembic -n wb_fbs_penalties upgrade head
 
+      - name: Apply WB review chats migrations
+        run: uv run alembic -n wb_review_chats upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

@@ -42,6 +42,16 @@ from backend.modules.wb_fbs_stocks.application import (
     TITLE as WB_FBS_STOCKS_TITLE,
 )
 from backend.modules.wb_fbs_stocks.application import BoardOverview
+from backend.modules.wb_review_chats.application import (
+    AUTOMATION_ID as WB_REVIEW_CHATS_ID,
+)
+from backend.modules.wb_review_chats.application import (
+    DESCRIPTION as WB_REVIEW_CHATS_DESCRIPTION,
+)
+from backend.modules.wb_review_chats.application import (
+    TITLE as WB_REVIEW_CHATS_TITLE,
+)
+from backend.modules.wb_review_chats.application import ReviewChatsOverview
 from backend.modules.wb_reviews.application import (
     AUTOMATION_ID as WB_REVIEWS_ID,
 )
@@ -109,6 +119,16 @@ def next_penalties_run_at(settings: Settings, overview: PenaltiesOverview, now: 
     return max(moment, overview.last_success_at + timedelta(hours=penalties.poll_hours))
 
 
+def next_review_chats_run_at(
+    settings: Settings, overview: ReviewChatsOverview, now: datetime | None = None
+) -> datetime:
+    """Своего сбора нет: лента чатов дочитывается зеркалом wb_core с его интервалом."""
+    moment = now or datetime.now(ZoneInfo(settings.review_chats.timezone))
+    if overview.last_success_at is None:
+        return moment
+    return max(moment, overview.last_success_at + timedelta(minutes=settings.core_mirror.chats_interval_minutes))
+
+
 def next_fbs_stocks_run_at(settings: Settings, overview: BoardOverview, now: datetime | None = None) -> datetime:
     """Опрос интервальный и по кабинетам: следующий — у самого давно собранного.
 
@@ -167,6 +187,7 @@ def automation_catalog(
     card_checklist: ChecklistOverview,
     fbs_stocks: BoardOverview,
     fbs_penalties: PenaltiesOverview,
+    review_chats: ReviewChatsOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -239,5 +260,16 @@ def automation_catalog(
             last_run=None,
             last_success_at=fbs_penalties.last_success_at.isoformat() if fbs_penalties.last_success_at else None,
             next_run_at=next_penalties_run_at(settings, fbs_penalties).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_REVIEW_CHATS_ID,
+            title=WB_REVIEW_CHATS_TITLE,
+            description=WB_REVIEW_CHATS_DESCRIPTION,
+            status=review_chats.status,
+            seller_count=review_chats.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=review_chats.last_success_at.isoformat() if review_chats.last_success_at else None,
+            next_run_at=next_review_chats_run_at(settings, review_chats).isoformat(),
         ),
     ]

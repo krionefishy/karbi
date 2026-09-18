@@ -11,6 +11,7 @@ from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
 from backend.modules.wb_fbs_penalties.presentation.http import router as wb_fbs_penalties_router
 from backend.modules.wb_fbs_stocks.presentation.http import router as wb_fbs_stocks_router
+from backend.modules.wb_review_chats.presentation.http import router as wb_review_chats_router
 from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
@@ -26,6 +27,7 @@ router.include_router(onec_router)
 router.include_router(wb_card_checklist_router)
 router.include_router(wb_fbs_stocks_router)
 router.include_router(wb_fbs_penalties_router)
+router.include_router(wb_review_chats_router)
 router.include_router(automations_router)
 
 

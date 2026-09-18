@@ -308,7 +308,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head && alembic -n wb_card_checklist upgrade head && alembic -n wb_fbs_stocks upgrade head && alembic -n wb_fbs_penalties upgrade head
+      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head && alembic -n wb_card_checklist upgrade head && alembic -n wb_fbs_stocks upgrade head && alembic -n wb_fbs_penalties upgrade head && alembic -n wb_review_chats upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-karbi}:${DB_PASSWORD:?set DB_PASSWORD in .env - no default in production}@db:5432/${DB_NAME:-karbi}
     depends_on:
