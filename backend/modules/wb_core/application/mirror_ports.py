@@ -1,14 +1,16 @@
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.domain import (
+    MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
+    ChatEvent,
     FbsOrder,
     FbsSupply,
     ReviewFact,
@@ -117,3 +119,44 @@ class OrderMirror:
     async def collected_at(self, seller_id: uuid.UUID) -> datetime | None:
         state = await self.mirror.state(seller_id, MIRROR_ORDERS)
         return state.collected_at if state else None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatMirrorState:
+    """Насколько ленте чатов можно верить.
+
+    `read_through` — время последнего прочитанного события: до него лента
+    известна, после — нет, даже если по часам это было давно. `synced_through`
+    — когда в последний раз дочитали до конца; `None` при непустом
+    `history_from` значит, что история ещё догоняется порциями. `error` —
+    текст последней неудачи, прежние события при этом на месте.
+    """
+
+    history_from: datetime | None
+    read_through: datetime | None
+    synced_through: datetime | None
+    error: str | None
+
+
+class ChatMirror:
+    """Что автоматизации читают о чатах с покупателями: диалоги после отзыва с низкой оценкой."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def review_dialog_events(self, seller_id: uuid.UUID, *, since: datetime, until: datetime) -> list[ChatEvent]:
+        """События чатов, где автосообщение WB пришло в окне; по чату и времени, без верхней границы."""
+        return await self.mirror.review_dialog_events(seller_id, since=since, until=until)
+
+    async def state(self, seller_id: uuid.UUID) -> ChatMirrorState | None:
+        """`None` — зеркало до этого селлера ещё не доходило."""
+        state = await self.mirror.state(seller_id, MIRROR_CHATS)
+        if state is None:
+            return None
+        cursor = await self.mirror.chat_cursor(seller_id)
+        return ChatMirrorState(
+            history_from=await self.mirror.first_chat_event_at(seller_id),
+            read_through=datetime.fromtimestamp(cursor.next / 1000, tz=UTC) if cursor else None,
+            synced_through=cursor.tail_reached_at if cursor else None,
+            error=state.error,
+        )

@@ -5,6 +5,7 @@ from backend.modules.wb_core.infrastructure.wb.analytics import (
     FBOStockRow,
     WBAnalyticsClient,
 )
+from backend.modules.wb_core.infrastructure.wb.chat import CHAT_BUCKET, ChatEventsPage, WBChatClient
 from backend.modules.wb_core.infrastructure.wb.client import (
     CatalogCard,
     CatalogSnapshot,
@@ -29,6 +30,7 @@ from backend.modules.wb_core.infrastructure.wb.marketplace import (
 
 __all__ = [
     "ANALYTICS_BUCKET",
+    "CHAT_BUCKET",
     "CHRT_CHUNK",
     "FEEDBACKS_BUCKET",
     "MARKETPLACE_BUCKET",
@@ -36,12 +38,14 @@ __all__ = [
     "PAGE_LIMIT",
     "CatalogCard",
     "CatalogSnapshot",
+    "ChatEventsPage",
     "EgressAdminError",
     "EgressGateway",
     "FBOStockRow",
     "FeedbackAggregation",
     "FeedbackProduct",
     "WBAnalyticsClient",
+    "WBChatClient",
     "WBContentClient",
     "WBFeedbackClient",
     "WBJsonClient",

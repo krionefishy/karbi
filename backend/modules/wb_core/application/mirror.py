@@ -2,15 +2,18 @@ import logging
 import uuid
 from collections import defaultdict
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_core.domain import (
+    CHAT_SENDER_CLIENT,
     MIRROR_CATALOG,
+    MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
+    ChatEvent,
     FbsOrder,
     ReviewFact,
     SellerWarehouse,
@@ -21,6 +24,7 @@ from backend.modules.wb_core.infrastructure.wb import (
     CatalogCard,
     FeedbackAggregation,
     WBAnalyticsClient,
+    WBChatClient,
     WBContentClient,
     WBFeedbackClient,
     WBMarketplaceClient,
@@ -74,8 +78,15 @@ class SuppliesOutcome:
     offices: int
 
 
+@dataclass(frozen=True, slots=True)
+class ChatsOutcome:
+    pages: int
+    events: int
+    caught_up: bool
+
+
 class MirrorService:
-    """Зеркало WB по селлеру: каталог, остатки, отзывы, задания и поставки FBS.
+    """Зеркало WB по селлеру: каталог, остатки, отзывы, задания и поставки FBS, чаты.
 
     Каждая операция — один селлер, три фазы: отметить попытку, сходить в WB без
     открытой сессии, записать результат. Сессия на время сети закрыта нарочно:
@@ -94,14 +105,20 @@ class MirrorService:
         analytics: WBAnalyticsClient,
         marketplace: WBMarketplaceClient,
         feedbacks: WBFeedbackClient,
+        chats: WBChatClient,
         orders_history_months: int = 6,
+        chats_history_days: int = 90,
+        chats_pages_per_run: int = 100,
     ) -> None:
         self.database = database
         self.content = content
         self.analytics = analytics
         self.marketplace = marketplace
         self.feedbacks = feedbacks
+        self.chats = chats
         self.orders_history_months = orders_history_months
+        self.chats_history_days = chats_history_days
+        self.chats_pages_per_run = chats_pages_per_run
         self.logger = logging.getLogger("wb.core.mirror")
 
     # --- catalog ------------------------------------------------------------------
@@ -336,6 +353,67 @@ class MirrorService:
         outcome = SuppliesOutcome(len(supplies), len(warehouses), len(offices))
         self.logger.info("supplies_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
+
+    # --- чаты с покупателями ------------------------------------------------------
+
+    async def collect_chats(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> ChatsOutcome:
+        """Лента событий чатов от сохранённого курсора до конца или до потолка страниц.
+
+        Каждая страница пишется вместе с курсором своей транзакцией: сбой на
+        сотой странице истории не заставляет перечитывать первые девяносто
+        девять. Потолок страниц — чтобы первый сбор кабинета не держал воркер:
+        курсор сохранён, остальное дочитает следующий проход. Такой проход
+        успешен, но «дочитано до конца» отмечается только на пустой странице.
+        """
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_CHATS, stamp)
+            await session.commit()
+            saved = await MirrorRepository(session).chat_cursor(seller_id)
+        cursor = saved.next if saved else int((stamp - timedelta(days=self.chats_history_days)).timestamp() * 1000)
+        pages = events = 0
+        caught_up = False
+        try:
+            while pages < self.chats_pages_per_run and not caught_up:
+                page = await self.chats.events(seller_key, after=cursor)
+                pages += 1
+                events += len(page.events)
+                # Курсор, который не сдвинулся, — конец ленты: WB возвращает его же
+                # на пустой странице, а на стыке может повторить последнее событие.
+                caught_up = not page.events or page.next is None or page.next <= cursor
+                cursor = max(cursor, page.next or cursor)
+                await self._write_chat_page(seller_id, page.events, cursor, stamp, caught_up=caught_up)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_CHATS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_CHATS, now=stamp)
+            await session.commit()
+        outcome = ChatsOutcome(pages, events, caught_up)
+        self.logger.info("chats_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    async def _write_chat_page(
+        self, seller_id: uuid.UUID, events: list[ChatEvent], cursor: int, stamp: datetime, *, caught_up: bool
+    ) -> None:
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            prompted = await mirror.chats_with_review_prompt(seller_id, {event.chat_id for event in events})
+            kept: list[ChatEvent] = []
+            for event in events:
+                if event.review_prompt:
+                    prompted.add(event.chat_id)
+                # Слова покупателя вне диалогов об отзыве отчётам не нужны — остаётся факт сообщения.
+                # Тексты продавца хранятся всегда: по ним историю можно переразметить, если WB
+                # сменит текст автосообщения.
+                private = event.sender == CHAT_SENDER_CLIENT and event.chat_id not in prompted
+                kept.append(replace(event, text=None) if private else event)
+            await mirror.insert_chat_events(seller_id, kept, now=stamp)
+            await mirror.save_chat_cursor(seller_id, cursor, tail_reached_at=stamp if caught_up else None)
+            await session.commit()
 
     @staticmethod
     def _unknown_cards(aggregation: FeedbackAggregation, known: set[str]) -> list[CatalogCard]:

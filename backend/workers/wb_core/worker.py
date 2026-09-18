@@ -10,6 +10,7 @@ from backend.modules.wb_core.application import MirrorService, SellerGoneError
 from backend.modules.wb_core.domain import (
     EGRESS_SERVABLE,
     MIRROR_CATALOG,
+    MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
@@ -23,7 +24,7 @@ from backend.storage.pg import Database
 
 
 class WBCoreWorker:
-    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки.
+    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты.
 
     Подключение к автоматизациям на зеркало не влияет — оно нужно любой из
     них, и собирается один раз. Отметка сбора хранится на паре «селлер + вид»;
@@ -74,22 +75,23 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_REVIEWS, now)
         await self.collect_due(MIRROR_ORDERS, now)
         await self.collect_due(MIRROR_SUPPLIES, now)
+        await self.collect_due(MIRROR_CHATS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
-        """Задания старше срока хранения — раз в сутки; штрафы на них давно пришли."""
+        """Задания и события чатов старше срока хранения — раз в сутки."""
         today = now.astimezone(self.timezone).date()
         if self._pruned_on == today:
             return 0
         async with self.database.session() as session:
-            removed = await MirrorRepository(session).prune_orders(
-                now - timedelta(days=self.config.orders_retention_days)
-            )
+            mirror = MirrorRepository(session)
+            orders = await mirror.prune_orders(now - timedelta(days=self.config.orders_retention_days))
+            chats = await mirror.prune_chat_events(now - timedelta(days=self.config.chats_retention_days))
             await session.commit()
         self._pruned_on = today
-        if removed:
-            self.logger.info("wb_core_orders_pruned", removed=removed)
-        return removed
+        if orders or chats:
+            self.logger.info("wb_core_mirror_pruned", orders=orders, chat_events=chats)
+        return orders + chats
 
     def due_since(self, kind: str, now: datetime) -> datetime:
         """Момент последнего наступившего сбора этого вида.
@@ -100,6 +102,8 @@ class WBCoreWorker:
         if kind == MIRROR_ORDERS:
             # Задания — интервалом, а не по часам: свежие перечитываются, пока не лягут в поставку.
             return now - timedelta(minutes=self.config.orders_interval_minutes)
+        if kind == MIRROR_CHATS:
+            return now - timedelta(minutes=self.config.chats_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -127,9 +131,9 @@ class WBCoreWorker:
                 if seller.egress_status in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind != MIRROR_CATALOG:
+            if kind not in (MIRROR_CATALOG, MIRROR_CHATS):
                 # Без каталога нечем ключевать остатки и отзывы: у нового селлера
-                # первый сбор остатков дал бы нули на весь срез.
+                # первый сбор остатков дал бы нули на весь срез. Чатам каталог не нужен.
                 catalog = await mirror.states(MIRROR_CATALOG)
                 candidates = [
                     seller_id
@@ -156,6 +160,7 @@ class WBCoreWorker:
             MIRROR_REVIEWS: self.mirror.collect_reviews,
             MIRROR_ORDERS: self.mirror.collect_orders,
             MIRROR_SUPPLIES: self.mirror.collect_supplies,
+            MIRROR_CHATS: self.mirror.collect_chats,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

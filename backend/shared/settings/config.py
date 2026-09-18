@@ -317,6 +317,13 @@ class CoreMirrorConfig:
     # Поставки, склады продавца и объекты WB — раз в сутки, до сбора штрафов.
     supplies_hour: int = 5
     supplies_minute: int = 0
+    # Чаты с покупателями: лента дочитывается от курсора, один запрос на селлера,
+    # если нового нет. Первый сбор берёт историю на `chats_history_days` порциями
+    # по `chats_pages_per_run` страниц (в странице 50 событий).
+    chats_interval_minutes: int = 30
+    chats_history_days: int = 90
+    chats_pages_per_run: int = 100
+    chats_retention_days: int = 180
 
 
 @dataclass(frozen=True, slots=True)
@@ -450,6 +457,10 @@ class Settings:
             "orders_interval_minutes",
             "orders_history_months",
             "orders_retention_days",
+            "chats_interval_minutes",
+            "chats_history_days",
+            "chats_pages_per_run",
+            "chats_retention_days",
             "supplies_hour",
             "supplies_minute",
         ):
@@ -554,6 +565,16 @@ class Settings:
             raise ValueError("core_mirror.retry_minutes and stock_fresh_days must be positive")
         if min(mirror.orders_interval_minutes, mirror.orders_history_months, mirror.orders_retention_days) < 1:
             raise ValueError("core_mirror.orders_* must be positive")
+        if (
+            min(
+                mirror.chats_interval_minutes,
+                mirror.chats_history_days,
+                mirror.chats_pages_per_run,
+                mirror.chats_retention_days,
+            )
+            < 1
+        ):
+            raise ValueError("core_mirror.chats_* must be positive")
         penalties = self.fbs_penalties
         if (
             min(

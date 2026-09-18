@@ -7,12 +7,23 @@ MIRROR_STOCKS = "stocks"
 MIRROR_REVIEWS = "reviews"
 MIRROR_ORDERS = "orders"
 MIRROR_SUPPLIES = "supplies"
-MIRROR_KINDS = (MIRROR_CATALOG, MIRROR_STOCKS, MIRROR_REVIEWS, MIRROR_ORDERS, MIRROR_SUPPLIES)
+MIRROR_CHATS = "chats"
+MIRROR_KINDS = (MIRROR_CATALOG, MIRROR_STOCKS, MIRROR_REVIEWS, MIRROR_ORDERS, MIRROR_SUPPLIES, MIRROR_CHATS)
 
 # Откуда пришло сборочное задание: живой список отдаёт только последние три
 # месяца, старше — архив с другим набором полей.
 ORDER_SOURCE_LIVE = "live"
 ORDER_SOURCE_ARCHIVE = "archive"
+
+# Кто написал в чат. Автосообщения WB тоже приходят от имени продавца.
+CHAT_SENDER_CLIENT = "client"
+CHAT_SENDER_SELLER = "seller"
+# Откуда ушло сообщение продавца: кабинет (люди и сам WB) или публичный API (программы).
+CHAT_SOURCE_PORTAL = "seller-portal"
+CHAT_SOURCE_API = "seller-public-api"
+# Так WB от имени продавца открывает диалог после отзыва с низкой оценкой. Текст
+# у всех кабинетов один и продавцом не меняется; сверяется начало — хвост WB правит.
+REVIEW_PROMPT_PREFIX = "Здравствуйте. Вы оставили отзыв с низкой оценкой"
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,3 +117,31 @@ class FbsSupply:
     destination_office_id: int | None
     done: bool
     cargo_type: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChatEvent:
+    """Сообщение из ленты чатов с покупателями.
+
+    `review_prompt` — автосообщение WB после отзыва с низкой оценкой. Текст
+    покупателя хранится только в диалогах, где такое сообщение было: остальная
+    переписка отчётам не нужна, а личных данных в ней хватает.
+    """
+
+    event_id: str
+    chat_id: str
+    sender: str
+    source: str
+    added_at: datetime
+    is_new_chat: bool
+    review_prompt: bool
+    nm_id: int | None
+    rid: str | None
+    text: str | None
+    has_attachments: bool
+
+
+def is_review_prompt(sender: str, source: str, text: str | None) -> bool:
+    if sender != CHAT_SENDER_SELLER or source != CHAT_SOURCE_PORTAL or not text:
+        return False
+    return text.lstrip().startswith(REVIEW_PROMPT_PREFIX)

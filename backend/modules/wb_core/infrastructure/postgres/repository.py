@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -186,6 +186,18 @@ class SellerRepository:
                     if barcode:
                         collected.setdefault(barcode, (chrt_id, row.article))
         return collected
+
+    async def article_names(self, seller_id: uuid.UUID, articles: Iterable[str]) -> dict[str, str]:
+        """Названия только запрошенных карточек; незнакомых в ответе нет."""
+        wanted = {article for article in articles if article}
+        if not wanted:
+            return {}
+        rows = await self.session.execute(
+            select(ArticleModel.article, ArticleModel.name).where(
+                ArticleModel.seller_id == seller_id, ArticleModel.article.in_(wanted)
+            )
+        )
+        return {str(article): str(name) for article, name in rows.all()}
 
     async def list_article_barcodes(self, seller_id: uuid.UUID) -> dict[str, str]:
         """Article → its first barcode, in the order WB lists the sizes.

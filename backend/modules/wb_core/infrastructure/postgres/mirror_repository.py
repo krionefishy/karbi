@@ -9,8 +9,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql import ColumnElement
 
-from backend.modules.wb_core.domain import FbsOrder, FbsSupply, ReviewFact, SellerWarehouse, StockFact, WbOffice
+from backend.modules.wb_core.domain import (
+    ChatEvent,
+    FbsOrder,
+    FbsSupply,
+    ReviewFact,
+    SellerWarehouse,
+    StockFact,
+    WbOffice,
+)
 from backend.modules.wb_core.infrastructure.postgres.models import (
+    ChatCursorModel,
+    ChatEventModel,
     FbsOrderArchiveMonthModel,
     FbsOrderModel,
     FbsSupplyModel,
@@ -432,6 +442,110 @@ class MirrorRepository:
             supplier_status=row.supplier_status,
             wb_status=row.wb_status,
             source=row.source,
+        )
+
+    # --- чаты с покупателями ------------------------------------------------------------
+
+    async def chat_cursor(self, seller_id: uuid.UUID) -> ChatCursorModel | None:
+        return await self.session.get(ChatCursorModel, seller_id)
+
+    async def save_chat_cursor(self, seller_id: uuid.UUID, cursor: int, *, tail_reached_at: datetime | None) -> None:
+        """Курсор двигается с каждой страницей; отметка «дочитали» — только когда дочитали."""
+        statement = insert(ChatCursorModel).values(seller_id=seller_id, next=cursor, tail_reached_at=tail_reached_at)
+        changes: dict[str, Any] = {"next": statement.excluded.next}
+        if tail_reached_at is not None:
+            changes["tail_reached_at"] = statement.excluded.tail_reached_at
+        await self.session.execute(statement.on_conflict_do_update(index_elements=["seller_id"], set_=changes))
+
+    async def chats_with_review_prompt(self, seller_id: uuid.UUID, chat_ids: Iterable[str]) -> set[str]:
+        wanted = {chat_id for chat_id in chat_ids if chat_id}
+        if not wanted:
+            return set()
+        rows = await self.session.scalars(
+            select(ChatEventModel.chat_id)
+            .where(
+                ChatEventModel.seller_id == seller_id,
+                ChatEventModel.review_prompt,
+                _any_of(ChatEventModel.chat_id, wanted, String),
+            )
+            .distinct()
+        )
+        return set(rows)
+
+    async def insert_chat_events(self, seller_id: uuid.UUID, events: Iterable[ChatEvent], *, now: datetime) -> None:
+        """Лента неизменяема: событие, пришедшее второй раз на стыке страниц, не переписывается."""
+        rows = [
+            {
+                "seller_id": seller_id,
+                "event_id": event.event_id,
+                "chat_id": event.chat_id,
+                "sender": event.sender,
+                "source": event.source,
+                "added_at": event.added_at,
+                "is_new_chat": event.is_new_chat,
+                "review_prompt": event.review_prompt,
+                "nm_id": event.nm_id,
+                "rid": event.rid,
+                "text": event.text,
+                "has_attachments": event.has_attachments,
+                "collected_at": now,
+            }
+            for event in events
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(ChatEventModel).values(rows[offset : offset + _INSERT_CHUNK])
+            await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id", "event_id"]))
+
+    async def review_dialog_events(self, seller_id: uuid.UUID, *, since: datetime, until: datetime) -> list[ChatEvent]:
+        """Все события чатов, где автосообщение WB об отзыве пришло в окне, начиная с `since`.
+
+        Верхней границы у событий нет: ответ на автосообщение последнего дня
+        окна приходит уже за его пределами.
+        """
+        prompted = (
+            select(ChatEventModel.chat_id)
+            .where(
+                ChatEventModel.seller_id == seller_id,
+                ChatEventModel.review_prompt,
+                ChatEventModel.added_at >= since,
+                ChatEventModel.added_at < until,
+            )
+            .distinct()
+        )
+        rows = await self.session.scalars(
+            select(ChatEventModel)
+            .where(
+                ChatEventModel.seller_id == seller_id,
+                ChatEventModel.added_at >= since,
+                ChatEventModel.chat_id.in_(prompted),
+            )
+            .order_by(ChatEventModel.chat_id, ChatEventModel.added_at, ChatEventModel.event_id)
+        )
+        return [self._chat_event(row) for row in rows]
+
+    async def first_chat_event_at(self, seller_id: uuid.UUID) -> datetime | None:
+        return await self.session.scalar(
+            select(func.min(ChatEventModel.added_at)).where(ChatEventModel.seller_id == seller_id)
+        )
+
+    async def prune_chat_events(self, before: datetime) -> int:
+        result = await self.session.execute(delete(ChatEventModel).where(ChatEventModel.added_at < before))
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    @staticmethod
+    def _chat_event(row: ChatEventModel) -> ChatEvent:
+        return ChatEvent(
+            event_id=row.event_id,
+            chat_id=row.chat_id,
+            sender=row.sender,
+            source=row.source,
+            added_at=row.added_at,
+            is_new_chat=row.is_new_chat,
+            review_prompt=row.review_prompt,
+            nm_id=row.nm_id,
+            rid=row.rid,
+            text=row.text,
+            has_attachments=row.has_attachments,
         )
 
     # --- catalog ----------------------------------------------------------------

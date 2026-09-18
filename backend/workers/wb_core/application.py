@@ -8,6 +8,7 @@ from backend.modules.wb_core.application import MirrorService
 from backend.modules.wb_core.infrastructure.wb import (
     EgressGateway,
     WBAnalyticsClient,
+    WBChatClient,
     WBContentClient,
     WBFeedbackClient,
     WBMarketplaceClient,
@@ -44,7 +45,10 @@ class WBCoreWorkerApplication:
             analytics=WBAnalyticsClient(gateway),
             marketplace=WBMarketplaceClient(gateway),
             feedbacks=WBFeedbackClient(gateway, page_size=self.settings.worker.feedback_page_size),
+            chats=WBChatClient(gateway),
             orders_history_months=self.settings.core_mirror.orders_history_months,
+            chats_history_days=self.settings.core_mirror.chats_history_days,
+            chats_pages_per_run=self.settings.core_mirror.chats_pages_per_run,
         )
         self.worker = WBCoreWorker(self.database, self.mirror, self.settings)
         self.catalog_consumer = self._create_consumer()

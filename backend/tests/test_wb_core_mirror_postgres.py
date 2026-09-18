@@ -6,31 +6,40 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
-from backend.modules.wb_core.application import MirrorService, OrderMirror, ReviewMirror, StockMirror
+from backend.modules.wb_core.application import ChatMirror, MirrorService, OrderMirror, ReviewMirror, StockMirror
 from backend.modules.wb_core.domain import (
+    CHAT_SENDER_CLIENT,
+    CHAT_SENDER_SELLER,
+    CHAT_SOURCE_API,
+    CHAT_SOURCE_PORTAL,
     MIRROR_CATALOG,
+    MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
     ORDER_SOURCE_ARCHIVE,
     ORDER_SOURCE_LIVE,
+    REVIEW_PROMPT_PREFIX,
+    ChatEvent,
     FbsOrder,
     FbsSupply,
     WbOffice,
 )
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
-from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
+from backend.modules.wb_core.infrastructure.postgres.models import ChatEventModel, SellerModel
 from backend.modules.wb_core.infrastructure.wb import (
     CatalogCard,
     CatalogSnapshot,
+    ChatEventsPage,
     FBOStockRow,
     FeedbackAggregation,
     FeedbackProduct,
     Warehouse,
     WBAnalyticsClient,
+    WBChatClient,
     WBContentClient,
     WBFeedbackClient,
     WBMarketplaceClient,
@@ -131,6 +140,59 @@ class FakeMarketplace(WBMarketplaceClient):
         return {chrt: amount for chrt, amount in self.declared.get(warehouse_id, {}).items() if chrt in chrt_ids}
 
 
+class FakeChats(WBChatClient):
+    """Лента WB: события после курсора, по две на страницу; на пустой странице курсор возвращается тем же."""
+
+    def __init__(self, feed: list[ChatEvent], *, failing_after: int | None = None) -> None:
+        super().__init__(make_gateway())
+        self.feed = feed
+        self.failing_after = failing_after
+        self.cursors: list[int | None] = []
+
+    async def events(self, seller_id: str, *, after: int | None) -> ChatEventsPage:
+        if self.failing_after is not None and len(self.cursors) >= self.failing_after:
+            raise WBTemporaryError("WB Buyers Chat API отвечает HTTP 503")
+        self.cursors.append(after)
+        newer = [item for item in self.feed if after is None or millis(item.added_at) > after]
+        page = newer[:2]
+        return ChatEventsPage(events=page, next=millis(page[-1].added_at) if page else after)
+
+
+def millis(moment: datetime) -> int:
+    return int(moment.timestamp() * 1000)
+
+
+def message(
+    number: int, chat: str, *, minute: int, sender: str = CHAT_SENDER_CLIENT, source: str = "ios", text: str = "Текст"
+) -> ChatEvent:
+    prompt = sender == CHAT_SENDER_SELLER and source == CHAT_SOURCE_PORTAL and text.startswith(REVIEW_PROMPT_PREFIX)
+    return ChatEvent(
+        event_id=f"event-{number}",
+        chat_id=chat,
+        sender=sender,
+        source=source,
+        added_at=datetime(2026, 9, 13, 10, minute, tzinfo=UTC),
+        is_new_chat=prompt,
+        review_prompt=prompt,
+        nm_id=1304195061 if prompt else None,
+        rid=None,
+        text=text,
+        has_attachments=False,
+    )
+
+
+def review_dialog() -> list[ChatEvent]:
+    """Чужой чат, затем диалог об отзыве: автосообщение WB, наше следом и ответ покупателя."""
+    prompt = f"{REVIEW_PROMPT_PREFIX}. Давайте обсудим, что не так с товаром."
+    return [
+        message(1, "chat-return", minute=30, text="Хочу вернуть товар, телефон +79990000000"),
+        message(2, "chat-review", minute=35, sender=CHAT_SENDER_SELLER, source=CHAT_SOURCE_PORTAL, text=prompt),
+        message(3, "chat-review", minute=36, sender=CHAT_SENDER_SELLER, source=CHAT_SOURCE_API, text="Ответ не нужен"),
+        message(4, "chat-return", minute=40, text="Когда ответите?"),
+        message(5, "chat-review", minute=50, text="Товар сломался"),
+    ]
+
+
 class FakeFeedbacks(WBFeedbackClient):
     def __init__(self, aggregation: FeedbackAggregation) -> None:
         super().__init__(make_gateway())
@@ -164,6 +226,8 @@ def mirror(
     marketplace: WBMarketplaceClient | None = None,
     feedbacks: WBFeedbackClient | None = None,
     content: WBContentClient | None = None,
+    chats: WBChatClient | None = None,
+    chats_pages_per_run: int = 100,
 ) -> MirrorService:
     return MirrorService(
         database,
@@ -180,6 +244,8 @@ def mirror(
                 media={FAN: (4, 1)},
             )
         ),
+        chats=chats or FakeChats([]),
+        chats_pages_per_run=chats_pages_per_run,
     )
 
 
@@ -512,3 +578,95 @@ async def test_orders_are_due_by_interval_and_supplies_daily(database: Database,
     assert await worker(database, service, at(11, 5)).collect_due(MIRROR_ORDERS, at(11, 5)) == 1
     assert await worker(database, service, at(10)).collect_due(MIRROR_SUPPLIES, at(10)) == 1
     assert await worker(database, service, at(12)).collect_due(MIRROR_SUPPLIES, at(12)) == 0
+
+
+async def test_the_chat_feed_is_read_to_its_end_and_resumed_from_the_cursor(
+    database: Database, seller: uuid.UUID
+) -> None:
+    feed = review_dialog()
+    chats = FakeChats(feed[:3])
+    service = mirror(database, chats=chats)
+
+    outcome = await service.collect_chats(seller, now=at(17))
+    assert (outcome.events, outcome.caught_up) == (3, True)
+    # Первый сбор начинает не с начала ленты, а с глубины истории.
+    assert chats.cursors[0] == millis(at(17) - timedelta(days=90))
+
+    chats.feed = feed
+    outcome = await service.collect_chats(seller, now=at(18))
+    assert (outcome.events, outcome.caught_up) == (2, True)
+    assert chats.cursors[-2] == millis(feed[2].added_at)
+
+    async with database.session() as session:
+        port = ChatMirror(session)
+        events = await port.review_dialog_events(seller, since=at(0), until=at(23))
+        state = await port.state(seller)
+    assert [event.event_id for event in events] == ["event-2", "event-3", "event-5"]
+    assert events[0].review_prompt and events[0].nm_id == 1304195061
+    assert events[2].text == "Товар сломался"
+    assert state is not None and state.synced_through == at(18) and state.error is None
+    assert state.history_from == feed[0].added_at
+
+
+async def test_client_text_outside_review_dialogs_is_not_stored(database: Database, seller: uuid.UUID) -> None:
+    await mirror(database, chats=FakeChats(review_dialog())).collect_chats(seller, now=at(17))
+
+    async with database.session() as session:
+        rows = {
+            row.event_id: row.text
+            for row in await session.scalars(select(ChatEventModel).where(ChatEventModel.seller_id == seller))
+        }
+    assert rows["event-1"] is None and rows["event-4"] is None
+    assert rows["event-5"] == "Товар сломался"
+    # Слова продавца хранятся всегда: по ним историю можно переразметить.
+    assert rows["event-3"] == "Ответ не нужен"
+
+
+async def test_a_long_history_is_read_in_portions_and_is_not_called_complete(
+    database: Database, seller: uuid.UUID
+) -> None:
+    service = mirror(database, chats=FakeChats(review_dialog()), chats_pages_per_run=1)
+
+    outcome = await service.collect_chats(seller, now=at(17))
+    assert (outcome.pages, outcome.events, outcome.caught_up) == (1, 2, False)
+    async with database.session() as session:
+        state = await ChatMirror(session).state(seller)
+        schedule = await MirrorRepository(session).state(seller, MIRROR_CHATS)
+    # Проход успешен — повтор придёт по расписанию, а не через паузу после ошибки, —
+    # но до конца ленты ещё не дошли.
+    assert schedule is not None and schedule.collected_at == at(17)
+    assert state is not None and state.synced_through is None
+
+    for hour in (18, 19, 20):
+        outcome = await service.collect_chats(seller, now=at(hour))
+    assert outcome.caught_up
+
+
+async def test_a_chat_failure_keeps_the_pages_already_written(database: Database, seller: uuid.UUID) -> None:
+    service = mirror(database, chats=FakeChats(review_dialog(), failing_after=1))
+
+    with pytest.raises(WBTemporaryError):
+        await service.collect_chats(seller, now=at(17))
+
+    async with database.session() as session:
+        repository = MirrorRepository(session)
+        cursor = await repository.chat_cursor(seller)
+        state = await repository.state(seller, MIRROR_CHATS)
+    assert cursor is not None and cursor.next == millis(review_dialog()[1].added_at)
+    assert state is not None and state.collected_at is None and "503" in (state.error or "")
+
+
+async def test_chats_are_due_by_interval_and_do_not_wait_for_the_catalog(database: Database, seller: uuid.UUID) -> None:
+    service = mirror(database, chats=FakeChats(review_dialog()))
+
+    assert await worker(database, service, at(10)).collect_due(MIRROR_CHATS, at(10)) == 1
+    assert await worker(database, service, at(10, 10)).collect_due(MIRROR_CHATS, at(10, 10)) == 0
+    assert await worker(database, service, at(10, 35)).collect_due(MIRROR_CHATS, at(10, 35)) == 1
+
+
+async def test_old_chat_events_are_pruned(database: Database, seller: uuid.UUID) -> None:
+    await mirror(database, chats=FakeChats(review_dialog())).collect_chats(seller, now=at(17))
+    now = at(17) + timedelta(days=200)
+
+    keeper = WBCoreWorker(database, mirror(database), SETTINGS, now=lambda: now)
+    assert await keeper.prune(now) == 5

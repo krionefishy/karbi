@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -157,7 +158,8 @@ class MirrorStateModel(WBCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies')", name="ck_wb_core_mirror_state_kind"
+            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats')",
+            name="ck_wb_core_mirror_state_kind",
         ),
     )
 
@@ -304,3 +306,57 @@ class FbsSupplyModel(WBCoreBase):
     done: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     cargo_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ChatEventModel(WBCoreBase):
+    """Сообщение из ленты чатов с покупателями — копия ответа WB.
+
+    Лента только дописывается, поэтому строки не обновляются. Текст покупателя
+    NULL вне диалогов с автосообщением WB об отзыве: его нарочно не храним.
+    """
+
+    __tablename__ = "chat_events"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    sender: Mapped[str] = mapped_column(String(16), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_new_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    review_prompt: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    nm_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    rid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    has_attachments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_wb_core_chat_events_chat", "seller_id", "chat_id", "added_at"),
+        Index(
+            "ix_wb_core_chat_events_prompts",
+            "seller_id",
+            "added_at",
+            # `text` в теле класса — колонка сообщения, поэтому функция под другим именем.
+            postgresql_where=sql_text("review_prompt"),
+        ),
+    )
+
+
+class ChatCursorModel(WBCoreBase):
+    """Докуда прочитана лента чатов селлера.
+
+    `next` — курсор WB (время последнего события, мс). `tail_reached_at` — когда
+    в последний раз дочитали до конца: пока история догоняется порциями, сбор
+    уже «успешен», а отчётам верить ещё рано.
+    """
+
+    __tablename__ = "chat_cursors"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    next: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    tail_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
