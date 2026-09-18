@@ -36,12 +36,13 @@ const AUTOMATION_TITLE = "Остатки FBS по складам";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 
-type Tab = "board" | "comparison" | "setup";
+type Tab = "board" | "comparison" | "fulfilment" | "setup";
 
 export function FbsStocksPage() {
   const queryClient = useQueryClient();
   const [sellerId, setSellerId] = useState("");
   const [tab, setTab] = useState<Tab>("board");
+  const comparing = tab === "comparison" || tab === "fulfilment";
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
@@ -174,7 +175,7 @@ export function FbsStocksPage() {
           selectedId={sellerId}
           onSelect={(id) => {
             setSellerId(id);
-            if (tab === "comparison") setTab("board");
+            if (comparing) setTab("board");
           }}
           onAdd={() => {
             setFormError("");
@@ -187,11 +188,19 @@ export function FbsStocksPage() {
           <div className="reviews-heading">
             <div>
               <p className="eyebrow">Wildberries / FBS</p>
-              <h1>{tab === "comparison" ? "Сравнение по кабинетам" : AUTOMATION_TITLE}</h1>
+              <h1>
+                {tab === "comparison"
+                  ? "Сравнение по кабинетам"
+                  : tab === "fulfilment"
+                    ? "Сравнение ФФ"
+                    : AUTOMATION_TITLE}
+              </h1>
               <p className="muted">
                 {tab === "comparison"
-                  ? "Свои склады по отдельности, округа — суммой. Все кабинеты на одном листе."
-                  : selected
+                  ? "Свои склады по отдельности, фулфилмент и округа — суммой. Все кабинеты на одном листе."
+                  : tab === "fulfilment"
+                    ? "Склады фулфилмента по отдельности, свои склады и округа — суммой. Все кабинеты на одном листе."
+                    : selected
                     ? `Остатки ${selected.name} по складам кабинета WB. Нули подсвечены.`
                     : "Остатки по баркодам на складах кабинета WB."}
               </p>
@@ -204,11 +213,14 @@ export function FbsStocksPage() {
                 <button className={tab === "comparison" ? "mode-active" : ""} onClick={() => setTab("comparison")}>
                   Сравнение
                 </button>
+                <button className={tab === "fulfilment" ? "mode-active" : ""} onClick={() => setTab("fulfilment")}>
+                  Сравнение ФФ
+                </button>
                 <button className={tab === "setup" ? "mode-active" : ""} onClick={() => setTab("setup")} disabled={!selected}>
                   Столбцы
                 </button>
               </span>
-              {selected && tab !== "comparison" && (
+              {selected && !comparing && (
                 <>
                   <div className="last-sync">
                     <span className="eyebrow">Остатки от</span>
@@ -225,7 +237,7 @@ export function FbsStocksPage() {
                   </button>
                 </>
               )}
-              {tab === "comparison" && (
+              {comparing && (
                 <button
                   className="secondary-button"
                   disabled={refreshAllMutation.isPending}
@@ -240,7 +252,7 @@ export function FbsStocksPage() {
                 className="primary-button"
                 disabled={exportMutation.isPending || sellers.length === 0}
                 onClick={() => exportMutation.mutate()}
-                title="Книга: лист на кабинет и лист «Сравнение»"
+                title="Книга: лист на кабинет, «Сравнение» и «Сравнение ФФ»"
               >
                 <Download size={15} />
                 {exportMutation.isPending ? "Собираем…" : "Выгрузить в Excel"}
@@ -249,13 +261,13 @@ export function FbsStocksPage() {
           </div>
 
           {actionError && <div className="inline-error">{actionError}</div>}
-          {tab !== "comparison" && refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
-          {tab !== "comparison" && board?.collection_error && (
+          {!comparing && refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
+          {!comparing && board?.collection_error && (
             <div className="checklist-notice">Последний сбор: {board.collection_error}</div>
           )}
 
-          {tab === "comparison" ? (
-            <FbsStocksComparison />
+          {comparing ? (
+            <FbsStocksComparison expand={tab === "fulfilment" ? "fulfilment" : "own"} />
           ) : isLoading || (sellerId && boardLoading) ? (
             <div className="loading-block">Загружаем данные…</div>
           ) : !selected ? (

@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.modules.wb_fbs_stocks.domain import GROUP_OWN
+from backend.modules.wb_fbs_stocks.domain import GROUP_FULFILMENT, GROUP_OWN
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,14 +64,22 @@ class BoardView:
     rows: tuple[RowView, ...]
     hidden: tuple[HiddenRowView, ...] = ()
 
-    @property
-    def own_group(self) -> GroupView | None:
-        return next((group for group in self.groups if group.kind == GROUP_OWN), None)
+    def expanded_group(self, kind: str = GROUP_OWN) -> GroupView | None:
+        """Группа, которую лист сравнения раскрывает по складам: свои склады на
+        «Сравнении», фулфилмент на «Сравнении ФФ»."""
+        return next((group for group in self.groups if group.kind == kind), None)
+
+    def summary_groups(self, kind: str = GROUP_OWN) -> tuple[GroupView, ...]:
+        """Остальные группы — одной суммой каждая, в порядке кабинета."""
+        return tuple(group for group in self.groups if group.kind != kind)
 
     @property
-    def summary_groups(self) -> tuple[GroupView, ...]:
-        """Группы, которые лист «Сравнение» показывает одной суммой: всё, кроме своих складов."""
-        return tuple(group for group in self.groups if group.kind != GROUP_OWN)
+    def own_group(self) -> GroupView | None:
+        return self.expanded_group(GROUP_OWN)
+
+    @property
+    def fulfilment_group(self) -> GroupView | None:
+        return self.expanded_group(GROUP_FULFILMENT)
 
 
 @dataclass(frozen=True, slots=True)

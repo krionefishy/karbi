@@ -11,9 +11,12 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import Outline
 
 from backend.modules.wb_fbs_stocks.application.view import BoardView
+from backend.modules.wb_fbs_stocks.domain import GROUP_FULFILMENT, GROUP_OWN
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 COMPARISON_SHEET = "Сравнение"
+# Тот же лист глазами фулфилмента: его склады раскрыты, свои и округа — суммами.
+COMPARISON_FF_SHEET = "Сравнение ФФ"
 
 # Первые две колонки как в таблице селлера: её заметка и баркод.
 NOTE_COLUMN = 1
@@ -54,7 +57,8 @@ def render_workbook(views: Sequence[BoardView]) -> bytes:
     taken: set[str] = set()
     for view in views:
         _seller_sheet(workbook.create_sheet(_sheet_title(view.seller_name, taken)), view)
-    _comparison_sheet(workbook.create_sheet(COMPARISON_SHEET), views)
+    _comparison_sheet(workbook.create_sheet(COMPARISON_SHEET), views, GROUP_OWN, "Наш склад")
+    _comparison_sheet(workbook.create_sheet(COMPARISON_FF_SHEET), views, GROUP_FULFILMENT, "Фулфилмент")
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
@@ -95,19 +99,19 @@ def _seller_sheet(sheet, view: BoardView) -> None:
     sheet.freeze_panes = sheet.cell(row=2, column=FIRST_DATA_COLUMN)
 
 
-def _comparison_sheet(sheet, views: Sequence[BoardView]) -> None:
-    """Все кабинеты друг под другом: свои склады раскрыты, фулфилменты и округа — суммами."""
+def _comparison_sheet(sheet, views: Sequence[BoardView], kind: str, fallback_title: str) -> None:
+    """Все кабинеты друг под другом: группа вида `kind` раскрыта по складам, остальные — суммами."""
     sheet.sheet_properties.outlinePr = Outline(summaryRight=False, summaryBelow=False)
-    own_width = max((len(view.own_group.columns) if view.own_group else 0 for view in views), default=0)
+    own_width = max((len(group.columns) if (group := view.expanded_group(kind)) else 0 for view in views), default=0)
     district_start = FIRST_DATA_COLUMN + 1 + own_width
     row_index = 1
     last_column = FIRST_DATA_COLUMN
     for view in views:
-        own = view.own_group
-        districts = view.summary_groups
+        own = view.expanded_group(kind)
+        districts = view.summary_groups(kind)
         sheet.cell(row=row_index, column=NOTE_COLUMN, value=view.seller_name)
         sheet.cell(row=row_index, column=BARCODE_COLUMN, value="Баркод")
-        sheet.cell(row=row_index, column=FIRST_DATA_COLUMN, value=own.title if own else "Наш склад")
+        sheet.cell(row=row_index, column=FIRST_DATA_COLUMN, value=own.title if own else fallback_title)
         own_columns = own.columns if own else ()
         for offset, member in enumerate(own_columns):
             sheet.cell(row=row_index, column=FIRST_DATA_COLUMN + 1 + offset, value=member.name)

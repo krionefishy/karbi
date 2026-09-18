@@ -269,7 +269,7 @@ async def test_export_follows_the_sellers_spreadsheet(database: Database, seller
         report = await board.export()
 
     workbook = load_workbook(io.BytesIO(report.content))
-    assert workbook.sheetnames == ["ИП Остатки", "Сравнение"]
+    assert workbook.sheetnames == ["ИП Остатки", "Сравнение", "Сравнение ФФ"]
     sheet = workbook["ИП Остатки"]
     assert [cell.value for cell in sheet[1]] == [
         "ИП Остатки",
@@ -302,6 +302,16 @@ async def test_export_follows_the_sellers_spreadsheet(database: Database, seller
     assert [cell.value for cell in comparison[2]] == ["дубль карточки", FEN, "=SUM(D2:E2)", 0, 0, 28]
     # Красятся только записанные ячейки: разрыв между блоками для Excel равен нулю.
     assert sorted(str(area.sqref) for area in comparison.conditional_formatting) == ["C2:E3", "F2:F3"]
+    # «Сравнение ФФ» раскрывает фулфилмент; у этого кабинета его нет — только суммы групп.
+    fulfilment = workbook["Сравнение ФФ"]
+    assert [cell.value for cell in fulfilment[1]] == [
+        "ИП Остатки",
+        "Баркод",
+        "Фулфилмент",
+        "Наш склад",
+        "Северо-западный округ",
+    ]
+    assert [cell.value for cell in fulfilment[2]] == ["дубль карточки", FEN, 0, 0, 28]
     assert report.filename.startswith("fbs_stocks_")
 
 

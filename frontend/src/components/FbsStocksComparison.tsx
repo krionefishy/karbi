@@ -2,28 +2,35 @@ import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 
 import { getBoards } from "../features/fbsStocks/api";
-import type { StocksBoard } from "../features/fbsStocks/types";
+import type { GroupKind, StocksBoard } from "../features/fbsStocks/types";
+
+interface Props {
+  /** Какую группу раскрывать по складам: свои склады на «Сравнении», фулфилмент на «Сравнении ФФ». */
+  expand: GroupKind;
+}
+
+const FALLBACK_TITLE: Record<GroupKind, string> = { own: "Наш склад", fulfilment: "Фулфилмент", district: "Округ" };
 
 /**
- * Лист «Сравнение»: все кабинеты друг под другом. Свои склады раскрыты, фулфилменты
- * и округа стоят суммами — чтобы увидеть, где товар лежит у нас и чего не хватает в регионе.
+ * Листы сравнения: все кабинеты друг под другом. Одна группа раскрыта по складам, остальные
+ * стоят суммами — чтобы увидеть, где товар лежит и чего не хватает в регионе.
  */
-export function FbsStocksComparison() {
+export function FbsStocksComparison({ expand }: Props) {
   const { data: boards = [], isLoading } = useQuery({ queryKey: ["fbs-stocks-boards"], queryFn: getBoards });
   if (isLoading) return <div className="loading-block">Собираем кабинеты…</div>;
   if (boards.length === 0) return <div className="loading-block">Подключите кабинеты — сравнение соберётся из их таблиц.</div>;
   return (
     <>
       {boards.map((board) => (
-        <ComparisonBlock key={board.seller_id} board={board} />
+        <ComparisonBlock key={board.seller_id} board={board} expand={expand} />
       ))}
     </>
   );
 }
 
-function ComparisonBlock({ board }: { board: StocksBoard }) {
-  const own = board.groups.find((group) => group.kind === "own");
-  const summaries = board.groups.filter((group) => group.kind !== "own");
+function ComparisonBlock({ board, expand }: { board: StocksBoard; expand: GroupKind }) {
+  const own = board.groups.find((group) => group.kind === expand);
+  const summaries = board.groups.filter((group) => group.kind !== expand);
   const ownColumns = own?.columns ?? [];
   const template = ["200px", "150px", "112px", ...ownColumns.map(() => "96px"), ...summaries.map(() => "128px")].join(" ");
   return (
@@ -38,7 +45,7 @@ function ComparisonBlock({ board }: { board: StocksBoard }) {
         <div className="stocks-head">
           <span className="checklist-sticky">Заметка</span>
           <span className="stocks-sticky-barcode">Баркод</span>
-          <span className="stocks-group-head stocks-group-static">{own?.title ?? "Наш склад"}</span>
+          <span className="stocks-group-head stocks-group-static">{own?.title ?? FALLBACK_TITLE[expand]}</span>
           {ownColumns.map((column) => (
             <span key={column.warehouse_id} className="stocks-column-head" title={column.name}>
               {column.name}
