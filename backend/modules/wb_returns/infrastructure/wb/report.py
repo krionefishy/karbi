@@ -8,11 +8,10 @@
 from datetime import date
 from typing import Any
 
-from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
+from backend.modules.wb_core.infrastructure.wb import ANALYTICS_BUCKET, WBJsonClient, WBPermanentError
 from backend.modules.wb_returns.domain import ReturnItem
 from backend.modules.wb_returns.infrastructure.wb.parsing import as_date, as_int, as_moment, as_text
 
-ANALYTICS_BUCKET = "analytics"
 REPORT_PATH = "/api/v1/analytics/goods-return"
 # По документации WB — максимум за один запрос.
 MAX_WINDOW_DAYS = 31

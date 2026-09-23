@@ -189,9 +189,9 @@ async def test_first_collection_reads_month_and_archive_then_two_weeks(database:
 
     async with database.session() as session:
         tracked = await session.get(TrackedSellerModel, seller)
-        counts = await ReturnsRepository(session).active_counts(seller)
+        active = await ReturnsRepository(session).active_returns(seller)
     assert tracked is not None and tracked.collected_at is not None and tracked.claims_archived_at is not None
-    assert counts == {RETURN_READY: 1, RETURN_TRANSIT: 1}
+    assert sorted(row.status_key for row in active) == [RETURN_READY, RETURN_TRANSIT]
 
     report, claims = await collect(database, seller, [item(1)], now=NOW + timedelta(hours=1))
     assert report.calls == [(TODAY - timedelta(days=14), TODAY)]

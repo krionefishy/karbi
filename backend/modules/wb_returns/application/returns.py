@@ -99,7 +99,7 @@ class ReturnsService:
         seller = await self.sellers.get(seller_id)
         if seller is None or seller.archived_at is not None:
             raise SellerNotFoundError
-        if seller_id not in await self.returns.tracked_seller_ids():
+        if await self.returns.tracked(seller_id) is None:
             raise SellerNotFoundError
         return seller.name
 

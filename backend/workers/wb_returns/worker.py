@@ -103,6 +103,7 @@ class ReturnsWorker:
         for seller_id in await self._active_tracked():
             if self._stop.is_set():
                 break
+            touch_heartbeat()
             sent += await self.notify(seller_id, now)
         return sent
 
@@ -143,9 +144,11 @@ class ReturnsWorker:
             await session.commit()
         if abandoned:
             self.logger.warning("returns_refresh_abandoned", count=abandoned)
+        active = set(await self._active_tracked()) if requests else set()
         for request_id, seller_id in requests:
             touch_heartbeat()
-            error = await self.collect(seller_id)
+            # Кабинет могли заархивировать после нажатия: ключа у шлюза уже нет.
+            error = await self.collect(seller_id) if seller_id in active else "Кабинет отключён или в архиве"
             async with self.database.session() as session:
                 await ReturnsRepository(session).finish_refresh(request_id, error)
                 await session.commit()

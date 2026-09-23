@@ -238,14 +238,6 @@ class ReturnsRepository:
         )
         return list(rows)
 
-    async def active_counts(self, seller_id: uuid.UUID) -> dict[str, int]:
-        result = await self.session.execute(
-            select(ReturnModel.status_key, func.count())
-            .where(ReturnModel.seller_id == seller_id, ReturnModel.is_active.is_(True))
-            .group_by(ReturnModel.status_key)
-        )
-        return {str(key): int(count) for key, count in result}
-
     # --- claims -----------------------------------------------------------
 
     async def upsert_claims(self, seller_id: uuid.UUID, claims: Sequence[Claim], *, now: datetime) -> list[Claim]:
@@ -353,18 +345,6 @@ class ReturnsRepository:
             .limit(limit)
         )
         return list(rows)
-
-    async def open_claim_count(self, seller_id: uuid.UUID) -> int:
-        return int(
-            await self.session.scalar(
-                select(func.count()).where(
-                    ClaimModel.seller_id == seller_id,
-                    ClaimModel.is_archive.is_(False),
-                    ClaimModel.status == CLAIM_OPEN,
-                )
-            )
-            or 0
-        )
 
     # --- notification log --------------------------------------------------
 
