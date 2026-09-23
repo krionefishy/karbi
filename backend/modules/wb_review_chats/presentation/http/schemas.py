@@ -6,15 +6,24 @@ class GroupSummaryResponse(BaseModel):
     replied: int
     silent: int
     pending: int
-    # Доли от диалогов с известным исходом; null — таких ещё нет.
+    # Доли от всех диалогов группы; null — диалогов нет.
     reply_rate: float | None
     silent_rate: float | None
+    pending_rate: float | None
 
 
 class DaySummaryResponse(BaseModel):
     day: str
+    total: GroupSummaryResponse
     followed: GroupSummaryResponse
-    bare: GroupSummaryResponse
+    early: GroupSummaryResponse
+    missed: GroupSummaryResponse
+
+
+class BaselineResponse(BaseModel):
+    date_from: str
+    date_to: str
+    summary: GroupSummaryResponse
 
 
 class DialogResponse(BaseModel):
@@ -38,10 +47,13 @@ class ReviewChatsResponse(BaseModel):
     date_from: str
     date_to: str
     reply_window_hours: int
+    launch_at: str | None
     followed: GroupSummaryResponse
-    bare: GroupSummaryResponse
-    follow_up_late: int
-    first_follow_up_at: str | None
+    early: GroupSummaryResponse
+    missed: GroupSummaryResponse
+    before: GroupSummaryResponse
+    after_launch: GroupSummaryResponse
+    baseline: BaselineResponse | None
     days: list[DaySummaryResponse]
     dialogs: list[DialogResponse]
     page: int

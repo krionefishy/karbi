@@ -1,8 +1,15 @@
-import type { Dialog, DialogOutcome } from "../features/reviewChats/types";
+import type { Dialog, DialogGroup, DialogOutcome } from "../features/reviewChats/types";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 
-const TEMPLATE = ["125px", "250px", "170px", "120px", "125px", "minmax(320px, 1fr)"].join(" ");
+const TEMPLATE = ["125px", "250px", "170px", "170px", "125px", "minmax(320px, 1fr)"].join(" ");
+
+const GROUP_LABEL: Record<DialogGroup, string> = {
+  followed: "с нашим сообщением",
+  early: "ответил раньше нашего",
+  missed: "пропуск рассылки",
+  before: "до запуска",
+};
 
 const OUTCOME_LABEL: Record<DialogOutcome, string> = {
   replied: "Ответил",
@@ -56,7 +63,10 @@ export function ReviewChatsDialogs({ dialogs, empty }: { dialogs: Dialog[]; empt
               <em className="stocks-unknown">не уходило</em>
             )}
           </span>
-          <span className={`chats-outcome chats-outcome-${dialog.outcome}`}>{OUTCOME_LABEL[dialog.outcome]}</span>
+          <span className="penalty-kind">
+            <strong className={`chats-outcome chats-outcome-${dialog.outcome}`}>{OUTCOME_LABEL[dialog.outcome]}</strong>
+            <em>{GROUP_LABEL[dialog.group]}</em>
+          </span>
           <span>{stamp(dialog.reply_at)}</span>
           <span className="chats-reply">
             {dialog.reply_text || (dialog.reply_has_attachments ? "вложение без текста" : "")}

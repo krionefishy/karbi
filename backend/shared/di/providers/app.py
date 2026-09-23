@@ -391,6 +391,7 @@ class SessionProvider(Provider):
             timezone=ZoneInfo(settings.review_chats.timezone),
             reply_window_hours=settings.review_chats.reply_window_hours,
             max_period_days=settings.review_chats.max_period_days,
+            baseline_days=settings.review_chats.baseline_days,
         )
 
     @provide(scope=Scope.REQUEST)

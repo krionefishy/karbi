@@ -1,15 +1,17 @@
 import uuid
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import BigInteger, Integer, String, any_, bindparam, delete, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import InstrumentedAttribute
+from sqlalchemy.orm import InstrumentedAttribute, aliased
 from sqlalchemy.sql import ColumnElement
 
 from backend.modules.wb_core.domain import (
+    CHAT_SENDER_SELLER,
+    CHAT_SOURCE_API,
     ChatEvent,
     FbsOrder,
     FbsSupply,
@@ -522,6 +524,33 @@ class MirrorRepository:
             .order_by(ChatEventModel.chat_id, ChatEventModel.added_at, ChatEventModel.event_id)
         )
         return [self._chat_event(row) for row in rows]
+
+    async def first_api_reply_at(self, seller_id: uuid.UUID, *, within: timedelta) -> datetime | None:
+        """Первое сообщение из публичного API не позже `within` после автосообщения WB в том же чате.
+
+        Просто «первое сообщение из API» не годится: менеджеры отвечают через
+        сторонние клиенты часами позже, и такие одиночные ответы есть задолго
+        до рассылки.
+        """
+        prompt = aliased(ChatEventModel)
+        reply = aliased(ChatEventModel)
+        return await self.session.scalar(
+            select(func.min(reply.added_at))
+            .select_from(reply)
+            .join(
+                prompt,
+                (prompt.seller_id == reply.seller_id)
+                & (prompt.chat_id == reply.chat_id)
+                & prompt.review_prompt
+                & (prompt.added_at < reply.added_at)
+                & (reply.added_at <= prompt.added_at + within),
+            )
+            .where(
+                reply.seller_id == seller_id,
+                reply.sender == CHAT_SENDER_SELLER,
+                reply.source == CHAT_SOURCE_API,
+            )
+        )
 
     async def first_chat_event_at(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(

@@ -8,14 +8,18 @@ from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_review_chats.application.report import ReviewChatsReportFile, build_workbook
 from backend.modules.wb_review_chats.application.view import (
+    Baseline,
     DaySummary,
     DialogView,
     ReviewChatsOverview,
     ReviewChatsView,
 )
 from backend.modules.wb_review_chats.domain import (
-    GROUP_BARE,
+    FOLLOW_UP_WITHIN,
+    GROUP_BEFORE,
+    GROUP_EARLY,
     GROUP_FOLLOWED,
+    GROUP_MISSED,
     GROUPS,
     OUTCOMES,
     Dialog,
@@ -41,6 +45,7 @@ class ReviewChatsService:
         timezone: ZoneInfo,
         reply_window_hours: int,
         max_period_days: int,
+        baseline_days: int,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -49,6 +54,7 @@ class ReviewChatsService:
         self.timezone = timezone
         self.reply_window_hours = reply_window_hours
         self.max_period_days = max_period_days
+        self.baseline_days = baseline_days
 
     async def overview(self) -> ReviewChatsOverview:
         enrolled = await self.tracked.tracked_seller_ids() & {seller.id for seller in await self.sellers.list_sellers()}
@@ -93,7 +99,15 @@ class ReviewChatsService:
         moment = now or datetime.now(UTC)
         if state is not None and state.read_through is not None:
             moment = min(moment, state.read_through)
-        dialogs = await self._dialogs(seller_id, date_from, date_to, moment)
+        launch_at = await self.chats.launch_at(seller_id, within=FOLLOW_UP_WITHIN)
+        dialogs = await self._dialogs(seller_id, date_from, date_to, moment, launch_at)
+        baseline = None
+        if launch_at is not None:
+            # Окно до запуска — до дня запуска, не включая его: в день запуска группы уже смешаны.
+            launch_day = launch_at.astimezone(self.timezone).date()
+            baseline_from, baseline_to = launch_day - timedelta(days=self.baseline_days), launch_day - timedelta(days=1)
+            before = await self._dialogs(seller_id, baseline_from, baseline_to, moment, launch_at)
+            baseline = Baseline(baseline_from, baseline_to, summarize(before))
         listed = [
             dialog
             for dialog in dialogs
@@ -102,17 +116,19 @@ class ReviewChatsService:
         size = page_size or max(len(listed), 1)
         shown = listed[(page - 1) * size : page * size]
         names = await self.sellers.article_names(seller_id, [str(dialog.nm_id) for dialog in shown if dialog.nm_id])
-        follow_ups = [dialog.follow_up_at for dialog in dialogs if dialog.follow_up_at is not None]
         return ReviewChatsView(
             seller_id=seller_id,
             seller_name=seller_name,
             date_from=date_from,
             date_to=date_to,
             reply_window_hours=self.reply_window_hours,
+            launch_at=launch_at,
             followed=summarize(dialogs, GROUP_FOLLOWED),
-            bare=summarize(dialogs, GROUP_BARE),
-            follow_up_late=sum(1 for dialog in dialogs if dialog.follow_up_late),
-            first_follow_up_at=min(follow_ups) if follow_ups else None,
+            early=summarize(dialogs, GROUP_EARLY),
+            missed=summarize(dialogs, GROUP_MISSED),
+            before=summarize(dialogs, GROUP_BEFORE),
+            after_launch=summarize(dialog for dialog in dialogs if dialog.group != GROUP_BEFORE),
+            baseline=baseline,
             days=self._days(dialogs),
             dialogs=tuple(DialogView(dialog, names.get(str(dialog.nm_id), "")) for dialog in shown),
             page=page,
@@ -134,18 +150,33 @@ class ReviewChatsService:
 
     # --- helpers ----------------------------------------------------------------------
 
-    async def _dialogs(self, seller_id: uuid.UUID, date_from: date, date_to: date, now: datetime) -> list[Dialog]:
+    async def _dialogs(
+        self, seller_id: uuid.UUID, date_from: date, date_to: date, now: datetime, launch_at: datetime | None
+    ) -> list[Dialog]:
         since = datetime.combine(date_from, time.min, tzinfo=self.timezone).astimezone(UTC)
         until = datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=self.timezone).astimezone(UTC)
         events = await self.chats.review_dialog_events(seller_id, since=since, until=until)
-        return build_dialogs(events, since=since, until=until, window=timedelta(hours=self.reply_window_hours), now=now)
+        return build_dialogs(
+            events,
+            since=since,
+            until=until,
+            window=timedelta(hours=self.reply_window_hours),
+            now=now,
+            launch_at=launch_at,
+        )
 
     def _days(self, dialogs: list[Dialog]) -> tuple[DaySummary, ...]:
         by_day: dict[date, list[Dialog]] = {}
         for dialog in dialogs:
             by_day.setdefault(dialog.prompt_at.astimezone(self.timezone).date(), []).append(dialog)
         return tuple(
-            DaySummary(day, summarize(items, GROUP_FOLLOWED), summarize(items, GROUP_BARE))
+            DaySummary(
+                day,
+                summarize(items),
+                summarize(items, GROUP_FOLLOWED),
+                summarize(items, GROUP_EARLY),
+                summarize(items, GROUP_MISSED),
+            )
             for day, items in sorted(by_day.items(), reverse=True)
         )
 

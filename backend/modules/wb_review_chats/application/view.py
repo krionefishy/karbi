@@ -7,11 +7,25 @@ from backend.modules.wb_review_chats.domain import Dialog, GroupSummary
 
 @dataclass(frozen=True, slots=True)
 class DaySummary:
-    """День по дате автосообщения WB: ответ следующим утром относится ко дню обращения."""
+    """День по дате автосообщения WB: ответ следующим утром относится ко дню обращения.
+
+    `total` — все диалоги дня; остальные группы до запуска рассылки пусты.
+    """
 
     day: date
+    total: GroupSummary
     followed: GroupSummary
-    bare: GroupSummary
+    early: GroupSummary
+    missed: GroupSummary
+
+
+@dataclass(frozen=True, slots=True)
+class Baseline:
+    """Как отвечали до запуска рассылки: все диалоги за окно перед первым нашим сообщением."""
+
+    date_from: date
+    date_to: date
+    summary: GroupSummary
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,12 +41,17 @@ class ReviewChatsView:
     date_from: date
     date_to: date
     reply_window_hours: int
+    # Момент запуска рассылки по кабинету — первое наше сообщение за всю историю; `None` — не уходило.
+    launch_at: datetime | None
+    # Группы по периоду.
     followed: GroupSummary
-    bare: GroupSummary
-    # Автосообщения WB, следом за которыми наше не ушло или ушло после ответа покупателя.
-    follow_up_late: int
-    # Первое наше сообщение в периоде — ориентир, с какого дня сравнение «с» и «без» имеет смысл.
-    first_follow_up_at: datetime | None
+    early: GroupSummary
+    missed: GroupSummary
+    before: GroupSummary
+    # Все диалоги периода после запуска, в какую бы группу они ни попали: итог для покупателя.
+    after_launch: GroupSummary
+    # Окно до запуска — от периода не зависит; `None`, пока рассылки не было.
+    baseline: Baseline | None
     days: tuple[DaySummary, ...]
     dialogs: tuple[DialogView, ...]
     page: int

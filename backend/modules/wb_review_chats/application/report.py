@@ -10,8 +10,10 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from backend.modules.wb_review_chats.application.view import ReviewChatsView
 from backend.modules.wb_review_chats.domain import (
-    GROUP_BARE,
+    GROUP_BEFORE,
+    GROUP_EARLY,
     GROUP_FOLLOWED,
+    GROUP_MISSED,
     OUTCOME_PENDING,
     OUTCOME_REPLIED,
     OUTCOME_SILENT,
@@ -27,10 +29,17 @@ HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=T
 BOLD = Font(bold=True)
 WRAP = Alignment(vertical="top", wrap_text=True)
 
-GROUP_TITLES = {GROUP_FOLLOWED: "С нашим сообщением", GROUP_BARE: "Без нашего сообщения"}
+GROUP_TITLES = {
+    GROUP_FOLLOWED: "С нашим сообщением",
+    GROUP_EARLY: "Ответил раньше нашего сообщения",
+    GROUP_MISSED: "Пропуск рассылки",
+    GROUP_BEFORE: "До запуска рассылки",
+}
 OUTCOME_TITLES = {OUTCOME_REPLIED: "Ответил", OUTCOME_SILENT: "Не ответил", OUTCOME_PENDING: "Ждём ответа"}
 
 SUMMARY_COLUMNS = ("Диалогов", "Ответили", "Не ответили", "Ждём ответа", "% ответивших", "% не ответивших")
+DAY_GROUPS = (("Все диалоги", "total"), (GROUP_TITLES[GROUP_FOLLOWED], "followed"))
+DAY_COUNTS = ((GROUP_TITLES[GROUP_EARLY], "early"), (GROUP_TITLES[GROUP_MISSED], "missed"))
 DIALOG_COLUMNS: tuple[tuple[str, int], ...] = (
     ("Автосообщение WB", 18),
     ("Артикул WB", 13),
@@ -77,17 +86,41 @@ def build_workbook(view: ReviewChatsView, timezone: ZoneInfo) -> bytes:
 def _summary_sheet(sheet: Worksheet, view: ReviewChatsView) -> None:
     sheet.append([f"{view.seller_name}: чаты после отзыва {view.date_from:%d.%m.%Y} — {view.date_to:%d.%m.%Y}"])
     sheet["A1"].font = BOLD
-    sheet.append([f"Ответ засчитывается в течение {view.reply_window_hours} ч; проценты — без диалогов, где ещё ждём"])
+    sheet.append(
+        [
+            f"Ответ засчитывается в течение {view.reply_window_hours} ч; проценты — от всех диалогов, "
+            "пока есть «ждём», доля ответивших может только вырасти"
+        ]
+    )
     sheet.append([])
     _header(sheet, ("Группа", *SUMMARY_COLUMNS))
     sheet.append([GROUP_TITLES[GROUP_FOLLOWED], *_summary_cells(view.followed)])
-    sheet.append([GROUP_TITLES[GROUP_BARE], *_summary_cells(view.bare)])
+    sheet.append([GROUP_TITLES[GROUP_EARLY], *_summary_cells(view.early)])
+    sheet.append([GROUP_TITLES[GROUP_MISSED], *_summary_cells(view.missed)])
+    sheet.append([GROUP_TITLES[GROUP_BEFORE], *_summary_cells(view.before)])
+    sheet.append(["Все диалоги после запуска", *_summary_cells(view.after_launch)])
+    if view.baseline is not None:
+        title = f"До запуска: {view.baseline.date_from:%d.%m.%Y} — {view.baseline.date_to:%d.%m.%Y}"
+        sheet.append([title, *_summary_cells(view.baseline.summary)])
     sheet.append([])
-    _header(sheet, ("День", *(f"{title}: {column}" for title in GROUP_TITLES.values() for column in SUMMARY_COLUMNS)))
+    _header(
+        sheet,
+        (
+            "День",
+            *(f"{title}: {column}" for title, _ in DAY_GROUPS for column in SUMMARY_COLUMNS),
+            *(title for title, _ in DAY_COUNTS),
+        ),
+    )
     for day in view.days:
-        sheet.append([day.day.strftime("%d.%m.%Y"), *_summary_cells(day.followed), *_summary_cells(day.bare)])
-    sheet.column_dimensions["A"].width = 24
-    for column in range(2, 2 + 2 * len(SUMMARY_COLUMNS)):
+        sheet.append(
+            [
+                day.day.strftime("%d.%m.%Y"),
+                *(cell for _, field in DAY_GROUPS for cell in _summary_cells(getattr(day, field))),
+                *(getattr(day, field).total for _, field in DAY_COUNTS),
+            ]
+        )
+    sheet.column_dimensions["A"].width = 34
+    for column in range(2, 2 + 2 * len(SUMMARY_COLUMNS) + len(DAY_COUNTS)):
         sheet.column_dimensions[get_column_letter(column)].width = 16
     for row in sheet.iter_rows(min_row=5):
         for cell in row:

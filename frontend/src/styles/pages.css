@@ -363,6 +363,7 @@
 .chats-summary dt { color: var(--ink-muted); }
 .chats-summary dd { margin: 0; font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
 .chats-summary p { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
+.chats-legend { margin: calc(-1 * var(--space-1)) 0 var(--space-4); font-size: 12px; line-height: 1.45; }
 .chats-section-title { margin: var(--space-5) 0 var(--space-2); }
 .chats-days { max-height: 360px; overflow: auto; margin-bottom: 4px; }
 .chats-days .stocks-head { position: sticky; top: 0; z-index: 2; }

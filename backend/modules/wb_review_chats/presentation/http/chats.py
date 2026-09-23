@@ -16,6 +16,7 @@ from backend.modules.wb_review_chats.application import (
 )
 from backend.modules.wb_review_chats.domain import GroupSummary
 from backend.modules.wb_review_chats.presentation.http.schemas import (
+    BaselineResponse,
     DaySummaryResponse,
     DialogResponse,
     GroupSummaryResponse,
@@ -48,6 +49,7 @@ def summary_response(summary: GroupSummary) -> GroupSummaryResponse:
         pending=summary.pending,
         reply_rate=summary.reply_rate,
         silent_rate=summary.silent_rate,
+        pending_rate=summary.pending_rate,
     )
 
 
@@ -76,13 +78,26 @@ def view_response(view: ReviewChatsView) -> ReviewChatsResponse:
         date_from=view.date_from.isoformat(),
         date_to=view.date_to.isoformat(),
         reply_window_hours=view.reply_window_hours,
+        launch_at=_iso(view.launch_at),
         followed=summary_response(view.followed),
-        bare=summary_response(view.bare),
-        follow_up_late=view.follow_up_late,
-        first_follow_up_at=_iso(view.first_follow_up_at),
+        early=summary_response(view.early),
+        missed=summary_response(view.missed),
+        before=summary_response(view.before),
+        after_launch=summary_response(view.after_launch),
+        baseline=BaselineResponse(
+            date_from=view.baseline.date_from.isoformat(),
+            date_to=view.baseline.date_to.isoformat(),
+            summary=summary_response(view.baseline.summary),
+        )
+        if view.baseline
+        else None,
         days=[
             DaySummaryResponse(
-                day=day.day.isoformat(), followed=summary_response(day.followed), bare=summary_response(day.bare)
+                day=day.day.isoformat(),
+                total=summary_response(day.total),
+                followed=summary_response(day.followed),
+                early=summary_response(day.early),
+                missed=summary_response(day.missed),
             )
             for day in view.days
         ],

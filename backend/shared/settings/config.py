@@ -338,6 +338,9 @@ class ReviewChatsConfig:
     reply_window_hours: int = 48
     # Отчёт считается при чтении, потолок периода держит запрос в разумных пределах.
     max_period_days: int = 92
+    # Сколько дней до запуска рассылки берётся за «как было»: одно и то же окно
+    # при любом выбранном периоде, чтобы сравнение не плыло вместе с датами.
+    baseline_days: int = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -514,7 +517,7 @@ class Settings:
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         review_chats = dict(data.get("review_chats", {}))
-        for key in ("reply_window_hours", "max_period_days"):
+        for key in ("reply_window_hours", "max_period_days", "baseline_days"):
             if key in review_chats:
                 review_chats[key] = int(review_chats[key])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
@@ -643,8 +646,13 @@ class Settings:
             < 1
         ):
             raise ValueError("core_mirror.chats_* must be positive")
-        if min(self.review_chats.reply_window_hours, self.review_chats.max_period_days) < 1:
-            raise ValueError("review_chats.reply_window_hours and max_period_days must be positive")
+        if (
+            min(
+                self.review_chats.reply_window_hours, self.review_chats.max_period_days, self.review_chats.baseline_days
+            )
+            < 1
+        ):
+            raise ValueError("review_chats.reply_window_hours, max_period_days and baseline_days must be positive")
         penalties = self.fbs_penalties
         if (
             min(

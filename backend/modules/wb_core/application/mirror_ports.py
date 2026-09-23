@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -147,6 +147,10 @@ class ChatMirror:
     async def review_dialog_events(self, seller_id: uuid.UUID, *, since: datetime, until: datetime) -> list[ChatEvent]:
         """События чатов, где автосообщение WB пришло в окне; по чату и времени, без верхней границы."""
         return await self.mirror.review_dialog_events(seller_id, since=since, until=until)
+
+    async def launch_at(self, seller_id: uuid.UUID, *, within: timedelta) -> datetime | None:
+        """Первое сообщение из API, ушедшее не позже `within` после автосообщения WB; `None` — не было."""
+        return await self.mirror.first_api_reply_at(seller_id, within=within)
 
     async def state(self, seller_id: uuid.UUID) -> ChatMirrorState | None:
         """`None` — зеркало до этого селлера ещё не доходило."""

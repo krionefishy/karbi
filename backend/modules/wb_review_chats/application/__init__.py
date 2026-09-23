@@ -7,6 +7,7 @@ from backend.modules.wb_review_chats.application.enrollment import (
 )
 from backend.modules.wb_review_chats.application.report import XLSX_MEDIA_TYPE, ReviewChatsReportFile
 from backend.modules.wb_review_chats.application.view import (
+    Baseline,
     DaySummary,
     DialogView,
     ReviewChatsOverview,
@@ -18,6 +19,7 @@ __all__ = [
     "DESCRIPTION",
     "TITLE",
     "XLSX_MEDIA_TYPE",
+    "Baseline",
     "DaySummary",
     "DialogView",
     "ReviewChatsEnrollment",

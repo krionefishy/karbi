@@ -8,8 +8,10 @@ from backend.modules.wb_core.domain import (
     ChatEvent,
 )
 from backend.modules.wb_review_chats.domain import (
-    GROUP_BARE,
+    GROUP_BEFORE,
+    GROUP_EARLY,
     GROUP_FOLLOWED,
+    GROUP_MISSED,
     OUTCOME_PENDING,
     OUTCOME_REPLIED,
     OUTCOME_SILENT,
@@ -45,8 +47,12 @@ def event(chat: str, minutes: float, kind: str, text: str = "") -> ChatEvent:
     )
 
 
-def dialogs(*events: ChatEvent, now: datetime = LATER):
-    return build_dialogs(list(events), since=SINCE, until=UNTIL, window=WINDOW, now=now)
+# Рассылка запущена до начала периода; `launch_at=None` — не запускалась вовсе.
+LAUNCH = SINCE
+
+
+def dialogs(*events: ChatEvent, now: datetime = LATER, launch_at: datetime | None = LAUNCH):
+    return build_dialogs(list(events), since=SINCE, until=UNTIL, window=WINDOW, now=now, launch_at=launch_at)
 
 
 def test_a_reply_after_our_message_counts_and_silence_counts_once_the_window_is_over() -> None:
@@ -70,7 +76,8 @@ def test_silence_inside_the_window_is_not_a_verdict_yet() -> None:
     assert dialog.outcome == OUTCOME_PENDING
 
 
-def test_a_prompt_without_our_message_is_the_baseline() -> None:
+def test_a_prompt_without_our_message_after_launch_is_an_early_reply_or_a_miss() -> None:
+    """Программа не шлёт сообщение, если покупатель уже написал; молчание без нашего сообщения — пропуск."""
     answered, quiet = dialogs(
         event("a", 0, "prompt"),
         event("a", 5, "client"),
@@ -79,15 +86,32 @@ def test_a_prompt_without_our_message_is_the_baseline() -> None:
         event("b", -5, "manager", "Здравствуйте! Мы готовы предложить"),
     )
 
-    assert (answered.group, answered.outcome) == (GROUP_BARE, OUTCOME_REPLIED)
-    assert (quiet.group, quiet.outcome, quiet.follow_up_at) == (GROUP_BARE, OUTCOME_SILENT, None)
+    assert (answered.group, answered.outcome) == (GROUP_EARLY, OUTCOME_REPLIED)
+    assert (quiet.group, quiet.outcome, quiet.follow_up_at) == (GROUP_MISSED, OUTCOME_SILENT, None)
 
 
-def test_a_buyer_who_answered_before_our_message_stays_in_the_baseline() -> None:
-    """В день запуска рассылка прошла по старым диалогам: на уже данный ответ она не влияла."""
-    [dialog] = dialogs(event("a", 0, "prompt"), event("a", 20, "client"), event("a", 600, "ours"))
+def test_before_the_launch_every_dialog_is_the_baseline() -> None:
+    launch = START + timedelta(hours=5)
+    answered, quiet = dialogs(
+        event("a", 0, "prompt"),
+        event("a", 5, "client"),
+        event("b", -10, "prompt"),
+        launch_at=launch,
+    )
+    never = dialogs(event("c", 0, "prompt"), launch_at=None)
+    # Диалог, открывший рассылку: его автосообщение WB раньше момента запуска на секунды.
+    [first] = dialogs(event("d", 299, "prompt"), event("d", 300, "ours"), launch_at=launch)
 
-    assert (dialog.group, dialog.outcome, dialog.follow_up_late) == (GROUP_BARE, OUTCOME_REPLIED, True)
+    assert (answered.group, quiet.group, never[0].group) == (GROUP_BEFORE, GROUP_BEFORE, GROUP_BEFORE)
+    assert first.group == GROUP_FOLLOWED
+    assert (answered.outcome, quiet.outcome) == (OUTCOME_REPLIED, OUTCOME_SILENT)
+
+
+def test_a_buyer_who_answered_before_our_message_is_an_early_reply() -> None:
+    """Покупатель успел написать за минуту до нашего сообщения: на его ответ оно не влияло."""
+    [dialog] = dialogs(event("a", 0, "prompt"), event("a", 1, "client"), event("a", 2, "ours"))
+
+    assert (dialog.group, dialog.outcome, dialog.follow_up_late) == (GROUP_EARLY, OUTCOME_REPLIED, True)
     assert dialog.anchor_at == START
 
 
@@ -96,6 +120,12 @@ def test_a_late_message_is_not_a_reply_to_ours() -> None:
     [dialog] = dialogs(event("a", 0, "prompt"), event("a", 1, "ours"), event("a", 60 * 24 * 4, "client"))
 
     assert (dialog.outcome, dialog.reply_at) == (OUTCOME_SILENT, None)
+
+
+def test_a_manager_answering_through_an_api_client_hours_later_is_not_our_message() -> None:
+    [dialog] = dialogs(event("a", 0, "prompt"), event("a", 300, "ours", "Заявка одобрена"))
+
+    assert (dialog.group, dialog.follow_up_at) == (GROUP_MISSED, None)
 
 
 def test_a_second_prompt_in_the_same_chat_starts_a_new_dialog() -> None:
@@ -116,7 +146,8 @@ def test_only_prompts_inside_the_period_are_reported() -> None:
     assert dialogs(event("a", -60 * 24, "prompt"), event("a", 5, "client")) == []
 
 
-def test_percentages_leave_out_the_dialogs_still_waiting() -> None:
+def test_percentages_are_shares_of_all_dialogs_so_a_fresh_day_is_not_a_hundred_percent() -> None:
+    """Девять ответили, десять ещё ждём — это 47 %, а не 100 % «от известных исходов»."""
     found = dialogs(
         event("a", 0, "prompt"),
         event("a", 1, "ours"),
@@ -126,8 +157,10 @@ def test_percentages_leave_out_the_dialogs_still_waiting() -> None:
         event("c", 0, "prompt"),
         now=START + timedelta(hours=1),
     )
-    followed, bare = summarize(found, GROUP_FOLLOWED), summarize(found, GROUP_BARE)
+    followed, missed, everything = summarize(found, GROUP_FOLLOWED), summarize(found, GROUP_MISSED), summarize(found)
 
     assert (followed.total, followed.replied, followed.silent, followed.pending) == (2, 1, 0, 1)
-    assert followed.reply_rate == 1.0
-    assert (bare.total, bare.pending, bare.reply_rate) == (1, 1, None)
+    assert (followed.reply_rate, followed.silent_rate, followed.pending_rate) == (0.5, 0.0, 0.5)
+    assert (missed.total, missed.pending, missed.reply_rate) == (1, 1, 0.0)
+    assert (everything.total, everything.reply_rate) == (3, 1 / 3)
+    assert summarize([], GROUP_FOLLOWED).reply_rate is None

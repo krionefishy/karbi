@@ -45,6 +45,9 @@ def event(number: int, chat: str, minutes: int, sender: str, source: str, *, pro
 
 
 FEED = [
+    # Менеджер через сторонний клиент за неделю до рассылки: не момент запуска.
+    event(0, "chat-old", -7 * 24 * 60, CHAT_SENDER_SELLER, CHAT_SOURCE_PORTAL, prompt=True, text="Здравствуйте. Вы"),
+    event(9, "chat-old", -7 * 24 * 60 + 300, CHAT_SENDER_SELLER, CHAT_SOURCE_API, text="Заявка одобрена"),
     event(1, "chat-a", 0, CHAT_SENDER_SELLER, CHAT_SOURCE_PORTAL, prompt=True, text="Здравствуйте. Вы оставили отзыв"),
     event(2, "chat-a", 1, CHAT_SENDER_SELLER, CHAT_SOURCE_API, text="Ответ не требуется"),
     event(3, "chat-a", 40, CHAT_SENDER_CLIENT, "ios", text="Товар сломался"),
@@ -113,10 +116,20 @@ async def test_the_report_counts_replies_with_and_without_our_message(client: As
         "pending": 0,
         "reply_rate": 0.5,
         "silent_rate": 0.5,
+        "pending_rate": 0.0,
     }
-    assert (body["bare"]["total"], body["bare"]["silent"], body["bare"]["reply_rate"]) == (1, 1, 0.0)
+    # Без нашего сообщения и без ответа после запуска — пропуск рассылки, не контрольная группа.
+    assert (body["missed"]["total"], body["missed"]["silent"]) == (1, 1)
+    assert (body["early"]["total"], body["before"]["total"]) == (0, 0)
+    assert (body["after_launch"]["total"], body["after_launch"]["reply_rate"]) == (3, 1 / 3)
+    assert body["launch_at"] == FEED[3].added_at.isoformat()
+    # Окно «до запуска» — две недели до дня запуска: туда попал старый диалог с ответом менеджера.
+    assert (body["baseline"]["summary"]["total"], body["baseline"]["summary"]["silent"]) == (1, 1)
+    assert body["baseline"]["date_to"] == (DAY - timedelta(days=1)).date().isoformat()
     assert body["reply_window_hours"] == 48
-    assert [day["followed"]["total"] for day in body["days"]] == [2]
+    assert [(day["total"]["total"], day["followed"]["total"], day["missed"]["total"]) for day in body["days"]] == [
+        (3, 2, 1)
+    ]
     assert body["synced_through"] is not None and body["collection_error"] is None
     assert [dialog["chat_id"] for dialog in body["dialogs"]] == ["chat-c", "chat-b", "chat-a"]
     assert body["dialogs"][2]["reply_text"] == "Товар сломался"
@@ -161,5 +174,6 @@ async def test_the_export_has_the_summary_and_every_dialog(client: AsyncClient, 
     workbook = load_workbook(io.BytesIO(response.content))
     summary, dialogs = workbook["Сводка"], workbook["Диалоги"]
     assert [cell.value for cell in summary[5]][:4] == ["С нашим сообщением", 2, 1, 1]
+    assert [cell.value for cell in summary[7]][:3] == ["Пропуск рассылки", 1, 0]
     assert dialogs.max_row == 4
     assert dialogs["H4"].value == "Товар сломался"

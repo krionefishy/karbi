@@ -10,7 +10,7 @@ import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
 import { Shell } from "../components/Shell";
 import { downloadReviewChats, getReviewChats } from "../features/reviewChats/api";
-import { defaultPeriod, percent, rateShift, share } from "../features/reviewChats/format";
+import { defaultPeriod, percent, rateShift, share, shiftLabel } from "../features/reviewChats/format";
 import type {
   DialogGroup,
   DialogOutcome,
@@ -31,11 +31,16 @@ const AUTOMATION_ID = "wb-review-chats";
 const AUTOMATION_TITLE = "Чаты после отзыва";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
+const dayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
 
-const GROUP_OPTIONS: { value: DialogGroup | ""; label: string }[] = [
+const day = (iso: string) => dayFormatter.format(new Date(`${iso}T00:00:00`));
+
+const GROUP_OPTIONS: { value: DialogGroup | ""; label: string; title?: string }[] = [
   { value: "", label: "Все диалоги" },
   { value: "followed", label: "С нашим сообщением" },
-  { value: "bare", label: "Без нашего сообщения" },
+  { value: "early", label: "Ответили раньше нашего", title: "Покупатель написал раньше, чем ушло наше сообщение" },
+  { value: "missed", label: "Пропуск рассылки", title: "После запуска: наше сообщение не ушло, покупатель молчит" },
+  { value: "before", label: "До запуска" },
 ];
 
 const OUTCOME_OPTIONS: { value: DialogOutcome | ""; label: string }[] = [
@@ -45,7 +50,18 @@ const OUTCOME_OPTIONS: { value: DialogOutcome | ""; label: string }[] = [
   { value: "pending", label: "Ждём ответа" },
 ];
 
-function SummaryCard({ title, summary, hint }: { title: string; summary: GroupSummary; hint: string }) {
+/** Проценты — от всех диалогов группы: пока есть «ждём», доля ответивших может только вырасти. */
+function SummaryCard({
+  title,
+  summary,
+  hint,
+  children,
+}: {
+  title: string;
+  summary: GroupSummary;
+  hint: string;
+  children?: React.ReactNode;
+}) {
   return (
     <article>
       <span>{title}</span>
@@ -63,7 +79,8 @@ function SummaryCard({ title, summary, hint }: { title: string; summary: GroupSu
           {summary.silent} · {percent(summary.silent_rate)}
         </dd>
         <dt>Ждём ответа</dt>
-        <dd>{summary.pending}</dd>
+        <dd>{summary.pending ? `${summary.pending} · ${percent(summary.pending_rate)}` : 0}</dd>
+        {children}
       </dl>
       <p>{hint}</p>
     </article>
@@ -162,7 +179,8 @@ export function ReviewChatsPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const notice = chats ? collectionNotice(chats) : null;
-  const shift = chats ? rateShift(chats.followed, chats.bare) : null;
+  // Честное сравнение — по времени: все диалоги после запуска против всех за две недели до него.
+  const shift = chats?.baseline ? rateShift(chats.after_launch, chats.baseline.summary) : null;
 
   return (
     <Shell
@@ -271,32 +289,47 @@ export function ReviewChatsPage() {
                       title="С нашим сообщением"
                       summary={chats.followed}
                       hint={
-                        chats.first_follow_up_at
-                          ? `Первое наше сообщение в периоде — ${momentFormatter.format(new Date(chats.first_follow_up_at))}.`
-                          : "В этом периоде наше сообщение не уходило ни в один диалог."
+                        chats.launch_at
+                          ? `Диалоги, где наше сообщение ушло следом за автосообщением WB и покупатель до него молчал. Рассылка запущена ${momentFormatter.format(new Date(chats.launch_at))}.`
+                          : "Наше сообщение по этому кабинету ещё не уходило."
                       }
                     />
                     <SummaryCard
-                      title="Без нашего сообщения"
-                      summary={chats.bare}
-                      hint={
-                        chats.follow_up_late
-                          ? `Сюда же попали ${chats.follow_up_late} диал., где покупатель ответил раньше, чем ушло наше сообщение.`
-                          : "Диалоги до запуска рассылки и те, куда наше сообщение не ушло."
-                      }
-                    />
-                    <article>
-                      <span>Разница</span>
-                      <strong>
-                        {shift === null ? "—" : `${shift > 0 ? "+" : ""}${shift.toLocaleString("ru-RU")} п.п.`}
-                      </strong>
-                      <p>
-                        Насколько доля ответивших с нашим сообщением отличается от доли без него. Ответ
-                        засчитывается в течение {chats.reply_window_hours} ч; диалоги, где окно ещё не истекло, в
-                        проценты не входят.
-                      </p>
-                    </article>
+                      title="Все диалоги после запуска"
+                      summary={chats.after_launch}
+                      hint="Итог для покупателя за период, куда бы диалог ни попал: сколько вообще пишут после автосообщения WB."
+                    >
+                      <dt title="Покупатель написал раньше, чем ушло наше сообщение; программа его тогда не шлёт">
+                        Ответили раньше нашего
+                      </dt>
+                      <dd>{chats.early.total}</dd>
+                      <dt title="Наше сообщение не ушло, и покупатель молчит">Пропуск рассылки</dt>
+                      <dd>{chats.missed.total}</dd>
+                    </SummaryCard>
+                    {chats.baseline ? (
+                      <SummaryCard
+                        title={`До запуска: ${day(chats.baseline.date_from)} — ${day(chats.baseline.date_to)}`}
+                        summary={chats.baseline.summary}
+                        hint={`Как отвечали на автосообщение WB за две недели до рассылки. Окно одно и то же при любом выбранном периоде.${
+                          chats.before.total ? ` В выбранном периоде до запуска — ещё ${chats.before.total} диал.` : ""
+                        }`}
+                      >
+                        <dt>Разница после запуска</dt>
+                        <dd>{shiftLabel(shift)}</dd>
+                      </SummaryCard>
+                    ) : (
+                      <article>
+                        <span>До запуска</span>
+                        <strong>—</strong>
+                        <p>Сравнивать пока не с чем: наше сообщение по кабинету ещё не уходило.</p>
+                      </article>
+                    )}
                   </div>
+                  <p className="muted chats-legend">
+                    Ответ засчитывается в течение {chats.reply_window_hours} ч после нашего сообщения (без него — после
+                    автосообщения WB). Проценты — от всех диалогов; «ждём» — окно ещё не истекло, доля ответивших за
+                    такие дни может только вырасти.
+                  </p>
 
                   <h2 className="chats-section-title">По дням</h2>
                   <ReviewChatsDays days={chats.days} />
@@ -309,6 +342,7 @@ export function ReviewChatsPage() {
                           key={option.value}
                           type="button"
                           role="tab"
+                          title={option.title}
                           aria-selected={filter.group === option.value}
                           className={filter.group === option.value ? "mode-active" : undefined}
                           onClick={() => changeFilter({ group: option.value })}
