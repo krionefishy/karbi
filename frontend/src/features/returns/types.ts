@@ -81,3 +81,31 @@ export interface RefreshState {
   finished_at: string | null;
   error: string | null;
 }
+
+export interface ExtensionInstall {
+  id: string;
+  install_id: string;
+  browser: string;
+  created_at: string;
+  last_seen_at: string | null;
+  state: "ok" | "needs_login" | "error";
+  last_error: string | null;
+  last_code_at: string | null;
+  deliveries_count: number;
+  deliveries_at: string | null;
+}
+
+export interface ExtensionState {
+  seller_id: string;
+  download_url: string;
+  code_date: string;
+  has_code_today: boolean;
+  code_received_at: string | null;
+  pending_tasks: boolean;
+  installs: ExtensionInstall[];
+}
+
+export interface PairingCode {
+  code: string;
+  expires_at: string;
+}

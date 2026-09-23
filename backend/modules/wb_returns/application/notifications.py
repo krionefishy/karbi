@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotNotFoundError, BotRegistry
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_returns.application.extension import STATE_NEEDS_LOGIN, ExtensionService
 from backend.modules.wb_returns.domain import (
     CLAIM_REVIEW_DAYS,
     FREE_STORAGE_DAYS,
@@ -35,12 +36,18 @@ TEMPLATE_TRANSIT = "returns.transit"
 TEMPLATE_REMINDER = "returns.reminder"
 TEMPLATE_CLAIMS = "returns.claims"
 TEMPLATE_CLAIM_DEADLINE = "returns.claim_deadline"
+TEMPLATE_CODE_MISSING = "returns.code_missing"
+TEMPLATE_NEEDS_LOGIN = "returns.needs_login"
+TEMPLATE_INSTALL_SILENT = "returns.install_silent"
 
 KIND_READY = "ready"
 KIND_TRANSIT = "transit"
 KIND_REMINDER = "reminder"
 KIND_CLAIM = "claim"
 KIND_CLAIM_DEADLINE = "claim_deadline"
+KIND_CODE_MISSING = "code_missing"
+KIND_NEEDS_LOGIN = "needs_login"
+KIND_INSTALL_SILENT = "install_silent"
 
 # На какие дни хранения напоминать: до начала платного хранения и за два дня до утилизации.
 REMINDER_DAYS = (FREE_STORAGE_DAYS, STORAGE_DAYS - 2)
@@ -55,10 +62,11 @@ class NotificationReport:
     reminders: int = 0
     claims: int = 0
     claim_deadlines: int = 0
+    extension: int = 0
 
     @property
     def sent(self) -> int:
-        return self.ready + self.transit + self.reminders + self.claims + self.claim_deadlines
+        return self.ready + self.transit + self.reminders + self.claims + self.claim_deadlines + self.extension
 
 
 class NotificationService:
@@ -68,20 +76,26 @@ class NotificationService:
         sellers: SellerRepository,
         returns: ReturnsRepository,
         bots: BotRegistry,
+        extension: ExtensionService,
         *,
         bot_code: str,
         timezone: ZoneInfo,
         digest_hour: int,
         digest_minute: int,
+        code_alert_hour: int = 1,
+        install_silent_hours: int = 24,
     ) -> None:
         self.session = session
         self.sellers = sellers
         self.returns = returns
         self.bots = bots
+        self.extension = extension
         self.bot_code = bot_code
         self.timezone = timezone
         self.digest_hour = digest_hour
         self.digest_minute = digest_minute
+        self.code_alert_hour = code_alert_hour
+        self.install_silent = timedelta(hours=install_silent_hours)
         self.logger = logging.getLogger("wb.returns.notifications")
 
     async def notify(self, seller_id: uuid.UUID, *, now: datetime) -> NotificationReport:
@@ -102,6 +116,7 @@ class NotificationService:
             reminders=await self._notify_reminders(seller_id, seller_name, ready_items, now),
             claims=await self._notify_claims(seller_id, seller_name, now),
             claim_deadlines=await self._notify_claim_deadlines(seller_id, seller_name, now),
+            extension=await self._notify_extension(seller_id, seller_name, now),
         )
         await self.session.commit()
         return report
@@ -115,6 +130,7 @@ class NotificationService:
         fresh = [item for item in items if str(item.shk_id) not in logged]
         if not fresh:
             return 0
+        code = await self.extension.code_params(seller_id, seller_name, self.extension.today(now))
         self._publish(
             seller_id,
             TEMPLATE_READY,
@@ -125,6 +141,10 @@ class NotificationService:
                 "offices": self._offices(fresh, now),
                 "free_days": FREE_STORAGE_DAYS,
                 "storage_days": STORAGE_DAYS,
+                "code": code.get("code"),
+                "code_date": code.get("date"),
+                "qr": code.get("qr"),
+                "qr_url": code.get("qr_url"),
             },
         )
         await self.returns.log_sent(seller_id, KIND_READY, (str(item.shk_id) for item in fresh), now=now)
@@ -266,6 +286,62 @@ class NotificationService:
             "created": claim.dt.astimezone(self.timezone).isoformat(),
             "deadline": (claim.dt + timedelta(days=CLAIM_REVIEW_DAYS)).astimezone(self.timezone).isoformat(),
         }
+
+    # --- extension --------------------------------------------------------
+
+    async def _notify_extension(self, seller_id: uuid.UUID, seller_name: str, now: datetime) -> int:
+        """Тревоги про расширение: нет кода к утру, слетела сессия, установка молчит."""
+        installs = await self.returns.active_installs(seller_id)
+        if not installs:
+            return 0
+        local = now.astimezone(self.timezone)
+        day_key = local.date().isoformat()
+        sent = 0
+        code_due = local.hour >= self.code_alert_hour
+        if (
+            code_due
+            and await self.returns.delivery_code(seller_id, local.date()) is None
+            and not await self.returns.logged_keys(seller_id, KIND_CODE_MISSING, [day_key])
+        ):
+            self._publish(
+                seller_id,
+                TEMPLATE_CODE_MISSING,
+                dedupe=f"returns:code-missing:{seller_id}:{day_key}",
+                params={"seller_name": seller_name, "date": day_key, "installs": len(installs)},
+            )
+            await self.returns.log_sent(seller_id, KIND_CODE_MISSING, [day_key], now=now)
+            sent += 1
+        for install in installs:
+            key = f"{install.id}:{day_key}"
+            if install.state == STATE_NEEDS_LOGIN and not await self.returns.logged_keys(
+                seller_id, KIND_NEEDS_LOGIN, [key]
+            ):
+                self._publish(
+                    seller_id,
+                    TEMPLATE_NEEDS_LOGIN,
+                    dedupe=f"returns:needs-login:{key}",
+                    params={"seller_name": seller_name, "browser": install.browser},
+                )
+                await self.returns.log_sent(seller_id, KIND_NEEDS_LOGIN, [key], now=now)
+                sent += 1
+            last_seen = install.last_seen_at or install.created_at
+            if last_seen < now - self.install_silent and not await self.returns.logged_keys(
+                seller_id, KIND_INSTALL_SILENT, [key]
+            ):
+                self._publish(
+                    seller_id,
+                    TEMPLATE_INSTALL_SILENT,
+                    dedupe=f"returns:install-silent:{key}",
+                    params={
+                        "seller_name": seller_name,
+                        "browser": install.browser,
+                        "last_seen_at": last_seen.astimezone(self.timezone).isoformat(),
+                        "hours": int(self.install_silent.total_seconds() // 3600),
+                    },
+                )
+                await self.returns.log_sent(seller_id, KIND_INSTALL_SILENT, [key], now=now)
+                sent += 1
+        return sent
 
     # --- outbox -----------------------------------------------------------
 

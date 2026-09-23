@@ -1,0 +1,16 @@
+{
+  "name": "marketplace-auto-returns-extension",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "pack": "npm run build && rm -f marketplace-auto-returns.zip && cd dist && zip -qr ../marketplace-auto-returns.zip ."
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.3"
+  }
+}

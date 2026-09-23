@@ -1,7 +1,6 @@
 import asyncio
 import signal
 from collections.abc import Callable, Coroutine
-from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -38,8 +37,7 @@ class ReturnsWorkerApplication:
             self.database,
             self.settings.kafka.bootstrap_servers,
             f"{self.settings.kafka.consumer_group}.wb.returns.commands",
-            bot_code=self.settings.returns.notification_bot,
-            timezone=ZoneInfo(self.settings.returns.timezone),
+            settings=self.settings,
         )
 
     async def run(self) -> None:

@@ -110,10 +110,40 @@ def test_command_replies_render() -> None:
         templates.RETURNS_CODE,
         {
             "codes": [
-                {"name": "А", "date": "2026-09-22", "code": "412"},
-                {"name": "Б", "date": "2026-09-22", "code": None},
+                {"name": "А", "date": "2026-09-22", "code": "412", "qr_url": "https://x/q.png"},
+                {"name": "Б", "date": "2026-09-22", "code": None, "no_install": True},
+                {"name": "В", "date": "2026-09-22", "code": None, "requested": True},
             ]
         },
     )
-    assert "А: код на 22 сент. — 412" in code and "По Б кода нет" in code
+    assert "А: код на 22 сент. — 412\nQR: https://x/q.png" in code
+    assert "Б: расширение не подключено" in code and "В: кода на сегодня ещё нет" in code
     assert "/returns" in templates.render(templates.RETURNS_UNKNOWN, {"command": "/x"})
+
+
+def test_qr_attachment_is_rendered_only_when_the_string_is_there() -> None:
+    photo = templates.render_attachment(
+        templates.RETURNS_CODE, {"codes": [{"name": "А", "date": "2026-09-22", "code": "412", "qr": "WB|412"}]}
+    )
+    assert photo is not None and photo["kind"] == "photo" and photo["caption"] == "А: код на 22 сент. — 412"
+    assert photo["png_base64"].startswith("iVBORw0KGgo")
+    assert templates.render_attachment(templates.RETURNS_CODE, {"codes": [{"name": "А", "code": None}]}) is None
+    assert templates.render_attachment(templates.RETURNS_HELP, {}) is None
+
+    ready = templates.render(
+        templates.RETURNS_READY,
+        {
+            "seller_name": "М",
+            "total": 1,
+            "offices": [],
+            "code": "412",
+            "code_date": "2026-09-22",
+            "qr_url": "https://x/q.png",
+        },
+    )
+    assert "Код получения на 22 сент.: 412\nQR: https://x/q.png" in ready
+    extension = templates.render(
+        templates.RETURNS_EXTENSION,
+        {"download_url": "https://x/ext.zip", "ttl_minutes": 15, "codes": [{"name": "М", "code": "123456"}]},
+    )
+    assert "https://x/ext.zip" in extension and "М: 123456" in extension

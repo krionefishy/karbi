@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Marketplace Auto — возвраты WB",
+  "version": "0.1.0",
+  "description": "Передаёт боту Marketplace Auto код получения из профиля покупателя Wildberries, чтобы забирать возвраты в ПВЗ по QR из Telegram.",
+  "permissions": ["alarms", "storage", "scripting", "tabs"],
+  "host_permissions": ["https://www.wildberries.ru/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "options_page": "options.html",
+  "action": { "default_title": "Marketplace Auto — возвраты" }
+}

@@ -1,5 +1,9 @@
+import base64
+import io
 from collections.abc import Callable
 from typing import Any
+
+import segno
 
 SUBSCRIPTION_CONFIRMED = "subscription.confirmed"
 SUBSCRIPTION_INVALID_LINK = "subscription.invalid_link"
@@ -19,6 +23,9 @@ RETURNS_CODE = "returns.code"
 RETURNS_EXTENSION = "returns.extension"
 RETURNS_NO_SUBSCRIPTION = "returns.no_subscription"
 RETURNS_UNKNOWN = "returns.unknown"
+RETURNS_CODE_MISSING = "returns.code_missing"
+RETURNS_NEEDS_LOGIN = "returns.needs_login"
+RETURNS_INSTALL_SILENT = "returns.install_silent"
 
 # Telegram accepts 4096 characters; a longer list is unreadable anyway.
 _DIGEST_LIMIT = 25
@@ -163,6 +170,8 @@ def _returns_ready(params: dict[str, Any]) -> str:
     if code:
         lines.append("")
         lines.append(f"Код получения на {_day(params.get('code_date'))}: {code}")
+        if params.get("qr_url"):
+            lines.append(f"QR: {params['qr_url']}")
     lines.append("")
     lines.append(
         f"Хранение в ПВЗ {params.get('storage_days', 7)} дн.: первые {params.get('free_days', 3)} бесплатно, "
@@ -301,30 +310,73 @@ def _returns_list(params: dict[str, Any]) -> str:
 
 def _returns_code(params: dict[str, Any]) -> str:
     lines: list[str] = []
-    missing: list[str] = []
     for item in params.get("codes") or []:
         name = str(item.get("name") or "Магазин")
         code = item.get("code")
         if code:
-            lines.append(f"{name}: код на {_day(item.get('date'))} — {code}")
+            line = f"{name}: код на {_day(item.get('date'))} — {code}"
+            if item.get("qr_url"):
+                line += f"\nQR: {item['qr_url']}"
+            lines.append(line)
+        elif item.get("no_install"):
+            lines.append(
+                f"{name}: расширение не подключено, кода нет. Поставьте его по /extension "
+                "или возьмите код в приложении Wildberries владельца, раздел «Доставки»."
+            )
+        elif item.get("requested"):
+            lines.append(
+                f"{name}: кода на сегодня ещё нет — попросил расширение обновить, пришлю сюда, как только придёт. "
+                "Обычно это несколько минут; если браузер с расширением выключен, код не придёт."
+            )
         else:
-            missing.append(name)
-    if missing:
-        shops = ", ".join(missing)
-        lines.append(
-            f"По {shops} кода нет: расширение ещё не подключено или сегодня не прислало код. "
-            "Поставьте его по /extension или откройте профиль покупателя владельца — код там в разделе «Доставки»."
-        )
-    return "\n".join(lines)
+            lines.append(f"{name}: кода на сегодня нет.")
+    return "\n\n".join(lines) if lines else "Кода нет."
 
 
 def _returns_extension(params: dict[str, Any]) -> str:
+    codes = params.get("codes") or []
+    ttl = int(params.get("ttl_minutes") or 15)
+    lines = [
+        "Расширение берёт код получения из профиля покупателя владельца кабинета и присылает его сюда.",
+        "",
+        f"1. Скачайте архив: {params.get('download_url') or '—'}",
+        "2. Распакуйте, откройте chrome://extensions (в Яндекс Браузере — browser://extensions), включите "
+        "«Режим разработчика» и нажмите «Загрузить распакованное расширение», выберите папку.",
+        "3. В том же браузере войдите на wildberries.ru под телефоном владельца кабинета.",
+        f"4. Откройте настройки расширения и введите код (действует {ttl} мин.):",
+    ]
+    for item in codes:
+        lines.append(f"   {item.get('name') or 'магазин'}: {item.get('code')}")
+    lines.append("")
+    lines.append(
+        "Пароль расширение не хранит и вход не проходит. Раз в сутки после полуночи оно забирает код и "
+        "отдаёт боту; если сессия слетит, напишу сюда."
+    )
+    return "\n".join(lines)
+
+
+def _returns_code_missing(params: dict[str, Any]) -> str:
     return (
-        "Расширение для кода получения пока в сборке — появится здесь же следующим шагом.\n\n"
-        "Как оно будет работать: ставится в Chrome или Яндекс Браузер на компьютере, где открыт "
-        "профиль покупателя владельца кабинета на wildberries.ru; раз в сутки после полуночи забирает "
-        "код получения и отдаёт боту. Пароль расширение не хранит и вход не проходит.\n\n"
-        "А пока код получения — в приложении Wildberries владельца, раздел «Доставки»."
+        f"{params.get('seller_name', 'Магазин')}: расширение не прислало код получения на {_day(params.get('date'))}. "
+        "Проверьте, что браузер с расширением включён и на wildberries.ru выполнен вход. "
+        "Команда /qr попросит код ещё раз."
+    )
+
+
+def _returns_needs_login(params: dict[str, Any]) -> str:
+    browser = str(params.get("browser") or "браузере")
+    return (
+        f"{params.get('seller_name', 'Магазин')}: на wildberries.ru слетел вход в профиль владельца ({browser}). "
+        "Войдите заново в том же браузере — расширение продолжит само."
+    )
+
+
+def _returns_install_silent(params: dict[str, Any]) -> str:
+    browser = str(params.get("browser") or "браузер")
+    return (
+        f"{params.get('seller_name', 'Магазин')}: расширение ({browser}) молчит больше {params.get('hours', 24)} ч., "
+        f"последний раз выходило на связь {_day(params.get('last_seen_at'))}. Кода получения без него не будет: "
+        "включите браузер или подключите расширение заново по /extension."
     )
 
 
@@ -360,6 +412,9 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     RETURNS_EXTENSION: _returns_extension,
     RETURNS_NO_SUBSCRIPTION: _returns_no_subscription,
     RETURNS_UNKNOWN: _returns_unknown,
+    RETURNS_CODE_MISSING: _returns_code_missing,
+    RETURNS_NEEDS_LOGIN: _returns_needs_login,
+    RETURNS_INSTALL_SILENT: _returns_install_silent,
 }
 
 
@@ -367,3 +422,42 @@ def render(template: str, params: dict[str, Any]) -> str:
     if template not in TEMPLATES:
         raise UnknownTemplateError(template)
     return TEMPLATES[template](params)
+
+
+# --- вложения ----------------------------------------------------------------
+
+
+def _qr_photo(qr: Any, caption: str) -> dict[str, Any] | None:
+    if not isinstance(qr, str) or not qr:
+        return None
+    buffer = io.BytesIO()
+    segno.make(qr, error="q").save(buffer, kind="png", scale=10, border=2)
+    return {"kind": "photo", "png_base64": base64.b64encode(buffer.getvalue()).decode(), "caption": caption[:1024]}
+
+
+def _returns_ready_photo(params: dict[str, Any]) -> dict[str, Any] | None:
+    caption = f"Код получения на {_day(params.get('code_date'))}: {params.get('code') or ''}".strip(": ")
+    return _qr_photo(params.get("qr"), caption)
+
+
+def _returns_code_photo(params: dict[str, Any]) -> dict[str, Any] | None:
+    for item in params.get("codes") or []:
+        if item.get("qr"):
+            caption = f"{item.get('name') or ''}: код на {_day(item.get('date'))} — {item.get('code') or ''}"
+            return _qr_photo(item.get("qr"), caption.strip(": "))
+    return None
+
+
+# Картинка рядом с текстом. Рисуется при постановке в очередь, чтобы доставка
+# не зависела от библиотеки; строка QR — секрет дня, картинка живёт в нашей базе.
+ATTACHMENTS: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
+    RETURNS_READY: _returns_ready_photo,
+    RETURNS_CODE: _returns_code_photo,
+}
+
+
+def render_attachment(template: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    if template not in TEMPLATES:
+        raise UnknownTemplateError(template)
+    renderer = ATTACHMENTS.get(template)
+    return renderer(params) if renderer else None

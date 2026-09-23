@@ -5,12 +5,13 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
-from backend.modules.wb_returns.application import CollectionService, NotificationService
+from backend.modules.wb_returns.application import CollectionService, ExtensionService, NotificationService
 from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.modules.wb_returns.infrastructure.wb import WBClaimsClient, WBReturnsReportClient
 from backend.shared.heartbeat import touch_heartbeat
@@ -115,10 +116,13 @@ class ReturnsWorker:
                     SellerRepository(session),
                     ReturnsRepository(session),
                     BotRegistry(session, NotificationRepository(session)),
+                    extension_service(session, self.settings),
                     bot_code=self.config.notification_bot,
                     timezone=self.timezone,
                     digest_hour=self.config.digest_hour,
                     digest_minute=self.config.digest_minute,
+                    code_alert_hour=self.config.code_alert_hour,
+                    install_silent_hours=self.config.install_silent_hours,
                 )
                 report = await service.notify(seller_id, now=now.astimezone(UTC))
         except Exception:
@@ -194,3 +198,19 @@ class ReturnsWorker:
         async with self.database.session() as session:
             await ReturnsRepository(session).fail_collection(seller_id, error)
             await session.commit()
+
+
+def extension_service(session: AsyncSession, settings: Settings) -> ExtensionService:
+    """Сервис расширения с настройками процесса: те же, что у API, но без контейнера DI."""
+    returns = settings.returns
+    return ExtensionService(
+        session,
+        SellerRepository(session),
+        ReturnsRepository(session),
+        bot_code=returns.notification_bot,
+        timezone=ZoneInfo(returns.timezone),
+        public_base_url=returns.public_base_url,
+        download_path=returns.extension_download_path,
+        pairing_ttl_minutes=returns.pairing_ttl_minutes,
+        qr_secret=settings.auth.jwt_secret,
+    )

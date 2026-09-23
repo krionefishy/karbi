@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,13 @@ from backend.modules.notifications.infrastructure.postgres import NotificationRe
 from backend.modules.notifications.infrastructure.postgres.models import BotModel
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
-from backend.modules.wb_returns.application import CollectionService, CommandService, NotificationService
+from backend.modules.wb_returns.application import (
+    CollectionService,
+    CommandService,
+    ExtensionService,
+    NotificationService,
+    PairingCodeInvalidError,
+)
 from backend.modules.wb_returns.domain import RETURN_READY, RETURN_TRANSIT, Claim, ReturnItem
 from backend.modules.wb_returns.infrastructure.postgres import (
     ClaimModel,
@@ -164,12 +171,31 @@ async def collect(
     return report, claims
 
 
+def extension(session: AsyncSession) -> ExtensionService:
+    return ExtensionService(
+        session,
+        SellerRepository(session),
+        ReturnsRepository(session),
+        bot_code=BOT,
+        timezone=MOSCOW,
+        public_base_url="https://test.local",
+        download_path="/extension/marketplace-auto-returns.zip",
+        pairing_ttl_minutes=15,
+        qr_secret="test-secret",
+    )
+
+
+def commands(session: AsyncSession) -> CommandService:
+    return CommandService(session, ReturnsRepository(session), extension(session), bot_code=BOT, timezone=MOSCOW)
+
+
 def notifications(session: AsyncSession) -> NotificationService:
     return NotificationService(
         session,
         SellerRepository(session),
         ReturnsRepository(session),
         BotRegistry(session, NotificationRepository(session)),
+        extension(session),
         bot_code=BOT,
         timezone=MOSCOW,
         digest_hour=9,
@@ -310,7 +336,7 @@ async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UU
     chat = 4242
     try:
         async with database.session() as session:
-            service = CommandService(session, ReturnsRepository(session), bot_code=BOT, timezone=MOSCOW)
+            service = commands(session)
             assert await service.handle(command(seller, "/returns", chat), now=NOW) == "returns.list"
             assert await service.handle(command(seller, "/qr", chat), now=NOW) == "returns.code"
             assert await service.handle(command(seller, "/whatever", chat), now=NOW) == "returns.unknown"
@@ -328,8 +354,10 @@ async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UU
         summary = replies[0]["params"]["sellers"][0]
         assert (summary["ready_total"], summary["transit_total"], summary["open_claims"]) == (1, 1, 1)
         assert summary["offices"][0]["address"] == "посёлок Развилка 52к1"
-        # Кода ещё нет: расширение подключат на следующем шаге.
-        assert replies[1]["params"]["codes"] == [{"name": "ИП Возвраты", "date": "2026-09-22", "code": None}]
+        # Расширения нет — кода нет, и бот говорит, где его взять.
+        assert replies[1]["params"]["codes"] == [
+            {"name": "ИП Возвраты", "date": "2026-09-22", "code": None, "no_install": True}
+        ]
     finally:
         async with database.session() as session:
             aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat}")
@@ -341,6 +369,111 @@ async def test_foreign_bot_commands_are_ignored(database: Database, seller: uuid
     event = command(seller, "/returns", 4343)
     foreign = replace(event, bot_code="turnover-alerts")
     async with database.session() as session:
-        service = CommandService(session, ReturnsRepository(session), bot_code=BOT, timezone=MOSCOW)
+        service = commands(session)
         assert await service.handle(foreign, now=NOW) is None
         assert await chat_replies(session, 4343) == []
+
+
+async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database: Database, seller: uuid.UUID) -> None:
+    chat = 4444
+    try:
+        async with database.session() as session:
+            pairing = await extension(session).create_pairing_code(seller, chat_id=chat, now=NOW)
+            await session.commit()
+            code = pairing.code
+        assert len(code) == 6 and code.isdigit()
+
+        async with database.session() as session:
+            with pytest.raises(PairingCodeInvalidError):
+                await extension(session).pair("000000", install_id="chrome-abcdef12", browser="Chrome", now=NOW)
+            paired = await extension(session).pair(code, install_id="chrome-abcdef12", browser="Chrome 130", now=NOW)
+        assert paired.token.startswith("mar_") and paired.seller_id == seller
+        async with database.session() as session:
+            with pytest.raises(PairingCodeInvalidError):
+                await extension(session).pair(code, install_id="chrome-abcdef12", browser="Chrome", now=NOW)
+
+        # /qr без кода на сегодня ставит задачу расширению; heartbeat её забирает.
+        async with database.session() as session:
+            assert await commands(session).handle(command(seller, "/qr", chat), now=NOW) == "returns.code"
+            [reply] = await chat_replies(session, chat)
+        assert reply["params"]["codes"][0]["requested"] is True
+        async with database.session() as session:
+            install = await extension(session).authenticate(paired.token, now=NOW)
+            beat = await extension(session).heartbeat(install, state="ok", error=None, now=NOW)
+        assert (beat.refresh_code, beat.has_code_today, beat.seller_name) == (True, False, "ИП Возвраты")
+
+        # Код пришёл: сохранён, чат получил ответ, повторный heartbeat задачу не отдаёт.
+        async with database.session() as session:
+            install = await extension(session).authenticate(paired.token, now=NOW)
+            result = await extension(session).ingest_codes(
+                install,
+                [
+                    {"date": "2026-09-22", "code": "412", "ext_code": "412", "qr": "WB|412|xyz", "ext_qr": ""},
+                    {"date": "2026-09-23", "code": "913", "ext_code": "", "qr": "WB|913|abc", "ext_qr": ""},
+                    {"date": "not-a-date", "code": "1"},
+                ],
+                now=NOW,
+            )
+            replies = await chat_replies(session, chat)
+        assert (result.accepted, result.replied_chats) == (2, [chat])
+        delivered = replies[-1]["params"]["codes"][0]
+        assert (delivered["code"], delivered["qr"]) == ("412", "WB|412|xyz")
+        assert delivered["qr_url"].startswith(f"https://test.local/api/v1/wb/returns/qr/{seller}/2026-09-22/")
+        async with database.session() as session:
+            install = await extension(session).authenticate(paired.token, now=NOW)
+            beat = await extension(session).heartbeat(install, state="ok", error=None, now=NOW)
+            view = await extension(session).view(seller, now=NOW)
+            signature = delivered["qr_url"].rsplit("/", 1)[1].removesuffix(".png")
+            assert extension(session).verify_qr(seller, date(2026, 9, 22), signature)
+            assert not extension(session).verify_qr(seller, date(2026, 9, 23), signature)
+            png = await extension(session).qr_png(seller, date(2026, 9, 22))
+        assert (beat.refresh_code, beat.has_code_today) == (False, True)
+        assert view.has_code_today and len(view.installs) == 1 and view.installs[0].state == "ok"
+        assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
+
+        # Готовый возврат теперь уходит с кодом дня.
+        await collect(database, seller, [item(1)])
+        async with database.session() as session:
+            report = await notifications(session).notify(seller, now=NOW)
+            sent = await session.scalars(
+                select(OutboxEventModel)
+                .where(OutboxEventModel.aggregate_id == seller)
+                .order_by(OutboxEventModel.created_at)
+            )
+            ready = [row.payload for row in sent if row.payload["template"] == "returns.ready"]
+        assert report.ready == 1 and ready[0]["params"]["code"] == "412" and ready[0]["params"]["qr"] == "WB|412|xyz"
+
+        # Отзыв установки: токен перестаёт работать.
+        async with database.session() as session:
+            assert await extension(session).revoke(seller, paired.install_id, now=NOW)
+        async with database.session() as session:
+            from backend.modules.wb_returns.application import ExtensionUnauthorizedError
+
+            with pytest.raises(ExtensionUnauthorizedError):
+                await extension(session).authenticate(paired.token, now=NOW)
+    finally:
+        async with database.session() as session:
+            aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat}")
+            await session.execute(delete(OutboxEventModel).where(OutboxEventModel.aggregate_id == aggregate))
+            await session.commit()
+
+
+async def test_extension_alerts_fire_once_a_day(database: Database, seller: uuid.UUID) -> None:
+    async with database.session() as session:
+        pairing = await extension(session).create_pairing_code(seller, now=NOW)
+        await session.commit()
+    async with database.session() as session:
+        paired = await extension(session).pair(pairing.code, install_id="yandex-1234567890", browser="Yandex", now=NOW)
+    async with database.session() as session:
+        install = await extension(session).authenticate(paired.token, now=NOW)
+        await extension(session).heartbeat(install, state="needs_login", error="login page", now=NOW)
+    # 09:00 МСК без кода на сегодня, сессия слетела: две тревоги, и только один раз.
+    async with database.session() as session:
+        first = await notifications(session).notify(seller, now=NOW)
+    async with database.session() as session:
+        second = await notifications(session).notify(seller, now=NOW + timedelta(minutes=10))
+    assert (first.extension, second.extension) == (2, 0)
+    # Через сутки молчания — тревога про установку (и снова про код на новый день).
+    async with database.session() as session:
+        later = await notifications(session).notify(seller, now=NOW + timedelta(days=1, hours=1))
+    assert later.extension == 3

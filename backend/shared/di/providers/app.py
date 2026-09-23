@@ -43,7 +43,7 @@ from backend.modules.wb_fbs_penalties.application import PenaltiesEnrollment, Pe
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
-from backend.modules.wb_returns.application import ReturnsEnrollment, ReturnsService
+from backend.modules.wb_returns.application import ExtensionService, ReturnsEnrollment, ReturnsService
 from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.modules.wb_review_chats.application import ReviewChatsEnrollment, ReviewChatsService
 from backend.modules.wb_review_chats.infrastructure.postgres import ReviewChatsRepository
@@ -419,6 +419,26 @@ class SessionProvider(Provider):
             subscriptions,
             bot_code=settings.returns.notification_bot,
             history_limit=settings.returns.history_limit,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def returns_extension_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        returns: ReturnsRepository,
+        settings: Settings,
+    ) -> ExtensionService:
+        return ExtensionService(
+            session,
+            sellers,
+            returns,
+            bot_code=settings.returns.notification_bot,
+            timezone=ZoneInfo(settings.returns.timezone),
+            public_base_url=settings.returns.public_base_url,
+            download_path=settings.returns.extension_download_path,
+            pairing_ttl_minutes=settings.returns.pairing_ttl_minutes,
+            qr_secret=settings.auth.jwt_secret,
         )
 
     @provide(scope=Scope.REQUEST)

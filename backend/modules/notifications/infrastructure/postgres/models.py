@@ -142,6 +142,9 @@ class OutgoingMessageModel(NotificationsBase):
     template: Mapped[str] = mapped_column(String(64), nullable=False)
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     text: Mapped[str] = mapped_column(String, nullable=False)
+    # Картинка рядом с текстом: {kind: photo, png_base64, caption}. Релей шлёт её,
+    # только если умеет; иначе уходит один текст.
+    attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(

@@ -71,3 +71,31 @@ class RefreshResponse(BaseModel):
     requested_at: str
     finished_at: str | None
     error: str | None
+
+
+class ExtensionInstallResponse(BaseModel):
+    id: str
+    install_id: str
+    browser: str
+    created_at: str
+    last_seen_at: str | None
+    state: str
+    last_error: str | None
+    last_code_at: str | None
+    deliveries_count: int
+    deliveries_at: str | None
+
+
+class ExtensionResponse(BaseModel):
+    seller_id: str
+    download_url: str
+    code_date: str
+    has_code_today: bool
+    code_received_at: str | None
+    pending_tasks: bool
+    installs: list[ExtensionInstallResponse]
+
+
+class PairingCodeResponse(BaseModel):
+    code: str
+    expires_at: str

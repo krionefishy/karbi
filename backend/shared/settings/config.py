@@ -233,6 +233,8 @@ class RelayConfig:
     audience: str = "relay"
     inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
+    # Релей умеет присылать картинку рядом с текстом; выключено, пока релей не обновлён.
+    photos_enabled: bool = False
     jwt_leeway_seconds: int = 30
     # Сколько релей держит наш запрос за апдейтами, если сказать нечего.
     updates_wait_seconds: int = 25
@@ -377,6 +379,13 @@ class ReturnsConfig:
     notification_bot: str = "wb-returns"
     # Сколько закрытых возвратов и заявок показывать в истории на странице.
     history_limit: int = 300
+    # Откуда менеджер скачивает расширение и куда ведут ссылки на картинку QR.
+    public_base_url: str = "http://localhost:5173"
+    extension_download_path: str = "/extension/marketplace-auto-returns.zip"
+    pairing_ttl_minutes: int = 15
+    # Во сколько считать, что код на сегодня так и не пришёл; молчание установки дольше — тревога.
+    code_alert_hour: int = 1
+    install_silent_hours: int = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,6 +537,9 @@ class Settings:
             "digest_hour",
             "digest_minute",
             "history_limit",
+            "pairing_ttl_minutes",
+            "code_alert_hour",
+            "install_silent_hours",
         ):
             if key in returns:
                 returns[key] = int(returns[key])
@@ -545,6 +557,7 @@ class Settings:
         if "delivery_interval_seconds" in telegram:
             telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
         relay = dict(data.get("relay", {}))
+        relay["photos_enabled"] = _as_bool(relay.get("photos_enabled", False))
         for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
             if key in relay:
                 relay[key] = int(relay[key])

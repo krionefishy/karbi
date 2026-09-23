@@ -6,7 +6,6 @@
 """
 
 import logging
-import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -14,10 +13,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.domain import COMMAND_START, CommandEvent
+from backend.modules.wb_returns.application.extension import ExtensionService
+from backend.modules.wb_returns.application.outbox import publish_chat_message
 from backend.modules.wb_returns.domain import FREE_STORAGE_DAYS, RETURN_READY, RETURN_TRANSIT, STORAGE_DAYS
 from backend.modules.wb_returns.infrastructure.postgres import ReturnModel, ReturnsRepository
-from backend.shared.kafka_streams.topics import NotificationTopics
-from backend.shared.outbox import OutboxRepository
 
 TEMPLATE_WELCOME = "returns.welcome"
 TEMPLATE_HELP = "returns.help"
@@ -36,12 +35,14 @@ class CommandService:
         self,
         session: AsyncSession,
         returns: ReturnsRepository,
+        extension: ExtensionService,
         *,
         bot_code: str,
         timezone: ZoneInfo,
     ) -> None:
         self.session = session
         self.returns = returns
+        self.extension = extension
         self.bot_code = bot_code
         self.timezone = timezone
         self.logger = logging.getLogger("wb.returns.commands")
@@ -64,7 +65,7 @@ class CommandService:
         elif command == "qr":
             template, params = TEMPLATE_CODE, {"codes": await self._codes(event, stamp)}
         elif command == "extension":
-            template, params = TEMPLATE_EXTENSION, {"sellers": [name for _, name in event.sellers]}
+            template, params = TEMPLATE_EXTENSION, await self._pairing(event, stamp)
         else:
             template, params = TEMPLATE_UNKNOWN, {"command": f"/{command}"}
         self._reply(event, template, params)
@@ -119,21 +120,36 @@ class CommandService:
         return offices
 
     async def _codes(self, event: CommandEvent, now: datetime) -> list[dict]:
-        """Код получения по каждому селлеру чата. Пока расширение не подключено — пусто."""
-        today = now.astimezone(self.timezone).date().isoformat()
-        return [{"name": name, "date": today, "code": None} for _, name in event.sellers]
+        """Код получения по каждому селлеру чата; без кода — задача расширению или подсказка."""
+        return [
+            await self.extension.request_code(seller_id, name, chat_id=event.chat_id, now=now)
+            for seller_id, name in event.sellers
+        ]
+
+    async def _pairing(self, event: CommandEvent, now: datetime) -> dict:
+        codes = []
+        for seller_id, name in event.sellers:
+            pairing = await self.extension.create_pairing_code(seller_id, chat_id=event.chat_id, now=now)
+            codes.append(
+                {
+                    "name": name,
+                    "code": pairing.code,
+                    "expires_at": pairing.expires_at.astimezone(self.timezone).isoformat(),
+                }
+            )
+        return {
+            "download_url": self.extension.download_url,
+            "ttl_minutes": int(self.extension.pairing_ttl.total_seconds() // 60),
+            "codes": codes,
+        }
 
     def _reply(self, event: CommandEvent, template: str, params: dict) -> None:
-        OutboxRepository(self.session).add(
-            aggregate_id=uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{event.chat_id}"),
+        publish_chat_message(
+            self.session,
+            bot_code=self.bot_code,
+            chat_id=event.chat_id,
+            template=template,
+            params=params,
+            dedupe_key=f"returns:reply:{event.event_id}",
             event_type="ReturnsCommandReplied",
-            topic=NotificationTopics.TELEGRAM_MESSAGE_REQUESTED,
-            payload={
-                "message_id": str(uuid.uuid4()),
-                "bot": self.bot_code,
-                "audience": {"type": "chat", "chat_id": event.chat_id},
-                "template": template,
-                "dedupe_key": f"returns:reply:{event.event_id}",
-                "params": params,
-            },
         )

@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application.bots import BotNotFoundError, BotRegistry
 from backend.modules.notifications.application.pacing import SendPacer
-from backend.modules.notifications.application.templates import UnknownTemplateError, render
+from backend.modules.notifications.application.templates import UnknownTemplateError, render, render_attachment
 from backend.modules.notifications.domain import (
     CHAT_AUDIENCE,
     MessageRequest,
@@ -62,6 +62,7 @@ class DispatchService:
             return QueueResult(0, 0, rejected=f"unknown or inactive bot: {request.bot_code}")
         try:
             text = render(request.template, request.params)
+            attachment = render_attachment(request.template, request.params)
         except UnknownTemplateError:
             return QueueResult(0, 0, rejected=f"unknown template: {request.template}")
 
@@ -83,6 +84,7 @@ class DispatchService:
                 template=request.template,
                 params=request.params,
                 text=text,
+                attachment=attachment,
             )
             queued += int(fresh)
             skipped += int(not fresh)
@@ -131,6 +133,7 @@ class DispatchService:
                     # The queue row's own id: a retry after a lost answer is
                     # recognised by the relay instead of reaching the chat twice.
                     idempotency_key=str(message.id),
+                    attachment=message.attachment,
                 )
             except MessengerPermanentError as error:
                 # Blocked bot, deleted chat: another attempt changes nothing.

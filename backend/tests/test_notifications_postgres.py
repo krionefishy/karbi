@@ -42,7 +42,9 @@ class FakeRelay(RelayClient):
         self.keys: list[str] = []
         self.error = error
 
-    async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
+    async def send(
+        self, *, bot_code: str, recipient: str, text: str, idempotency_key: str, attachment: dict | None = None
+    ) -> str | None:
         if self.error is not None:
             raise self.error
         self.sent.append((recipient, text))
@@ -376,7 +378,9 @@ async def test_one_bot_the_relay_refuses_does_not_stop_delivery_for_the_rest(not
         await subscribe(database, bot, chat_id=555, update_id=1)
 
         class PickyRelay(FakeRelay):
-            async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
+            async def send(
+                self, *, bot_code: str, recipient: str, text: str, idempotency_key: str, attachment: dict | None = None
+            ) -> str | None:
                 if bot_code == broken.code:
                     raise MessengerPermanentError("bot was blocked by the user")
                 return await super().send(
@@ -404,7 +408,9 @@ async def test_a_crash_mid_batch_keeps_the_messages_already_sent(notifications) 
     await subscribe(database, bot, chat_id=556, update_id=2)
 
     class CrashingRelay(FakeRelay):
-        async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
+        async def send(
+            self, *, bot_code: str, recipient: str, text: str, idempotency_key: str, attachment: dict | None = None
+        ) -> str | None:
             if self.sent:
                 raise RuntimeError("the process died here")
             return await super().send(

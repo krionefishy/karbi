@@ -2,12 +2,14 @@ import uuid
 from datetime import datetime
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_returns.application import (
     ClaimView,
+    ExtensionService,
+    ExtensionView,
     NotificationBotMissingError,
     RefreshRequest,
     ReturnsService,
@@ -16,7 +18,10 @@ from backend.modules.wb_returns.application import (
 )
 from backend.modules.wb_returns.presentation.http.schemas import (
     ClaimResponse,
+    ExtensionInstallResponse,
+    ExtensionResponse,
     InviteLinkResponse,
+    PairingCodeResponse,
     RefreshResponse,
     ReturnResponse,
     ReturnsResponse,
@@ -163,3 +168,69 @@ async def refresh_state(
     except SellerNotFoundError as error:
         raise not_enrolled() from error
     return refresh_response(state) if state else None
+
+
+def extension_response(view: ExtensionView) -> ExtensionResponse:
+    return ExtensionResponse(
+        seller_id=str(view.seller_id),
+        download_url=view.download_url,
+        code_date=view.code_date.isoformat(),
+        has_code_today=view.has_code_today,
+        code_received_at=_iso(view.code_received_at),
+        pending_tasks=view.pending_tasks,
+        installs=[
+            ExtensionInstallResponse(
+                id=str(item.id),
+                install_id=item.install_id,
+                browser=item.browser,
+                created_at=item.created_at.isoformat(),
+                last_seen_at=_iso(item.last_seen_at),
+                state=item.state,
+                last_error=item.last_error,
+                last_code_at=_iso(item.last_code_at),
+                deliveries_count=item.deliveries_count,
+                deliveries_at=_iso(item.deliveries_at),
+            )
+            for item in view.installs
+        ],
+    )
+
+
+@router.get("/sellers/{seller_id}/extension", response_model=ExtensionResponse)
+@inject
+async def extension_state(
+    seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[ExtensionService]
+) -> ExtensionResponse:
+    try:
+        view = await service.view(seller_id)
+    except SellerNotFoundError as error:
+        raise not_enrolled() from error
+    return extension_response(view)
+
+
+@router.post("/sellers/{seller_id}/extension/pairing-code", response_model=PairingCodeResponse)
+@inject
+async def pairing_code(
+    seller_id: uuid.UUID, principal: CurrentPrincipal, service: FromDishka[ExtensionService]
+) -> PairingCodeResponse:
+    """Код пары со страницы — для менеджера, который ставит расширение без бота."""
+    try:
+        pairing = await service.create_pairing_code(seller_id, created_by=principal.user_id)
+    except SellerNotFoundError as error:
+        raise not_enrolled() from error
+    await service.session.commit()
+    return PairingCodeResponse(code=pairing.code, expires_at=pairing.expires_at.isoformat())
+
+
+@router.delete("/sellers/{seller_id}/extension/installs/{install_id}", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def revoke_install(
+    seller_id: uuid.UUID, install_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[ExtensionService]
+) -> Response:
+    try:
+        revoked = await service.revoke(seller_id, install_id)
+    except SellerNotFoundError as error:
+        raise not_enrolled() from error
+    if not revoked:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Установка не найдена или уже отключена")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

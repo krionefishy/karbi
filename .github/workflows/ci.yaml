@@ -45,6 +45,10 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Build returns extension
+        working-directory: ${{ github.workspace }}/extension
+        run: npm ci && npm run pack
+
       - name: Build frontend image
         working-directory: ${{ github.workspace }}
         run: docker build -f deploy/frontend.Dockerfile -t karbi-frontend:ci .

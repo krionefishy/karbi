@@ -64,17 +64,29 @@ class RelayClient:
         self._timeout = httpx.Timeout(config.request_timeout_seconds, connect=10.0)
         self.logger = logging.getLogger("notifications.relay")
 
-    async def send(self, *, bot_code: str, recipient: str, text: str, idempotency_key: str) -> str | None:
-        """Hand one message to the relay. Returns the messenger's reference, if any."""
-        response = await self._post(
-            SEND_PATH,
-            {
-                "bot_code": bot_code,
-                "recipient": recipient,
-                "text": text,
-                "idempotency_key": idempotency_key,
-            },
-        )
+    async def send(
+        self,
+        *,
+        bot_code: str,
+        recipient: str,
+        text: str,
+        idempotency_key: str,
+        attachment: dict | None = None,
+    ) -> str | None:
+        """Hand one message to the relay. Returns the messenger's reference, if any.
+
+        `attachment` travels only when the relay is known to understand it
+        (`relay.photos_enabled`); an older relay would refuse the whole message.
+        """
+        payload: dict[str, object] = {
+            "bot_code": bot_code,
+            "recipient": recipient,
+            "text": text,
+            "idempotency_key": idempotency_key,
+        }
+        if attachment and self._config.photos_enabled:
+            payload["attachment"] = attachment
+        response = await self._post(SEND_PATH, payload)
         body = self._body(response)
         if response.status_code == 200:
             reference = body.get("message_ref")

@@ -8,8 +8,18 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# Расширение для кода получения возвратов: собирается здесь же и раздаётся статикой.
+FROM node:22-alpine AS extension
+WORKDIR /ext
+RUN apk add --no-cache zip
+COPY extension/package.json extension/package-lock.json ./
+RUN npm ci
+COPY extension/ ./
+RUN npm run pack
+
 FROM nginx:1.27-alpine AS runtime
 COPY deploy/nginx/frontend.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=extension /ext/marketplace-auto-returns.zip /usr/share/nginx/html/extension/marketplace-auto-returns.zip
 
 EXPOSE 80

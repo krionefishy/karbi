@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
+import { ReturnsExtension } from "../components/ReturnsExtension";
 import { ReturnsClaims, ReturnsTable } from "../components/ReturnsTable";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
@@ -24,7 +25,7 @@ const AUTOMATION_TITLE = "Возвраты WB";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 
-type Tab = "ready" | "transit" | "claims" | "history";
+type Tab = "ready" | "transit" | "claims" | "history" | "extension";
 
 export function ReturnsPage() {
   const queryClient = useQueryClient();
@@ -125,6 +126,7 @@ export function ReturnsPage() {
     transit: (returns?.transit.length ?? 0) + (returns?.other_active.length ?? 0),
     claims: returns?.claims.length ?? 0,
     history: (returns?.history.length ?? 0) + (returns?.claims_history.length ?? 0),
+    extension: null,
   };
 
   return (
@@ -232,6 +234,7 @@ export function ReturnsPage() {
                   ["transit", "В пути"],
                   ["claims", "Заявки покупателей"],
                   ["history", "История"],
+                  ["extension", "Расширение"],
                 ] as [Tab, string][]
               ).map(([key, label]) => (
                 <button
@@ -243,11 +246,13 @@ export function ReturnsPage() {
                   onClick={() => setTab(key)}
                 >
                   {label}
-                  {returns && <small>{counts[key]}</small>}
+                  {returns && counts[key] !== null && <small>{counts[key]}</small>}
                 </button>
               ))}
             </div>
-            {returnsLoading || !returns ? (
+            {tab === "extension" ? (
+              <ReturnsExtension sellerId={sellerId} />
+            ) : returnsLoading || !returns ? (
               <div className="loading-block">Загружаем данные…</div>
             ) : tab === "ready" ? (
               <ReturnsTable rows={returns.ready} empty="Готовых к выдаче возвратов нет." storage />

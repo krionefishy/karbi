@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import Iterable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_returns.domain import CLAIM_OPEN, Claim, ReturnChange, ReturnItem
 from backend.modules.wb_returns.infrastructure.postgres.models import (
     ClaimModel,
+    DeliveryCodeModel,
+    ExtensionInstallModel,
+    ExtensionTaskModel,
     NotificationLogModel,
+    PairingCodeModel,
     RefreshRequestModel,
     ReturnModel,
     TrackedSellerModel,
@@ -39,7 +43,16 @@ class ReturnsRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        for model in (ReturnModel, ClaimModel, NotificationLogModel, RefreshRequestModel):
+        for model in (
+            ReturnModel,
+            ClaimModel,
+            NotificationLogModel,
+            RefreshRequestModel,
+            ExtensionInstallModel,
+            PairingCodeModel,
+            DeliveryCodeModel,
+            ExtensionTaskModel,
+        ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
 
@@ -372,6 +385,228 @@ class ReturnsRepository:
         for offset in range(0, len(values), _CHUNK):
             statement = insert(NotificationLogModel).values(values[offset : offset + _CHUNK])
             await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id", "kind", "key"]))
+
+    # --- extension: installs -----------------------------------------------
+
+    async def add_install(
+        self,
+        *,
+        seller_id: uuid.UUID,
+        install_id: str,
+        browser: str,
+        token_hash: str,
+        chat_id: int | None,
+    ) -> ExtensionInstallModel:
+        install = ExtensionInstallModel(
+            seller_id=seller_id,
+            install_id=install_id[:64],
+            browser=browser[:255],
+            token_hash=token_hash,
+            paired_chat_id=chat_id,
+        )
+        self.session.add(install)
+        await self.session.flush()
+        return install
+
+    async def install_by_token_hash(self, token_hash: str) -> ExtensionInstallModel | None:
+        return await self.session.scalar(
+            select(ExtensionInstallModel).where(
+                ExtensionInstallModel.token_hash == token_hash, ExtensionInstallModel.revoked_at.is_(None)
+            )
+        )
+
+    async def install(self, seller_id: uuid.UUID, install_id: uuid.UUID) -> ExtensionInstallModel | None:
+        return await self.session.scalar(
+            select(ExtensionInstallModel).where(
+                ExtensionInstallModel.id == install_id, ExtensionInstallModel.seller_id == seller_id
+            )
+        )
+
+    async def active_installs(self, seller_id: uuid.UUID) -> list[ExtensionInstallModel]:
+        rows = await self.session.scalars(
+            select(ExtensionInstallModel)
+            .where(ExtensionInstallModel.seller_id == seller_id, ExtensionInstallModel.revoked_at.is_(None))
+            .order_by(ExtensionInstallModel.created_at)
+        )
+        return list(rows)
+
+    async def revoke_install(self, seller_id: uuid.UUID, install_id: uuid.UUID, *, now: datetime) -> bool:
+        result = await self.session.execute(
+            update(ExtensionInstallModel)
+            .where(
+                ExtensionInstallModel.id == install_id,
+                ExtensionInstallModel.seller_id == seller_id,
+                ExtensionInstallModel.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+            .returning(ExtensionInstallModel.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def revoke_installs_of_same_browser(self, seller_id: uuid.UUID, install_id: str, *, now: datetime) -> None:
+        """Повторная пара из того же браузера заменяет прежнюю установку, а не копит их."""
+        await self.session.execute(
+            update(ExtensionInstallModel)
+            .where(
+                ExtensionInstallModel.seller_id == seller_id,
+                ExtensionInstallModel.install_id == install_id[:64],
+                ExtensionInstallModel.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+
+    # --- extension: pairing --------------------------------------------------
+
+    async def add_pairing_code(
+        self,
+        *,
+        seller_id: uuid.UUID,
+        code: str,
+        chat_id: int | None,
+        created_by: uuid.UUID | None,
+        expires_at: datetime,
+    ) -> PairingCodeModel:
+        pairing = PairingCodeModel(
+            seller_id=seller_id, code=code, chat_id=chat_id, created_by=created_by, expires_at=expires_at
+        )
+        self.session.add(pairing)
+        await self.session.flush()
+        return pairing
+
+    async def live_pairing_code(self, code: str, *, now: datetime) -> PairingCodeModel | None:
+        return await self.session.scalar(
+            select(PairingCodeModel)
+            .where(PairingCodeModel.code == code, PairingCodeModel.used_at.is_(None), PairingCodeModel.expires_at > now)
+            .with_for_update(skip_locked=True)
+        )
+
+    async def expire_pairing_codes(self, seller_id: uuid.UUID, *, chat_id: int | None, now: datetime) -> None:
+        """Новый код гасит прежние неиспользованные того же источника."""
+        statement = (
+            update(PairingCodeModel)
+            .where(
+                PairingCodeModel.seller_id == seller_id,
+                PairingCodeModel.used_at.is_(None),
+                PairingCodeModel.expires_at > now,
+            )
+            .values(expires_at=now)
+        )
+        statement = (
+            statement.where(PairingCodeModel.chat_id == chat_id)
+            if chat_id is not None
+            else statement.where(PairingCodeModel.chat_id.is_(None))
+        )
+        await self.session.execute(statement)
+
+    # --- extension: delivery codes ----------------------------------------
+
+    async def upsert_delivery_codes(
+        self, seller_id: uuid.UUID, rows: Sequence[dict], *, install_id: uuid.UUID, now: datetime
+    ) -> int:
+        values = [
+            {
+                "seller_id": seller_id,
+                "code_date": row["code_date"],
+                "code": str(row.get("code") or "")[:16],
+                "ext_code": str(row.get("ext_code") or "")[:16],
+                "qr": str(row.get("qr") or "")[:2048],
+                "ext_qr": str(row.get("ext_qr") or "")[:2048],
+                "install_id": install_id,
+                "received_at": now,
+            }
+            for row in {row["code_date"]: row for row in rows}.values()
+        ]
+        if not values:
+            return 0
+        statement = insert(DeliveryCodeModel).values(values)
+        excluded = statement.excluded
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "code_date"],
+                set_={
+                    "code": excluded.code,
+                    "ext_code": excluded.ext_code,
+                    "qr": excluded.qr,
+                    "ext_qr": excluded.ext_qr,
+                    "install_id": excluded.install_id,
+                    "received_at": excluded.received_at,
+                },
+            )
+        )
+        return len(values)
+
+    async def delivery_code(self, seller_id: uuid.UUID, day: date) -> DeliveryCodeModel | None:
+        return await self.session.get(DeliveryCodeModel, (seller_id, day))
+
+    async def delivery_codes_for(
+        self, seller_ids: Iterable[uuid.UUID], day: date
+    ) -> dict[uuid.UUID, DeliveryCodeModel]:
+        wanted = list(seller_ids)
+        if not wanted:
+            return {}
+        rows = await self.session.scalars(
+            select(DeliveryCodeModel).where(DeliveryCodeModel.seller_id.in_(wanted), DeliveryCodeModel.code_date == day)
+        )
+        return {row.seller_id: row for row in rows}
+
+    async def purge_old_delivery_codes(self, *, before: date) -> int:
+        result = await self.session.execute(
+            delete(DeliveryCodeModel).where(DeliveryCodeModel.code_date < before).returning(DeliveryCodeModel.seller_id)
+        )
+        return len(result.all())
+
+    # --- extension: tasks ---------------------------------------------------
+
+    async def add_task(self, seller_id: uuid.UUID, *, kind: str, chat_id: int | None) -> ExtensionTaskModel:
+        task = ExtensionTaskModel(seller_id=seller_id, kind=kind, chat_id=chat_id)
+        self.session.add(task)
+        await self.session.flush()
+        return task
+
+    async def take_tasks(
+        self, seller_id: uuid.UUID, *, now: datetime, retake_after: timedelta
+    ) -> list[ExtensionTaskModel]:
+        """Задачи, которые расширение ещё не забирало или забрало давно и не выполнило."""
+        rows = list(
+            await self.session.scalars(
+                select(ExtensionTaskModel)
+                .where(
+                    ExtensionTaskModel.seller_id == seller_id,
+                    ExtensionTaskModel.fulfilled_at.is_(None),
+                    (ExtensionTaskModel.taken_at.is_(None)) | (ExtensionTaskModel.taken_at < now - retake_after),
+                )
+                .with_for_update(skip_locked=True)
+            )
+        )
+        for task in rows:
+            task.taken_at = now
+        return rows
+
+    async def fulfil_tasks(self, seller_id: uuid.UUID, *, kind: str, now: datetime) -> list[ExtensionTaskModel]:
+        rows = list(
+            await self.session.scalars(
+                select(ExtensionTaskModel)
+                .where(
+                    ExtensionTaskModel.seller_id == seller_id,
+                    ExtensionTaskModel.kind == kind,
+                    ExtensionTaskModel.fulfilled_at.is_(None),
+                )
+                .with_for_update(skip_locked=True)
+            )
+        )
+        for task in rows:
+            task.fulfilled_at = now
+        return rows
+
+    async def has_open_task(self, seller_id: uuid.UUID, *, kind: str) -> bool:
+        found = await self.session.scalar(
+            select(ExtensionTaskModel.id).where(
+                ExtensionTaskModel.seller_id == seller_id,
+                ExtensionTaskModel.kind == kind,
+                ExtensionTaskModel.fulfilled_at.is_(None),
+            )
+        )
+        return found is not None
 
     # --- manual refresh --------------------------------------------------
 

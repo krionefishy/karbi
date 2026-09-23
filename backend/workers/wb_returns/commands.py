@@ -11,7 +11,9 @@ from backend.modules.notifications.domain import CommandEvent
 from backend.modules.wb_returns.application import CommandService
 from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.shared.kafka_streams.topics import NotificationTopics
+from backend.shared.settings import Settings
 from backend.storage.pg import Database
+from backend.workers.wb_returns.worker import extension_service
 
 
 class CommandConsumer:
@@ -23,14 +25,14 @@ class CommandConsumer:
         bootstrap_servers: str,
         group_id: str,
         *,
-        bot_code: str,
-        timezone: ZoneInfo,
+        settings: Settings,
     ) -> None:
         self.database = database
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
-        self.bot_code = bot_code
-        self.timezone = timezone
+        self.settings = settings
+        self.bot_code = settings.returns.notification_bot
+        self.timezone = ZoneInfo(settings.returns.timezone)
         self.logger = logging.getLogger("wb.returns.commands.consumer")
 
     async def run(self) -> None:
@@ -69,7 +71,11 @@ class CommandConsumer:
             return None
         async with self.database.session() as session:
             service = CommandService(
-                session, ReturnsRepository(session), bot_code=self.bot_code, timezone=self.timezone
+                session,
+                ReturnsRepository(session),
+                extension_service(session, self.settings),
+                bot_code=self.bot_code,
+                timezone=self.timezone,
             )
             template = await service.handle(event)
         self.logger.info(

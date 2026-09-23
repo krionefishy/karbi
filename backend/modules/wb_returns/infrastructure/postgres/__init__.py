@@ -1,6 +1,10 @@
 from backend.modules.wb_returns.infrastructure.postgres.models import (
     ClaimModel,
+    DeliveryCodeModel,
+    ExtensionInstallModel,
+    ExtensionTaskModel,
     NotificationLogModel,
+    PairingCodeModel,
     RefreshRequestModel,
     ReturnModel,
     TrackedSellerModel,
@@ -10,7 +14,11 @@ from backend.modules.wb_returns.infrastructure.postgres.repository import Return
 
 __all__ = [
     "ClaimModel",
+    "DeliveryCodeModel",
+    "ExtensionInstallModel",
+    "ExtensionTaskModel",
     "NotificationLogModel",
+    "PairingCodeModel",
     "RefreshRequestModel",
     "ReturnModel",
     "ReturnsRepository",

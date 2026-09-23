@@ -74,6 +74,7 @@ relay:
   audience: ${RELAY_AUDIENCE:-relay}
   jwt_ttl_seconds: ${RELAY_JWT_TTL_SECONDS:-300}
   updates_wait_seconds: ${RELAY_UPDATES_WAIT_SECONDS:-25}
+  photos_enabled: ${RELAY_PHOTOS_ENABLED:-false}
   verify: ${RELAY_VERIFY:-/etc/relay/relay.crt}
   request_timeout_seconds: ${RELAY_REQUEST_TIMEOUT_SECONDS:-60}
 turnover:
@@ -109,3 +110,8 @@ returns:
   digest_minute: 0
   notification_bot: ${RETURNS_NOTIFICATION_BOT:-wb-returns}
   history_limit: 300
+  public_base_url: https://${PUBLIC_DOMAIN:-localhost}
+  extension_download_path: /extension/marketplace-auto-returns.zip
+  pairing_ttl_minutes: 15
+  code_alert_hour: 1
+  install_silent_hours: 24

@@ -176,7 +176,15 @@ class NotificationRepository:
         return sorted(set(rows))
 
     async def queue_message(
-        self, *, bot_id: uuid.UUID, chat_id: int, dedupe_key: str, template: str, params: dict, text: str
+        self,
+        *,
+        bot_id: uuid.UUID,
+        chat_id: int,
+        dedupe_key: str,
+        template: str,
+        params: dict,
+        text: str,
+        attachment: dict | None = None,
     ) -> bool:
         """Returns False when this exact message was already queued before."""
         statement = insert(OutgoingMessageModel).values(
@@ -186,6 +194,7 @@ class NotificationRepository:
             template=template,
             params=params,
             text=text,
+            attachment=attachment,
         )
         result = await self.session.execute(
             statement.on_conflict_do_nothing(index_elements=["dedupe_key"]).returning(OutgoingMessageModel.id)

@@ -150,3 +150,92 @@ class RefreshRequestModel(WBReturnsBase):
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
     )
+
+
+class ExtensionInstallModel(WBReturnsBase):
+    """Расширение в браузере, где открыт профиль покупателя владельца кабинета.
+
+    Токен хранится хэшем: сам токен видит только расширение. Одна установка —
+    один кабинет: профиль покупателя оформлен на владельца именно этого кабинета.
+    """
+
+    __tablename__ = "extension_installs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Идентификатор, который расширение придумывает себе при установке.
+    install_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    browser: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    paired_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ok — код берётся; needs_login — сайт показал вход; error — последний запрос упал.
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    last_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_code_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Снимок «готов к выдаче» из профиля покупателя — резерв на случай, если отчёт WB запаздывает.
+    deliveries: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    deliveries_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_wb_returns_installs_seller", "seller_id", "revoked_at"),)
+
+
+class PairingCodeModel(WBReturnsBase):
+    """Шестизначный код на 15 минут: бот или страница выдаёт, расширение обменивает на токен."""
+
+    __tablename__ = "pairing_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    code: Mapped[str] = mapped_column(String(8), nullable=False)
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    install_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    __table_args__ = (
+        Index("uq_wb_returns_pairing_live", "code", unique=True, postgresql_where=text("used_at IS NULL")),
+        Index("ix_wb_returns_pairing_seller", "seller_id", "expires_at"),
+    )
+
+
+class DeliveryCodeModel(WBReturnsBase):
+    """Код получения в ПВЗ на день: общий для всех выдач владельца за сутки.
+
+    `qr` — строка, из которой сайт покупателя рисует QR; картинку рисуем сами.
+    """
+
+    __tablename__ = "delivery_codes"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    code_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    code: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    ext_code: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    qr: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    ext_qr: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    install_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExtensionTaskModel(WBReturnsBase):
+    """Просьба к расширению, которую оно заберёт при следующем heartbeat.
+
+    Сервер не может достучаться до браузера, поэтому «/qr» без кода на сегодня
+    ставит задачу, а ответ в чат уходит, когда код придёт.
+    """
+
+    __tablename__ = "extension_tasks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="refresh_code")
+    chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    taken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("ix_wb_returns_tasks_open", "seller_id", "fulfilled_at", "requested_at"),)
