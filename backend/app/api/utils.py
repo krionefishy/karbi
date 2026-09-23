@@ -42,6 +42,16 @@ from backend.modules.wb_fbs_stocks.application import (
     TITLE as WB_FBS_STOCKS_TITLE,
 )
 from backend.modules.wb_fbs_stocks.application import BoardOverview
+from backend.modules.wb_returns.application import (
+    AUTOMATION_ID as WB_RETURNS_ID,
+)
+from backend.modules.wb_returns.application import (
+    DESCRIPTION as WB_RETURNS_DESCRIPTION,
+)
+from backend.modules.wb_returns.application import (
+    TITLE as WB_RETURNS_TITLE,
+)
+from backend.modules.wb_returns.application import ReturnsOverview
 from backend.modules.wb_review_chats.application import (
     AUTOMATION_ID as WB_REVIEW_CHATS_ID,
 )
@@ -129,6 +139,15 @@ def next_review_chats_run_at(
     return max(moment, overview.last_success_at + timedelta(minutes=settings.core_mirror.chats_interval_minutes))
 
 
+def next_returns_run_at(settings: Settings, overview: ReturnsOverview, now: datetime | None = None) -> datetime:
+    """Опрос интервальный: следующий — через `poll_minutes` после последнего удачного сбора."""
+    returns = settings.returns
+    moment = now or datetime.now(ZoneInfo(returns.timezone))
+    if overview.last_success_at is None:
+        return moment
+    return max(moment, overview.last_success_at + timedelta(minutes=returns.poll_minutes))
+
+
 def next_fbs_stocks_run_at(settings: Settings, overview: BoardOverview, now: datetime | None = None) -> datetime:
     """Опрос интервальный и по кабинетам: следующий — у самого давно собранного.
 
@@ -188,6 +207,7 @@ def automation_catalog(
     fbs_stocks: BoardOverview,
     fbs_penalties: PenaltiesOverview,
     review_chats: ReviewChatsOverview,
+    returns: ReturnsOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -271,5 +291,16 @@ def automation_catalog(
             last_run=None,
             last_success_at=review_chats.last_success_at.isoformat() if review_chats.last_success_at else None,
             next_run_at=next_review_chats_run_at(settings, review_chats).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_RETURNS_ID,
+            title=WB_RETURNS_TITLE,
+            description=WB_RETURNS_DESCRIPTION,
+            status=returns.status,
+            seller_count=returns.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=returns.last_success_at.isoformat() if returns.last_success_at else None,
+            next_run_at=next_returns_run_at(settings, returns).isoformat(),
         ),
     ]

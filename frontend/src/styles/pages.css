@@ -379,3 +379,11 @@
   .page-container, .reviews-content { padding: var(--space-5); }
   .timeline-grid { grid-template-columns: minmax(210px, 1.8fr) repeat(7, minmax(72px, 1fr)); }
 }
+
+/* Возвраты WB */
+.returns-subheading { margin: var(--space-6) 0 var(--space-3); font-size: 16px; line-height: 22px; font-weight: 600; }
+.returns-deadline-soon { color: var(--warning); }
+.returns-deadline-over { color: var(--negative); }
+.returns-claim-comment { max-width: 360px; white-space: normal; font-size: 12px; line-height: 16px; color: var(--ink-secondary); }
+.returns-photos { display: flex; gap: 6px; }
+.returns-photos a { font-size: 12px; }

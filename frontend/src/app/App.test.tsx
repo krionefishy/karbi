@@ -13,6 +13,7 @@ vi.mock("../pages/FbsDistributionPage", () => ({ FbsDistributionPage: () => <div
 vi.mock("../pages/CardChecklistPage", () => ({ CardChecklistPage: () => <div>чек-лист</div> }));
 vi.mock("../pages/FbsStocksPage", () => ({ FbsStocksPage: () => <div>остатки FBS</div> }));
 vi.mock("../pages/FbsPenaltiesPage", () => ({ FbsPenaltiesPage: () => <div>штрафы FBS</div> }));
+vi.mock("../pages/ReturnsPage", () => ({ ReturnsPage: () => <div>возвраты WB</div> }));
 vi.mock("../pages/SellersPage", () => ({ SellersPage: () => <div>селлеры</div> }));
 vi.mock("../pages/LoginPage", () => ({ LoginPage: () => <div>вход</div> }));
 vi.mock("../pages/admin/EmployeesPage", () => ({ EmployeesPage: () => <div>сотрудники</div> }));
@@ -46,6 +47,7 @@ describe("маршруты автоматизаций", () => {
     ["/automations/wb-card-checklist", "чек-лист"],
     ["/automations/wb-fbs-stocks", "остатки FBS"],
     ["/automations/wb-fbs-penalties", "штрафы FBS"],
+    ["/automations/wb-returns", "возвраты WB"],
   ])("%s открывает свою страницу", (path, expected) => {
     open(path);
 

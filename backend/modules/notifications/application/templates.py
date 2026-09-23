@@ -7,6 +7,11 @@ SUBSCRIPTION_NO_TOKEN = "subscription.no_token"
 SUBSCRIPTION_STOPPED = "subscription.stopped"
 SUBSCRIPTION_NOTHING_TO_STOP = "subscription.nothing_to_stop"
 TURNOVER_DIGEST = "turnover.digest"
+RETURNS_READY = "returns.ready"
+RETURNS_TRANSIT = "returns.transit"
+RETURNS_REMINDER = "returns.reminder"
+RETURNS_CLAIMS = "returns.claims"
+RETURNS_CLAIM_DEADLINE = "returns.claim_deadline"
 
 # Telegram accepts 4096 characters; a longer list is unreadable anyway.
 _DIGEST_LIMIT = 25
@@ -91,6 +96,149 @@ def _turnover_digest(params: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# --- возвраты WB -----------------------------------------------------------
+
+_MONTHS = ("янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек.")
+
+
+def _day(value: Any) -> str:
+    """`2026-09-24` или ISO-момент → «24 сент.»; что не разобралось — как пришло."""
+    text = str(value or "")
+    try:
+        month, day = int(text[5:7]), int(text[8:10])
+    except ValueError:
+        return text
+    if not 1 <= month <= 12:
+        return text
+    return f"{day} {_MONTHS[month - 1]}"
+
+
+def _money(value: Any) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    whole = f"{int(round(amount)):,}".replace(",", "\u202f")
+    return f"{whole} ₽"
+
+
+def _return_line(item: dict[str, Any]) -> str:
+    detail = str(item.get("return_type") or "")
+    reason = str(item.get("reason") or "")
+    if reason:
+        detail = f"{detail}, {reason}" if detail else reason
+    line = f"• {item.get('title') or 'товар'} · стикер {item.get('sticker') or '—'}"
+    return f"{line}\n  {detail}" if detail else line
+
+
+def _office_block(office: dict[str, Any], *, deadline: bool) -> list[str]:
+    count = int(office.get("count") or 0)
+    lines = [f"ПВЗ {office.get('address') or 'не указан'} — {count} {_plural(count, 'шт.', 'шт.', 'шт.')}"]
+    lines.extend(_return_line(item) for item in office.get("items") or [])
+    shown = len(office.get("items") or [])
+    if count > shown:
+        lines.append(f"  …и ещё {count - shown}")
+    if deadline:
+        lines.append(f"Бесплатно до {_day(office.get('free_until'))}, забрать до {_day(office.get('deadline'))}")
+    return lines
+
+
+def _returns_ready(params: dict[str, Any]) -> str:
+    total = int(params.get("total") or 0)
+    lines = [
+        f"{params.get('seller_name', 'Магазин')}: {total} "
+        f"{_plural(total, 'возврат готов', 'возврата готовы', 'возвратов готовы')} к выдаче"
+    ]
+    for office in params.get("offices") or []:
+        lines.append("")
+        lines.extend(_office_block(office, deadline=True))
+    code = params.get("code")
+    if code:
+        lines.append("")
+        lines.append(f"Код получения на {_day(params.get('code_date'))}: {code}")
+    lines.append("")
+    lines.append(
+        f"Хранение в ПВЗ {params.get('storage_days', 7)} дн.: первые {params.get('free_days', 3)} бесплатно, "
+        "дальше 10 ₽ в день за штуку, потом товар уедет на утилизацию."
+    )
+    return "\n".join(lines)
+
+
+def _returns_transit(params: dict[str, Any]) -> str:
+    total = int(params.get("total") or 0)
+    lines = [
+        f"{params.get('seller_name', 'Магазин')}: {total} "
+        f"{_plural(total, 'возврат едет', 'возврата едут', 'возвратов едут')} в ПВЗ"
+    ]
+    for office in params.get("offices") or []:
+        lines.append("")
+        lines.extend(_office_block(office, deadline=False))
+    lines.append("")
+    lines.append("Напишу, как только они будут готовы к выдаче.")
+    return "\n".join(lines)
+
+
+def _returns_reminder(params: dict[str, Any]) -> str:
+    total = int(params.get("total") or 0)
+    day = int(params.get("day") or 0)
+    free_days = int(params.get("free_days") or 3)
+    if day <= free_days:
+        headline = "с завтрашнего дня хранение платное, 10 ₽ в день за штуку"
+    else:
+        headline = "через два дня товар уедет на утилизацию"
+    lines = [
+        f"{params.get('seller_name', 'Магазин')}: {total} "
+        f"{_plural(total, 'возврат лежит', 'возврата лежат', 'возвратов лежат')} в ПВЗ уже {day} дн. — {headline}"
+    ]
+    for office in params.get("offices") or []:
+        lines.append("")
+        lines.extend(_office_block(office, deadline=True))
+    return "\n".join(lines)
+
+
+def _claim_line(claim: dict[str, Any]) -> str:
+    lines = [f"• {claim.get('name') or 'товар'} · {_money(claim.get('price'))}"]
+    comment = str(claim.get("comment") or "").strip()
+    if comment:
+        lines.append(f"  «{comment[:300]}»")
+    photos = list(claim.get("photos") or [])
+    if photos:
+        lines.append("  фото: " + " ".join(photos))
+    lines.append(f"  ответить до {_day(claim.get('deadline'))}")
+    return "\n".join(lines)
+
+
+def _returns_claims(params: dict[str, Any]) -> str:
+    total = int(params.get("total") or 0)
+    lines = [
+        f"{params.get('seller_name', 'Магазин')}: {total} "
+        f"{_plural(total, 'новая заявка', 'новые заявки', 'новых заявок')} на возврат"
+    ]
+    for claim in params.get("claims") or []:
+        lines.append("")
+        lines.append(_claim_line(claim))
+    lines.append("")
+    lines.append(
+        f"На ответ {params.get('review_days', 5)} дн.: без решения заявка одобрится сама. "
+        "Ответить можно в кабинете WB, раздел «Возвраты покупателей»."
+    )
+    return "\n".join(lines)
+
+
+def _returns_claim_deadline(params: dict[str, Any]) -> str:
+    total = int(params.get("total") or 0)
+    lines = [
+        f"{params.get('seller_name', 'Магазин')}: завтра истекает срок ответа по {total} "
+        f"{_plural(total, 'заявке', 'заявкам', 'заявкам')} на возврат"
+    ]
+    for claim in params.get("claims") or []:
+        lines.append("")
+        lines.append(_claim_line(claim))
+    lines.append("")
+    lines.append("Без ответа заявка одобрится автоматически.")
+    return "\n".join(lines)
+
+
 # Producers send a template id and parameters, never ready-made text: wording
 # changes then need no republished events, and the outgoing log keeps both.
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -100,6 +248,11 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_STOPPED: _stopped,
     SUBSCRIPTION_NOTHING_TO_STOP: _nothing_to_stop,
     TURNOVER_DIGEST: _turnover_digest,
+    RETURNS_READY: _returns_ready,
+    RETURNS_TRANSIT: _returns_transit,
+    RETURNS_REMINDER: _returns_reminder,
+    RETURNS_CLAIMS: _returns_claims,
+    RETURNS_CLAIM_DEADLINE: _returns_claim_deadline,
 }
 
 

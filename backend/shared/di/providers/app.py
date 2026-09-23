@@ -43,6 +43,8 @@ from backend.modules.wb_fbs_penalties.application import PenaltiesEnrollment, Pe
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
+from backend.modules.wb_returns.application import ReturnsEnrollment, ReturnsService
+from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.modules.wb_review_chats.application import ReviewChatsEnrollment, ReviewChatsService
 from backend.modules.wb_review_chats.infrastructure.postgres import ReviewChatsRepository
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
@@ -392,6 +394,34 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def returns_repository(self, session: AsyncSession) -> ReturnsRepository:
+        return ReturnsRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def returns_enrollment(self, returns: ReturnsRepository) -> ReturnsEnrollment:
+        return ReturnsEnrollment(returns)
+
+    @provide(scope=Scope.REQUEST)
+    def returns_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        returns: ReturnsRepository,
+        bots: BotRegistry,
+        subscriptions: SubscriptionService,
+        settings: Settings,
+    ) -> ReturnsService:
+        return ReturnsService(
+            session,
+            sellers,
+            returns,
+            bots,
+            subscriptions,
+            bot_code=settings.returns.notification_bot,
+            history_limit=settings.returns.history_limit,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
@@ -401,9 +431,10 @@ class SessionProvider(Provider):
         fbs_stocks: FbsStocksEnrollment,
         fbs_penalties: PenaltiesEnrollment,
         review_chats: ReviewChatsEnrollment,
+        returns: ReturnsEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties, review_chats]
+        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties, review_chats, returns]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

@@ -358,6 +358,28 @@ class FbsPenaltiesConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ReturnsConfig:
+    """Возвраты WB: как часто перечитывать отчёт и заявки, когда слать дайджест. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Отчёт о возвратах — запрос в минуту на кабинет (держит шлюз), заявки — 20 в минуту.
+    # Раз в десять минут хватает: возврат едет в ПВЗ днями, а не минутами.
+    poll_minutes: int = 10
+    retry_minutes: int = 5
+    # Отчёт отдаётся целиком за окно, без страниц; больше 31 дня WB не даёт.
+    report_window_days: int = 14
+    report_backfill_days: int = 31
+    # Архив заявок большой и меняется только решениями продавца.
+    claims_archive_hours: int = 6
+    # Утренний дайджест того, что едет в ПВЗ.
+    digest_hour: int = 9
+    digest_minute: int = 0
+    notification_bot: str = "wb-returns"
+    # Сколько закрытых возвратов и заявок показывать в истории на странице.
+    history_limit: int = 300
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     app: AppConfig
     database: DatabaseConfig
@@ -377,6 +399,7 @@ class Settings:
     core_mirror: CoreMirrorConfig
     fbs_penalties: FbsPenaltiesConfig
     review_chats: ReviewChatsConfig
+    returns: ReturnsConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -495,6 +518,19 @@ class Settings:
         ):
             if key in fbs_penalties:
                 fbs_penalties[key] = int(fbs_penalties[key])
+        returns = dict(data.get("returns", {}))
+        for key in (
+            "poll_minutes",
+            "retry_minutes",
+            "report_window_days",
+            "report_backfill_days",
+            "claims_archive_hours",
+            "digest_hour",
+            "digest_minute",
+            "history_limit",
+        ):
+            if key in returns:
+                returns[key] = int(returns[key])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -531,6 +567,7 @@ class Settings:
             core_mirror=CoreMirrorConfig(**core_mirror),
             fbs_penalties=FbsPenaltiesConfig(**fbs_penalties),
             review_chats=ReviewChatsConfig(**review_chats),
+            returns=ReturnsConfig(**returns),
         )
         settings.validate_values()
         return settings
@@ -607,6 +644,27 @@ class Settings:
             < 1
         ):
             raise ValueError("fbs_penalties.retry_minutes, report windows and reports_per_run must be positive")
+        returns = self.returns
+        if (
+            min(
+                returns.poll_minutes,
+                returns.retry_minutes,
+                returns.report_window_days,
+                returns.report_backfill_days,
+                returns.claims_archive_hours,
+                returns.history_limit,
+            )
+            < 1
+        ):
+            raise ValueError(
+                "returns: poll and retry minutes, windows, claims_archive_hours and history_limit must be positive"
+            )
+        if returns.report_backfill_days > 31 or returns.report_window_days > 31:
+            raise ValueError("returns.report_window_days and report_backfill_days must not exceed 31 (WB limit)")
+        if not 0 <= returns.digest_hour <= 23 or not 0 <= returns.digest_minute <= 59:
+            raise ValueError("returns.digest_hour must be 0..23 and digest_minute 0..59")
+        if not returns.notification_bot:
+            raise ValueError("returns.notification_bot must be set")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

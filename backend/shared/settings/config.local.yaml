@@ -55,3 +55,14 @@ relay:
   base_url: http://localhost:8081
   jwt_secret: local-development-relay-secret-not-a-real-one
   verify: "false"
+returns:
+  timezone: Europe/Moscow
+  poll_minutes: 10
+  retry_minutes: 5
+  report_window_days: 14
+  report_backfill_days: 31
+  claims_archive_hours: 6
+  digest_hour: 9
+  digest_minute: 0
+  notification_bot: wb-returns
+  history_limit: 300

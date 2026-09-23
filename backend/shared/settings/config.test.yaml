@@ -51,3 +51,14 @@ relay:
   base_url: https://relay.invalid
   jwt_secret: test-relay-secret-that-is-long-enough
   verify: "false"
+returns:
+  timezone: Europe/Moscow
+  poll_minutes: 10
+  retry_minutes: 5
+  report_window_days: 14
+  report_backfill_days: 31
+  claims_archive_hours: 6
+  digest_hour: 9
+  digest_minute: 0
+  notification_bot: wb-returns
+  history_limit: 300

@@ -12,6 +12,7 @@ from backend.modules.wb_card_checklist.application import ChecklistOverview
 from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
 from backend.modules.wb_fbs_penalties.application import PenaltiesOverview
 from backend.modules.wb_fbs_stocks.application import BoardOverview
+from backend.modules.wb_returns.application import ReturnsOverview
 from backend.modules.wb_review_chats.application import ReviewChatsOverview
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
@@ -45,6 +46,10 @@ def quiet_penalties() -> PenaltiesOverview:
 
 def quiet_chats() -> ReviewChatsOverview:
     return ReviewChatsOverview(seller_count=0, last_success_at=None, failing=0)
+
+
+def quiet_returns() -> ReturnsOverview:
+    return ReturnsOverview(seller_count=0, last_success_at=None, failing=0)
 
 
 def test_the_stocks_card_points_at_the_most_stale_cabinet() -> None:
@@ -97,6 +102,7 @@ def test_catalog_reports_the_run_that_actually_happened() -> None:
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
+        quiet_returns(),
         SETTINGS,
     )
 
@@ -137,6 +143,7 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
+        quiet_returns(),
         SETTINGS,
     )
 
@@ -160,15 +167,18 @@ def test_next_run_is_the_worker_schedule() -> None:
 def test_the_catalog_lists_every_automation() -> None:
     turnover = TurnoverOverview(seller_count=2, last_run=None, last_success_at=None, runs_last_24h=0)
 
-    reviews_card, turnover_card, fbs_card, checklist_card, stocks_card, penalties_card, chats_card = automation_catalog(
-        SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
-        turnover,
-        DistributionCatalogOverview(seller_count=3),
-        ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
-        BoardOverview(seller_count=5, last_success_at=None, failing=0),
-        PenaltiesOverview(seller_count=1, last_success_at=None, failing=0),
-        ReviewChatsOverview(seller_count=2, last_success_at=None, failing=0),
-        SETTINGS,
+    reviews_card, turnover_card, fbs_card, checklist_card, stocks_card, penalties_card, chats_card, returns_card = (
+        automation_catalog(
+            SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
+            turnover,
+            DistributionCatalogOverview(seller_count=3),
+            ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
+            BoardOverview(seller_count=5, last_success_at=None, failing=0),
+            PenaltiesOverview(seller_count=1, last_success_at=None, failing=0),
+            ReviewChatsOverview(seller_count=2, last_success_at=None, failing=0),
+            ReturnsOverview(seller_count=1, last_success_at=None, failing=0),
+            SETTINGS,
+        )
     )
 
     assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id, stocks_card.id, penalties_card.id) == (
@@ -181,6 +191,7 @@ def test_the_catalog_lists_every_automation() -> None:
     )
     assert (penalties_card.seller_count, penalties_card.status) == (1, "idle")
     assert (chats_card.id, chats_card.seller_count, chats_card.status) == ("wb-review-chats", 2, "idle")
+    assert (returns_card.id, returns_card.seller_count, returns_card.status) == ("wb-returns", 1, "idle")
     assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
@@ -207,7 +218,7 @@ def test_the_checklist_card_reports_collection_state() -> None:
     healthy = ChecklistOverview(seller_count=3, last_success_at=collected, failing=0)
     failing = ChecklistOverview(seller_count=3, last_success_at=collected, failing=1)
 
-    *_, card, _, _, _ = automation_catalog(
+    *_, card, _, _, _, _ = automation_catalog(
         quiet_overview(),
         quiet_turnover(),
         quiet_fbs(),
@@ -215,6 +226,7 @@ def test_the_checklist_card_reports_collection_state() -> None:
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
+        quiet_returns(),
         SETTINGS,
     )
 

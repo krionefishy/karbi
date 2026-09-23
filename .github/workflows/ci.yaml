@@ -108,6 +108,9 @@ jobs:
       - name: Apply WB review chats migrations
         run: uv run alembic -n wb_review_chats upgrade head
 
+      - name: Apply WB returns migrations
+        run: uv run alembic -n wb_returns upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

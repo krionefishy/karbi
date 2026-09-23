@@ -13,6 +13,7 @@ import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
 import { FbsDistributionPage } from "../pages/FbsDistributionPage";
 import { FbsPenaltiesPage } from "../pages/FbsPenaltiesPage";
+import { ReturnsPage } from "../pages/ReturnsPage";
 import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
 
@@ -39,6 +40,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-fbs-stocks" element={<FbsStocksPage />} />
         <Route path="/automations/wb-fbs-penalties" element={<FbsPenaltiesPage />} />
         <Route path="/automations/wb-review-chats" element={<ReviewChatsPage />} />
+        <Route path="/automations/wb-returns" element={<ReturnsPage />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />
