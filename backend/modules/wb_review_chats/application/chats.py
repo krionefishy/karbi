@@ -15,7 +15,6 @@ from backend.modules.wb_review_chats.application.view import (
     ReviewChatsView,
 )
 from backend.modules.wb_review_chats.domain import (
-    FOLLOW_UP_WITHIN,
     GROUP_BEFORE,
     GROUP_EARLY,
     GROUP_FOLLOWED,
@@ -46,6 +45,7 @@ class ReviewChatsService:
         reply_window_hours: int,
         max_period_days: int,
         baseline_days: int,
+        follow_up_within_minutes: int,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -55,6 +55,7 @@ class ReviewChatsService:
         self.reply_window_hours = reply_window_hours
         self.max_period_days = max_period_days
         self.baseline_days = baseline_days
+        self.follow_up_within = timedelta(minutes=follow_up_within_minutes)
 
     async def overview(self) -> ReviewChatsOverview:
         enrolled = await self.tracked.tracked_seller_ids() & {seller.id for seller in await self.sellers.list_sellers()}
@@ -99,7 +100,7 @@ class ReviewChatsService:
         moment = now or datetime.now(UTC)
         if state is not None and state.read_through is not None:
             moment = min(moment, state.read_through)
-        launch_at = await self.chats.launch_at(seller_id, within=FOLLOW_UP_WITHIN)
+        launch_at = await self.chats.launch_at(seller_id, within=self.follow_up_within)
         dialogs = await self._dialogs(seller_id, date_from, date_to, moment, launch_at)
         baseline = None
         if launch_at is not None:
@@ -163,6 +164,7 @@ class ReviewChatsService:
             window=timedelta(hours=self.reply_window_hours),
             now=now,
             launch_at=launch_at,
+            follow_up_within=self.follow_up_within,
         )
 
     def _days(self, dialogs: list[Dialog]) -> tuple[DaySummary, ...]:

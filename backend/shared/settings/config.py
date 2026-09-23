@@ -341,6 +341,10 @@ class ReviewChatsConfig:
     # Сколько дней до запуска рассылки берётся за «как было»: одно и то же окно
     # при любом выбранном периоде, чтобы сравнение не плыло вместе с датами.
     baseline_days: int = 14
+    # Не позже скольки минут после автосообщения WB сообщение из API — наше. Рассылка
+    # укладывается в полторы минуты; позже отвечают менеджеры через сторонний клиент.
+    # Если программа рассылки начнёт задерживаться, поднять порог здесь.
+    follow_up_within_minutes: int = 15
 
 
 @dataclass(frozen=True, slots=True)
@@ -517,7 +521,7 @@ class Settings:
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         review_chats = dict(data.get("review_chats", {}))
-        for key in ("reply_window_hours", "max_period_days", "baseline_days"):
+        for key in ("reply_window_hours", "max_period_days", "baseline_days", "follow_up_within_minutes"):
             if key in review_chats:
                 review_chats[key] = int(review_chats[key])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
@@ -646,13 +650,12 @@ class Settings:
             < 1
         ):
             raise ValueError("core_mirror.chats_* must be positive")
+        chats = self.review_chats
         if (
-            min(
-                self.review_chats.reply_window_hours, self.review_chats.max_period_days, self.review_chats.baseline_days
-            )
+            min(chats.reply_window_hours, chats.max_period_days, chats.baseline_days, chats.follow_up_within_minutes)
             < 1
         ):
-            raise ValueError("review_chats.reply_window_hours, max_period_days and baseline_days must be positive")
+            raise ValueError("review_chats.* windows must be positive")
         penalties = self.fbs_penalties
         if (
             min(

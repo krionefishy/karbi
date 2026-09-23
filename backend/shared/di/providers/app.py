@@ -392,6 +392,7 @@ class SessionProvider(Provider):
             reply_window_hours=settings.review_chats.reply_window_hours,
             max_period_days=settings.review_chats.max_period_days,
             baseline_days=settings.review_chats.baseline_days,
+            follow_up_within_minutes=settings.review_chats.follow_up_within_minutes,
         )
 
     @provide(scope=Scope.REQUEST)

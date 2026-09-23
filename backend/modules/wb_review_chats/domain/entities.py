@@ -15,9 +15,10 @@ GROUP_BEFORE = "before"  # до запуска рассылки
 GROUPS = (GROUP_FOLLOWED, GROUP_EARLY, GROUP_MISSED, GROUP_BEFORE)
 
 # Наше сообщение уходит через 10–80 секунд после автосообщения WB. Сообщение из
-# API позже этого — менеджер, отвечающий через сторонний клиент (в ленте такие
+# API позже порога — менеджер, отвечающий через сторонний клиент (в ленте такие
 # есть: одиночные ответы часами позже), и нашей рассылкой оно не считается.
-FOLLOW_UP_WITHIN = timedelta(minutes=15)
+# Порог задаётся настройкой `review_chats.follow_up_within_minutes`.
+DEFAULT_FOLLOW_UP_WITHIN = timedelta(minutes=15)
 
 OUTCOME_REPLIED = "replied"
 OUTCOME_SILENT = "silent"
@@ -85,11 +86,13 @@ def build_dialogs(
     window: timedelta,
     now: datetime,
     launch_at: datetime | None,
+    follow_up_within: timedelta = DEFAULT_FOLLOW_UP_WITHIN,
 ) -> list[Dialog]:
     """Диалоги с автосообщением WB в `[since, until)` из событий, упорядоченных по чату и времени.
 
     `launch_at` — момент запуска рассылки: диалоги раньше него — группа «до
-    запуска», что бы в них ни было.
+    запуска», что бы в них ни было. `follow_up_within` — не позже скольки после
+    автосообщения сообщение из API считается нашим.
     """
     dialogs: list[Dialog] = []
     chat_id: str | None = None
@@ -97,7 +100,7 @@ def build_dialogs(
 
     def close() -> None:
         if episode and since <= episode[0].added_at < until:
-            dialogs.append(_dialog(episode, window=window, now=now, launch_at=launch_at))
+            dialogs.append(_dialog(episode, window=window, now=now, launch_at=launch_at, within=follow_up_within))
 
     for event in events:
         if event.chat_id != chat_id or event.review_prompt:
@@ -111,7 +114,9 @@ def build_dialogs(
     return dialogs
 
 
-def _dialog(episode: Sequence[ChatEvent], *, window: timedelta, now: datetime, launch_at: datetime | None) -> Dialog:
+def _dialog(
+    episode: Sequence[ChatEvent], *, window: timedelta, now: datetime, launch_at: datetime | None, within: timedelta
+) -> Dialog:
     prompt, rest = episode[0], episode[1:]
     first_client = next((event for event in rest if event.sender == CHAT_SENDER_CLIENT), None)
     follow_up = next(
@@ -120,7 +125,7 @@ def _dialog(episode: Sequence[ChatEvent], *, window: timedelta, now: datetime, l
             for event in rest
             if event.sender == CHAT_SENDER_SELLER
             and event.source == CHAT_SOURCE_API
-            and event.added_at <= prompt.added_at + FOLLOW_UP_WITHIN
+            and event.added_at <= prompt.added_at + within
         ),
         None,
     )

@@ -1,5 +1,5 @@
 from backend.modules.wb_review_chats.domain.entities import (
-    FOLLOW_UP_WITHIN,
+    DEFAULT_FOLLOW_UP_WITHIN,
     GROUP_BEFORE,
     GROUP_EARLY,
     GROUP_FOLLOWED,
@@ -16,7 +16,7 @@ from backend.modules.wb_review_chats.domain.entities import (
 )
 
 __all__ = [
-    "FOLLOW_UP_WITHIN",
+    "DEFAULT_FOLLOW_UP_WITHIN",
     "GROUPS",
     "GROUP_BEFORE",
     "GROUP_EARLY",
