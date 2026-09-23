@@ -142,9 +142,9 @@ heartbeat приходит со `state=needs_login`.
 heartbeat, а ответ в чат уходит, когда код приедет.
 
 **QR в сообщении.** Строка QR — параметр шаблона; модуль уведомлений рисует PNG при
-постановке в очередь (`outgoing_messages.attachment`) и отдаёт релею, только если
-`relay.photos_enabled` (релей нужно обновить: поле `attachment` в `/api/v1/messages/send`).
-Пока флаг выключен, в сообщении ссылка на картинку
+постановке в очередь (`outgoing_messages.attachment`) и отдаёт релею, если
+`relay.photos_enabled` (по умолчанию включено; релей принимает поле `attachment` с 23.09.2026).
+В тексте в любом случае ссылка на картинку
 `GET /api/v1/wb/returns/qr/{seller}/{date}/{подпись}.png` — подпись HMAC от кабинета и
 даты, без входа.
 
