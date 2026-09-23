@@ -5,8 +5,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import templates
-from backend.modules.notifications.domain import Bot, Invite, Update
+from backend.modules.notifications.domain import COMMAND_START, Bot, Invite, Update
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.shared.kafka_streams.topics import NotificationTopics
+from backend.shared.outbox import OutboxRepository
 
 # Telegram allows up to 64 characters of [A-Za-z0-9_-] in a start payload.
 TOKEN_BYTES = 24
@@ -105,6 +107,11 @@ class SubscriptionService:
             await self._start(bot, update, argument.strip())
         elif command == "/stop":
             await self._stop(bot, update)
+        elif command.startswith("/"):
+            # Команду, которой здесь нет, знает автоматизация бота: ей и отвечать.
+            # Чат без подписок тоже получает событие — пусть автоматизация сама
+            # скажет, что сначала нужна ссылка.
+            await self._publish_command(bot, update, command[1:].lower(), argument.strip())
         else:
             await self._reply(bot, update, templates.SUBSCRIPTION_NO_TOKEN, {})
 
@@ -131,6 +138,8 @@ class SubscriptionService:
             templates.SUBSCRIPTION_CONFIRMED,
             {"seller_name": invite.seller_name, "bot_title": bot.title or "Marketplace Auto"},
         )
+        # Автоматизация бота может добавить своё приветствие — например, шаги подключения.
+        await self._publish_command(bot, update, COMMAND_START, "")
 
     async def _stop(self, bot: Bot, update: Update) -> None:
         active = await self.repository.subscriptions_of_chat(bot.id, update.chat_id)
@@ -149,4 +158,30 @@ class SubscriptionService:
             template=template,
             params=params,
             text=templates.render(template, params),
+        )
+
+    async def _publish_command(self, bot: Bot, update: Update, command: str, argument: str) -> None:
+        """Отдать команду автоматизации бота через outbox вместе с селлерами чата.
+
+        Ответ придёт обычным событием сообщения с аудиторией «чат»; модулю
+        уведомлений не нужно знать, что значит `/returns`.
+        """
+        active = await self.repository.subscriptions_of_chat(bot.id, update.chat_id)
+        OutboxRepository(self.session).add(
+            aggregate_id=bot.id,
+            event_type="TelegramCommandReceived",
+            topic=NotificationTopics.TELEGRAM_COMMAND_RECEIVED,
+            payload={
+                "bot": bot.code,
+                "chat_id": update.chat_id,
+                "command": command,
+                "argument": argument,
+                "text": update.text,
+                "sellers": [
+                    {"seller_id": str(item.seller_id), "seller_name": item.seller_name}
+                    for item in sorted(active, key=lambda item: item.seller_name)
+                ],
+                "username": update.username,
+                "first_name": update.first_name,
+            },
         )

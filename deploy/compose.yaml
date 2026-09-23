@@ -249,6 +249,8 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck: *worker-healthcheck
     networks:
       - internal

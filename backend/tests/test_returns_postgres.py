@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,11 +9,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry
+from backend.modules.notifications.domain import CommandEvent
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.postgres.models import BotModel
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
-from backend.modules.wb_returns.application import CollectionService, NotificationService
+from backend.modules.wb_returns.application import CollectionService, CommandService, NotificationService
 from backend.modules.wb_returns.domain import RETURN_READY, RETURN_TRANSIT, Claim, ReturnItem
 from backend.modules.wb_returns.infrastructure.postgres import (
     ClaimModel,
@@ -280,3 +282,65 @@ async def test_missing_bot_leaves_no_trace(database: Database, seller: uuid.UUID
             await session.scalars(select(NotificationLogModel).where(NotificationLogModel.seller_id == seller))
         )
     assert report.sent == 0 and logged == []
+
+
+def command(seller_id: uuid.UUID | None, text: str, chat_id: int = 42) -> CommandEvent:
+    name, _, argument = text.partition(" ")
+    return CommandEvent(
+        event_id=str(uuid.uuid4()),
+        bot_code=BOT,
+        chat_id=chat_id,
+        command=name.lstrip("/"),
+        argument=argument,
+        text=text,
+        sellers=((seller_id, "ИП Возвраты"),) if seller_id else (),
+    )
+
+
+async def chat_replies(session: AsyncSession, chat_id: int) -> list[dict]:
+    aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat_id}")
+    rows = await session.scalars(
+        select(OutboxEventModel).where(OutboxEventModel.aggregate_id == aggregate).order_by(OutboxEventModel.created_at)
+    )
+    return [row.payload for row in rows]
+
+
+async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [item(1), item(2, "В пути в пвз")], [claim(str(uuid.uuid4()))])
+    chat = 4242
+    try:
+        async with database.session() as session:
+            service = CommandService(session, ReturnsRepository(session), bot_code=BOT, timezone=MOSCOW)
+            assert await service.handle(command(seller, "/returns", chat), now=NOW) == "returns.list"
+            assert await service.handle(command(seller, "/qr", chat), now=NOW) == "returns.code"
+            assert await service.handle(command(seller, "/whatever", chat), now=NOW) == "returns.unknown"
+            assert await service.handle(command(None, "/returns", chat), now=NOW) == "returns.no_subscription"
+            assert await service.handle(command(None, "/help", chat), now=NOW) == "returns.help"
+            replies = await chat_replies(session, chat)
+        assert [reply["template"] for reply in replies] == [
+            "returns.list",
+            "returns.code",
+            "returns.unknown",
+            "returns.no_subscription",
+            "returns.help",
+        ]
+        assert replies[0]["audience"] == {"type": "chat", "chat_id": chat}
+        summary = replies[0]["params"]["sellers"][0]
+        assert (summary["ready_total"], summary["transit_total"], summary["open_claims"]) == (1, 1, 1)
+        assert summary["offices"][0]["address"] == "посёлок Развилка 52к1"
+        # Кода ещё нет: расширение подключат на следующем шаге.
+        assert replies[1]["params"]["codes"] == [{"name": "ИП Возвраты", "date": "2026-09-22", "code": None}]
+    finally:
+        async with database.session() as session:
+            aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat}")
+            await session.execute(delete(OutboxEventModel).where(OutboxEventModel.aggregate_id == aggregate))
+            await session.commit()
+
+
+async def test_foreign_bot_commands_are_ignored(database: Database, seller: uuid.UUID) -> None:
+    event = command(seller, "/returns", 4343)
+    foreign = replace(event, bot_code="turnover-alerts")
+    async with database.session() as session:
+        service = CommandService(session, ReturnsRepository(session), bot_code=BOT, timezone=MOSCOW)
+        assert await service.handle(foreign, now=NOW) is None
+        assert await chat_replies(session, 4343) == []

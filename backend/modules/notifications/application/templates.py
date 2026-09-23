@@ -12,6 +12,13 @@ RETURNS_TRANSIT = "returns.transit"
 RETURNS_REMINDER = "returns.reminder"
 RETURNS_CLAIMS = "returns.claims"
 RETURNS_CLAIM_DEADLINE = "returns.claim_deadline"
+RETURNS_WELCOME = "returns.welcome"
+RETURNS_HELP = "returns.help"
+RETURNS_LIST = "returns.list"
+RETURNS_CODE = "returns.code"
+RETURNS_EXTENSION = "returns.extension"
+RETURNS_NO_SUBSCRIPTION = "returns.no_subscription"
+RETURNS_UNKNOWN = "returns.unknown"
 
 # Telegram accepts 4096 characters; a longer list is unreadable anyway.
 _DIGEST_LIMIT = 25
@@ -239,6 +246,99 @@ def _returns_claim_deadline(params: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+_RETURNS_COMMANDS = (
+    "/returns — что готово к выдаче и что едет в ПВЗ\n"
+    "/qr — код получения на сегодня\n"
+    "/extension — расширение для кода получения\n"
+    "/help — эта подсказка\n"
+    "/stop — отписаться"
+)
+
+
+def _returns_welcome(params: dict[str, Any]) -> str:
+    sellers = [str(name) for name in params.get("sellers") or [] if name]
+    shops = ", ".join(sellers) if sellers else "магазин"
+    return (
+        f"Буду присылать возвраты по {shops}: когда товар приедет в ПВЗ и будет готов к выдаче, "
+        "сколько дней осталось до платного хранения, и заявки покупателей на возврат.\n\n"
+        "Чтобы забирать возвраты по QR прямо из этого чата, нужно ещё два шага:\n"
+        "1. Поставьте расширение в браузер, где открыт профиль покупателя владельца кабинета — /extension.\n"
+        "2. Введите в расширении код из бота. После этого код получения будет приходить вместе с уведомлением "
+        "и по команде /qr.\n\n"
+        f"Команды:\n{_RETURNS_COMMANDS}"
+    )
+
+
+def _returns_help(_: dict[str, Any]) -> str:
+    return (
+        "Бот возвратов Marketplace Auto.\n\n"
+        "Подписка: откройте персональную ссылку из интерфейса, раздел «Возвраты WB» → «Ссылка на бота». "
+        "Один чат можно подписать на несколько магазинов.\n\n"
+        "Код получения в ПВЗ берёт расширение из профиля покупателя владельца кабинета: "
+        "поставьте его по /extension и введите код пары из бота.\n\n"
+        f"Команды:\n{_RETURNS_COMMANDS}"
+    )
+
+
+def _returns_list(params: dict[str, Any]) -> str:
+    blocks: list[str] = []
+    for seller in params.get("sellers") or []:
+        ready = int(seller.get("ready_total") or 0)
+        transit = int(seller.get("transit_total") or 0)
+        claims = int(seller.get("open_claims") or 0)
+        head = f"{seller.get('name') or 'Магазин'}: готово {ready}, едет {transit}"
+        if claims:
+            head += f", {claims} {_plural(claims, 'открытая заявка', 'открытые заявки', 'открытых заявок')}"
+        lines = [head]
+        for office in seller.get("offices") or []:
+            lines.append("")
+            lines.extend(_office_block(office, deadline=True))
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return "Активных возвратов нет."
+    return "\n\n".join(blocks)
+
+
+def _returns_code(params: dict[str, Any]) -> str:
+    lines: list[str] = []
+    missing: list[str] = []
+    for item in params.get("codes") or []:
+        name = str(item.get("name") or "Магазин")
+        code = item.get("code")
+        if code:
+            lines.append(f"{name}: код на {_day(item.get('date'))} — {code}")
+        else:
+            missing.append(name)
+    if missing:
+        shops = ", ".join(missing)
+        lines.append(
+            f"По {shops} кода нет: расширение ещё не подключено или сегодня не прислало код. "
+            "Поставьте его по /extension или откройте профиль покупателя владельца — код там в разделе «Доставки»."
+        )
+    return "\n".join(lines)
+
+
+def _returns_extension(params: dict[str, Any]) -> str:
+    return (
+        "Расширение для кода получения пока в сборке — появится здесь же следующим шагом.\n\n"
+        "Как оно будет работать: ставится в Chrome или Яндекс Браузер на компьютере, где открыт "
+        "профиль покупателя владельца кабинета на wildberries.ru; раз в сутки после полуночи забирает "
+        "код получения и отдаёт боту. Пароль расширение не хранит и вход не проходит.\n\n"
+        "А пока код получения — в приложении Wildberries владельца, раздел «Доставки»."
+    )
+
+
+def _returns_no_subscription(_: dict[str, Any]) -> str:
+    return (
+        "Этот чат ещё не подписан ни на один магазин. Откройте персональную ссылку из интерфейса "
+        "Marketplace Auto, раздел «Возвраты WB» → «Ссылка на бота»."
+    )
+
+
+def _returns_unknown(params: dict[str, Any]) -> str:
+    return f"Команду {params.get('command') or ''} не знаю.\n\nЧто умею:\n{_RETURNS_COMMANDS}"
+
+
 # Producers send a template id and parameters, never ready-made text: wording
 # changes then need no republished events, and the outgoing log keeps both.
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
@@ -253,6 +353,13 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     RETURNS_REMINDER: _returns_reminder,
     RETURNS_CLAIMS: _returns_claims,
     RETURNS_CLAIM_DEADLINE: _returns_claim_deadline,
+    RETURNS_WELCOME: _returns_welcome,
+    RETURNS_HELP: _returns_help,
+    RETURNS_LIST: _returns_list,
+    RETURNS_CODE: _returns_code,
+    RETURNS_EXTENSION: _returns_extension,
+    RETURNS_NO_SUBSCRIPTION: _returns_no_subscription,
+    RETURNS_UNKNOWN: _returns_unknown,
 }
 
 

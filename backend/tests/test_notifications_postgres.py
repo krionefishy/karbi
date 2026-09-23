@@ -24,6 +24,8 @@ from backend.modules.notifications.infrastructure.postgres import (
     SubscriptionModel,
 )
 from backend.modules.notifications.infrastructure.relay import RelayClient
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
+from backend.shared.kafka_streams.topics import NotificationTopics
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
@@ -179,6 +181,47 @@ async def test_a_message_without_a_link_explains_what_to_do(notifications) -> No
     await handle(database, bot, update("привет"))
 
     assert "персональную ссылку" in (await queued_texts(database, bot))[0]
+
+
+async def command_events(database: Database, bot: Bot) -> list[dict]:
+    async with database.session() as session:
+        rows = await session.scalars(
+            select(OutboxEventModel)
+            .where(
+                OutboxEventModel.aggregate_id == bot.id,
+                OutboxEventModel.topic == NotificationTopics.TELEGRAM_COMMAND_RECEIVED,
+            )
+            .order_by(OutboxEventModel.created_at)
+        )
+        return [row.payload for row in rows]
+
+
+async def test_an_unknown_slash_command_goes_to_the_bots_automation(notifications) -> None:
+    database, bot = notifications
+
+    await handle(database, bot, update("/returns@test_bot сегодня"))
+
+    # Модуль уведомлений сам не отвечает: ответ — забота автоматизации бота.
+    assert await queued_texts(database, bot) == []
+    [event] = await command_events(database, bot)
+    assert (event["bot"], event["chat_id"], event["command"], event["argument"]) == (
+        bot.code,
+        555,
+        "returns",
+        "сегодня",
+    )
+    assert event["sellers"] == []
+    assert event["event_id"]
+
+
+async def test_start_also_tells_the_automation_about_the_new_chat(notifications) -> None:
+    database, bot = notifications
+
+    await subscribe(database, bot, chat_id=556, update_id=9)
+
+    [event] = await command_events(database, bot)
+    assert event["command"] == "start"
+    assert event["sellers"] == [{"seller_id": str(SELLER_ID), "seller_name": "ООО Ромашка"}]
 
 
 async def subscribe(database: Database, bot: Bot, chat_id: int, update_id: int) -> None:

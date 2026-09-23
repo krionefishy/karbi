@@ -93,3 +93,53 @@ class MessageRequest:
             dedupe_key=str(payload.get("dedupe_key") or message_id),
             params=params,
         )
+
+
+COMMAND_START = "start"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandEvent:
+    """Команда из чата, отданная автоматизации бота: `/help`, `/qr` или удачный `/start`.
+
+    Модуль уведомлений знает только подписки; что ответить на `/returns`, знает
+    автоматизация. Событие несёт чат и его селлеров, чтобы ответ не ходил в базу
+    уведомлений за тем, что уже известно.
+    """
+
+    event_id: str
+    bot_code: str
+    chat_id: int
+    command: str
+    argument: str
+    text: str
+    sellers: tuple[tuple[uuid.UUID, str], ...]
+    username: str = ""
+    first_name: str = ""
+
+    @classmethod
+    def parse(cls, payload: dict[str, Any]) -> "CommandEvent":
+        event_id = str(payload.get("event_id") or "")
+        bot_code = str(payload.get("bot") or "")
+        command = str(payload.get("command") or "")
+        if not event_id or not bot_code or not command:
+            raise ValueError("event_id, bot and command are required")
+        raw_sellers = payload.get("sellers") or []
+        if not isinstance(raw_sellers, list):
+            raise ValueError("sellers must be a list")
+        sellers = tuple(
+            (uuid.UUID(str(item["seller_id"])), str(item.get("seller_name") or ""))
+            for item in raw_sellers
+            if isinstance(item, dict) and item.get("seller_id")
+        )
+        return cls(
+            event_id=event_id,
+            bot_code=bot_code,
+            chat_id=int(payload["chat_id"]),
+            command=command,
+            argument=str(payload.get("argument") or ""),
+            text=str(payload.get("text") or ""),
+            sellers=sellers,
+            username=str(payload.get("username") or ""),
+            first_name=str(payload.get("first_name") or ""),
+        )

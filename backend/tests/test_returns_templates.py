@@ -73,3 +73,47 @@ def test_reminder_wording_depends_on_day() -> None:
     base = {"seller_name": "Магазин", "total": 1, "free_days": 3, "storage_days": 7, "offices": []}
     assert "с завтрашнего дня хранение платное" in templates.render(templates.RETURNS_REMINDER, {**base, "day": 3})
     assert "через два дня товар уедет на утилизацию" in templates.render(templates.RETURNS_REMINDER, {**base, "day": 5})
+
+
+def test_command_replies_render() -> None:
+    welcome = templates.render(templates.RETURNS_WELCOME, {"sellers": ["Байбурин"]})
+    assert welcome.startswith("Буду присылать возвраты по Байбурин")
+    assert "/extension" in welcome and "/qr" in welcome
+
+    listing = templates.render(
+        templates.RETURNS_LIST,
+        {
+            "sellers": [
+                {
+                    "name": "Байбурин",
+                    "ready_total": 1,
+                    "transit_total": 2,
+                    "open_claims": 3,
+                    "offices": [
+                        {
+                            "address": "Развилка 52к1",
+                            "count": 1,
+                            "free_until": "2026-09-20",
+                            "deadline": "2026-09-24",
+                            "items": [{"title": "Шуруповерты", "sticker": "1", "return_type": "", "reason": ""}],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    assert listing.startswith("Байбурин: готово 1, едет 2, 3 открытые заявки")
+    assert "ПВЗ Развилка 52к1 — 1 шт." in listing
+    assert templates.render(templates.RETURNS_LIST, {"sellers": []}) == "Активных возвратов нет."
+
+    code = templates.render(
+        templates.RETURNS_CODE,
+        {
+            "codes": [
+                {"name": "А", "date": "2026-09-22", "code": "412"},
+                {"name": "Б", "date": "2026-09-22", "code": None},
+            ]
+        },
+    )
+    assert "А: код на 22 сент. — 412" in code and "По Б кода нет" in code
+    assert "/returns" in templates.render(templates.RETURNS_UNKNOWN, {"command": "/x"})
