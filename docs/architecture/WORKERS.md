@@ -43,8 +43,9 @@ flowchart TB
     end
     subgraph returns["wb-returns-worker"]
         rt1["отчёт о возвратах и заявки<br/>каждые 10 минут"]
-        rt2["уведомления: готово, дайджест,<br/>напоминания, заявки"]
+        rt2["уведомления: готово, дайджест,<br/>напоминания, заявки, расширение"]
         rt3["кнопка «Обновить»"]
+        rt4["консьюмер команд бота<br/>/help /returns /qr /extension"]
     end
     outbox["outbox-publisher"]
 ```
