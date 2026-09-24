@@ -1,9 +1,9 @@
 """Что и когда уходит в бот по возвратам.
 
-Мгновенно: возврат стал «готов к выдаче». О новых заявках покупателей не пишем —
-их разбирают в кабинете WB; бот напоминает только о сроке ответа.
+Мгновенно: возврат стал «готов к выдаче».
 По расписанию: утренний дайджест того, что едет в ПВЗ; напоминания на 3-й и
-5-й день хранения; «завтра истекает срок ответа» по заявке.
+5-й день хранения. О заявках покупателей бот не пишет вовсе — их разбирают в
+кабинете WB, а список виден на странице и в /returns.
 
 Сообщение — событие в outbox с кодом бота и аудиторией «подписчики селлера»;
 что уже отправлялось, помнит журнал модуля, чтобы повтор прохода не слал то же.
@@ -22,20 +22,18 @@ from backend.modules.notifications.application import BotNotFoundError, BotRegis
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_returns.application.extension import STATE_NEEDS_LOGIN, ExtensionService
 from backend.modules.wb_returns.domain import (
-    CLAIM_REVIEW_DAYS,
     FREE_STORAGE_DAYS,
     RETURN_READY,
     RETURN_TRANSIT,
     STORAGE_DAYS,
 )
-from backend.modules.wb_returns.infrastructure.postgres import ClaimModel, ReturnModel, ReturnsRepository
+from backend.modules.wb_returns.infrastructure.postgres import ReturnModel, ReturnsRepository
 from backend.shared.kafka_streams.topics import NotificationTopics
 from backend.shared.outbox import OutboxRepository
 
 TEMPLATE_READY = "returns.ready"
 TEMPLATE_TRANSIT = "returns.transit"
 TEMPLATE_REMINDER = "returns.reminder"
-TEMPLATE_CLAIM_DEADLINE = "returns.claim_deadline"
 TEMPLATE_CODE_MISSING = "returns.code_missing"
 TEMPLATE_NEEDS_LOGIN = "returns.needs_login"
 TEMPLATE_INSTALL_SILENT = "returns.install_silent"
@@ -43,7 +41,6 @@ TEMPLATE_INSTALL_SILENT = "returns.install_silent"
 KIND_READY = "ready"
 KIND_TRANSIT = "transit"
 KIND_REMINDER = "reminder"
-KIND_CLAIM_DEADLINE = "claim_deadline"
 KIND_CODE_MISSING = "code_missing"
 KIND_NEEDS_LOGIN = "needs_login"
 KIND_INSTALL_SILENT = "install_silent"
@@ -59,12 +56,11 @@ class NotificationReport:
     ready: int = 0
     transit: int = 0
     reminders: int = 0
-    claim_deadlines: int = 0
     extension: int = 0
 
     @property
     def sent(self) -> int:
-        return self.ready + self.transit + self.reminders + self.claim_deadlines + self.extension
+        return self.ready + self.transit + self.reminders + self.extension
 
 
 class NotificationService:
@@ -112,7 +108,6 @@ class NotificationService:
             ready=await self._notify_ready(seller_id, seller_name, ready_items, now),
             transit=await self._notify_transit(seller_id, seller_name, now),
             reminders=await self._notify_reminders(seller_id, seller_name, ready_items, now),
-            claim_deadlines=await self._notify_claim_deadlines(seller_id, seller_name, now),
             extension=await self._notify_extension(seller_id, seller_name, now),
         )
         await self.session.commit()
@@ -228,41 +223,6 @@ class NotificationService:
                 }
             )
         return offices
-
-    # --- claims -----------------------------------------------------------
-
-    async def _notify_claim_deadlines(self, seller_id: uuid.UUID, seller_name: str, now: datetime) -> int:
-        claims = await self.returns.open_claims(seller_id)
-        # За сутки до автоодобрения: ещё есть время ответить, и это уже не «на днях».
-        due = [claim for claim in claims if claim.dt + timedelta(days=CLAIM_REVIEW_DAYS - 1) <= now]
-        logged = await self.returns.logged_keys(seller_id, KIND_CLAIM_DEADLINE, (str(c.claim_id) for c in due))
-        fresh = [claim for claim in due if str(claim.claim_id) not in logged]
-        if not fresh:
-            return 0
-        self._publish(
-            seller_id,
-            TEMPLATE_CLAIM_DEADLINE,
-            dedupe=f"returns:claim-deadline:{seller_id}:{_digest(claim.claim_id for claim in fresh)}",
-            params={
-                "seller_name": seller_name,
-                "total": len(fresh),
-                "claims": [self._claim(claim) for claim in fresh[:ITEMS_LIMIT]],
-            },
-        )
-        await self.returns.log_sent(seller_id, KIND_CLAIM_DEADLINE, (str(c.claim_id) for c in fresh), now=now)
-        return 1
-
-    def _claim(self, model: ClaimModel) -> dict:
-        claim = self.returns.to_claim(model)
-        return {
-            "name": claim.imt_name or f"артикул {claim.nm_id}",
-            "nm_id": claim.nm_id,
-            "price": claim.price,
-            "comment": claim.user_comment,
-            "photos": list(claim.photo_urls[:3]),
-            "created": claim.dt.astimezone(self.timezone).isoformat(),
-            "deadline": (claim.dt + timedelta(days=CLAIM_REVIEW_DAYS)).astimezone(self.timezone).isoformat(),
-        }
 
     # --- extension --------------------------------------------------------
 

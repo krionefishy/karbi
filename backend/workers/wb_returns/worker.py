@@ -135,7 +135,6 @@ class ReturnsWorker:
                 ready=report.ready,
                 transit=report.transit,
                 reminders=report.reminders,
-                claim_deadlines=report.claim_deadlines,
             )
         return report.sent
 
