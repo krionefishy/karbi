@@ -6,6 +6,8 @@ import { browserName, loadSettings, saveSettings, type Message, type Settings } 
 const DELIVERIES_URL = "https://www.wildberries.ru/lk/deliveries";
 const HEARTBEAT_ALARM = "heartbeat";
 const COLLECT_ALARM = "collect";
+const RETRY_ALARM = "retry";
+const RETRY_MINUTES = 10;
 const HEARTBEAT_MINUTES = 10;
 // Код меняется в полночь по Москве; второй заход днём — на случай, если ночью браузер спал.
 const COLLECT_HOURS_MSK = [0, 12];
@@ -29,6 +31,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void collect("schedule").finally(scheduleCollect);
   } else if (alarm.name === HEARTBEAT_ALARM) {
     void heartbeat();
+  } else if (alarm.name === RETRY_ALARM) {
+    void collect("retry");
   }
 });
 
@@ -168,6 +172,12 @@ async function collect(reason: string): Promise<void> {
       error = `${reason}: ${caught instanceof Error ? caught.message : String(caught)}`;
     }
     await saveSettings({ lastRunAt: new Date().toISOString(), lastState: state, lastError: error });
+    if (state === "ok") {
+      await chrome.alarms.clear(RETRY_ALARM);
+    } else {
+      // Вкладка появится или вход восстановят — не ждать полуночи, попробовать снова.
+      await chrome.alarms.create(RETRY_ALARM, { delayInMinutes: RETRY_MINUTES });
+    }
     try {
       const reply = await api<{ has_code_today: boolean }>(settings, "/heartbeat", { state, error });
       await saveSettings({ hasCodeToday: reply.has_code_today });
@@ -180,9 +190,27 @@ async function collect(reason: string): Promise<void> {
   return running;
 }
 
+/** Любая открытая вкладка www.wildberries.ru: запросы к своему домену оттуда те же, что с /lk/deliveries. */
+async function findWbTab(): Promise<chrome.tabs.Tab | undefined> {
+  const tabs = await chrome.tabs.query({ url: "https://www.wildberries.ru/*" });
+  return tabs.find((tab) => tab.url?.startsWith(DELIVERIES_URL)) ?? tabs.find((tab) => tab.status === "complete") ?? tabs[0];
+}
+
 async function readPage(): Promise<PageResult> {
-  const existing = (await chrome.tabs.query({ url: `${DELIVERIES_URL}*` }))[0];
-  const tab = existing ?? (await chrome.tabs.create({ url: DELIVERIES_URL, active: false }));
+  const existing = await findWbTab();
+  let tab = existing;
+  if (tab === undefined) {
+    try {
+      tab = await chrome.tabs.create({ url: DELIVERIES_URL, active: false });
+    } catch (error) {
+      // Антидетект-браузеры (Dolphin) не дают расширению открывать вкладки — тогда
+      // код можно взять только из вкладки, которую открыл сам менеджер.
+      throw new Error(
+        `браузер не дал открыть вкладку (${error instanceof Error ? error.message : String(error)}). ` +
+          "Откройте wildberries.ru в этом браузере и оставьте вкладку — расширение возьмёт код из неё",
+      );
+    }
+  }
   if (tab.id === undefined) throw new Error("не удалось открыть вкладку");
   const tabId = tab.id;
   try {
