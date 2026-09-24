@@ -109,25 +109,36 @@ def test_command_replies_render() -> None:
     code = templates.render(
         templates.RETURNS_CODE,
         {
-            "codes": [
-                {"name": "А", "date": "2026-09-22", "code": "412", "qr_url": "https://x/q.png"},
-                {"name": "Б", "date": "2026-09-22", "code": None, "no_install": True},
-                {"name": "В", "date": "2026-09-22", "code": None, "requested": True},
-            ]
+            "name": "А",
+            "date": "2026-09-22",
+            "code": "21588",
+            "qr": "WB|x",
+            "qr_url": "https://x/q.png",
+            "offices": [{"address": "Развилка, Римский проезд 15", "count": 3}, {"address": "Дзержинский", "count": 6}],
         },
     )
-    assert "А: код на 22 сент. — 412\nQR: https://x/q.png" in code
-    assert "Б: расширение не подключено" in code and "В: кода на сегодня ещё нет" in code
+    assert code.startswith("А — код для получения доставки: 21588\nДействует 22 сент.")
+    assert "• Развилка, Римский проезд 15 — 3 шт." in code and "• Дзержинский — 6 шт." in code
+    assert "https://x/q.png" not in code  # картинка идёт вложением, ссылка — только без неё
+    assert "QR: https://x/q.png" in templates.render(
+        templates.RETURNS_CODE, {"name": "А", "date": "2026-09-22", "code": "1", "qr_url": "https://x/q.png"}
+    )
+    assert "Б: расширение не подключено" in templates.render(
+        templates.RETURNS_CODE, {"name": "Б", "date": "2026-09-22", "code": None, "no_install": True}
+    )
+    assert "В: кода на сегодня ещё нет" in templates.render(
+        templates.RETURNS_CODE, {"name": "В", "date": "2026-09-22", "code": None, "requested": True}
+    )
     assert "/returns" in templates.render(templates.RETURNS_UNKNOWN, {"command": "/x"})
 
 
 def test_qr_attachment_is_rendered_only_when_the_string_is_there() -> None:
     photo = templates.render_attachment(
-        templates.RETURNS_CODE, {"codes": [{"name": "А", "date": "2026-09-22", "code": "412", "qr": "WB|412"}]}
+        templates.RETURNS_CODE, {"name": "А", "date": "2026-09-22", "code": "412", "qr": "WB|412"}
     )
-    assert photo is not None and photo["kind"] == "photo" and photo["caption"] == "А: код на 22 сент. — 412"
+    assert photo is not None and photo["kind"] == "photo" and photo["caption"] == "А — код для получения доставки: 412"
     assert photo["png_base64"].startswith("iVBORw0KGgo")
-    assert templates.render_attachment(templates.RETURNS_CODE, {"codes": [{"name": "А", "code": None}]}) is None
+    assert templates.render_attachment(templates.RETURNS_CODE, {"name": "А", "code": None}) is None
     assert templates.render_attachment(templates.RETURNS_HELP, {}) is None
 
     ready = templates.render(

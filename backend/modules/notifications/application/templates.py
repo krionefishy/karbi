@@ -309,28 +309,42 @@ def _returns_list(params: dict[str, Any]) -> str:
 
 
 def _returns_code(params: dict[str, Any]) -> str:
-    lines: list[str] = []
-    for item in params.get("codes") or []:
-        name = str(item.get("name") or "Магазин")
-        code = item.get("code")
-        if code:
-            line = f"{name}: код на {_day(item.get('date'))} — {code}"
-            if item.get("qr_url"):
-                line += f"\nQR: {item['qr_url']}"
-            lines.append(line)
-        elif item.get("no_install"):
-            lines.append(
+    """Код дня одного магазина; с картинкой этот текст становится её подписью (до 1024 знаков)."""
+    name = str(params.get("name") or "Магазин")
+    code = params.get("code")
+    if not code:
+        if params.get("no_install"):
+            return (
                 f"{name}: расширение не подключено, кода нет. Поставьте его по /extension "
                 "или возьмите код в приложении Wildberries владельца, раздел «Доставки»."
             )
-        elif item.get("requested"):
-            lines.append(
+        if params.get("requested"):
+            return (
                 f"{name}: кода на сегодня ещё нет — попросил расширение обновить, пришлю сюда, как только придёт. "
                 "Обычно это несколько минут; если браузер с расширением выключен, код не придёт."
             )
-        else:
-            lines.append(f"{name}: кода на сегодня нет.")
-    return "\n\n".join(lines) if lines else "Кода нет."
+        return f"{name}: кода на сегодня нет."
+    lines = [
+        f"{name} — код для получения доставки: {code}",
+        f"Действует {_day(params.get('date'))}, один на все выдачи.",
+    ]
+    offices = list(params.get("offices") or [])
+    if offices:
+        lines.append("")
+        lines.append("Готово к выдаче в ПВЗ:")
+        for office in offices[:20]:
+            count = int(office.get("count") or 0)
+            lines.append(
+                f"• {office.get('address') or 'адрес не указан'} — {count} {_plural(count, 'шт.', 'шт.', 'шт.')}"
+            )
+        if len(offices) > 20:
+            lines.append(f"…и ещё {len(offices) - 20} ПВЗ, весь список — /returns")
+    else:
+        lines.append("")
+        lines.append("Готовых к выдаче возвратов по отчёту WB пока нет.")
+    if params.get("qr_url") and not params.get("qr"):
+        lines.append(f"QR: {params['qr_url']}")
+    return "\n".join(lines)
 
 
 def _returns_extension(params: dict[str, Any]) -> str:
@@ -442,11 +456,8 @@ def _returns_ready_photo(params: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _returns_code_photo(params: dict[str, Any]) -> dict[str, Any] | None:
-    for item in params.get("codes") or []:
-        if item.get("qr"):
-            caption = f"{item.get('name') or ''}: код на {_day(item.get('date'))} — {item.get('code') or ''}"
-            return _qr_photo(item.get("qr"), caption.strip(": "))
-    return None
+    caption = f"{params.get('name') or ''} — код для получения доставки: {params.get('code') or ''}"
+    return _qr_photo(params.get("qr"), caption.strip(" —:"))
 
 
 # Картинка рядом с текстом. Рисуется при постановке в очередь, чтобы доставка

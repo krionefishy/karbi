@@ -20,6 +20,7 @@ from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_returns.application import qr as qr_tools
 from backend.modules.wb_returns.application.outbox import publish_chat_message
+from backend.modules.wb_returns.domain import RETURN_READY
 from backend.modules.wb_returns.infrastructure.postgres import (
     DeliveryCodeModel,
     ExtensionInstallModel,
@@ -225,7 +226,7 @@ class ExtensionService:
                     bot_code=self.bot_code,
                     chat_id=task.chat_id,
                     template=TEMPLATE_CODE,
-                    params={"codes": [await self.code_params(install.seller_id, seller_name, today)]},
+                    params=await self.code_params(install.seller_id, seller_name, today),
                     dedupe_key=f"returns:code-task:{task.id}",
                 )
                 replied.append(task.chat_id)
@@ -264,10 +265,19 @@ class ExtensionService:
         params: dict[str, Any] = {"name": seller_name, "date": day.isoformat(), "code": None}
         if stored is not None and (stored.code or stored.qr):
             params.update(self._code_fields(stored, seller_id, day))
+            params["offices"] = await self.ready_offices(seller_id)
             return params
         installs = await self.returns.active_installs(seller_id)
         params["no_install"] = not installs
         return params
+
+    async def ready_offices(self, seller_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Готовые к выдаче возвраты по адресам ПВЗ — что показать рядом с кодом."""
+        counts: dict[str, int] = {}
+        for item in await self.returns.active_returns(seller_id, status_key=RETURN_READY):
+            address = item.dst_office_address or "адрес не указан"
+            counts[address] = counts.get(address, 0) + 1
+        return [{"address": address, "count": count} for address, count in sorted(counts.items())]
 
     def _code_fields(self, stored: DeliveryCodeModel, seller_id: uuid.UUID, day: date) -> dict[str, Any]:
         return {

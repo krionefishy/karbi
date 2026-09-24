@@ -63,7 +63,12 @@ class CommandService:
         elif command == "returns":
             template, params = TEMPLATE_LIST, {"sellers": await self._sellers_summary(event, stamp)}
         elif command == "qr":
-            template, params = TEMPLATE_CODE, {"codes": await self._codes(event, stamp)}
+            # Картинка QR — одна на сообщение, поэтому по сообщению на магазин.
+            for seller_id, name in event.sellers:
+                params = await self.extension.request_code(seller_id, name, chat_id=event.chat_id, now=stamp)
+                self._reply(event, TEMPLATE_CODE, params, suffix=str(seller_id))
+            await self.session.commit()
+            return TEMPLATE_CODE
         elif command == "extension":
             template, params = TEMPLATE_EXTENSION, await self._pairing(event, stamp)
         else:
@@ -119,13 +124,6 @@ class CommandService:
             )
         return offices
 
-    async def _codes(self, event: CommandEvent, now: datetime) -> list[dict]:
-        """Код получения по каждому селлеру чата; без кода — задача расширению или подсказка."""
-        return [
-            await self.extension.request_code(seller_id, name, chat_id=event.chat_id, now=now)
-            for seller_id, name in event.sellers
-        ]
-
     async def _pairing(self, event: CommandEvent, now: datetime) -> dict:
         codes = []
         for seller_id, name in event.sellers:
@@ -143,13 +141,13 @@ class CommandService:
             "codes": codes,
         }
 
-    def _reply(self, event: CommandEvent, template: str, params: dict) -> None:
+    def _reply(self, event: CommandEvent, template: str, params: dict, *, suffix: str = "") -> None:
         publish_chat_message(
             self.session,
             bot_code=self.bot_code,
             chat_id=event.chat_id,
             template=template,
             params=params,
-            dedupe_key=f"returns:reply:{event.event_id}",
+            dedupe_key=f"returns:reply:{event.event_id}" + (f":{suffix}" if suffix else ""),
             event_type="ReturnsCommandReplied",
         )

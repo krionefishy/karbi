@@ -353,9 +353,7 @@ async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UU
         assert (summary["ready_total"], summary["transit_total"], summary["open_claims"]) == (1, 1, 1)
         assert summary["offices"][0]["address"] == "посёлок Развилка 52к1"
         # Расширения нет — кода нет, и бот говорит, где его взять.
-        assert replies[1]["params"]["codes"] == [
-            {"name": "ИП Возвраты", "date": "2026-09-22", "code": None, "no_install": True}
-        ]
+        assert replies[1]["params"] == {"name": "ИП Возвраты", "date": "2026-09-22", "code": None, "no_install": True}
     finally:
         async with database.session() as session:
             aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat}")
@@ -394,7 +392,7 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
         async with database.session() as session:
             assert await commands(session).handle(command(seller, "/qr", chat), now=NOW) == "returns.code"
             [reply] = await chat_replies(session, chat)
-        assert reply["params"]["codes"][0]["requested"] is True
+        assert reply["params"]["requested"] is True
         async with database.session() as session:
             install = await extension(session).authenticate(paired.token, now=NOW)
             beat = await extension(session).heartbeat(install, state="ok", error=None, now=NOW)
@@ -414,8 +412,10 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             )
             replies = await chat_replies(session, chat)
         assert (result.accepted, result.replied_chats) == (2, [chat])
-        delivered = replies[-1]["params"]["codes"][0]
+        delivered = replies[-1]["params"]
         assert (delivered["code"], delivered["qr"]) == ("412", "WB|412|xyz")
+        # Возвраты ещё не собирали — адресов рядом с кодом пока нет.
+        assert delivered["offices"] == []
         assert delivered["qr_url"].startswith(f"https://test.local/api/v1/wb/returns/qr/{seller}/2026-09-22/")
         async with database.session() as session:
             install = await extension(session).authenticate(paired.token, now=NOW)
@@ -429,8 +429,11 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
         assert view.has_code_today and len(view.installs) == 1 and view.installs[0].state == "ok"
         assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
 
-        # Готовый возврат теперь уходит с кодом дня.
+        # Готовый возврат теперь уходит с кодом дня, а рядом с кодом — адреса ПВЗ из отчёта.
         await collect(database, seller, [item(1)])
+        async with database.session() as session:
+            params = await extension(session).code_params(seller, "ИП Возвраты", date(2026, 9, 22))
+        assert params["offices"] == [{"address": "посёлок Развилка 52к1", "count": 1}]
         async with database.session() as session:
             report = await notifications(session).notify(seller, now=NOW)
             sent = await session.scalars(
