@@ -1,4 +1,4 @@
-import type { Message, Settings } from "./shared";
+import { normalizeBackendUrl, type Message, type Settings } from "./shared";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
@@ -39,13 +39,15 @@ async function refresh(): Promise<void> {
 
 $("pair").addEventListener("click", async () => {
   const message = $("message");
-  const backendUrl = $<HTMLInputElement>("backend").value.trim().replace(/\/$/, "");
   const code = $<HTMLInputElement>("code").value.trim();
   message.className = "";
   message.textContent = "Подключаем…";
   try {
+    const backendUrl = normalizeBackendUrl($<HTMLInputElement>("backend").value);
+    $<HTMLInputElement>("backend").value = backendUrl;
+    if (!/^\d{6}$/.test(code)) throw new Error("Код — шесть цифр из бота (/extension) или со страницы «Возвраты WB»");
     // Доступ к адресу сервиса просим здесь, по клику: сервис-воркер не может.
-    const origin = new URL(backendUrl).origin;
+    const origin = backendUrl;
     const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
     if (!granted) throw new Error("Без доступа к адресу сервиса расширение не сможет отправлять код");
     const reply = await send({ type: "pair", backendUrl, code });

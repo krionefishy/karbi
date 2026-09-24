@@ -75,7 +75,10 @@ export function ReturnsExtension({ sellerId }: { sellerId: string }) {
               <KeyRound size={15} />
               {pairingMutation.isPending ? "Готовим…" : "Получить код для расширения"}
             </button>
-            <span>Введите код в настройках расширения. Тот же код выдаёт бот по команде /extension.</span>
+            <span>
+              Введите код в настройках расширения. Тот же код выдаёт бот по команде /extension. Адрес сервиса
+              там уже заполнен; если поле пустое — впишите <code>{window.location.origin}</code>.
+            </span>
           </li>
         </ol>
         {pairing && (

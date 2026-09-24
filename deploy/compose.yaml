@@ -26,6 +26,8 @@ services:
     build:
       context: ..
       dockerfile: deploy/frontend.Dockerfile
+      args:
+        PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-}
     restart: unless-stopped
     mem_limit: 128m
     networks:

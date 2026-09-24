@@ -11,11 +11,13 @@ RUN npm run build
 # Расширение для кода получения возвратов: собирается здесь же и раздаётся статикой.
 FROM node:22-alpine AS extension
 WORKDIR /ext
+# Адрес сервиса по умолчанию в настройках расширения: менеджер вводит только код.
+ARG PUBLIC_DOMAIN=""
 RUN apk add --no-cache zip
 COPY extension/package.json extension/package-lock.json ./
 RUN npm ci
 COPY extension/ ./
-RUN npm run pack
+RUN VITE_BACKEND_URL="${PUBLIC_DOMAIN:+https://$PUBLIC_DOMAIN}" npm run pack
 
 FROM nginx:1.27-alpine AS runtime
 COPY deploy/nginx/frontend.conf /etc/nginx/conf.d/default.conf

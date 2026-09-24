@@ -270,17 +270,15 @@ async def test_notifications_sent_once_and_by_schedule(database: Database, selle
         report = await notifications(session).notify(seller, now=NOW)
         sent = await outbox_templates(session, seller)
     # 09:00 МСК: готовый возврат, дайджест по едущему, напоминание на третий день,
-    # новая заявка и «завтра истекает срок» по ней же.
-    assert (report.ready, report.transit, report.reminders, report.claims, report.claim_deadlines) == (1, 1, 1, 1, 1)
-    assert sorted(sent) == sorted(
-        ["returns.ready", "returns.transit", "returns.reminder", "returns.claims", "returns.claim_deadline"]
-    )
+    # «завтра истекает срок» по заявке. О самой новой заявке бот молчит.
+    assert (report.ready, report.transit, report.reminders, report.claim_deadlines) == (1, 1, 1, 1)
+    assert sorted(sent) == sorted(["returns.ready", "returns.transit", "returns.reminder", "returns.claim_deadline"])
 
     async with database.session() as session:
         again = await notifications(session).notify(seller, now=NOW + timedelta(minutes=10))
         logged = await session.scalars(select(NotificationLogModel).where(NotificationLogModel.seller_id == seller))
     assert again.sent == 0
-    assert sorted(row.kind for row in logged) == ["claim", "claim_deadline", "ready", "reminder", "transit"]
+    assert sorted(row.kind for row in logged) == ["claim_deadline", "ready", "reminder", "transit"]
 
     # Второй день хранения без нового статуса — тихо; пятый — напоминание про утилизацию.
     async with database.session() as session:
