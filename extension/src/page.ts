@@ -1,25 +1,29 @@
-/** Функции, которые выполняются в мире страницы wildberries.ru — от её имени, с её JWT и антибот-токеном.
+/** Функция, которая выполняется в мире страницы wildberries.ru — от её имени.
  *
  * Здесь нельзя ссылаться ни на что снаружи: функция сериализуется и запускается через
- * chrome.scripting.executeScript({ world: "MAIN" }). Возвращаем сырые ответы; разбор — на сервере.
+ * chrome.scripting.executeScript({ world: "MAIN" }). Со страницы берём только то, чего
+ * нет у расширения: JWT сессии из localStorage, антибот-cookie и список доставок.
+ * За кодом расширение ходит само — из сервис-воркера CORS не мешает.
  */
 
 export interface PageResult {
-  loggedIn: boolean;
-  codes: unknown;
-  codesStatus: number;
+  jwt: string | null;
+  jwtSource: string;
+  antibot: string | null;
   deliveries: unknown;
   deliveriesStatus: number;
+  deliveriesUrl: string;
   error: string | null;
 }
 
 export async function collectFromPage(): Promise<PageResult> {
   const result: PageResult = {
-    loggedIn: false,
-    codes: null,
-    codesStatus: 0,
+    jwt: null,
+    jwtSource: "",
+    antibot: null,
     deliveries: null,
     deliveriesStatus: 0,
+    deliveriesUrl: "",
     error: null,
   };
   const jwtLike = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
@@ -43,24 +47,30 @@ export async function collectFromPage(): Promise<PageResult> {
     return null;
   }
 
-  function tokenFromStorage(): string | null {
-    for (const key of ["wbx__tokenData", "wbx__tokenDataStage"]) {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      try {
-        const found = findJwt(JSON.parse(raw));
-        if (found) return found;
-      } catch {
-        if (jwtLike.test(raw)) return raw;
-      }
+  // Ключ с токеном сайт может переименовать: сначала известные, потом любой ключ с «token».
+  const keys = ["wbx__tokenData", "wbx__tokenDataStage"];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && /token/i.test(key) && !keys.includes(key)) keys.push(key);
+  }
+  for (const key of keys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+    let found: string | null = null;
+    try {
+      found = findJwt(JSON.parse(raw));
+    } catch {
+      found = jwtLike.test(raw) ? raw : null;
     }
-    return null;
+    if (found) {
+      result.jwt = found;
+      result.jwtSource = key;
+      break;
+    }
   }
 
-  function cookie(name: string): string | null {
-    const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-    return match ? decodeURIComponent(match[1]) : null;
-  }
+  const antibot = document.cookie.match(/(?:^|; )x_wbaas_token=([^;]*)/);
+  result.antibot = antibot ? decodeURIComponent(antibot[1]) : null;
 
   try {
     const deliveries = await fetch("/webapi/lk/myorders/delivery/get", {
@@ -70,11 +80,8 @@ export async function collectFromPage(): Promise<PageResult> {
       redirect: "follow",
     });
     result.deliveriesStatus = deliveries.status;
-    const location = deliveries.url || "";
-    if (deliveries.status === 401 || deliveries.status === 403 || /login|auth/i.test(location)) {
-      result.loggedIn = false;
-    } else {
-      result.loggedIn = deliveries.ok;
+    result.deliveriesUrl = deliveries.url || "";
+    if (deliveries.ok) {
       try {
         result.deliveries = await deliveries.json();
       } catch {
@@ -83,39 +90,6 @@ export async function collectFromPage(): Promise<PageResult> {
     }
   } catch (error) {
     result.error = `deliveries: ${String(error)}`;
-  }
-
-  const jwt = tokenFromStorage();
-  if (!jwt) {
-    result.loggedIn = false;
-    result.error = result.error ?? "no jwt in localStorage";
-    return result;
-  }
-
-  try {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${jwt}`,
-      "WB-AppType": "site",
-      "WB-AppVersion": "700",
-      Accept: "application/json",
-    };
-    const antibot = cookie("x_wbaas_token");
-    if (antibot) headers["x-wbaas-token"] = antibot;
-    const codes = await fetch("https://delivery-code.wildberries.ru/delivery-code/api/v1/otp/get", {
-      method: "GET",
-      credentials: "include",
-      headers,
-    });
-    result.codesStatus = codes.status;
-    if (codes.status === 401) result.loggedIn = false;
-    try {
-      result.codes = await codes.json();
-    } catch {
-      result.codes = null;
-    }
-    if (codes.ok) result.loggedIn = true;
-  } catch (error) {
-    result.error = `${result.error ? result.error + "; " : ""}codes: ${String(error)}`;
   }
   return result;
 }

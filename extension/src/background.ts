@@ -4,6 +4,7 @@ import { collectFromPage, type PageResult } from "./page";
 import { browserName, loadSettings, saveSettings, type Message, type Settings } from "./shared";
 
 const DELIVERIES_URL = "https://www.wildberries.ru/lk/deliveries";
+const CODES_URL = "https://delivery-code.wildberries.ru/delivery-code/api/v1/otp/get";
 const HEARTBEAT_ALARM = "heartbeat";
 const COLLECT_ALARM = "collect";
 const RETRY_ALARM = "retry";
@@ -152,20 +153,24 @@ async function collect(reason: string): Promise<void> {
     let error: string | null = null;
     try {
       const page = await readPage();
-      if (!page.loggedIn) {
+      if (!page.jwt) {
         state = "needs_login";
-        error = page.error ?? `deliveries ${page.deliveriesStatus}, codes ${page.codesStatus}`;
+        error = `в localStorage нет токена сессии (доставки ${page.deliveriesStatus}${page.error ? `, ${page.error}` : ""})`;
       } else {
-        const codes = normalizeCodes(page.codes);
-        if (codes.length) {
+        const codesReply = await fetchCodes(page.jwt, page.antibot);
+        const codes = normalizeCodes(codesReply.body);
+        if (codesReply.status === 401 || codesReply.status === 403) {
+          state = "needs_login";
+          error = `код ${codesReply.status} с токеном из ${page.jwtSource}: ${codesReply.text.slice(0, 200)}`;
+        } else if (codes.length) {
           await api(settings, "/codes", { codes });
           await saveSettings({ lastCodeAt: new Date().toISOString() });
+          const items = normalizeDeliveries(page.deliveries);
+          if (items.length) await api(settings, "/deliveries", { items });
         } else {
           state = "error";
-          error = `codes ${page.codesStatus}: ${JSON.stringify(page.codes).slice(0, 300)}`;
+          error = `код ${codesReply.status}: ${codesReply.text.slice(0, 300)}`;
         }
-        const items = normalizeDeliveries(page.deliveries);
-        if (items.length) await api(settings, "/deliveries", { items });
       }
     } catch (caught) {
       state = "error";
@@ -188,6 +193,47 @@ async function collect(reason: string): Promise<void> {
     running = null;
   });
   return running;
+}
+
+interface CodesReply {
+  status: number;
+  body: unknown;
+  text: string;
+}
+
+/** Код дня — запросом из сервис-воркера: у него есть право на хост, CORS его не касается.
+ *
+ * Сначала так, как ходит сайт: JWT и заголовки приложения. Если отказ — ещё раз с
+ * антибот-cookie, вдруг сервис её проверяет. Ответ отдаём как есть, разбор ниже.
+ */
+async function fetchCodes(jwt: string, antibot: string | null): Promise<CodesReply> {
+  const base: Record<string, string> = {
+    Authorization: `Bearer ${jwt}`,
+    "WB-AppType": "site",
+    "WB-AppVersion": "700",
+  };
+  const attempts: Record<string, string>[] = [base];
+  if (antibot) attempts.push({ ...base, "x-wbaas-token": antibot });
+  let last: CodesReply = { status: 0, body: null, text: "" };
+  for (const headers of attempts) {
+    let response: Response;
+    try {
+      response = await fetch(CODES_URL, { method: "GET", credentials: "include", headers });
+    } catch (caught) {
+      last = { status: 0, body: null, text: `fetch: ${caught instanceof Error ? caught.message : String(caught)}` };
+      continue;
+    }
+    const text = await response.text();
+    let body: unknown = null;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
+    last = { status: response.status, body, text };
+    if (response.ok) return last;
+  }
+  return last;
 }
 
 /** Любая открытая вкладка www.wildberries.ru: запросы к своему домену оттуда те же, что с /lk/deliveries. */
