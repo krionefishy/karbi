@@ -4,6 +4,7 @@ from backend.modules.wb_core.infrastructure.wb.analytics import (
     PAGE_LIMIT,
     FBOStockRow,
     WBAnalyticsClient,
+    WBWarehouseRemainsClient,
 )
 from backend.modules.wb_core.infrastructure.wb.chat import CHAT_BUCKET, ChatEventsPage, WBChatClient
 from backend.modules.wb_core.infrastructure.wb.client import (
@@ -51,6 +52,7 @@ __all__ = [
     "WBJsonClient",
     "WBMarketplaceClient",
     "WBPermanentError",
+    "WBWarehouseRemainsClient",
     "WBTemporaryError",
     "Warehouse",
 ]

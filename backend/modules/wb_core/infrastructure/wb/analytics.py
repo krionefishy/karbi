@@ -1,7 +1,11 @@
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
-from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
+from backend.modules.wb_core.domain import WarehouseRemain
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
+from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 ANALYTICS_BUCKET = "analytics"
@@ -95,3 +99,97 @@ class WBAnalyticsClient(WBJsonClient):
             in_way_to_client=int(raw.get("inWayToClient") or 0),
             in_way_from_client=int(raw.get("inWayFromClient") or 0),
         )
+
+
+class WBWarehouseRemainsClient(WBJsonClient):
+    """Отчёт «Остатки на складах»: остаток каждого баркода по каждому складу WB.
+
+    В отличие от `stocks-report/wb-warehouses`, этот отчёт склады не
+    склеивает — по нему видно, сколько товара лежит в Коледино, а сколько в
+    Краснодаре. Отчёт асинхронный: создать задачу, дождаться `done`, скачать.
+    Лимиты WB — создание и скачивание раз в минуту, статус раз в пять секунд;
+    очередь держит шлюз, здесь только пауза между опросами статуса.
+    """
+
+    bucket = ANALYTICS_BUCKET
+    api_name = "WB Analytics API"
+    category = "Аналитика"
+    path = "/api/v1/warehouse_remains"
+
+    def __init__(
+        self,
+        gateway: EgressGateway,
+        *,
+        priority: str = "background",
+        poll_seconds: float = 5.0,
+        max_wait_seconds: float = 300.0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
+        super().__init__(gateway, priority=priority)
+        self.poll_seconds = poll_seconds
+        self.max_wait_seconds = max_wait_seconds
+        self._sleep = sleep
+
+    async def remains(self, seller_id: str) -> list[WarehouseRemain]:
+        created = await self.request(
+            "GET",
+            self.path,
+            seller_id,
+            params={"groupByBarcode": "true", "groupBySize": "true", "groupByNm": "true", "groupBySa": "true"},
+        )
+        task_id = self._task_id(created)
+        waited = 0.0
+        while True:
+            status = await self.request("GET", f"{self.path}/tasks/{task_id}/status", seller_id)
+            state = self._status(status)
+            if state == "done":
+                break
+            if state in ("canceled", "purged"):
+                raise WBPermanentError(f"{self.api_name}: отчёт об остатках не сформирован (статус {state})")
+            if waited >= self.max_wait_seconds:
+                raise WBTemporaryError(
+                    f"{self.api_name}: отчёт об остатках не готов за {int(self.max_wait_seconds)} с (статус {state})"
+                )
+            await self._sleep(self.poll_seconds)
+            waited += self.poll_seconds
+        payload = await self.request("GET", f"{self.path}/tasks/{task_id}/download", seller_id)
+        if payload is None:
+            return []
+        if not isinstance(payload, list):
+            raise WBPermanentError(f"{self.api_name}: отчёт об остатках пришёл не списком")
+        return [remain for raw in payload if isinstance(raw, dict) for remain in self._remains(raw)]
+
+    def _task_id(self, payload: Any) -> str:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        task_id = data.get("taskId") if isinstance(data, dict) else None
+        if not isinstance(task_id, str) or not task_id:
+            raise WBPermanentError(f"{self.api_name}: WB не вернул номер задачи отчёта об остатках")
+        return task_id
+
+    @staticmethod
+    def _status(payload: Any) -> str:
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return str(data.get("status") or "") if isinstance(data, dict) else ""
+
+    def _remains(self, raw: dict) -> list[WarehouseRemain]:
+        barcode = str(raw.get("barcode") or "")
+        article = raw.get("nmId")
+        if not barcode or not isinstance(article, int):
+            # Строку без баркода не к чему привязать ни в заказах, ни в каталоге.
+            self.logger.warning("wb_remains_row_without_barcode", extra={"row": str(raw)[:200]})
+            return []
+        warehouses = raw.get("warehouses")
+        if not isinstance(warehouses, list):
+            return []
+        return [
+            WarehouseRemain(
+                barcode=barcode,
+                article=str(article),
+                tech_size=str(raw.get("techSize") or ""),
+                vendor_code=str(raw.get("vendorCode") or ""),
+                warehouse_name=str(item.get("warehouseName") or ""),
+                quantity=int(item.get("quantity") or 0),
+            )
+            for item in warehouses
+            if isinstance(item, dict) and item.get("warehouseName")
+        ]

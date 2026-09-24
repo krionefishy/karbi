@@ -326,6 +326,10 @@ class CoreMirrorConfig:
     chats_history_days: int = 90
     chats_pages_per_run: int = 100
     chats_retention_days: int = 180
+    # Остатки по складам WB для подсорта: асинхронный отчёт, создание и
+    # скачивание — раз в минуту на ключ. Раз в шесть часов хватает, чтобы
+    # логист утром видел остаток после ночных отгрузок.
+    remains_interval_minutes: int = 360
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,6 +400,23 @@ class ReturnsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class PodsortConfig:
+    """Подсорт WB: сколько дней заказов держать и как быстро их догружать. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Три календарных месяца книги плюс запас; дальше WB заказы и не отдаёт.
+    history_days: int = 92
+    # Сутки — запрос раз в минуту на ключ (лимит «Статистики», общий с
+    # оборачиваемостью): столько дней за проход, потом следующий кабинет.
+    days_per_run: int = 5
+    # WB дописывает заказы с опозданием: сутки перечитываются, пока их не
+    # прочитали через столько часов после полуночи, и не чаще раза в refresh.
+    settle_hours: int = 6
+    refresh_minutes: int = 60
+    retry_minutes: int = 15
+
+
+@dataclass(frozen=True, slots=True)
 class Settings:
     app: AppConfig
     database: DatabaseConfig
@@ -416,6 +437,7 @@ class Settings:
     fbs_penalties: FbsPenaltiesConfig
     review_chats: ReviewChatsConfig
     returns: ReturnsConfig
+    podsort: PodsortConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -515,6 +537,7 @@ class Settings:
             "chats_retention_days",
             "supplies_hour",
             "supplies_minute",
+            "remains_interval_minutes",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -534,6 +557,10 @@ class Settings:
         ):
             if key in fbs_penalties:
                 fbs_penalties[key] = int(fbs_penalties[key])
+        podsort = dict(data.get("podsort", {}))
+        for key in ("history_days", "days_per_run", "settle_hours", "refresh_minutes", "retry_minutes"):
+            if key in podsort:
+                podsort[key] = int(podsort[key])
         returns = dict(data.get("returns", {}))
         for key in (
             "poll_minutes",
@@ -588,6 +615,7 @@ class Settings:
             fbs_penalties=FbsPenaltiesConfig(**fbs_penalties),
             review_chats=ReviewChatsConfig(**review_chats),
             returns=ReturnsConfig(**returns),
+            podsort=PodsortConfig(**podsort),
         )
         settings.validate_values()
         return settings
@@ -650,6 +678,8 @@ class Settings:
             < 1
         ):
             raise ValueError("core_mirror.chats_* must be positive")
+        if mirror.remains_interval_minutes < 1:
+            raise ValueError("core_mirror.remains_interval_minutes must be positive")
         chats = self.review_chats
         if (
             min(chats.reply_window_hours, chats.max_period_days, chats.baseline_days, chats.follow_up_within_minutes)
@@ -689,6 +719,12 @@ class Settings:
             raise ValueError("returns.digest_hour must be 0..23 and digest_minute 0..59")
         if not returns.notification_bot:
             raise ValueError("returns.notification_bot must be set")
+        podsort = self.podsort
+        if (
+            min(podsort.history_days, podsort.days_per_run, podsort.refresh_minutes, podsort.retry_minutes) < 1
+            or podsort.settle_hours < 0
+        ):
+            raise ValueError("podsort: history_days, days_per_run, refresh and retry minutes must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

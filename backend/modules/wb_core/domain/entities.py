@@ -58,3 +58,14 @@ class Article:
     photo_url: str = ""
     photo_count: int | None = None
     state: str = "active"
+
+
+@dataclass(frozen=True, slots=True)
+class BarcodeCard:
+    """Баркод из каталога: чья это карточка и какой размер."""
+
+    barcode: str
+    article: str
+    vendor_code: str
+    subject_name: str
+    tech_size: str

@@ -43,6 +43,8 @@ from backend.modules.wb_fbs_penalties.application import PenaltiesEnrollment, Pe
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_stocks.application import FbsStocksEnrollment, FbsStocksService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
+from backend.modules.wb_podsort.application import PodsortEnrollment, PodsortService
+from backend.modules.wb_podsort.infrastructure.postgres import PodsortRepository
 from backend.modules.wb_returns.application import ExtensionService, ReturnsEnrollment, ReturnsService
 from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.modules.wb_review_chats.application import ReviewChatsEnrollment, ReviewChatsService
@@ -444,6 +446,31 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def podsort_repository(self, session: AsyncSession) -> PodsortRepository:
+        return PodsortRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def podsort_enrollment(self, podsort: PodsortRepository) -> PodsortEnrollment:
+        return PodsortEnrollment(podsort)
+
+    @provide(scope=Scope.REQUEST)
+    def podsort_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        podsort: PodsortRepository,
+        settings: Settings,
+    ) -> PodsortService:
+        """Расчёт при чтении: суточные итоги заказов модуля плюс зеркало остатков wb_core."""
+        return PodsortService(
+            session,
+            sellers,
+            podsort,
+            timezone=ZoneInfo(settings.podsort.timezone),
+            history_days=settings.podsort.history_days,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def automation_enrollments(
         self,
         reviews: ReviewsEnrollment,
@@ -454,9 +481,20 @@ class SessionProvider(Provider):
         fbs_penalties: PenaltiesEnrollment,
         review_chats: ReviewChatsEnrollment,
         returns: ReturnsEnrollment,
+        podsort: PodsortEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
-        return [reviews, turnover, fbs_distribution, card_checklist, fbs_stocks, fbs_penalties, review_chats, returns]
+        return [
+            reviews,
+            turnover,
+            fbs_distribution,
+            card_checklist,
+            fbs_stocks,
+            fbs_penalties,
+            review_chats,
+            returns,
+            podsort,
+        ]
 
     @provide(scope=Scope.REQUEST)
     def review_sync_service(

@@ -398,3 +398,15 @@
 .returns-steps li > a, .returns-steps li > button { align-self: flex-start; }
 .returns-steps code { font-family: var(--font-mono); font-size: 12px; }
 .returns-pairing-code { font-family: var(--font-mono); font-size: 26px; line-height: 32px; font-weight: 600; letter-spacing: 0.08em; }
+
+/* Подсорт WB */
+.podsort-settings { margin-bottom: var(--space-4); }
+.podsort-settings .checklist-toolbar { align-items: flex-end; }
+.podsort-settings input[type="number"] { width: 90px; }
+.podsort-regions { display: flex; flex-wrap: wrap; gap: 6px 14px; max-width: 640px; margin: 0; padding: 0; border: 0; }
+.podsort-regions legend { width: 100%; }
+.podsort-region { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.podsort-formula { margin: 0; padding: var(--space-3) var(--space-5); font-size: 12px; line-height: 18px; }
+.podsort-sellers { margin-top: var(--space-4); }
+.podsort-seller-row { grid-template-columns: minmax(240px, 1fr) 260px 48px; }
+.podsort-warehouses .stocks-warehouse-row { grid-template-columns: minmax(240px, 1fr) 260px 0; }

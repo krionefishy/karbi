@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.domain import (
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     ChatEvent,
@@ -15,6 +16,7 @@ from backend.modules.wb_core.domain import (
     FbsSupply,
     ReviewFact,
     StockFact,
+    WarehouseRemain,
 )
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 
@@ -44,6 +46,32 @@ class StockMirror:
     async def collected_at(self, seller_id: uuid.UUID) -> datetime | None:
         state = await self.mirror.state(seller_id, MIRROR_STOCKS)
         return state.collected_at if state else None
+
+
+@dataclass(frozen=True, slots=True)
+class RemainsSnapshot:
+    """Отчёт по складам WB на момент сбора. `collected_at` None — не собирался ни разу."""
+
+    remains: tuple[WarehouseRemain, ...]
+    collected_at: datetime | None
+    error: str | None
+
+
+class RemainsMirror:
+    """Остатки по складам WB из зеркала: что лежит и когда это сняли.
+
+    Свежесть решает потребитель: подсорт показывает дату снимка рядом с
+    цифрой, а не прячет цифру, собранную вчера.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def snapshot(self, seller_id: uuid.UUID) -> RemainsSnapshot:
+        state = await self.mirror.state(seller_id, MIRROR_REMAINS)
+        if state is None or state.collected_at is None:
+            return RemainsSnapshot((), None, state.error if state else None)
+        return RemainsSnapshot(tuple(await self.mirror.remains(seller_id)), state.collected_at, state.error)
 
 
 class ReviewMirror:

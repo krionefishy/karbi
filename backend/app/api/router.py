@@ -11,6 +11,7 @@ from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
 from backend.modules.wb_fbs_penalties.presentation.http import router as wb_fbs_penalties_router
 from backend.modules.wb_fbs_stocks.presentation.http import router as wb_fbs_stocks_router
+from backend.modules.wb_podsort.presentation.http import router as wb_podsort_router
 from backend.modules.wb_returns.presentation.http import extension_router as wb_returns_extension_router
 from backend.modules.wb_returns.presentation.http import router as wb_returns_router
 from backend.modules.wb_review_chats.presentation.http import router as wb_review_chats_router
@@ -32,6 +33,7 @@ router.include_router(wb_fbs_penalties_router)
 router.include_router(wb_review_chats_router)
 router.include_router(wb_returns_router)
 router.include_router(wb_returns_extension_router)
+router.include_router(wb_podsort_router)
 router.include_router(automations_router)
 
 

@@ -4,6 +4,7 @@ from backend.modules.wb_core.domain.entities import (
     MARKETPLACE_OZON,
     MARKETPLACE_WB,
     Article,
+    BarcodeCard,
     Seller,
 )
 from backend.modules.wb_core.domain.mirror import (
@@ -15,6 +16,7 @@ from backend.modules.wb_core.domain.mirror import (
     MIRROR_CHATS,
     MIRROR_KINDS,
     MIRROR_ORDERS,
+    MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
@@ -27,6 +29,7 @@ from backend.modules.wb_core.domain.mirror import (
     ReviewFact,
     SellerWarehouse,
     StockFact,
+    WarehouseRemain,
     WbOffice,
     is_review_prompt,
 )
@@ -44,6 +47,7 @@ __all__ = [
     "MIRROR_CHATS",
     "MIRROR_KINDS",
     "MIRROR_ORDERS",
+    "MIRROR_REMAINS",
     "MIRROR_REVIEWS",
     "MIRROR_STOCKS",
     "MIRROR_SUPPLIES",
@@ -51,6 +55,7 @@ __all__ = [
     "ORDER_SOURCE_LIVE",
     "REVIEW_PROMPT_PREFIX",
     "Article",
+    "BarcodeCard",
     "ChatEvent",
     "FbsOrder",
     "FbsSupply",
@@ -58,6 +63,7 @@ __all__ = [
     "Seller",
     "SellerWarehouse",
     "StockFact",
+    "WarehouseRemain",
     "WbOffice",
     "is_review_prompt",
 ]

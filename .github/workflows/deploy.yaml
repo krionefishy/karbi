@@ -121,7 +121,7 @@ jobs:
               sudo docker compose --env-file .env -f deploy/compose.yaml logs \
                 --tail=200 migrate api wb-reviews-worker wb-turnover-worker \
                 wb-fbs-distribution-worker wb-card-checklist-worker wb-fbs-stocks-worker wb-core-worker \
-                wb-fbs-penalties-worker wb-returns-worker notifications-worker \
+                wb-fbs-penalties-worker wb-returns-worker wb-podsort-worker notifications-worker \
                 outbox-publisher nginx
               exit 1
             fi
@@ -146,6 +146,8 @@ jobs:
               ps --status running -q wb-fbs-penalties-worker | wc -l | tr -d ' ')" = "1"
             test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
               ps --status running -q wb-returns-worker | wc -l | tr -d ' ')" = "1"
+            test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \
+              ps --status running -q wb-podsort-worker | wc -l | tr -d ' ')" = "1"
             # Фронт проверяется наравне с воркерами: без этого выкат зелёный,
             # даже когда интерфейс остался от прошлой сборки.
             test "$(sudo docker compose --env-file .env -f deploy/compose.yaml \

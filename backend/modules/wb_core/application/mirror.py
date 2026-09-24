@@ -10,6 +10,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
@@ -30,6 +31,7 @@ from backend.modules.wb_core.infrastructure.wb import (
     WBMarketplaceClient,
     WBPermanentError,
     WBTemporaryError,
+    WBWarehouseRemainsClient,
 )
 from backend.storage.pg import Database
 
@@ -56,6 +58,12 @@ class CatalogOutcome:
 class StocksOutcome:
     articles: int
     warehouses: int
+
+
+@dataclass(frozen=True, slots=True)
+class RemainsOutcome:
+    barcodes: int
+    rows: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +114,7 @@ class MirrorService:
         marketplace: WBMarketplaceClient,
         feedbacks: WBFeedbackClient,
         chats: WBChatClient,
+        remains: WBWarehouseRemainsClient | None = None,
         orders_history_months: int = 6,
         chats_history_days: int = 90,
         chats_pages_per_run: int = 100,
@@ -116,6 +125,7 @@ class MirrorService:
         self.marketplace = marketplace
         self.feedbacks = feedbacks
         self.chats = chats
+        self.remains = remains
         self.orders_history_months = orders_history_months
         self.chats_history_days = chats_history_days
         self.chats_pages_per_run = chats_pages_per_run
@@ -222,6 +232,36 @@ class MirrorService:
                     totals[article] += amount
                     per_warehouse[(article, warehouse.id)] += amount
         return len(warehouses), dict(totals), dict(per_warehouse)
+
+    # --- остатки по складам WB --------------------------------------------------
+
+    async def collect_remains(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> RemainsOutcome:
+        """Отчёт «Остатки на складах» целиком — баркод × склад WB.
+
+        Пустой ответ — тоже ответ: у кабинета без FBO ничего не лежит, и
+        прежние строки уходят. Ошибка WB прежние строки не трогает.
+        """
+        if self.remains is None:
+            raise WBPermanentError("Отчёт об остатках по складам WB не подключён к зеркалу")
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_REMAINS, stamp)
+            await session.commit()
+        try:
+            remains = await self.remains.remains(seller_key)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_REMAINS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            await mirror.replace_remains(seller_id, remains, now=stamp)
+            await mirror.mark_collected(seller_id, MIRROR_REMAINS, now=stamp)
+            await session.commit()
+        outcome = RemainsOutcome(len({remain.barcode for remain in remains}), len(remains))
+        self.logger.info("remains_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
 
     # --- reviews ------------------------------------------------------------------
 

@@ -42,6 +42,16 @@ from backend.modules.wb_fbs_stocks.application import (
     TITLE as WB_FBS_STOCKS_TITLE,
 )
 from backend.modules.wb_fbs_stocks.application import BoardOverview
+from backend.modules.wb_podsort.application import (
+    AUTOMATION_ID as WB_PODSORT_ID,
+)
+from backend.modules.wb_podsort.application import (
+    DESCRIPTION as WB_PODSORT_DESCRIPTION,
+)
+from backend.modules.wb_podsort.application import (
+    TITLE as WB_PODSORT_TITLE,
+)
+from backend.modules.wb_podsort.application import PodsortOverview
 from backend.modules.wb_returns.application import (
     AUTOMATION_ID as WB_RETURNS_ID,
 )
@@ -139,6 +149,15 @@ def next_review_chats_run_at(
     return max(moment, overview.last_success_at + timedelta(minutes=settings.core_mirror.chats_interval_minutes))
 
 
+def next_podsort_run_at(settings: Settings, overview: PodsortOverview, now: datetime | None = None) -> datetime:
+    """Догрузка заказов интервальная: новые сутки — после полуночи, неустоявшиеся — раз в `refresh_minutes`."""
+    podsort = settings.podsort
+    moment = now or datetime.now(ZoneInfo(podsort.timezone))
+    if overview.last_success_at is None:
+        return moment
+    return max(moment, overview.last_success_at + timedelta(minutes=podsort.refresh_minutes))
+
+
 def next_returns_run_at(settings: Settings, overview: ReturnsOverview, now: datetime | None = None) -> datetime:
     """Опрос интервальный: следующий — через `poll_minutes` после последнего удачного сбора."""
     returns = settings.returns
@@ -208,6 +227,7 @@ def automation_catalog(
     fbs_penalties: PenaltiesOverview,
     review_chats: ReviewChatsOverview,
     returns: ReturnsOverview,
+    podsort: PodsortOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -302,5 +322,16 @@ def automation_catalog(
             last_run=None,
             last_success_at=returns.last_success_at.isoformat() if returns.last_success_at else None,
             next_run_at=next_returns_run_at(settings, returns).isoformat(),
+        ),
+        AutomationResponse(
+            id=WB_PODSORT_ID,
+            title=WB_PODSORT_TITLE,
+            description=WB_PODSORT_DESCRIPTION,
+            status=podsort.status,
+            seller_count=podsort.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=podsort.last_success_at.isoformat() if podsort.last_success_at else None,
+            next_run_at=next_podsort_run_at(settings, podsort).isoformat(),
         ),
     ]

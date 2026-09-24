@@ -158,7 +158,7 @@ class MirrorStateModel(WBCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats')",
+            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -189,6 +189,27 @@ class FbsWarehouseStockModel(WBCoreBase):
     )
     article: Mapped[str] = mapped_column(String(255), primary_key=True)
     warehouse_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WarehouseRemainModel(WBCoreBase):
+    """Остаток баркода по складу WB из отчёта «Остатки на складах» — копия ответа, переписывается целиком.
+
+    Служебные строки отчёта («В пути до получателей», «Всего находится на
+    складах») лежат здесь же с тем именем, которое дал WB.
+    """
+
+    __tablename__ = "warehouse_remains"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    barcode: Mapped[str] = mapped_column(String(64), primary_key=True)
+    warehouse_name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), nullable=False)
+    tech_size: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    vendor_code: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

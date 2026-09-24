@@ -5,6 +5,7 @@ import {
   MessagesSquare,
   MessageSquareText,
   ReceiptText,
+  Truck,
   Undo2,
   Warehouse,
   type LucideIcon,
@@ -28,6 +29,7 @@ export const automationNav: AutomationNavItem[] = [
   { id: "wb-fbs-penalties", title: "Штрафы FBS", icon: ReceiptText },
   { id: "wb-review-chats", title: "Чаты после отзыва", icon: MessagesSquare },
   { id: "wb-returns", title: "Возвраты WB", icon: Undo2 },
+  { id: "wb-podsort", title: "Подсорт WB", icon: Truck },
 ];
 
 export function automationIcon(id: string): LucideIcon {

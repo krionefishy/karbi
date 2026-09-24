@@ -8,7 +8,16 @@ MIRROR_REVIEWS = "reviews"
 MIRROR_ORDERS = "orders"
 MIRROR_SUPPLIES = "supplies"
 MIRROR_CHATS = "chats"
-MIRROR_KINDS = (MIRROR_CATALOG, MIRROR_STOCKS, MIRROR_REVIEWS, MIRROR_ORDERS, MIRROR_SUPPLIES, MIRROR_CHATS)
+MIRROR_REMAINS = "remains"
+MIRROR_KINDS = (
+    MIRROR_CATALOG,
+    MIRROR_STOCKS,
+    MIRROR_REVIEWS,
+    MIRROR_ORDERS,
+    MIRROR_SUPPLIES,
+    MIRROR_CHATS,
+    MIRROR_REMAINS,
+)
 
 # Откуда пришло сборочное задание: живой список отдаёт только последние три
 # месяца, старше — архив с другим набором полей.
@@ -43,6 +52,24 @@ class StockFact:
     @property
     def total(self) -> int:
         return self.fbo_quantity + self.fbs_quantity
+
+
+@dataclass(frozen=True, slots=True)
+class WarehouseRemain:
+    """Остаток баркода на одном складе WB из отчёта «Остатки на складах».
+
+    Кроме настоящих складов отчёт кладёт в тот же список служебные строки:
+    «В пути до получателей», «В пути возвраты на склад WB», «Всего находится
+    на складах». Они хранятся как пришли — что из них считать, решает тот, кто
+    читает.
+    """
+
+    barcode: str
+    article: str
+    tech_size: str
+    vendor_code: str
+    warehouse_name: str
+    quantity: int
 
 
 @dataclass(frozen=True, slots=True)

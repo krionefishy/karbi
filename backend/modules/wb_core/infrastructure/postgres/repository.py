@@ -7,7 +7,7 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
+from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, BarcodeCard, Seller
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
     InboxEventModel,
@@ -185,6 +185,30 @@ class SellerRepository:
                     barcode = str(sku).strip()
                     if barcode:
                         collected.setdefault(barcode, (chrt_id, row.article))
+        return collected
+
+    async def list_barcode_cards(self, seller_id: uuid.UUID) -> dict[str, BarcodeCard]:
+        """Баркод → карточка и размер, в том числе у карточек в корзине.
+
+        Выгрузкам по баркоду нужно подписать строку артикулом продавца и
+        предметом, а заказы по карточке, ушедшей в корзину, никуда не делись.
+        """
+        rows = await self.session.scalars(select(ArticleModel).where(ArticleModel.seller_id == seller_id))
+        collected: dict[str, BarcodeCard] = {}
+        for row in rows:
+            for size in row.sizes or []:
+                if not isinstance(size, dict):
+                    continue
+                for sku in size.get("skus") or []:
+                    barcode = str(sku).strip()
+                    if barcode and (barcode not in collected or row.state == "active"):
+                        collected[barcode] = BarcodeCard(
+                            barcode=barcode,
+                            article=row.article,
+                            vendor_code=row.vendor_code,
+                            subject_name=row.subject_name,
+                            tech_size=str(size.get("tech_size") or ""),
+                        )
         return collected
 
     async def article_names(self, seller_id: uuid.UUID, articles: Iterable[str]) -> dict[str, str]:

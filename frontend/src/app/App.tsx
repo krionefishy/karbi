@@ -13,6 +13,7 @@ import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
 import { FbsDistributionPage } from "../pages/FbsDistributionPage";
 import { FbsPenaltiesPage } from "../pages/FbsPenaltiesPage";
+import { PodsortPage } from "../pages/PodsortPage";
 import { ReturnsPage } from "../pages/ReturnsPage";
 import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
@@ -41,6 +42,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-fbs-penalties" element={<FbsPenaltiesPage />} />
         <Route path="/automations/wb-review-chats" element={<ReviewChatsPage />} />
         <Route path="/automations/wb-returns" element={<ReturnsPage />} />
+        <Route path="/automations/wb-podsort" element={<PodsortPage />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />

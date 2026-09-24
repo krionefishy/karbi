@@ -12,6 +12,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
@@ -24,7 +25,7 @@ from backend.storage.pg import Database
 
 
 class WBCoreWorker:
-    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты.
+    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты, склады WB.
 
     Подключение к автоматизациям на зеркало не влияет — оно нужно любой из
     них, и собирается один раз. Отметка сбора хранится на паре «селлер + вид»;
@@ -76,6 +77,7 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_ORDERS, now)
         await self.collect_due(MIRROR_SUPPLIES, now)
         await self.collect_due(MIRROR_CHATS, now)
+        await self.collect_due(MIRROR_REMAINS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
@@ -104,6 +106,8 @@ class WBCoreWorker:
             return now - timedelta(minutes=self.config.orders_interval_minutes)
         if kind == MIRROR_CHATS:
             return now - timedelta(minutes=self.config.chats_interval_minutes)
+        if kind == MIRROR_REMAINS:
+            return now - timedelta(minutes=self.config.remains_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -161,6 +165,7 @@ class WBCoreWorker:
             MIRROR_ORDERS: self.mirror.collect_orders,
             MIRROR_SUPPLIES: self.mirror.collect_supplies,
             MIRROR_CHATS: self.mirror.collect_chats,
+            MIRROR_REMAINS: self.mirror.collect_remains,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

@@ -12,6 +12,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     SellerModel,
     SellerWarehouseModel,
     StockFactModel,
+    WarehouseRemainModel,
     WBCoreBase,
     WbOfficeModel,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "SellerRepository",
     "SellerWarehouseModel",
     "StockFactModel",
+    "WarehouseRemainModel",
     "WBCoreBase",
     "WbOfficeModel",
 ]

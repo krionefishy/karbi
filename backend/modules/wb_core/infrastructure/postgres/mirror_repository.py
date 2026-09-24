@@ -18,6 +18,7 @@ from backend.modules.wb_core.domain import (
     ReviewFact,
     SellerWarehouse,
     StockFact,
+    WarehouseRemain,
     WbOffice,
 )
 from backend.modules.wb_core.infrastructure.postgres.models import (
@@ -31,6 +32,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     ReviewFactModel,
     SellerWarehouseModel,
     StockFactModel,
+    WarehouseRemainModel,
     WbOfficeModel,
 )
 
@@ -161,6 +163,48 @@ class MirrorRepository:
         return {(row.article, row.warehouse_id): row.quantity for row in rows}
 
     # --- reviews ----------------------------------------------------------------
+
+    async def replace_remains(self, seller_id: uuid.UUID, remains: Iterable[WarehouseRemain], *, now: datetime) -> None:
+        """Отчёт по складам целиком: баркод, пропавший из ответа, пропадает и отсюда.
+
+        WB может повторить пару «баркод + склад» — например, у двух размеров с
+        одним баркодом; такие строки складываются, а не спорят за ключ.
+        """
+        await self.session.execute(delete(WarehouseRemainModel).where(WarehouseRemainModel.seller_id == seller_id))
+        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        for remain in remains:
+            key = (remain.barcode, remain.warehouse_name)
+            row = merged.get(key)
+            if row is None:
+                merged[key] = {
+                    "seller_id": seller_id,
+                    "barcode": remain.barcode,
+                    "warehouse_name": remain.warehouse_name,
+                    "article": remain.article,
+                    "tech_size": remain.tech_size,
+                    "vendor_code": remain.vendor_code,
+                    "quantity": remain.quantity,
+                    "collected_at": now,
+                }
+            else:
+                row["quantity"] += remain.quantity
+        await self._insert(WarehouseRemainModel, list(merged.values()))
+
+    async def remains(self, seller_id: uuid.UUID) -> list[WarehouseRemain]:
+        rows = await self.session.scalars(
+            select(WarehouseRemainModel).where(WarehouseRemainModel.seller_id == seller_id)
+        )
+        return [
+            WarehouseRemain(
+                barcode=row.barcode,
+                article=row.article,
+                tech_size=row.tech_size,
+                vendor_code=row.vendor_code,
+                warehouse_name=row.warehouse_name,
+                quantity=row.quantity,
+            )
+            for row in rows
+        ]
 
     async def replace_reviews(self, seller_id: uuid.UUID, facts: Iterable[ReviewFact], *, now: datetime) -> None:
         await self.session.execute(delete(ReviewFactModel).where(ReviewFactModel.seller_id == seller_id))

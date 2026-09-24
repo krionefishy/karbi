@@ -12,6 +12,7 @@ from backend.modules.wb_core.infrastructure.wb import (
     WBContentClient,
     WBFeedbackClient,
     WBMarketplaceClient,
+    WBWarehouseRemainsClient,
 )
 from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.settings import Settings, load_settings
@@ -46,6 +47,7 @@ class WBCoreWorkerApplication:
             marketplace=WBMarketplaceClient(gateway),
             feedbacks=WBFeedbackClient(gateway, page_size=self.settings.worker.feedback_page_size),
             chats=WBChatClient(gateway),
+            remains=WBWarehouseRemainsClient(gateway),
             orders_history_months=self.settings.core_mirror.orders_history_months,
             chats_history_days=self.settings.core_mirror.chats_history_days,
             chats_pages_per_run=self.settings.core_mirror.chats_pages_per_run,
