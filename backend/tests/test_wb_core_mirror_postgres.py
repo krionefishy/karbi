@@ -17,6 +17,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
@@ -397,6 +398,13 @@ def worker(database: Database, service: MirrorService, moment: datetime) -> WBCo
 
 def at(hour: int, minute: int = 0) -> datetime:
     return datetime(2026, 9, 13, hour, minute, tzinfo=MOSCOW).astimezone(UTC)
+
+
+def test_remains_are_collected_by_interval() -> None:
+    schedule = WBCoreWorker(Database(), mirror(Database()), SETTINGS)
+    interval = timedelta(minutes=SETTINGS.core_mirror.remains_interval_minutes)
+
+    assert schedule.due_since(MIRROR_REMAINS, at(10)) == at(10) - interval
 
 
 def test_due_since_takes_the_last_passed_slot() -> None:

@@ -404,11 +404,17 @@ class PodsortConfig:
     """Подсорт WB: сколько дней заказов держать и как быстро их догружать. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Три календарных месяца книги плюс запас; дальше WB заказы и не отдаёт.
-    history_days: int = 92
-    # Сутки — запрос раз в минуту на ключ (лимит «Статистики», общий с
+    # Столько WB хранит заказы: дальше сутки пришли бы пустыми и легли бы в
+    # книгу нулями, неотличимыми от настоящих.
+    history_days: int = 90
+    # Сутки — запрос в минуту на ключ (лимит «Статистики», общий с
     # оборачиваемостью): столько дней за проход, потом следующий кабинет.
     days_per_run: int = 5
+    # Пауза между сутками одного кабинета. Шлюз повторяет 429, но WB считает
+    # ответ 4xx за десять запросов — лучше не дойти до него.
+    request_interval_seconds: int = 61
+    # Снимок остатков по складам старше этого — в книге и на странице предупреждение.
+    remains_stale_hours: int = 24
     # WB дописывает заказы с опозданием: сутки перечитываются, пока их не
     # прочитали через столько часов после полуночи, и не чаще раза в refresh.
     settle_hours: int = 6
@@ -558,7 +564,15 @@ class Settings:
             if key in fbs_penalties:
                 fbs_penalties[key] = int(fbs_penalties[key])
         podsort = dict(data.get("podsort", {}))
-        for key in ("history_days", "days_per_run", "settle_hours", "refresh_minutes", "retry_minutes"):
+        for key in (
+            "history_days",
+            "days_per_run",
+            "settle_hours",
+            "refresh_minutes",
+            "retry_minutes",
+            "request_interval_seconds",
+            "remains_stale_hours",
+        ):
             if key in podsort:
                 podsort[key] = int(podsort[key])
         returns = dict(data.get("returns", {}))
@@ -721,8 +735,15 @@ class Settings:
             raise ValueError("returns.notification_bot must be set")
         podsort = self.podsort
         if (
-            min(podsort.history_days, podsort.days_per_run, podsort.refresh_minutes, podsort.retry_minutes) < 1
-            or podsort.settle_hours < 0
+            min(
+                podsort.history_days,
+                podsort.days_per_run,
+                podsort.refresh_minutes,
+                podsort.retry_minutes,
+                podsort.remains_stale_hours,
+            )
+            < 1
+            or min(podsort.settle_hours, podsort.request_interval_seconds) < 0
         ):
             raise ValueError("podsort: history_days, days_per_run, refresh and retry minutes must be positive")
         if not self.turnover.stock_slot_hours:

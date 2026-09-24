@@ -19,6 +19,10 @@ export function sellerProblem(state: PodsortSellerState, windowDays: number): st
       ? `остатки по складам WB не собираются: ${state.remains_error}`
       : "остатки по складам WB ещё не собирались — остаток принят за 0";
   }
+  if (state.remains_stale) {
+    const reason = state.remains_error ? ` (${state.remains_error})` : "";
+    return `остатки по складам WB давно не обновлялись${reason} — вычитается устаревший остаток`;
+  }
   return null;
 }
 

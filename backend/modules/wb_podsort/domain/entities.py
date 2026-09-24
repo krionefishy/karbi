@@ -7,6 +7,11 @@ MAX_COVER_DAYS = 90
 MONTHS_SHOWN = 3
 
 
+def one_decimal(value: float | None) -> float | None:
+    """Как среднее и дни покрытия показываются и на странице, и в книге."""
+    return round(value, 1) if value is not None else None
+
+
 @dataclass(frozen=True, slots=True)
 class PodsortSettings:
     """Как считать подсорт: окно продаж, на сколько дней везти и какие регионы в сводном листе."""

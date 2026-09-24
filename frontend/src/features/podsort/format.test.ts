@@ -12,6 +12,7 @@ const healthy: PodsortSellerState = {
   collected_at: "2026-09-24T06:00:00Z",
   collection_error: null,
   remains_at: "2026-09-24T06:00:00Z",
+  remains_stale: false,
   remains_error: null,
 };
 
@@ -25,6 +26,9 @@ describe("подсорт: подписи", () => {
     expect(sellerProblem({ ...healthy, window_days_loaded: 3 }, 7)).toContain("3 из 7");
     expect(sellerProblem({ ...healthy, remains_at: null }, 7)).toContain("остаток принят за 0");
     expect(sellerProblem({ ...healthy, collection_error: "HTTP 429" }, 7)).toContain("HTTP 429");
+    expect(sellerProblem({ ...healthy, remains_stale: true, remains_error: "нет доступа" }, 7)).toContain(
+      "устаревший остаток",
+    );
   });
 
   it("дни покрытия без продаж — прочерк, огромные — 100+", () => {

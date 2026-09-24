@@ -9,6 +9,7 @@ from backend.modules.wb_podsort.domain.entities import (
     PodsortRow,
     PodsortSettings,
     RegionFigures,
+    one_decimal,
 )
 from backend.modules.wb_podsort.domain.regions import (
     CENTRAL,
@@ -39,5 +40,6 @@ __all__ = [
     "guess_warehouse_region",
     "is_service_warehouse",
     "is_unplaced_warehouse",
+    "one_decimal",
     "order_region",
 ]

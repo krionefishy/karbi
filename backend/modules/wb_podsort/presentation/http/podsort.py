@@ -6,7 +6,13 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_podsort.application import XLSX_MEDIA_TYPE, PodsortQueryError, PodsortService, PodsortView
-from backend.modules.wb_podsort.domain import MAX_COVER_DAYS, TARGET_REGIONS, WINDOW_CHOICES, PodsortSettings
+from backend.modules.wb_podsort.domain import (
+    MAX_COVER_DAYS,
+    TARGET_REGIONS,
+    WINDOW_CHOICES,
+    PodsortSettings,
+    one_decimal,
+)
 from backend.modules.wb_podsort.presentation.http.schemas import (
     PodsortResponse,
     SellerStateResponse,
@@ -45,7 +51,6 @@ def podsort_response(view: PodsortView) -> PodsortResponse:
     for item in view.rows:
         figures = item.row.targets[view.region]
         info = item.row.info
-        cover = figures.cover(settings.window_days)
         rows.append(
             SummaryRowResponse(
                 seller_name=item.seller_name,
@@ -56,9 +61,9 @@ def podsort_response(view: PodsortView) -> PodsortResponse:
                 tech_size=info.tech_size,
                 need=item.need,
                 window_orders=figures.window_orders,
-                average=round(figures.average(settings.window_days), 2),
+                average=one_decimal(figures.average(settings.window_days)) or 0.0,
                 stock=figures.stock,
-                cover_days=round(cover, 1) if cover is not None else None,
+                cover_days=one_decimal(figures.cover(settings.window_days)),
             )
         )
     return PodsortResponse(
@@ -76,6 +81,7 @@ def podsort_response(view: PodsortView) -> PodsortResponse:
                 collected_at=_iso(state.collected_at),
                 collection_error=state.collection_error,
                 remains_at=_iso(state.remains_at),
+                remains_stale=state.remains_stale,
                 remains_error=state.remains_error,
             )
             for state in view.sellers

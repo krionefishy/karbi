@@ -96,6 +96,7 @@ class PodsortWorker:
             days_per_run=self.config.days_per_run,
             settle_hours=self.config.settle_hours,
             refresh_minutes=self.config.refresh_minutes,
+            request_interval_seconds=self.config.request_interval_seconds,
         )
 
     async def collect(self, seller_id: uuid.UUID, now: datetime) -> str | None:

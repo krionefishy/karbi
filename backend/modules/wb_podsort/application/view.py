@@ -17,6 +17,7 @@ class SellerState:
     collected_at: datetime | None
     collection_error: str | None
     remains_at: datetime | None
+    remains_stale: bool
     remains_error: str | None
 
 

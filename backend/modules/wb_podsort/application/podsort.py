@@ -65,6 +65,7 @@ class PodsortService:
         *,
         timezone: ZoneInfo,
         history_days: int,
+        remains_stale_hours: int = 24,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -72,6 +73,7 @@ class PodsortService:
         self.remains = RemainsMirror(session)
         self.timezone = timezone
         self.history_days = history_days
+        self.remains_stale = timedelta(hours=remains_stale_hours)
 
     async def overview(self) -> PodsortOverview:
         enrolled = {seller.id for seller in await self._enrolled()}
@@ -195,18 +197,31 @@ class PodsortService:
             )
             for name, quantity in warehouse_stock(snapshot.remains).items():
                 stock_by_warehouse[name] += quantity
-            sections.append(SellerSection(seller.name, rows, window_loaded, snapshot.collected_at))
+            history_from = min(loaded) if loaded else None
+            stale = snapshot.collected_at is not None and snapshot.collected_at < stamp - self.remains_stale
+            sections.append(
+                SellerSection(
+                    seller.name,
+                    rows,
+                    window_loaded,
+                    snapshot.collected_at,
+                    history_from=history_from,
+                    remains_stale=stale,
+                    remains_error=snapshot.error,
+                )
+            )
             row = tracked[seller.id]
             states.append(
                 SellerState(
                     seller_id=seller.id,
                     name=seller.name,
                     window_days_loaded=window_loaded,
-                    history_from=min(loaded) if loaded else None,
+                    history_from=history_from,
                     history_days_loaded=len(loaded),
                     collected_at=row.collected_at,
                     collection_error=row.collection_error,
                     remains_at=snapshot.collected_at,
+                    remains_stale=stale,
                     remains_error=snapshot.error,
                 )
             )

@@ -112,12 +112,18 @@ async def test_remains_that_never_get_ready_are_a_temporary_error() -> None:
     stub.on("GET", REMAINS, body={"data": {"taskId": "task-2"}})
     stub.on("GET", f"{REMAINS}/tasks/task-2/status", body={"data": {"status": "processing"}})
 
-    async def sleep(seconds: float) -> None:
-        return None
+    # Опрос статуса у шлюза идёт дольше паузы: срок считается по часам, а не по сумме пауз.
+    moment = [0.0]
 
-    client = WBWarehouseRemainsClient(make_gateway(), poll_seconds=5, max_wait_seconds=10, sleep=sleep)
+    async def sleep(seconds: float) -> None:
+        moment[0] += seconds + 20
+
+    client = WBWarehouseRemainsClient(
+        make_gateway(), poll_seconds=5, max_wait_seconds=60, sleep=sleep, clock=lambda: moment[0]
+    )
     with pytest.raises(WBTemporaryError):
         await client.remains(SELLER)
+    assert len(stub.requests_to(f"{REMAINS}/tasks/task-2/status")) == 4
 
 
 @respx.mock

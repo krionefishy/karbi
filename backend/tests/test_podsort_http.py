@@ -47,9 +47,11 @@ class FakeStatistics(WBPodsortStatisticsClient):
     def __init__(self) -> None:
         super().__init__(make_gateway())
         self.days: list[date] = []
+        self.sellers: set[str] = set()
 
     async def orders_on(self, seller_id: str, day: date) -> list[OrderLine]:
         self.days.append(day)
+        self.sellers.add(seller_id)
         drill = [
             OrderLine(DRILL, 1271611253, "KARBI - Шуруповерт", "Шуруповерты", "0", CENTRAL, fbs=index < 4)
             for index in range(9)
@@ -264,3 +266,32 @@ async def test_disconnecting_keeps_the_loaded_days(
     await PodsortWorker(application.database, statistics, SETTINGS).collect(seller, datetime.now(UTC))
     assert len(statistics.days) == 5
     assert min(statistics.days) < datetime.now(UTC).date() - timedelta(days=6)
+
+
+async def test_a_failing_cabinet_waits_before_the_next_attempt(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    assert (await client.post(AUTOMATION, json={"seller_id": str(seller)})).status_code == 201
+    async with application.database.session() as session:
+        podsort = PodsortRepository(session)
+        await podsort.record_attempt(seller, now=datetime.now(UTC))
+        await podsort.fail_collection(seller, "WB Statistics API отвечает HTTP 429")
+        await session.commit()
+    statistics = FakeStatistics()
+    worker = PodsortWorker(application.database, statistics, SETTINGS)
+
+    await worker.tick()
+    assert str(seller) not in statistics.sellers
+
+    # Пауза прошла — кабинет снова в очереди, удачный проход снимает ошибку.
+    later = PodsortWorker(
+        application.database,
+        statistics,
+        SETTINGS,
+        now=lambda: datetime.now(UTC) + timedelta(minutes=SETTINGS.podsort.retry_minutes + 1),
+    )
+    await later.tick()
+    assert str(seller) in statistics.sellers
+    async with application.database.session() as session:
+        tracked = await session.get(TrackedSellerModel, seller)
+    assert tracked is not None and tracked.collection_error is None

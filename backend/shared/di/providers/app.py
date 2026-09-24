@@ -468,6 +468,7 @@ class SessionProvider(Provider):
             podsort,
             timezone=ZoneInfo(settings.podsort.timezone),
             history_days=settings.podsort.history_days,
+            remains_stale_hours=settings.podsort.remains_stale_hours,
         )
 
     @provide(scope=Scope.REQUEST)

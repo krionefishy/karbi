@@ -25,6 +25,7 @@ class SellerStateResponse(BaseModel):
     collected_at: str | None
     collection_error: str | None
     remains_at: str | None
+    remains_stale: bool
     remains_error: str | None
 
 

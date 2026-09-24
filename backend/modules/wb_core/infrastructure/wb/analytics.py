@@ -1,4 +1,5 @@
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -124,11 +125,13 @@ class WBWarehouseRemainsClient(WBJsonClient):
         poll_seconds: float = 5.0,
         max_wait_seconds: float = 300.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__(gateway, priority=priority)
         self.poll_seconds = poll_seconds
         self.max_wait_seconds = max_wait_seconds
         self._sleep = sleep
+        self._clock = clock
 
     async def remains(self, seller_id: str) -> list[WarehouseRemain]:
         created = await self.request(
@@ -138,7 +141,9 @@ class WBWarehouseRemainsClient(WBJsonClient):
             params={"groupByBarcode": "true", "groupBySize": "true", "groupByNm": "true", "groupBySa": "true"},
         )
         task_id = self._task_id(created)
-        waited = 0.0
+        # Ждём по часам, а не по сумме пауз: шлюз разводит запросы аналитики на
+        # десятки секунд, и опрос статуса сам по себе идёт дольше паузы.
+        started = self._clock()
         while True:
             status = await self.request("GET", f"{self.path}/tasks/{task_id}/status", seller_id)
             state = self._status(status)
@@ -146,12 +151,11 @@ class WBWarehouseRemainsClient(WBJsonClient):
                 break
             if state in ("canceled", "purged"):
                 raise WBPermanentError(f"{self.api_name}: отчёт об остатках не сформирован (статус {state})")
-            if waited >= self.max_wait_seconds:
+            if self._clock() - started >= self.max_wait_seconds:
                 raise WBTemporaryError(
                     f"{self.api_name}: отчёт об остатках не готов за {int(self.max_wait_seconds)} с (статус {state})"
                 )
             await self._sleep(self.poll_seconds)
-            waited += self.poll_seconds
         payload = await self.request("GET", f"{self.path}/tasks/{task_id}/download", seller_id)
         if payload is None:
             return []

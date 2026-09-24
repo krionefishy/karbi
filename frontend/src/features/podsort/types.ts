@@ -22,6 +22,8 @@ export interface PodsortSellerState {
   collected_at: string | null;
   collection_error: string | null;
   remains_at: string | null;
+  /** Снимок остатков давно не обновлялся — вычитается устаревший остаток. */
+  remains_stale: boolean;
   remains_error: string | null;
 }
 

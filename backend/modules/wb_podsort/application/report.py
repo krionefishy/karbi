@@ -10,7 +10,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
-from backend.modules.wb_podsort.domain import REGIONS, PodsortRow, PodsortSettings
+from backend.modules.wb_podsort.domain import REGIONS, PodsortRow, PodsortSettings, one_decimal
 from backend.shared.exports import export_stem
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -73,6 +73,10 @@ class SellerSection:
     rows: Sequence[PodsortRow]
     window_days_loaded: int
     remains_at: datetime | None
+    # Первые сутки, которые удалось загрузить: месяц раньше них в книге неполный.
+    history_from: date | None = None
+    remains_stale: bool = False
+    remains_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,10 +109,6 @@ def month_title(month: date) -> str:
 
 def _stamp(moment: datetime | None) -> str:
     return moment.astimezone(MOSCOW).strftime("%d.%m.%Y %H:%M") if moment else "не собирались"
-
-
-def _cover(value: float | None) -> float | None:
-    return round(value, 1) if value is not None else None
 
 
 class PodsortWorkbook:
@@ -164,6 +164,12 @@ class PodsortWorkbook:
                 )
             if section.remains_at is None:
                 notes.append(f"{section.name}: остатки по складам WB ещё не собирались — остаток принят за 0.")
+            elif section.remains_stale:
+                reason = f" ({section.remains_error})" if section.remains_error else ""
+                notes.append(
+                    f"{section.name}: остатки по складам WB сняты {_stamp(section.remains_at)} и с тех пор "
+                    f"не обновлялись{reason} — вычтен устаревший остаток."
+                )
         return notes
 
     def _summary(self, sheet: Worksheet) -> None:
@@ -211,9 +217,9 @@ class PodsortWorkbook:
                         None,
                         None,
                         figures.window_orders,
-                        round(figures.average(self.context.settings.window_days), 1),
+                        one_decimal(figures.average(self.context.settings.window_days)),
                         figures.stock,
-                        _cover(figures.cover(self.context.settings.window_days)),
+                        one_decimal(figures.cover(self.context.settings.window_days)),
                     ]
                     for column, value in enumerate(values, start=1):
                         cell = sheet.cell(line, column, value)
@@ -243,7 +249,7 @@ class PodsortWorkbook:
             ("Баркод", 16),
             ("Артикул WB", 13),
             ("Размер", 8),
-            *[(month_title(month), 11) for month in context.months],
+            *[(self._month_header(month, section.history_from), 11) for month in context.months],
             ("14 дней", 9),
             ("7 дней", 9),
             (f"Ср. в день ({settings.window_days} дн.)", 10),
@@ -283,7 +289,7 @@ class PodsortWorkbook:
                 *row.month_orders,
                 row.orders_14,
                 row.orders_7,
-                round(row.average(settings.window_days), 1),
+                one_decimal(row.average(settings.window_days)),
                 row.window_fbs_orders,
                 *[row.month_by_region.get(region, 0) for region in REGIONS],
                 row.unplaced_stock,
@@ -339,6 +345,14 @@ class PodsortWorkbook:
             cell.alignment = WRAP
             if text in headings:
                 cell.font = BOLD
+
+    @staticmethod
+    def _month_header(month: date, history_from: date | None) -> str:
+        """Месяц, начало которого WB уже не отдаёт, подписан «с какого числа»: иначе его ноль — неправда."""
+        title = month_title(month)
+        if history_from is None:
+            return f"{title} (нет данных)"
+        return f"{title} (с {history_from:%d.%m})" if history_from > month else title
 
     @staticmethod
     def _sheet_title(name: str, taken: set[str]) -> str:

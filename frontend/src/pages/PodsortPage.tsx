@@ -77,8 +77,10 @@ export function PodsortPage() {
 
   const settingsMutation = useMutation({
     mutationFn: saveSettings,
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
       setDraft(null);
+      // Открытую вкладку могли убрать из регионов: иначе страница спросила бы сервер о регионе, которого нет.
+      if (region && !saved.regions.includes(region)) setRegion("");
       setActionError("");
       await refresh();
     },

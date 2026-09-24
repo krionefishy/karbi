@@ -1,4 +1,5 @@
 import io
+import uuid
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
@@ -109,6 +110,55 @@ def collection() -> CollectionService:
     )
 
 
+async def test_days_of_one_cabinet_are_spaced_by_the_statistics_limit() -> None:
+    pauses: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+
+    class Repository:
+        async def loaded_days(self, seller_id, since):
+            return {}
+
+        async def still_tracked(self, seller_id):
+            return True
+
+        async def replace_day(self, *args, **kwargs):
+            return None
+
+        async def prune(self, *args):
+            return None
+
+        async def clear_error(self, seller_id):
+            return None
+
+    class Session:
+        async def commit(self):
+            return None
+
+    class Client:
+        async def orders_on(self, seller_id, day):
+            return []
+
+    service = CollectionService(
+        Session(),  # type: ignore[arg-type]
+        Repository(),  # type: ignore[arg-type]
+        Client(),  # type: ignore[arg-type]
+        timezone=MOSCOW,
+        history_days=10,
+        days_per_run=3,
+        settle_hours=6,
+        refresh_minutes=60,
+        request_interval_seconds=61,
+        sleep=sleep,
+    )
+
+    result = await service.collect(uuid.uuid4(), now=datetime(2026, 9, 24, 10, 0, tzinfo=MOSCOW))
+
+    # Между сутками — пауза, перед первыми — нет: первый запрос кабинета не ждёт зря.
+    assert (result.days_loaded, result.remaining, pauses) == (3, 7, [61, 61])
+
+
 def test_missing_days_come_newest_first_and_unsettled_days_are_reread() -> None:
     now = datetime(2026, 9, 24, 10, 0, tzinfo=MOSCOW)
     service = collection()
@@ -188,20 +238,36 @@ def test_the_workbook_explains_the_subtraction_next_to_the_numbers() -> None:
     content = PodsortWorkbook(
         context,
         [
-            SellerSection("Байбурин", rows, 7, datetime(2026, 9, 24, 6, 0, tzinfo=UTC)),
+            SellerSection("Байбурин", rows, 7, datetime(2026, 9, 24, 6, 0, tzinfo=UTC), history_from=date(2026, 7, 26)),
             SellerSection("ИП Мунаева М.Л.", [], 3, None),
+            SellerSection(
+                "Саниев",
+                [],
+                7,
+                datetime(2026, 9, 21, 6, 0, tzinfo=UTC),
+                history_from=date(2026, 6, 26),
+                remains_stale=True,
+                remains_error="нет доступа к Аналитике",
+            ),
         ],
     ).build()
 
     book = load_workbook(io.BytesIO(content))
-    assert book.sheetnames == ["Подсорт 24.09.2026", "Подсорт Байбурин", "Подсорт ИП Мунаева М Л", "Как читать"]
+    assert book.sheetnames == [
+        "Подсорт 24.09.2026",
+        "Подсорт Байбурин",
+        "Подсорт ИП Мунаева М Л",
+        "Подсорт Саниев",
+        "Как читать",
+    ]
     summary = book["Подсорт 24.09.2026"]
-    notes = [summary.cell(line, 1).value or "" for line in range(1, 10)]
+    notes = [summary.cell(line, 1).value or "" for line in range(1, 12)]
     assert any("Остаток WB в регионе вычтен" in note for note in notes)
     assert any("Остаток нашего склада не учитывается" in note for note in notes)
     assert any("Неведомый склад" in note for note in notes)
     assert any("ИП Мунаева М.Л.: заказы загружены за 3 из 7" in note for note in notes)
     assert any("ИП Мунаева М.Л.: остатки по складам WB ещё не собирались" in note for note in notes)
+    assert any("Саниев: остатки по складам WB сняты 21.09.2026" in note and "Аналитике" in note for note in notes)
     values = [[cell.value for cell in row] for row in summary.iter_rows()]
     header = next(row for row in values if row[0] == "Кабинет")
     assert header[5] == "Расчёт системы"
@@ -210,5 +276,7 @@ def test_the_workbook_explains_the_subtraction_next_to_the_numbers() -> None:
     assert [(row[2], row[5], row[12]) for row in body] == [(SAW, 53, 0)]
     assert summary.cell(values.index(header) + 1, 6).comment is not None
     seller = book["Подсорт Байбурин"]
-    assert seller.cell(2, 6).value == "июль 2026"
+    # Начало июля WB уже не отдаёт — месяц подписан, с какого числа он посчитан.
+    assert (seller.cell(2, 6).value, seller.cell(2, 7).value) == ("июль 2026 (с 26.07)", "август 2026")
+    assert book["Подсорт Саниев"].cell(2, 6).value == "июль 2026"
     assert seller.cell(3, 3).value == DRILL

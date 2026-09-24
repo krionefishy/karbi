@@ -1,6 +1,7 @@
+import asyncio
 import uuid
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -57,6 +58,8 @@ class CollectionService:
         days_per_run: int,
         settle_hours: int,
         refresh_minutes: int,
+        request_interval_seconds: float = 0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.session = session
         self.podsort = podsort
@@ -66,6 +69,8 @@ class CollectionService:
         self.days_per_run = days_per_run
         self.settle = timedelta(hours=settle_hours)
         self.refresh = timedelta(minutes=refresh_minutes)
+        self.request_interval = request_interval_seconds
+        self._sleep = sleep
 
     def history_start(self, today: date) -> date:
         return today - timedelta(days=self.history_days)
@@ -101,7 +106,9 @@ class CollectionService:
         await self.session.commit()
 
         loaded = orders = 0
-        for day in batch:
+        for index, day in enumerate(batch):
+            if index and self.request_interval:
+                await self._sleep(self.request_interval)
             lines = await self.client.orders_on(seller_key, day)
             if not await self.podsort.still_tracked(seller_id):
                 await self.session.rollback()

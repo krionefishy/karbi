@@ -67,3 +67,6 @@ returns:
   pairing_ttl_minutes: 15
   code_alert_hour: 1
   install_silent_hours: 24
+podsort:
+  timezone: Europe/Moscow
+  request_interval_seconds: 0
