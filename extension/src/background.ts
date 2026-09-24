@@ -9,6 +9,10 @@ const HEARTBEAT_ALARM = "heartbeat";
 const COLLECT_ALARM = "collect";
 const RETRY_ALARM = "retry";
 const RETRY_MINUTES = 10;
+// Сайт продлевает токен сессии при загрузке страницы: перезагрузка вкладки раз в несколько
+// часов не даёт ему протухнуть от бездействия. Только фоновую вкладку — рабочую не трогаем.
+const KEEPALIVE_ALARM = "keepalive";
+const KEEPALIVE_HOURS = 3;
 const HEARTBEAT_MINUTES = 10;
 // Код меняется в полночь по Москве; второй заход днём — на случай, если ночью браузер спал.
 const COLLECT_HOURS_MSK = [0, 12];
@@ -34,6 +38,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void heartbeat();
   } else if (alarm.name === RETRY_ALARM) {
     void collect("retry");
+  } else if (alarm.name === KEEPALIVE_ALARM) {
+    void keepAlive();
   }
 });
 
@@ -60,6 +66,7 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, respond) => {
 
 async function scheduleAll(): Promise<void> {
   await chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: HEARTBEAT_MINUTES });
+  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: KEEPALIVE_HOURS * 60 });
   await scheduleCollect();
 }
 
@@ -234,6 +241,19 @@ async function fetchCodes(jwt: string, antibot: string | null): Promise<CodesRep
     if (response.ok) return last;
   }
   return last;
+}
+
+/** Освежить сессию: перезагрузить фоновую вкладку WB, чтобы сайт продлил токен. */
+async function keepAlive(): Promise<void> {
+  const settings = await loadSettings();
+  if (!settings.token) return;
+  const tab = await findWbTab();
+  if (tab?.id === undefined || tab.active) return;
+  try {
+    await chrome.tabs.reload(tab.id);
+  } catch {
+    /* вкладка могла закрыться — следующий раз через три часа */
+  }
 }
 
 /** Любая открытая вкладка www.wildberries.ru: запросы к своему домену оттуда те же, что с /lk/deliveries. */
