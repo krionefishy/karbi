@@ -11,11 +11,7 @@ SUBSCRIPTION_NO_TOKEN = "subscription.no_token"
 SUBSCRIPTION_STOPPED = "subscription.stopped"
 SUBSCRIPTION_NOTHING_TO_STOP = "subscription.nothing_to_stop"
 TURNOVER_DIGEST = "turnover.digest"
-RETURNS_READY = "returns.ready"
-RETURNS_TRANSIT = "returns.transit"
-RETURNS_REMINDER = "returns.reminder"
-RETURNS_CLAIMS = "returns.claims"
-RETURNS_CLAIM_DEADLINE = "returns.claim_deadline"
+RETURNS_DIGEST = "returns.digest"
 RETURNS_WELCOME = "returns.welcome"
 RETURNS_HELP = "returns.help"
 RETURNS_LIST = "returns.list"
@@ -23,9 +19,6 @@ RETURNS_CODE = "returns.code"
 RETURNS_EXTENSION = "returns.extension"
 RETURNS_NO_SUBSCRIPTION = "returns.no_subscription"
 RETURNS_UNKNOWN = "returns.unknown"
-RETURNS_CODE_MISSING = "returns.code_missing"
-RETURNS_NEEDS_LOGIN = "returns.needs_login"
-RETURNS_INSTALL_SILENT = "returns.install_silent"
 
 # Telegram accepts 4096 characters; a longer list is unreadable anyway.
 _DIGEST_LIMIT = 25
@@ -127,132 +120,47 @@ def _day(value: Any) -> str:
     return f"{day} {_MONTHS[month - 1]}"
 
 
-def _money(value: Any) -> str:
-    try:
-        amount = float(value)
-    except (TypeError, ValueError):
-        return str(value)
-    whole = f"{int(round(amount)):,}".replace(",", "\u202f")
-    return f"{whole} ₽"
+def _pieces(count: int) -> str:
+    return f"{count} шт."
 
 
-def _return_line(item: dict[str, Any]) -> str:
-    detail = str(item.get("return_type") or "")
-    reason = str(item.get("reason") or "")
-    if reason:
-        detail = f"{detail}, {reason}" if detail else reason
-    line = f"• {item.get('title') or 'товар'} · стикер {item.get('sticker') or '—'}"
-    return f"{line}\n  {detail}" if detail else line
-
-
-def _office_block(office: dict[str, Any], *, deadline: bool) -> list[str]:
-    count = int(office.get("count") or 0)
-    lines = [f"ПВЗ {office.get('address') or 'не указан'} — {count} {_plural(count, 'шт.', 'шт.', 'шт.')}"]
-    lines.extend(_return_line(item) for item in office.get("items") or [])
-    shown = len(office.get("items") or [])
-    if count > shown:
-        lines.append(f"  …и ещё {count - shown}")
-    if deadline:
-        lines.append(f"Бесплатно до {_day(office.get('free_until'))}, забрать до {_day(office.get('deadline'))}")
+def _office_lines(title: str, offices: list[dict[str, Any]], total: int) -> list[str]:
+    """«Готово к выдаче: 9 шт.» и адреса с количеством — и больше ничего."""
+    lines = [f"{title}: {_pieces(total)}"]
+    for office in offices[:30]:
+        lines.append(f"• {office.get('address') or 'адрес не указан'} — {_pieces(int(office.get('count') or 0))}")
+    if len(offices) > 30:
+        lines.append(f"…и ещё {len(offices) - 30} ПВЗ")
     return lines
 
 
-def _returns_ready(params: dict[str, Any]) -> str:
-    total = int(params.get("total") or 0)
-    lines = [
-        f"{params.get('seller_name', 'Магазин')}: {total} "
-        f"{_plural(total, 'возврат готов', 'возврата готовы', 'возвратов готовы')} к выдаче"
-    ]
-    for office in params.get("offices") or []:
-        lines.append("")
-        lines.extend(_office_block(office, deadline=True))
+def _code_line(name: str, params: dict[str, Any]) -> str:
     code = params.get("code")
     if code:
-        lines.append("")
-        lines.append(f"Код получения на {_day(params.get('code_date'))}: {code}")
-        if params.get("qr_url"):
-            lines.append(f"QR: {params['qr_url']}")
-    lines.append("")
-    lines.append(
-        f"Хранение в ПВЗ {params.get('storage_days', 7)} дн.: первые {params.get('free_days', 3)} бесплатно, "
-        "дальше 10 ₽ в день за штуку, потом товар уедет на утилизацию."
-    )
-    return "\n".join(lines)
+        return f"{name} — код для получения доставки: {code}"
+    if params.get("no_install"):
+        return f"{name} — кода нет: расширение не подключено (/extension)"
+    return f"{name} — кода на сегодня нет"
 
 
-def _returns_transit(params: dict[str, Any]) -> str:
-    total = int(params.get("total") or 0)
-    lines = [
-        f"{params.get('seller_name', 'Магазин')}: {total} "
-        f"{_plural(total, 'возврат едет', 'возврата едут', 'возвратов едут')} в ПВЗ"
-    ]
-    for office in params.get("offices") or []:
-        lines.append("")
-        lines.extend(_office_block(office, deadline=False))
-    lines.append("")
-    lines.append("Напишу, как только они будут готовы к выдаче.")
-    return "\n".join(lines)
-
-
-def _returns_reminder(params: dict[str, Any]) -> str:
-    total = int(params.get("total") or 0)
-    day = int(params.get("day") or 0)
-    free_days = int(params.get("free_days") or 3)
-    if day <= free_days:
-        headline = "с завтрашнего дня хранение платное, 10 ₽ в день за штуку"
-    else:
-        headline = "через два дня товар уедет на утилизацию"
-    lines = [
-        f"{params.get('seller_name', 'Магазин')}: {total} "
-        f"{_plural(total, 'возврат лежит', 'возврата лежат', 'возвратов лежат')} в ПВЗ уже {day} дн. — {headline}"
-    ]
-    for office in params.get("offices") or []:
-        lines.append("")
-        lines.extend(_office_block(office, deadline=True))
-    return "\n".join(lines)
-
-
-def _claim_line(claim: dict[str, Any]) -> str:
-    lines = [f"• {claim.get('name') or 'товар'} · {_money(claim.get('price'))}"]
-    comment = str(claim.get("comment") or "").strip()
-    if comment:
-        lines.append(f"  «{comment[:300]}»")
-    photos = list(claim.get("photos") or [])
-    if photos:
-        lines.append("  фото: " + " ".join(photos))
-    lines.append(f"  ответить до {_day(claim.get('deadline'))}")
-    return "\n".join(lines)
-
-
-def _returns_claims(params: dict[str, Any]) -> str:
-    total = int(params.get("total") or 0)
-    lines = [
-        f"{params.get('seller_name', 'Магазин')}: {total} "
-        f"{_plural(total, 'новая заявка', 'новые заявки', 'новых заявок')} на возврат"
-    ]
-    for claim in params.get("claims") or []:
-        lines.append("")
-        lines.append(_claim_line(claim))
-    lines.append("")
-    lines.append(
-        f"На ответ {params.get('review_days', 5)} дн.: без решения заявка одобрится сама. "
-        "Ответить можно в кабинете WB, раздел «Возвраты покупателей»."
-    )
-    return "\n".join(lines)
-
-
-def _returns_claim_deadline(params: dict[str, Any]) -> str:
-    total = int(params.get("total") or 0)
-    lines = [
-        f"{params.get('seller_name', 'Магазин')}: завтра истекает срок ответа по {total} "
-        f"{_plural(total, 'заявке', 'заявкам', 'заявкам')} на возврат"
-    ]
-    for claim in params.get("claims") or []:
-        lines.append("")
-        lines.append(_claim_line(claim))
-    lines.append("")
-    lines.append("Без ответа заявка одобрится автоматически.")
-    return "\n".join(lines)
+def _returns_digest(params: dict[str, Any]) -> str:
+    """Слот: код с QR, готовые и едущие по адресам, кто залежался, что не так с расширением."""
+    name = str(params.get("seller_name") or "Магазин")
+    blocks: list[list[str]] = [[_code_line(name, params)]]
+    ready_total = int(params.get("ready_total") or 0)
+    if ready_total:
+        blocks.append(_office_lines("Готово к выдаче", list(params.get("ready") or []), ready_total))
+    transit_total = int(params.get("transit_total") or 0)
+    if transit_total:
+        blocks.append(_office_lines("Едет в ПВЗ", list(params.get("transit") or []), transit_total))
+    overdue = int(params.get("overdue_total") or 0)
+    tail: list[str] = []
+    if overdue:
+        tail.append(f"Лежат дольше {params.get('free_days', 3)} дн.: {_pieces(overdue)} — хранение платное")
+    tail.extend(str(alert) for alert in params.get("alerts") or [])
+    if tail:
+        blocks.append(tail)
+    return "\n\n".join("\n".join(block) for block in blocks)
 
 
 _RETURNS_COMMANDS = (
@@ -268,12 +176,11 @@ def _returns_welcome(params: dict[str, Any]) -> str:
     sellers = [str(name) for name in params.get("sellers") or [] if name]
     shops = ", ".join(sellers) if sellers else "магазин"
     return (
-        f"Буду присылать возвраты по {shops}: когда товар приедет в ПВЗ и будет готов к выдаче, "
-        "сколько дней осталось до платного хранения, и заявки покупателей на возврат.\n\n"
-        "Чтобы забирать возвраты по QR прямо из этого чата, нужно ещё два шага:\n"
+        f"Буду присылать возвраты по {shops}: в 9:00, 12:00, 15:00 и 18:00 — код получения с QR и адреса ПВЗ, "
+        "где что готово к выдаче. Если ничего не изменилось, молчу.\n\n"
+        "Чтобы код приходил сюда, нужно ещё два шага:\n"
         "1. Поставьте расширение в браузер, где открыт профиль покупателя владельца кабинета — /extension.\n"
-        "2. Введите в расширении код из бота. После этого код получения будет приходить вместе с уведомлением "
-        "и по команде /qr.\n\n"
+        "2. Введите в расширении код из бота.\n\n"
         f"Команды:\n{_RETURNS_COMMANDS}"
     )
 
@@ -292,27 +199,24 @@ def _returns_help(_: dict[str, Any]) -> str:
 def _returns_list(params: dict[str, Any]) -> str:
     blocks: list[str] = []
     for seller in params.get("sellers") or []:
-        ready = int(seller.get("ready_total") or 0)
-        transit = int(seller.get("transit_total") or 0)
-        claims = int(seller.get("open_claims") or 0)
-        head = f"{seller.get('name') or 'Магазин'}: готово {ready}, едет {transit}"
-        if claims:
-            head += f", {claims} {_plural(claims, 'открытая заявка', 'открытые заявки', 'открытых заявок')}"
-        lines = [head]
-        for office in seller.get("offices") or []:
-            lines.append("")
-            lines.extend(_office_block(office, deadline=True))
+        name = str(seller.get("name") or "Магазин")
+        ready_total = int(seller.get("ready_total") or 0)
+        transit_total = int(seller.get("transit_total") or 0)
+        lines = [name]
+        if ready_total:
+            lines.extend(_office_lines("Готово к выдаче", list(seller.get("ready") or []), ready_total))
+        if transit_total:
+            lines.extend(_office_lines("Едет в ПВЗ", list(seller.get("transit") or []), transit_total))
+        if not ready_total and not transit_total:
+            lines.append("Активных возвратов нет.")
         blocks.append("\n".join(lines))
-    if not blocks:
-        return "Активных возвратов нет."
-    return "\n\n".join(blocks)
+    return "\n\n".join(blocks) if blocks else "Активных возвратов нет."
 
 
 def _returns_code(params: dict[str, Any]) -> str:
     """Код дня одного магазина; с картинкой этот текст становится её подписью (до 1024 знаков)."""
     name = str(params.get("name") or "Магазин")
-    code = params.get("code")
-    if not code:
+    if not params.get("code"):
         if params.get("no_install"):
             return (
                 f"{name}: расширение не подключено, кода нет. Поставьте его по /extension "
@@ -324,26 +228,12 @@ def _returns_code(params: dict[str, Any]) -> str:
                 "Обычно это несколько минут; если браузер с расширением выключен, код не придёт."
             )
         return f"{name}: кода на сегодня нет."
-    lines = [
-        f"{name} — код для получения доставки: {code}",
-        f"Действует {_day(params.get('date'))}, один на все выдачи.",
-    ]
     offices = list(params.get("offices") or [])
+    lines = [_code_line(name, params), ""]
     if offices:
-        lines.append("")
-        lines.append("Готово к выдаче в ПВЗ:")
-        for office in offices[:20]:
-            count = int(office.get("count") or 0)
-            lines.append(
-                f"• {office.get('address') or 'адрес не указан'} — {count} {_plural(count, 'шт.', 'шт.', 'шт.')}"
-            )
-        if len(offices) > 20:
-            lines.append(f"…и ещё {len(offices) - 20} ПВЗ, весь список — /returns")
+        lines.extend(_office_lines("Готово к выдаче", offices, sum(int(o.get("count") or 0) for o in offices)))
     else:
-        lines.append("")
-        lines.append("Готовых к выдаче возвратов по отчёту WB пока нет.")
-    if params.get("qr_url") and not params.get("qr"):
-        lines.append(f"QR: {params['qr_url']}")
+        lines.append("Готовых к выдаче возвратов нет.")
     return "\n".join(lines)
 
 
@@ -358,7 +248,7 @@ def _returns_extension(params: dict[str, Any]) -> str:
         "«Режим разработчика» и нажмите «Загрузить распакованное расширение», выберите папку.",
         "3. В том же браузере войдите на wildberries.ru под телефоном владельца кабинета. Если это Dolphin или "
         "другой антидетект-браузер, оставьте вкладку wildberries.ru открытой: новые вкладки они расширению не дают.",
-        f"4. Откройте настройки расширения и введите код (действует {ttl} мин.):",
+        f"4. Откройте настройки расширения (адрес сервиса уже подставлен) и введите код (действует {ttl} мин.):",
     ]
     for item in codes:
         lines.append(f"   {item.get('name') or 'магазин'}: {item.get('code')}")
@@ -368,31 +258,6 @@ def _returns_extension(params: dict[str, Any]) -> str:
         "отдаёт боту; если сессия слетит, напишу сюда."
     )
     return "\n".join(lines)
-
-
-def _returns_code_missing(params: dict[str, Any]) -> str:
-    return (
-        f"{params.get('seller_name', 'Магазин')}: расширение не прислало код получения на {_day(params.get('date'))}. "
-        "Проверьте, что браузер с расширением включён и на wildberries.ru выполнен вход. "
-        "Команда /qr попросит код ещё раз."
-    )
-
-
-def _returns_needs_login(params: dict[str, Any]) -> str:
-    browser = str(params.get("browser") or "браузере")
-    return (
-        f"{params.get('seller_name', 'Магазин')}: на wildberries.ru слетел вход в профиль владельца ({browser}). "
-        "Войдите заново в том же браузере — расширение продолжит само."
-    )
-
-
-def _returns_install_silent(params: dict[str, Any]) -> str:
-    browser = str(params.get("browser") or "браузер")
-    return (
-        f"{params.get('seller_name', 'Магазин')}: расширение ({browser}) молчит больше {params.get('hours', 24)} ч., "
-        f"последний раз выходило на связь {_day(params.get('last_seen_at'))}. Кода получения без него не будет: "
-        "включите браузер или подключите расширение заново по /extension."
-    )
 
 
 def _returns_no_subscription(_: dict[str, Any]) -> str:
@@ -415,11 +280,7 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_STOPPED: _stopped,
     SUBSCRIPTION_NOTHING_TO_STOP: _nothing_to_stop,
     TURNOVER_DIGEST: _turnover_digest,
-    RETURNS_READY: _returns_ready,
-    RETURNS_TRANSIT: _returns_transit,
-    RETURNS_REMINDER: _returns_reminder,
-    RETURNS_CLAIMS: _returns_claims,
-    RETURNS_CLAIM_DEADLINE: _returns_claim_deadline,
+    RETURNS_DIGEST: _returns_digest,
     RETURNS_WELCOME: _returns_welcome,
     RETURNS_HELP: _returns_help,
     RETURNS_LIST: _returns_list,
@@ -427,9 +288,6 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     RETURNS_EXTENSION: _returns_extension,
     RETURNS_NO_SUBSCRIPTION: _returns_no_subscription,
     RETURNS_UNKNOWN: _returns_unknown,
-    RETURNS_CODE_MISSING: _returns_code_missing,
-    RETURNS_NEEDS_LOGIN: _returns_needs_login,
-    RETURNS_INSTALL_SILENT: _returns_install_silent,
 }
 
 
@@ -450,20 +308,18 @@ def _qr_photo(qr: Any, caption: str) -> dict[str, Any] | None:
     return {"kind": "photo", "png_base64": base64.b64encode(buffer.getvalue()).decode(), "caption": caption[:1024]}
 
 
-def _returns_ready_photo(params: dict[str, Any]) -> dict[str, Any] | None:
-    caption = f"Код получения на {_day(params.get('code_date'))}: {params.get('code') or ''}".strip(": ")
-    return _qr_photo(params.get("qr"), caption)
+def _returns_digest_photo(params: dict[str, Any]) -> dict[str, Any] | None:
+    return _qr_photo(params.get("qr"), _code_line(str(params.get("seller_name") or ""), params).strip(" —"))
 
 
 def _returns_code_photo(params: dict[str, Any]) -> dict[str, Any] | None:
-    caption = f"{params.get('name') or ''} — код для получения доставки: {params.get('code') or ''}"
-    return _qr_photo(params.get("qr"), caption.strip(" —:"))
+    return _qr_photo(params.get("qr"), _code_line(str(params.get("name") or ""), params).strip(" —"))
 
 
 # Картинка рядом с текстом. Рисуется при постановке в очередь, чтобы доставка
 # не зависела от библиотеки; строка QR — секрет дня, картинка живёт в нашей базе.
 ATTACHMENTS: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
-    RETURNS_READY: _returns_ready_photo,
+    RETURNS_DIGEST: _returns_digest_photo,
     RETURNS_CODE: _returns_code_photo,
 }
 

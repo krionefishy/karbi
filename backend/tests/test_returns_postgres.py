@@ -198,8 +198,7 @@ def notifications(session: AsyncSession) -> NotificationService:
         extension(session),
         bot_code=BOT,
         timezone=MOSCOW,
-        digest_hour=9,
-        digest_minute=0,
+        notify_hours=(9, 12, 15, 18),
     )
 
 
@@ -257,43 +256,51 @@ async def test_open_claim_gone_from_open_list_is_archived(database: Database, se
     assert [str(row.claim_id) for row in open_now] == [second]
 
 
-async def test_notifications_sent_once_and_by_schedule(database: Database, seller: uuid.UUID) -> None:
+async def test_digest_goes_out_once_per_slot_and_only_when_something_changed(
+    database: Database, seller: uuid.UUID
+) -> None:
     ready_at = NOW - timedelta(days=3, minutes=1)
-    claim_id = str(uuid.uuid4())
-    await collect(
-        database,
-        seller,
-        [item(1, ready=ready_at), item(2, "В пути в пвз")],
-        [claim(claim_id, created=NOW - timedelta(days=4, minutes=1))],
-    )
+    await collect(database, seller, [item(1, ready=ready_at), item(2, "В пути в пвз")])
+    # 09:00 МСК — первый слот: готовый, едущий и залежавшийся в одном сообщении.
     async with database.session() as session:
         report = await notifications(session).notify(seller, now=NOW)
         sent = await outbox_templates(session, seller)
-    # 09:00 МСК: готовый возврат, дайджест по едущему, напоминание на третий день.
-    # О заявке, даже за сутки до автоодобрения, бот молчит.
-    assert (report.ready, report.transit, report.reminders) == (1, 1, 1)
-    assert sorted(sent) == sorted(["returns.ready", "returns.transit", "returns.reminder"])
+    assert (report.digest, report.ready, report.transit, report.overdue) == (1, 1, 1, 1)
+    assert sent == ["returns.digest"]
+    async with database.session() as session:
+        [event] = await session.scalars(select(OutboxEventModel).where(OutboxEventModel.aggregate_id == seller))
+    params = event.payload["params"]
+    assert (params["ready_total"], params["transit_total"], params["overdue_total"]) == (1, 1, 1)
+    assert params["ready"] == [{"address": "посёлок Развилка 52к1", "count": 1}]
+    assert "code" in params and params["no_install"] is True
 
+    # Тот же слот через 10 минут и следующий слот без изменений — тишина.
     async with database.session() as session:
         again = await notifications(session).notify(seller, now=NOW + timedelta(minutes=10))
-        logged = await session.scalars(select(NotificationLogModel).where(NotificationLogModel.seller_id == seller))
-    assert again.sent == 0
-    assert sorted(row.kind for row in logged) == ["ready", "reminder", "transit"]
-
-    # Второй день хранения без нового статуса — тихо; пятый — напоминание про утилизацию.
     async with database.session() as session:
-        fifth = await notifications(session).notify(seller, now=ready_at + timedelta(days=5, minutes=1))
-    assert (fifth.reminders, fifth.ready) == (1, 0)
+        noon = await notifications(session).notify(seller, now=NOW + timedelta(hours=3))
+    assert (again.sent, noon.sent) == (0, 0)
+    async with database.session() as session:
+        logged = await session.scalars(select(NotificationLogModel).where(NotificationLogModel.seller_id == seller))
+    assert sorted(row.kind for row in logged) == ["overdue", "ready", "slot", "slot", "transit"]
+
+    # Новый готовый возврат — в ближайший слот, между слотами ничего.
+    await collect(database, seller, [item(1, ready=ready_at), item(2, "Готов к выдаче")], now=NOW + timedelta(hours=4))
+    async with database.session() as session:
+        between = await notifications(session).notify(seller, now=NOW + timedelta(hours=4))
+    async with database.session() as session:
+        afternoon = await notifications(session).notify(seller, now=NOW + timedelta(hours=6))
+    assert (between.sent, afternoon.sent, afternoon.ready) == (0, 1, 1)
 
 
-async def test_digest_waits_for_its_hour(database: Database, seller: uuid.UUID) -> None:
+async def test_nothing_before_the_first_slot(database: Database, seller: uuid.UUID) -> None:
     await collect(database, seller, [item(2, "В пути в пвз")])
     async with database.session() as session:
         early = await notifications(session).notify(seller, now=NOW - timedelta(hours=1))
-    assert early.transit == 0
+    assert early.sent == 0
     async with database.session() as session:
         on_time = await notifications(session).notify(seller, now=NOW)
-    assert on_time.transit == 1
+    assert on_time.sent == 1
 
 
 async def test_missing_bot_leaves_no_trace(database: Database, seller: uuid.UUID) -> None:
@@ -350,8 +357,8 @@ async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UU
         ]
         assert replies[0]["audience"] == {"type": "chat", "chat_id": chat}
         summary = replies[0]["params"]["sellers"][0]
-        assert (summary["ready_total"], summary["transit_total"], summary["open_claims"]) == (1, 1, 1)
-        assert summary["offices"][0]["address"] == "посёлок Развилка 52к1"
+        assert (summary["ready_total"], summary["transit_total"]) == (1, 1)
+        assert summary["ready"] == [{"address": "посёлок Развилка 52к1", "count": 1}]
         # Расширения нет — кода нет, и бот говорит, где его взять.
         assert replies[1]["params"] == {"name": "ИП Возвраты", "date": "2026-09-22", "code": None, "no_install": True}
     finally:
@@ -441,8 +448,8 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
                 .where(OutboxEventModel.aggregate_id == seller)
                 .order_by(OutboxEventModel.created_at)
             )
-            ready = [row.payload for row in sent if row.payload["template"] == "returns.ready"]
-        assert report.ready == 1 and ready[0]["params"]["code"] == "412" and ready[0]["params"]["qr"] == "WB|412|xyz"
+            digests = [row.payload for row in sent if row.payload["template"] == "returns.digest"]
+        assert report.sent == 1 and digests[0]["params"]["code"] == "412" and digests[0]["params"]["qr"] == "WB|412|xyz"
 
         # Отзыв установки: токен перестаёт работать.
         async with database.session() as session:
@@ -468,13 +475,16 @@ async def test_extension_alerts_fire_once_a_day(database: Database, seller: uuid
     async with database.session() as session:
         install = await extension(session).authenticate(paired.token, now=NOW)
         await extension(session).heartbeat(install, state="needs_login", error="login page", now=NOW)
-    # 09:00 МСК без кода на сегодня, сессия слетела: две тревоги, и только один раз.
+    # 09:00 МСК без кода на сегодня, сессия слетела: обе строки в одном сообщении, и только раз.
     async with database.session() as session:
         first = await notifications(session).notify(seller, now=NOW)
     async with database.session() as session:
-        second = await notifications(session).notify(seller, now=NOW + timedelta(minutes=10))
-    assert (first.extension, second.extension) == (2, 0)
-    # Через сутки молчания — тревога про установку (и снова про код на новый день).
+        noon = await notifications(session).notify(seller, now=NOW + timedelta(hours=3))
+    assert (first.sent, first.alerts, noon.sent) == (1, 2, 0)
+    async with database.session() as session:
+        [event] = await session.scalars(select(OutboxEventModel).where(OutboxEventModel.aggregate_id == seller))
+    assert len(event.payload["params"]["alerts"]) == 2
+    # Через сутки молчания — снова про код на новый день, вход и теперь про молчание.
     async with database.session() as session:
         later = await notifications(session).notify(seller, now=NOW + timedelta(days=1, hours=1))
-    assert later.extension == 3
+    assert (later.sent, later.alerts) == (1, 3)

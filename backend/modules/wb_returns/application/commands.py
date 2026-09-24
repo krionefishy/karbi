@@ -6,7 +6,7 @@
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.notifications.domain import COMMAND_START, CommandEvent
 from backend.modules.wb_returns.application.extension import ExtensionService
 from backend.modules.wb_returns.application.outbox import publish_chat_message
-from backend.modules.wb_returns.domain import FREE_STORAGE_DAYS, RETURN_READY, RETURN_TRANSIT, STORAGE_DAYS
+from backend.modules.wb_returns.domain import RETURN_READY, RETURN_TRANSIT
 from backend.modules.wb_returns.infrastructure.postgres import ReturnModel, ReturnsRepository
 
 TEMPLATE_WELCOME = "returns.welcome"
@@ -88,41 +88,19 @@ class CommandService:
                     "name": seller_name,
                     "ready_total": len(ready),
                     "transit_total": len(transit),
-                    "other_total": len(active) - len(ready) - len(transit),
-                    "offices": self._offices(ready),
-                    "open_claims": len(await self.returns.open_claims(seller_id)),
+                    "ready": self._by_office(ready),
+                    "transit": self._by_office(transit),
                 }
             )
         return summary
 
-    def _offices(self, items: list[ReturnModel]) -> list[dict]:
-        grouped: dict[str, list[ReturnModel]] = {}
+    @staticmethod
+    def _by_office(items: list[ReturnModel]) -> list[dict]:
+        counts: dict[str, int] = {}
         for item in items:
-            grouped.setdefault(item.dst_office_address or "ПВЗ не указан", []).append(item)
-        offices = []
-        for address, rows in sorted(grouped.items()):
-            ready_at = min((row.ready_to_return_dt or row.status_changed_at) for row in rows)
-            offices.append(
-                {
-                    "address": address,
-                    "count": len(rows),
-                    "free_until": (ready_at + timedelta(days=FREE_STORAGE_DAYS))
-                    .astimezone(self.timezone)
-                    .date()
-                    .isoformat(),
-                    "deadline": (ready_at + timedelta(days=STORAGE_DAYS)).astimezone(self.timezone).date().isoformat(),
-                    "items": [
-                        {
-                            "title": self.returns.to_item(row).title,
-                            "sticker": row.sticker_id or str(row.shk_id),
-                            "return_type": row.return_type,
-                            "reason": row.reason,
-                        }
-                        for row in rows[:ITEMS_LIMIT]
-                    ],
-                }
-            )
-        return offices
+            address = item.dst_office_address or "адрес не указан"
+            counts[address] = counts.get(address, 0) + 1
+        return [{"address": address, "count": count} for address, count in sorted(counts.items())]
 
     async def _pairing(self, event: CommandEvent, now: datetime) -> dict:
         codes = []

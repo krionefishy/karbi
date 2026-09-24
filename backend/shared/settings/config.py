@@ -384,9 +384,8 @@ class ReturnsConfig:
     report_backfill_days: int = 31
     # Архив заявок большой и меняется только решениями продавца.
     claims_archive_hours: int = 6
-    # Утренний дайджест того, что едет в ПВЗ.
-    digest_hour: int = 9
-    digest_minute: int = 0
+    # Слоты, в которые уходит накопившееся: не чаще четырёх раз в день, и только если есть что сказать.
+    notify_hours: tuple[int, ...] = (9, 12, 15, 18)
     notification_bot: str = "wb-returns"
     # Сколько закрытых возвратов и заявок показывать в истории на странице.
     history_limit: int = 300
@@ -582,8 +581,6 @@ class Settings:
             "report_window_days",
             "report_backfill_days",
             "claims_archive_hours",
-            "digest_hour",
-            "digest_minute",
             "history_limit",
             "pairing_ttl_minutes",
             "code_alert_hour",
@@ -591,6 +588,8 @@ class Settings:
         ):
             if key in returns:
                 returns[key] = int(returns[key])
+        if "notify_hours" in returns:
+            returns["notify_hours"] = tuple(int(hour) for hour in returns["notify_hours"])
         telegram = dict(data.get("telegram", {}))
         for key in (
             "poll_timeout_seconds",
@@ -729,8 +728,10 @@ class Settings:
             )
         if returns.report_backfill_days > 31 or returns.report_window_days > 31:
             raise ValueError("returns.report_window_days and report_backfill_days must not exceed 31 (WB limit)")
-        if not 0 <= returns.digest_hour <= 23 or not 0 <= returns.digest_minute <= 59:
-            raise ValueError("returns.digest_hour must be 0..23 and digest_minute 0..59")
+        if not returns.notify_hours or any(not 0 <= hour <= 23 for hour in returns.notify_hours):
+            raise ValueError("returns.notify_hours must contain hours between 0 and 23")
+        if len(set(returns.notify_hours)) != len(returns.notify_hours):
+            raise ValueError("returns.notify_hours must not repeat an hour")
         if not returns.notification_bot:
             raise ValueError("returns.notification_bot must be set")
         podsort = self.podsort

@@ -106,8 +106,7 @@ returns:
   report_window_days: 14
   report_backfill_days: 31
   claims_archive_hours: 6
-  digest_hour: ${RETURNS_DIGEST_HOUR:-9}
-  digest_minute: 0
+  notify_hours: [9, 12, 15, 18]
   notification_bot: ${RETURNS_NOTIFICATION_BOT:-wb-returns}
   history_limit: 300
   public_base_url: https://${PUBLIC_DOMAIN:-localhost}

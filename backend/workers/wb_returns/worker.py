@@ -119,8 +119,7 @@ class ReturnsWorker:
                     extension_service(session, self.settings),
                     bot_code=self.config.notification_bot,
                     timezone=self.timezone,
-                    digest_hour=self.config.digest_hour,
-                    digest_minute=self.config.digest_minute,
+                    notify_hours=self.config.notify_hours,
                     code_alert_hour=self.config.code_alert_hour,
                     install_silent_hours=self.config.install_silent_hours,
                 )
@@ -134,7 +133,8 @@ class ReturnsWorker:
                 seller_id=str(seller_id),
                 ready=report.ready,
                 transit=report.transit,
-                reminders=report.reminders,
+                overdue=report.overdue,
+                alerts=report.alerts,
             )
         return report.sent
 
