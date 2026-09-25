@@ -12,6 +12,7 @@ from collections.abc import Sequence
 
 import pypdfium2 as pdfium
 import zxingcpp
+from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 
@@ -43,7 +44,8 @@ def _open(data: bytes) -> PdfReader:
 def _qr_codes(document: pdfium.PdfDocument, index: int) -> set[str]:
     page = document[index]
     try:
-        image = page.render(scale=RENDER_SCALE, grayscale=True).to_pil()
+        # to_pil тянет Pillow лениво; явный тип держит её в зависимостях сервиса.
+        image: Image.Image = page.render(scale=RENDER_SCALE, grayscale=True).to_pil()
     finally:
         page.close()
     found = zxingcpp.read_barcodes(image)
