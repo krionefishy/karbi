@@ -54,3 +54,22 @@ describe("обновление сессии", () => {
     expect(await tokenInUse()).toBe("Bearer live-token");
   });
 });
+
+describe("тип тела запроса", () => {
+  async function contentType(body: BodyInit): Promise<string | null> {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await apiRequest("/api/v1/probe", { method: "POST", body });
+    return new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers).get("Content-Type");
+  }
+
+  it("JSON по умолчанию", async () => {
+    expect(await contentType(JSON.stringify({ a: 1 }))).toBe("application/json");
+  });
+
+  it("файлы уходят без типа — границу multipart ставит браузер", async () => {
+    const body = new FormData();
+    body.append("stickers", new Blob(["%PDF"]), "a.pdf");
+    expect(await contentType(body)).toBeNull();
+  });
+});

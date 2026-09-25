@@ -28,7 +28,8 @@ async function send(path: string, init?: RequestInit): Promise<Response> {
   headers.set("Accept", "application/json");
   // JSON по умолчанию, но не поверх явно заданного: выгрузка 1С уезжает
   // текстом, и подменять ей тип нельзя.
-  if (init?.body && !headers.has("Content-Type")) {
+  // Файлы (FormData) — без типа: границу multipart браузер подставит сам.
+  if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   if (accessToken) {
@@ -85,12 +86,12 @@ function filenameFromDisposition(header: string | null): string | null {
   return header.match(/filename="?([^";]+)"?/i)?.[1] ?? null;
 }
 
-export async function apiDownload(path: string): Promise<FileDownload> {
-  let response = await send(path);
+export async function apiDownload(path: string, init?: RequestInit): Promise<FileDownload> {
+  let response = await send(path, init);
   if (response.status === 401) {
     try {
       await refreshAccessToken();
-      response = await send(path);
+      response = await send(path, init);
     } catch (error) {
       if (isSessionGone(error)) setAccessToken(null);
       throw error;

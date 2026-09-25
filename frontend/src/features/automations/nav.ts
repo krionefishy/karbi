@@ -4,6 +4,7 @@ import {
   Grid3x3,
   MessagesSquare,
   MessageSquareText,
+  Package,
   ReceiptText,
   Truck,
   Undo2,
@@ -30,6 +31,7 @@ export const automationNav: AutomationNavItem[] = [
   { id: "wb-review-chats", title: "Чаты после отзыва", icon: MessagesSquare },
   { id: "wb-returns", title: "Возвраты WB", icon: Undo2 },
   { id: "wb-podsort", title: "Подсорт WB", icon: Truck },
+  { id: "wb-box-stickers", title: "Стикеры коробов", icon: Package },
 ];
 
 export function automationIcon(id: string): LucideIcon {
