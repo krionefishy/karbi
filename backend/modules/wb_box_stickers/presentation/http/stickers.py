@@ -1,7 +1,7 @@
 import urllib.parse
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, File, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_box_stickers.application import (
@@ -84,11 +84,10 @@ async def build_stickers(
     service: FromDishka[BoxStickerService],
     workbook: UploadFile = File(...),
     stickers: UploadFile = File(...),
-    stamp: bool = Query(True),
 ) -> Response:
     """PDF в порядке строк Excel; при любом расхождении — 422 со списком проблем."""
     try:
-        plan, data = await service.build(await _read(workbook, "Excel"), await _read(stickers, "PDF"), stamp=stamp)
+        plan, data = await service.build(await _read(workbook, "Excel"), await _read(stickers, "PDF"))
     except StickerInputError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
     except StickerBuildError as error:

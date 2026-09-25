@@ -1,39 +1,25 @@
-"""PDF со стикерами коробов: прочитать, переставить, подписать и перепроверить.
+"""PDF со стикерами коробов: прочитать, переставить и перепроверить.
 
-Страницы WB не перерисовываются — переставляются целиком, поэтому QR остаётся
-тем, что выдал WB. Подпись ложится отдельным слоем в свободный левый нижний
-угол стикера. Готовый файл читается заново тем же разбором, что и исходный:
-не сошёлся хоть один стикер — файл не отдаётся.
+Страницы WB не перерисовываются и ничем не дополняются — переставляются
+целиком, поэтому стикер остаётся ровно тем, что выдал WB. Готовый файл
+читается заново тем же разбором, что и исходный: не сошёлся хоть один
+стикер — файл не отдаётся.
 """
 
 import io
 import re
 from collections.abc import Sequence
-from pathlib import Path
 
 import pypdfium2 as pdfium
 import zxingcpp
 from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.pdfgen import canvas
 
 from backend.modules.wb_box_stickers.domain import MatchedBox, StickerInputError, StickerPage
 
 MAX_PAGES = 2000
 # QR на стикере крупный: 150 dpi читаются без промахов и вдвое быстрее 300.
 RENDER_SCALE = 150 / 72
-FONT_NAME = "WbBoxStickersBold"
-FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "DejaVuSans-Bold.ttf"
-FONT_SIZE = 8.5
-LINE_HEIGHT = 10.0
-# Свободный угол стикера WB 75×120 мм: под строкой «Продавец», левее малого QR.
-# Доли, а не пункты: если WB поменяет размер стикера, область поедет вместе с ним.
-AREA_LEFT = 0.047
-AREA_RIGHT = 0.68
-AREA_BOTTOM = 0.03
-AREA_TOP = 0.19
 
 SHK_LINE = re.compile(r"^[\d ]{5,}$")
 QUANTITY = re.compile(r"Кол-во товаров:\s*(\d+)")
@@ -96,66 +82,12 @@ def read_stickers(data: bytes) -> list[StickerPage]:
         document.close()
 
 
-def _font() -> str:
-    if FONT_NAME not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(FONT_NAME, str(FONT_PATH)))
-    return FONT_NAME
-
-
-def _fit(text: str, font: str, width: float) -> str:
-    if pdfmetrics.stringWidth(text, font, FONT_SIZE) <= width:
-        return text
-    while text and pdfmetrics.stringWidth(text + "…", font, FONT_SIZE) > width:
-        text = text[:-1]
-    return text + "…"
-
-
-def label_lines(box: MatchedBox, total: int, max_lines: int) -> list[str]:
-    """Что допечатать на стикер: место в очереди и содержимое, самое нужное — сверху."""
-    lines = [f"№ {box.position} из {total} · {box.quantity} шт"]
-    items = list(box.items)
-    room = max_lines - 1
-    shown = items if len(items) <= room else items[: max(room - 1, 0)]
-    for item in shown:
-        name = item.vendor_code or item.barcode
-        size = f" ({item.tech_size})" if item.tech_size and item.tech_size != "0" else ""
-        lines.append(f"{name}{size} × {item.quantity}")
-    if len(shown) < len(items):
-        lines.append(f"+ ещё {len(items) - len(shown)} поз. — см. Excel")
-    return lines[:max_lines]
-
-
-def _overlay(boxes: Sequence[MatchedBox], sizes: Sequence[tuple[float, float]]) -> PdfReader:
-    """Все подписи одним PDF: шрифт встраивается один раз, а не в каждую страницу."""
-    font = _font()
-    buffer = io.BytesIO()
-    sheet = canvas.Canvas(buffer, pagesize=sizes[0])
-    for box, (width, height) in zip(boxes, sizes, strict=True):
-        sheet.setPageSize((width, height))
-        left, right = width * AREA_LEFT, width * AREA_RIGHT
-        top, bottom = height * AREA_TOP, height * AREA_BOTTOM
-        max_lines = max(int((top - bottom) // LINE_HEIGHT), 1)
-        sheet.setFont(font, FONT_SIZE)
-        y = top - FONT_SIZE
-        for line in label_lines(box, len(boxes), max_lines):
-            sheet.drawString(left, y, _fit(line, font, right - left))
-            y -= LINE_HEIGHT
-        sheet.showPage()
-    sheet.save()
-    return PdfReader(io.BytesIO(buffer.getvalue()))
-
-
-def build_stickers(data: bytes, boxes: Sequence[MatchedBox], *, stamp: bool) -> bytes:
-    """Новый PDF: страницы исходника в порядке `boxes`, при `stamp` — с подписью."""
+def build_stickers(data: bytes, boxes: Sequence[MatchedBox]) -> bytes:
+    """Новый PDF: страницы исходника в порядке `boxes`, без изменений."""
     source = _open(data)
     writer = PdfWriter()
     for box in boxes:
         writer.add_page(source.pages[box.page_index])
-    if stamp:
-        sizes = [(float(page.mediabox.width), float(page.mediabox.height)) for page in writer.pages]
-        overlay = _overlay(boxes, sizes)
-        for page, layer in zip(writer.pages, overlay.pages, strict=True):
-            page.merge_page(layer)
     writer.compress_identical_objects(remove_duplicates=True, remove_unreferenced=True)
     output = io.BytesIO()
     writer.write(output)

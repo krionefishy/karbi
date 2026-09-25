@@ -80,11 +80,11 @@ class BoxStickerService:
         pages = await asyncio.to_thread(read_stickers, stickers)
         return await self._match(boxes, pages)
 
-    async def build(self, workbook: bytes, stickers: bytes, *, stamp: bool) -> tuple[StickerPlan, bytes]:
+    async def build(self, workbook: bytes, stickers: bytes) -> tuple[StickerPlan, bytes]:
         plan = await self.plan(workbook, stickers)
         if not plan.ready:
             raise StickerBuildError(plan.problems or ["Нечего собирать"])
-        data = await asyncio.to_thread(build_stickers, stickers, plan.boxes, stamp=stamp)
+        data = await asyncio.to_thread(build_stickers, stickers, plan.boxes)
         problems = await asyncio.to_thread(verify_stickers, data, plan.boxes)
         if problems:
             raise StickerBuildError(["Собранный файл не прошёл проверку, отдавать его нельзя", *problems])

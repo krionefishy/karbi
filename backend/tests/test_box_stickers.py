@@ -10,6 +10,7 @@ import re
 import uuid
 import zipfile
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 import segno
@@ -17,6 +18,8 @@ from httpx import AsyncClient
 from openpyxl import Workbook
 from pypdf import PdfReader
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 from backend.modules.wb_box_stickers.application import (
@@ -26,7 +29,6 @@ from backend.modules.wb_box_stickers.application import (
     read_stickers,
     read_workbook,
 )
-from backend.modules.wb_box_stickers.application.stickers import _font
 from backend.modules.wb_box_stickers.domain import BoxLine, Package
 from backend.modules.wb_box_stickers.infrastructure.wb import WBSuppliesClient
 from backend.modules.wb_core.domain import BarcodeCard, Seller
@@ -46,6 +48,17 @@ BOXES: list[tuple[str, str, list[tuple[str, int]]]] = [
     ("6180553", "$Ts;CCC;0003;1;Xk00003;TAS", [(DRILL, 10), (SAW, 5)]),
     ("6180598", "$Ts;DDD;0004;1;Xk00004;TAS", [(SAW, 20)]),
 ]
+
+
+FONT = "WbStickerTest"
+# Кириллица на стикере: без неё не выйдет «Кол-во товаров» и «№ поставки» текстом.
+FONT_PATH = Path(__file__).resolve().parent / "fixtures" / "DejaVuSans-Bold.ttf"
+
+
+def _font() -> str:
+    if FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(FONT, str(FONT_PATH)))
+    return FONT
 
 
 def sticker_pdf(boxes: Sequence[tuple[str, str, list[tuple[str, int]]]], *, supply: int = SUPPLY) -> bytes:
@@ -196,7 +209,7 @@ def test_stickers_read_text_and_qr() -> None:
 async def test_build_follows_excel_order_and_passes_own_check() -> None:
     supplies = FakeSupplies()
     order = [3, 1, 0, 2]
-    plan, data = await service(supplies).build(workbook_xlsx(excel_rows(order)), sticker_pdf(BOXES), stamp=True)
+    plan, data = await service(supplies).build(workbook_xlsx(excel_rows(order)), sticker_pdf(BOXES))
     # Кабинет с именем со стикера спрашивают первым — чужим поставку не показывали.
     assert supplies.asked == [str(SELLER_ID)]
     assert (plan.supply_id, plan.seller_id, plan.problems) == (SUPPLY, SELLER_ID, [])
@@ -205,15 +218,14 @@ async def test_build_follows_excel_order_and_passes_own_check() -> None:
 
     pages = read_stickers(data)
     assert [page.package_code for page in pages] == [BOXES[index][1] for index in order]
-    first = PdfReader(io.BytesIO(data)).pages[0].extract_text()
-    assert "№ 1 из 4 · 20 шт" in first
-    assert "KARBI-Пила (XL) × 20" in first
+    # На стикер ничего не допечатывается: страница — ровно та, что выдал WB.
+    source = PdfReader(io.BytesIO(sticker_pdf(BOXES))).pages
+    built = PdfReader(io.BytesIO(data)).pages
+    assert [page.extract_text() for page in built] == [source[index].extract_text() for index in order]
 
 
-async def test_build_without_stamp_and_without_filled_contents() -> None:
-    plan, data = await service().build(
-        workbook_xlsx(excel_rows([1, 0, 2, 3], filled=False)), sticker_pdf(BOXES), stamp=False
-    )
+async def test_build_without_filled_contents() -> None:
+    plan, data = await service().build(workbook_xlsx(excel_rows([1, 0, 2, 3], filled=False)), sticker_pdf(BOXES))
     assert plan.ready
     assert [page.shk for page in read_stickers(data)] == ["6180488", "6180474", "6180553", "6180598"]
 
@@ -227,7 +239,7 @@ async def test_problems_block_the_build() -> None:
     assert "В PDF есть стикеры коробов, которых нет в Excel: 618 0598" in problems
 
     with pytest.raises(StickerBuildError):
-        await service(FakeSupplies(wrong)).build(workbook_xlsx(excel_rows([0, 1, 2])), sticker_pdf(BOXES), stamp=True)
+        await service(FakeSupplies(wrong)).build(workbook_xlsx(excel_rows([0, 1, 2])), sticker_pdf(BOXES))
 
 
 async def test_quantity_on_sticker_must_match_wb() -> None:

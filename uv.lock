@@ -503,7 +503,6 @@ dependencies = [
     { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "redis" },
-    { name = "reportlab" },
     { name = "segno" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "structlog" },
@@ -518,6 +517,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "reportlab" },
     { name = "respx" },
     { name = "ruff" },
 ]
@@ -540,7 +540,6 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "redis", specifier = ">=5.2.0" },
-    { name = "reportlab", specifier = ">=5.0.1" },
     { name = "segno", specifier = ">=1.6.6" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
     { name = "structlog", specifier = ">=24.4.0" },
@@ -555,6 +554,7 @@ dev = [
     { name = "pytest", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", specifier = ">=0.25.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "reportlab", specifier = ">=5.0.1" },
     { name = "respx", specifier = ">=0.22.0" },
     { name = "ruff", specifier = ">=0.9.0" },
 ]

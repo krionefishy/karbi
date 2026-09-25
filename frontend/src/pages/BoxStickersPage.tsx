@@ -26,7 +26,6 @@ function contents(box: BoxStickerBox) {
 export function BoxStickersPage() {
   const [workbook, setWorkbook] = useState<File | null>(null);
   const [stickers, setStickers] = useState<File | null>(null);
-  const [stamp, setStamp] = useState(true);
   const [plan, setPlan] = useState<BoxStickerPlan | null>(null);
   const [error, setError] = useState("");
   const fail = (fallback: string) => (reason: unknown) =>
@@ -41,7 +40,7 @@ export function BoxStickersPage() {
     onError: fail("Не удалось сверить файлы"),
   });
   const buildMutation = useMutation({
-    mutationFn: () => buildStickers(workbook as File, stickers as File, stamp),
+    mutationFn: () => buildStickers(workbook as File, stickers as File),
     onSuccess: ({ blob, filename }) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -106,10 +105,6 @@ export function BoxStickersPage() {
               </label>
             </li>
             <li>
-              <label className="box-stickers-check">
-                <input type="checkbox" checked={stamp} onChange={(event) => setStamp(event.target.checked)} />
-                <span>Допечатать на стикере номер по порядку, артикул и количество</span>
-              </label>
               <div className="box-stickers-actions">
                 <button
                   className="secondary-button"

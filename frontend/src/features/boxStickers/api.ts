@@ -14,9 +14,9 @@ function form(workbook: File, stickers: File): FormData {
 export const checkStickers = (workbook: File, stickers: File) =>
   apiRequest<BoxStickerPlan>(`${root}/check`, { method: "POST", body: form(workbook, stickers) });
 
-/** PDF в порядке строк Excel; `stamp` — допечатать номер по порядку и содержимое короба. */
-export const buildStickers = (workbook: File, stickers: File, stamp: boolean) =>
-  apiDownload(`${root}/build?${new URLSearchParams({ stamp: String(stamp) })}`, {
+/** PDF в порядке строк Excel: страницы WB как есть, без допечаток. */
+export const buildStickers = (workbook: File, stickers: File) =>
+  apiDownload(`${root}/build`, {
     method: "POST",
     body: form(workbook, stickers),
   });

@@ -414,6 +414,5 @@
 /* Стикеры коробов: загрузка двух файлов и таблица сопоставления. */
 .box-stickers-panel { margin-bottom: var(--space-5); padding: var(--space-5); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
 .box-stickers-file { display: flex; flex-direction: column; align-self: flex-start; color: var(--ink); }
-.box-stickers-check { display: flex; gap: var(--space-2); align-items: center; color: var(--ink); cursor: pointer; }
 .box-stickers-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .box-stickers-problems { margin: 0; padding-left: 18px; }
