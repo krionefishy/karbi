@@ -263,7 +263,7 @@ class ExtensionService:
         """Код на день в виде параметров шаблона; без кода — почему его нет."""
         stored = await self.returns.delivery_code(seller_id, day)
         params: dict[str, Any] = {"name": seller_name, "date": day.isoformat(), "code": None}
-        if stored is not None and (stored.code or stored.qr):
+        if stored is not None and (stored.ext_code or stored.code or stored.ext_qr or stored.qr):
             params.update(self._code_fields(stored, seller_id, day))
             params["offices"] = await self.ready_offices(seller_id)
             return params
@@ -280,11 +280,13 @@ class ExtensionService:
         return [{"address": address, "count": count} for address, count in sorted(counts.items())]
 
     def _code_fields(self, stored: DeliveryCodeModel, seller_id: uuid.UUID, day: date) -> dict[str, Any]:
+        """Новый формат первым: сайт с 2026 показывает всем шестизначный `extCode` и QR `extQr`,
+        старые пятизначный `code` и `qr` оставлены на случай, если WB их ещё отдаёт кому-то одному."""
         return {
-            "code": stored.code or stored.ext_code or None,
-            "ext_code": stored.ext_code or None,
-            "qr": stored.qr or stored.ext_qr or None,
-            "qr_url": self.qr_url(seller_id, day) if (stored.qr or stored.ext_qr) else None,
+            "code": stored.ext_code or stored.code or None,
+            "legacy_code": stored.code or None,
+            "qr": stored.ext_qr or stored.qr or None,
+            "qr_url": self.qr_url(seller_id, day) if (stored.ext_qr or stored.qr) else None,
         }
 
     async def request_code(
@@ -337,7 +339,7 @@ class ExtensionService:
 
     async def qr_png(self, seller_id: uuid.UUID, day: date) -> bytes | None:
         stored = await self.returns.delivery_code(seller_id, day)
-        text = (stored.qr or stored.ext_qr) if stored else ""
+        text = (stored.ext_qr or stored.qr) if stored else ""
         return qr_tools.render_png(text) if text else None
 
     async def _enrolled(self, seller_id: uuid.UUID) -> str:

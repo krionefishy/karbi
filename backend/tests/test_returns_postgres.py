@@ -411,7 +411,13 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             result = await extension(session).ingest_codes(
                 install,
                 [
-                    {"date": "2026-09-22", "code": "412", "ext_code": "412", "qr": "WB|412|xyz", "ext_qr": ""},
+                    {
+                        "date": "2026-09-22",
+                        "code": "41255",
+                        "ext_code": "412",
+                        "qr": "1_41255_412_1",
+                        "ext_qr": "WB|412|xyz",
+                    },
                     {"date": "2026-09-23", "code": "913", "ext_code": "", "qr": "WB|913|abc", "ext_qr": ""},
                     {"date": "not-a-date", "code": "1"},
                 ],
@@ -420,7 +426,8 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             replies = await chat_replies(session, chat)
         assert (result.accepted, result.replied_chats) == (2, [chat])
         delivered = replies[-1]["params"]
-        assert (delivered["code"], delivered["qr"]) == ("412", "WB|412|xyz")
+        # Новый формат первым: шестизначный extCode и extQr, старые — только если новых нет.
+        assert (delivered["code"], delivered["legacy_code"], delivered["qr"]) == ("412", "41255", "WB|412|xyz")
         # Возвраты ещё не собирали — адресов рядом с кодом пока нет.
         assert delivered["offices"] == []
         assert delivered["qr_url"].startswith(f"https://test.local/api/v1/wb/returns/qr/{seller}/2026-09-22/")
