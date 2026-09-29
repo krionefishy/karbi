@@ -26,6 +26,7 @@ Marketplace Auto — внутренняя платформа автоматиз�
 | [NETWORK_AND_EGRESS.md](architecture/NETWORK_AND_EGRESS.md) | сети, откуда какой трафик уходит наружу |
 | [WB_API.md](architecture/WB_API.md) | лимиты WB, троттлинг, ретраи |
 | [OZON_API.md](architecture/OZON_API.md) | Seller и Performance API, их лимиты, чем Ozon отличается от WB |
+| [MPSTATS_API.md](architecture/MPSTATS_API.md) | токены MPStats на шлюзе, суточная квота и почему ответы не повторяются |
 | [WB_EGRESS.md](architecture/WB_EGRESS.md) | целевая VPS wb-egress: ключи селлеров и закреплённые IP |
 | [WORKERS.md](architecture/WORKERS.md) | фоновые процессы, расписание, heartbeat, повторы |
 

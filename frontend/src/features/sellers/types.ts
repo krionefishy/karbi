@@ -14,7 +14,10 @@ export interface Seller {
   egress_error: string | null;
   ozon_egress_status: EgressStatus;
   ozon_egress_error: string | null;
-  /** Адрес общий: у селлера он один на оба маркетплейса. */
+  /** MPStats — не маркетплейс, а аналитика по ним; токен у селлера свой. */
+  mpstats_egress_status: EgressStatus;
+  mpstats_egress_error: string | null;
+  /** Адрес общий: у селлера он один на оба маркетплейса и на MPStats. */
   egress_ip: string | null;
 }
 
@@ -61,3 +64,12 @@ export interface OzonCredentialsInput {
 /** Учётка Ozon ни разу не доезжала до шлюза — это не ошибка, а «ещё не заводили». */
 export const isOzonMissing = (seller: Seller) =>
   seller.ozon_egress_status === "undelivered" && seller.ozon_egress_error === null;
+
+/** Токен MPStats: кабинет MPStats → Настройки → API. */
+export interface MPStatsCredentialsInput {
+  token: string;
+}
+
+/** Токен MPStats ни разу не доезжал до шлюза — это не ошибка, а «ещё не заводили». */
+export const isMPStatsMissing = (seller: Seller) =>
+  seller.mpstats_egress_status === "undelivered" && seller.mpstats_egress_error === null;

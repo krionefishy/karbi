@@ -18,6 +18,8 @@ function seller(id: string, name: string): Seller {
     egress_error: null,
     ozon_egress_status: "undelivered",
     ozon_egress_error: null,
+    mpstats_egress_status: "undelivered",
+    mpstats_egress_error: null,
     egress_ip: null,
   };
 }

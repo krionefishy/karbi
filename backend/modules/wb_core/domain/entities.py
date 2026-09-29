@@ -8,6 +8,12 @@ ARTICLE_STATES = ("active", "archived", "feedback_only")
 # путях шлюза и в ответе его /api/v1/sellers.
 MARKETPLACE_WB = "wb"
 MARKETPLACE_OZON = "ozon"
+# Не маркетплейс, а аналитика по ним: токен MPStats у селлера свой, и учётка
+# устроена так же — поэтому стоит в том же ряду и под тем же словом.
+MARKETPLACE_MPSTATS = "mpstats"
+# Все учётки, исход доставки которых реестр умеет хранить. Имя, которого здесь
+# нет, шлюз мог выучить раньше нас — такое пропускается, а не роняет сверку.
+MARKETPLACES = (MARKETPLACE_WB, MARKETPLACE_OZON, MARKETPLACE_MPSTATS)
 
 # Сага доставки учётки на шлюз wb-egress: первую группу статусов отвечает сам
 # шлюз, вторая описывает доставку с нашей стороны. Единственный словарь этих
@@ -37,6 +43,8 @@ class Seller:
     egress_error: str | None = None
     ozon_egress_status: str = EGRESS_UNDELIVERED
     ozon_egress_error: str | None = None
+    mpstats_egress_status: str = EGRESS_UNDELIVERED
+    mpstats_egress_error: str | None = None
     egress_ip: str | None = None
 
     @property

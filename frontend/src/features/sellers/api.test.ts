@@ -6,7 +6,9 @@ import {
   detachSeller,
   getSellers,
   purgeSeller,
+  setMPStatsCredentials,
   setOzonCredentials,
+  verifyMPStatsEgress,
   verifyOzonEgress,
 } from "./api";
 
@@ -93,6 +95,28 @@ describe("seller registry api", () => {
       performance_client_id: "42@advertising.performance.ozon.ru",
       performance_client_secret: "perf-secret",
     });
+  });
+
+  it("sends the MPStats token to its own route, apart from the marketplace keys", async () => {
+    const request = vi.fn().mockImplementation(
+      async () => new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", request);
+
+    await setMPStatsCredentials("seller-1", { token: "aaaa1111.bbbb2222" });
+    await verifyMPStatsEgress("seller-1");
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/wb/sellers/seller-1/mpstats",
+      expect.objectContaining({ method: "PUT" }),
+    );
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ token: "aaaa1111.bbbb2222" });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/wb/sellers/seller-1/mpstats-verify",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("keeps the two marketplaces' re-checks apart", async () => {

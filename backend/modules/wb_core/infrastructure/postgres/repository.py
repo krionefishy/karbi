@@ -7,7 +7,14 @@ from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, BarcodeCard, Seller
+from backend.modules.wb_core.domain import (
+    MARKETPLACE_MPSTATS,
+    MARKETPLACE_OZON,
+    MARKETPLACE_WB,
+    Article,
+    BarcodeCard,
+    Seller,
+)
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
     InboxEventModel,
@@ -23,6 +30,7 @@ _UPSERT_CHUNK = 500
 _EGRESS_COLUMNS = {
     MARKETPLACE_WB: (SellerModel.egress_status, SellerModel.egress_error),
     MARKETPLACE_OZON: (SellerModel.ozon_egress_status, SellerModel.ozon_egress_error),
+    MARKETPLACE_MPSTATS: (SellerModel.mpstats_egress_status, SellerModel.mpstats_egress_error),
 }
 
 
@@ -357,6 +365,8 @@ class SellerRepository:
             egress_error=model.egress_error,
             ozon_egress_status=model.ozon_egress_status,
             ozon_egress_error=model.ozon_egress_error,
+            mpstats_egress_status=model.mpstats_egress_status,
+            mpstats_egress_error=model.mpstats_egress_error,
             egress_ip=model.egress_ip,
         )
 

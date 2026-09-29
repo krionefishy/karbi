@@ -191,7 +191,7 @@
 .registry-actions { display: flex; align-items: center; gap: var(--space-4); }
 /* Колонки фиксированные, кроме автоматизаций: длинное содержимое переносится
    и растит строку вниз, а не двигает соседние колонки. */
-.registry-head, .registry-row { display: grid; grid-template-columns: 200px 90px 120px 120px 120px minmax(220px, 1fr) 176px; align-items: center; border-bottom: 1px solid var(--line); }
+.registry-head, .registry-row { display: grid; grid-template-columns: 200px 90px 120px 120px 120px 120px minmax(220px, 1fr) 210px; align-items: center; border-bottom: 1px solid var(--line); }
 .registry-row > * { padding-top: 8px; padding-bottom: 8px; min-width: 0; overflow-wrap: anywhere; }
 .registry-row:last-child { border-bottom: 0; }
 .registry-head > *, .registry-row > * { padding: 0 var(--space-4); }

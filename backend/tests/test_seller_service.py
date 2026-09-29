@@ -14,7 +14,13 @@ from backend.modules.wb_core.application import (
     SellerNotFoundError,
     SellerService,
 )
-from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
+from backend.modules.wb_core.domain import (
+    MARKETPLACE_MPSTATS,
+    MARKETPLACE_OZON,
+    MARKETPLACE_WB,
+    Article,
+    Seller,
+)
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
 from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
@@ -66,6 +72,7 @@ class FakeGateway:
         outcome: dict | None = None,
         error: Exception | None = None,
         ozon_outcome: dict | None = None,
+        mpstats_outcome: dict | None = None,
     ) -> None:
         self.outcome = outcome or {"status": "verified", "egress_ip": "185.0.0.1", "verify_error": ""}
         self.ozon_outcome = ozon_outcome or {
@@ -74,7 +81,15 @@ class FakeGateway:
             "verify_error": "",
             "marketplaces": {"ozon": {"status": "verified", "verify_error": ""}},
         }
+        self.mpstats_outcome = mpstats_outcome or {
+            "status": "verified",
+            "egress_ip": "185.0.0.1",
+            "verify_error": "",
+            "marketplaces": {"mpstats": {"status": "verified", "verify_error": ""}},
+        }
         self.error = error
+        self.mpstats_delivered: list[dict] = []
+        self.mpstats_verified: list[str] = []
         self.delivered: list[tuple[str, str, str]] = []
         self.ozon_delivered: list[dict] = []
         self.renamed: list[tuple[str, str]] = []
@@ -137,6 +152,18 @@ class FakeGateway:
         self.ozon_verified.append(seller_id)
         return dict(self.ozon_outcome)
 
+    async def put_mpstats_credentials(self, *, seller_id: str, name: str, token: str, event_version: int) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.mpstats_delivered.append({"seller_id": seller_id, "name": name, "token": token})
+        return dict(self.mpstats_outcome)
+
+    async def verify_mpstats(self, seller_id: str) -> dict:
+        if self.error is not None:
+            raise self.error
+        self.mpstats_verified.append(seller_id)
+        return dict(self.mpstats_outcome)
+
 
 class FakeSellerRepository:
     def __init__(self) -> None:
@@ -151,6 +178,8 @@ class FakeSellerRepository:
             egress_error=None,
             ozon_egress_status="undelivered",
             ozon_egress_error=None,
+            mpstats_egress_status="undelivered",
+            mpstats_egress_error=None,
             egress_ip=None,
             egress_version=0,
         )
@@ -175,6 +204,8 @@ class FakeSellerRepository:
                 egress_error=self.model.egress_error,
                 ozon_egress_status=self.model.ozon_egress_status,
                 ozon_egress_error=self.model.ozon_egress_error,
+                mpstats_egress_status=self.model.mpstats_egress_status,
+                mpstats_egress_error=self.model.mpstats_egress_error,
                 egress_ip=self.model.egress_ip,
             )
         ]
@@ -198,7 +229,7 @@ class FakeSellerRepository:
         version: int | None = None,
         marketplace: str = MARKETPLACE_WB,
     ) -> None:
-        prefix = "ozon_" if marketplace == MARKETPLACE_OZON else ""
+        prefix = {MARKETPLACE_WB: "", MARKETPLACE_OZON: "ozon_", MARKETPLACE_MPSTATS: "mpstats_"}[marketplace]
         setattr(self.model, f"{prefix}egress_status", status)
         setattr(self.model, f"{prefix}egress_error", error)
         if ip is not None:
@@ -500,3 +531,93 @@ async def test_archiving_puts_out_every_marketplace() -> None:
 
     assert archived.egress_status == "disabled"
     assert archived.ozon_egress_status == "disabled"
+
+
+# --- MPStats ----------------------------------------------------------------
+
+
+async def test_the_mpstats_token_is_delivered_to_the_gateway() -> None:
+    service, repository, _, _, gateway = service_fixture()
+
+    seller = await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+    assert seller.mpstats_egress_status == "verified"
+    assert gateway.mpstats_delivered == [
+        {"seller_id": str(repository.seller_id), "name": repository.model.name, "token": "aaaa1111.bbbb2222"}
+    ]
+
+
+async def test_mpstats_does_not_disturb_the_marketplaces() -> None:
+    """Учётки независимы: токен MPStats отозван, а WB и Ozon работают."""
+    gateway = FakeGateway(
+        mpstats_outcome={"marketplaces": {"mpstats": {"status": "key_invalid", "verify_error": "HTTP 401 от MPStats"}}}
+    )
+    service, repository, _, _, _ = service_fixture(gateway)
+    await service.create("ООО Ромашка", "wb-api-key-123456")
+    await service.set_ozon_credentials(repository.seller_id, client_id="111222", api_key="ozon-api-key-123456")
+
+    seller = await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+    assert (seller.egress_status, seller.ozon_egress_status) == ("verified", "verified")
+    assert seller.mpstats_egress_status == "key_invalid"
+    assert seller.mpstats_egress_error == "HTTP 401 от MPStats"
+
+
+async def test_the_mpstats_token_does_not_requeue_the_catalog() -> None:
+    """Каталог собирается по ключу WB; токен аналитики его не трогает."""
+    service, repository, session, _, _ = service_fixture()
+
+    await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+    assert not any(isinstance(item, OutboxEventModel) for item in session.added)
+    assert repository.model.catalog_sync_status == "success"
+
+
+async def test_a_gateway_that_predates_mpstats_leaves_the_token_undelivered() -> None:
+    """Во время выкатки шлюз про MPStats ещё не знает: его 404 — это «не доехало», а не падение."""
+    gateway = FakeGateway(error=EgressAdminError("Шлюз ответил HTTP 404", status_code=404))
+    service, repository, _, _, _ = service_fixture(gateway)
+
+    seller = await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+    assert seller.mpstats_egress_status == "undelivered"
+    assert seller.mpstats_egress_error is not None and "404" in seller.mpstats_egress_error
+
+
+async def test_a_token_already_taken_is_reported_as_a_conflict() -> None:
+    gateway = FakeGateway(error=EgressAdminError("Этот токен MPStats уже заведён у селлера «ООО Икс»", status_code=409))
+    service, repository, _, _, _ = service_fixture(gateway)
+
+    with pytest.raises(DuplicateCredentialError, match="ООО Икс"):
+        await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+
+async def test_an_archived_seller_takes_no_mpstats_token() -> None:
+    service, repository, _, _, gateway = service_fixture()
+    await service.create("ООО Ромашка", "wb-api-key-123456")
+    await service.archive(repository.seller_id)
+
+    with pytest.raises(SellerArchivedError):
+        await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+    assert gateway.mpstats_delivered == []
+
+
+async def test_reverification_updates_only_the_mpstats_status() -> None:
+    service, repository, _, _, gateway = service_fixture()
+    repository.model.mpstats_egress_status = "delivered"
+
+    seller = await service.refresh_mpstats_egress(repository.seller_id)
+
+    assert gateway.mpstats_verified == [str(repository.seller_id)]
+    assert gateway.verified == [] and gateway.ozon_verified == []
+    assert seller.mpstats_egress_status == "verified"
+
+
+async def test_archiving_puts_out_the_mpstats_token_too() -> None:
+    service, repository, _, _, _ = service_fixture()
+    await service.create("ООО Ромашка", "wb-api-key-123456")
+    await service.set_mpstats_credentials(repository.seller_id, token="aaaa1111.bbbb2222")
+
+    archived = await service.archive(repository.seller_id)
+
+    assert archived.mpstats_egress_status == "disabled"

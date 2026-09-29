@@ -210,6 +210,19 @@ class EgressGateway:
     async def verify_ozon(self, seller_id: str) -> dict[str, Any]:
         return await self._admin("POST", f"/api/v1/sellers/{seller_id}/ozon/verify", None)
 
+    async def put_mpstats_credentials(
+        self, *, seller_id: str, name: str, token: str, event_version: int
+    ) -> dict[str, Any]:
+        """Токен MPStats селлера: как и ключи маркетплейсов, живёт только на шлюзе."""
+        return await self._admin(
+            "PUT",
+            f"/api/v1/sellers/{seller_id}/mpstats",
+            {"name": name, "token": token, "event_version": event_version},
+        )
+
+    async def verify_mpstats(self, seller_id: str) -> dict[str, Any]:
+        return await self._admin("POST", f"/api/v1/sellers/{seller_id}/mpstats/verify", None)
+
     async def rename_seller(self, *, seller_id: str, name: str, event_version: int) -> dict[str, Any]:
         payload = {"name": name, "event_version": event_version}
         return await self._admin("PATCH", f"/api/v1/sellers/{seller_id}", payload)

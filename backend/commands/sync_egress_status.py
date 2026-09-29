@@ -17,7 +17,7 @@ import sys
 import time
 import uuid
 
-from backend.modules.wb_core.domain import MARKETPLACE_WB
+from backend.modules.wb_core.domain import MARKETPLACE_WB, MARKETPLACES
 from backend.modules.wb_core.domain.entities import EGRESS_DISABLED, EGRESS_UNDELIVERED
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
@@ -50,6 +50,11 @@ async def sync() -> int:
                     failures += 1
                     continue
                 for marketplace, state in _states(row).items():
+                    if marketplace not in MARKETPLACES:
+                        # Шлюз обновлён раньше и знает учётку, под которую здесь
+                        # ещё нет колонок: записать её некуда, а ронять из-за
+                        # неё сверку остальных незачем.
+                        continue
                     await repository.set_egress_state(
                         uuid.UUID(str(seller.id)),
                         status=state[0] or EGRESS_UNDELIVERED,

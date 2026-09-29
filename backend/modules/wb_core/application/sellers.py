@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application.enrollment import AutomationEnrollment
-from backend.modules.wb_core.domain import MARKETPLACE_OZON, MARKETPLACE_WB, Article, Seller
+from backend.modules.wb_core.domain import (
+    MARKETPLACE_MPSTATS,
+    MARKETPLACE_OZON,
+    MARKETPLACE_WB,
+    MARKETPLACES,
+    Article,
+    Seller,
+)
 from backend.modules.wb_core.domain.entities import (
     EGRESS_DISABLED,
     EGRESS_SERVABLE,
@@ -112,6 +119,19 @@ class SellerService:
         )
         return await self._reload(seller_id)
 
+    async def set_mpstats_credentials(self, seller_id: uuid.UUID, *, token: str) -> Seller:
+        """Завести или заменить токен MPStats у существующего селлера.
+
+        Отдельный вызов по той же причине, что у Ozon: токен перевыпускается
+        при смене пароля аккаунта MPStats, и его замена не должна требовать
+        ввода ключа WB.
+        """
+        seller = await self._active(seller_id)
+        name = seller.name
+        await self.session.commit()
+        await self._deliver_mpstats(seller_id, name, token)
+        return await self._reload(seller_id)
+
     async def archive(self, seller_id: uuid.UUID) -> Seller:
         """Retire the seller: collected data and his automation enrollments stay.
 
@@ -183,6 +203,21 @@ class SellerService:
             await self.session.commit()
             return await self._reload(seller_id, include_archived=True)
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=None, marketplace=MARKETPLACE_OZON)
+        return await self._reload(seller_id, include_archived=True)
+
+    async def refresh_mpstats_egress(self, seller_id: uuid.UUID) -> Seller:
+        """Повторная проверка токена MPStats — когда проверка не состоялась из-за сети."""
+        if await self.repository.get(seller_id) is None:
+            raise SellerNotFoundError
+        try:
+            outcome = await self.gateway.verify_mpstats(str(seller_id))
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(
+                seller_id, status=EGRESS_UNDELIVERED, error=str(error), marketplace=MARKETPLACE_MPSTATS
+            )
+            await self.session.commit()
+            return await self._reload(seller_id, include_archived=True)
+        await self._apply_outcome(seller_id, outcome, sync_reason=None, version=None, marketplace=MARKETPLACE_MPSTATS)
         return await self._reload(seller_id, include_archived=True)
 
     async def request_sync(self, seller_id: uuid.UUID) -> Seller:
@@ -285,6 +320,27 @@ class SellerService:
             return
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=version, marketplace=MARKETPLACE_OZON)
 
+    async def _deliver_mpstats(self, seller_id: uuid.UUID, name: str, token: str) -> None:
+        """Отдать токен MPStats шлюзу и записать исход отдельной короткой транзакцией."""
+        version = await self._next_version(seller_id)
+        try:
+            outcome = await self.gateway.put_mpstats_credentials(
+                seller_id=str(seller_id), name=name, token=token, event_version=version
+            )
+        except EgressAdminError as error:
+            await self.repository.set_egress_state(
+                seller_id, status=EGRESS_UNDELIVERED, error=str(error), marketplace=MARKETPLACE_MPSTATS
+            )
+            await self.session.commit()
+            if error.status_code == 409:
+                # Один токен на двух селлерах означал бы один аккаунт MPStats
+                # с двух исходящих адресов.
+                raise DuplicateCredentialError(str(error)) from error
+            return
+        await self._apply_outcome(
+            seller_id, outcome, sync_reason=None, version=version, marketplace=MARKETPLACE_MPSTATS
+        )
+
     async def _apply_outcome(
         self,
         seller_id: uuid.UUID,
@@ -326,13 +382,13 @@ class SellerService:
         try:
             await self.gateway.disable_seller(seller_id=str(seller_id), event_version=version)
         except EgressAdminError as error:
-            for marketplace in (MARKETPLACE_WB, MARKETPLACE_OZON):
+            for marketplace in MARKETPLACES:
                 await self.repository.set_egress_state(
                     seller_id, status=EGRESS_UNSYNCED, error=str(error), marketplace=marketplace
                 )
             await self.session.commit()
             return
-        for marketplace in (MARKETPLACE_WB, MARKETPLACE_OZON):
+        for marketplace in MARKETPLACES:
             await self.repository.set_egress_state(
                 seller_id, status=EGRESS_DISABLED, error=None, version=version, marketplace=marketplace
             )

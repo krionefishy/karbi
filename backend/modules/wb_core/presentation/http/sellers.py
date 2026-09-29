@@ -12,6 +12,7 @@ from backend.modules.wb_core.application import (
 )
 from backend.modules.wb_core.presentation.http.schemas import (
     ArticleResponse,
+    MPStatsCredentials,
     OzonCredentials,
     SellerCreate,
     SellerResponse,
@@ -102,6 +103,37 @@ async def ozon_egress_verify(
     """Повторная проверка учётки Ozon: после перевыпуска ключа в кабинете."""
     try:
         seller = await service.refresh_ozon_egress(seller_id)
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    return await one_seller_response(service, seller)
+
+
+@router.put("/{seller_id}/mpstats", response_model=SellerResponse)
+@inject
+async def set_mpstats_credentials(
+    seller_id: uuid.UUID, payload: MPStatsCredentials, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Завести или заменить токен MPStats. Ключ WB для этого вводить не нужно."""
+    try:
+        seller = await service.set_mpstats_credentials(seller_id, token=payload.token.get_secret_value())
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    except SellerArchivedError as error:
+        raise archived_conflict() from error
+    except DuplicateCredentialError as error:
+        # Текст шлюза называет селлера, за которым токен уже закреплён.
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    return await one_seller_response(service, seller)
+
+
+@router.post("/{seller_id}/mpstats-verify", response_model=SellerResponse)
+@inject
+async def mpstats_egress_verify(
+    seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Повторная проверка токена MPStats: когда первая не состоялась из-за сети."""
+    try:
+        seller = await service.refresh_mpstats_egress(seller_id)
     except SellerNotFoundError as error:
         raise not_found() from error
     return await one_seller_response(service, seller)

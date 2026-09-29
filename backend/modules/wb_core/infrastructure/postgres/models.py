@@ -49,6 +49,10 @@ class SellerModel(WBCoreBase):
     # остались за Wildberries по истории — их читают фронтенд и сверка.
     ozon_egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
     ozon_egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    # И для MPStats: это не маркетплейс, а аналитика по ним, но токен у селлера
+    # свой и доставляется на шлюз той же сагой.
+    mpstats_egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
+    mpstats_egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
     # Адрес общий: у селлера он один на оба маркетплейса.
     egress_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     # Монотонная версия для идемпотентных upsert'ов шлюза: очередная версия —

@@ -1,5 +1,11 @@
 import { apiRequest } from "../../api/http";
-import type { OzonCredentialsInput, Seller, SellerArticle, SellerInput } from "./types";
+import type {
+  MPStatsCredentialsInput,
+  OzonCredentialsInput,
+  Seller,
+  SellerArticle,
+  SellerInput,
+} from "./types";
 
 export function getSellers(includeArchived = false) {
   const query = includeArchived ? "?include_archived=true" : "";
@@ -46,6 +52,17 @@ export const setOzonCredentials = (sellerId: string, payload: OzonCredentialsInp
 /** Перепроверить учётку Ozon (после перевыпуска ключа — он живёт полгода). */
 export const verifyOzonEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon-verify`, { method: "POST" });
+
+/** Завести или заменить токен MPStats. Ключ WB для этого вводить не нужно. */
+export const setMPStatsCredentials = (sellerId: string, payload: MPStatsCredentialsInput) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/mpstats`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+/** Перепроверить токен MPStats (он перевыпускается при смене пароля аккаунта). */
+export const verifyMPStatsEgress = (sellerId: string) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/mpstats-verify`, { method: "POST" });
 
 export const getAutomationSellers = (automationId: string) =>
   apiRequest<Seller[]>(`/api/v1/automations/${automationId}/sellers`);

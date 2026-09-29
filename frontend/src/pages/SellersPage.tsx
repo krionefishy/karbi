@@ -1,11 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, KeyRound, Pencil, Plus, RefreshCw, Store, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  BarChart3,
+  KeyRound,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Store,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
 import { Shell } from "../components/Shell";
 import {
   ConfirmDialog,
+  MPStatsCredentialsDialog,
   OzonCredentialsDialog,
   RestoreSellerDialog,
   SellerDialog,
@@ -18,13 +29,20 @@ import {
   purgeSeller,
   restoreSeller,
   retrySellerSync,
+  setMPStatsCredentials,
   setOzonCredentials,
   updateSeller,
+  verifyMPStatsEgress,
   verifyOzonEgress,
   verifySellerEgress,
 } from "../features/sellers/api";
-import type { OzonCredentialsInput, Seller, SellerInput } from "../features/sellers/types";
-import { isOzonMissing } from "../features/sellers/types";
+import type {
+  MPStatsCredentialsInput,
+  OzonCredentialsInput,
+  Seller,
+  SellerInput,
+} from "../features/sellers/types";
+import { isMPStatsMissing, isOzonMissing } from "../features/sellers/types";
 
 const syncStatusText: Record<Seller["catalog_sync_status"], string> = {
   queued: "В очереди",
@@ -53,6 +71,7 @@ export function SellersPage() {
   const [purging, setPurging] = useState<Seller | null>(null);
   const [restoring, setRestoring] = useState<Seller | null>(null);
   const [ozonSeller, setOzonSeller] = useState<Seller | null>(null);
+  const [mpstatsSeller, setMPStatsSeller] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
 
   const { data: sellers = [], isLoading } = useQuery({
@@ -132,6 +151,24 @@ export function SellersPage() {
       await refresh();
     },
   });
+  const mpstatsMutation = useMutation({
+    mutationFn: (payload: MPStatsCredentialsInput) =>
+      setMPStatsCredentials((mpstatsSeller as Seller).id, payload),
+    onSuccess: async () => {
+      setMPStatsSeller(null);
+      setFormError("");
+      await refresh();
+    },
+    onError: (error) =>
+      setFormError(error instanceof ApiError ? error.message : "Не удалось сохранить токен MPStats"),
+  });
+  const mpstatsVerifyMutation = useMutation({
+    mutationFn: () => verifyMPStatsEgress((mpstatsSeller as Seller).id),
+    onSuccess: async (seller) => {
+      setMPStatsSeller(seller);
+      await refresh();
+    },
+  });
 
   return (
     <Shell>
@@ -190,6 +227,7 @@ export function SellersPage() {
               <span>Каталог</span>
               <span>Ключ WB</span>
               <span>Ключ Ozon</span>
+              <span>Токен MPStats</span>
               <span>Автоматизации</span>
               <span>Действия</span>
             </div>
@@ -223,6 +261,19 @@ export function SellersPage() {
                     : isOzonMissing(seller)
                       ? "не подключён"
                       : (egressStatusText[seller.ozon_egress_status] ?? seller.ozon_egress_status)}
+                </span>
+                <span
+                  className={`egress-state egress-state-${isMPStatsMissing(seller) ? "absent" : seller.mpstats_egress_status}`}
+                  title={seller.mpstats_egress_error ?? undefined}
+                >
+                  {seller.archived_at
+                    ? "—"
+                    : isMPStatsMissing(seller)
+                      ? "не подключён"
+                      : seller.mpstats_egress_status === "key_invalid"
+                        ? "токен отклонён"
+                        : (egressStatusText[seller.mpstats_egress_status] ??
+                          seller.mpstats_egress_status)}
                 </span>
                 <span className="registry-automations">
                   {seller.automations.length === 0
@@ -294,6 +345,16 @@ export function SellersPage() {
                         <Store size={15} />
                       </button>
                       <button
+                        title={isMPStatsMissing(seller) ? "Подключить MPStats" : "Токен MPStats"}
+                        aria-label={`Токен MPStats ${seller.name}`}
+                        onClick={() => {
+                          setFormError("");
+                          setMPStatsSeller(seller);
+                        }}
+                      >
+                        <BarChart3 size={15} />
+                      </button>
+                      <button
                         title="В архив"
                         aria-label={`Отправить в архив ${seller.name}`}
                         onClick={() => setArchiving(seller)}
@@ -329,10 +390,21 @@ export function SellersPage() {
           onVerify={() => ozonVerifyMutation.mutate()}
         />
       )}
+      {mpstatsSeller && (
+        <MPStatsCredentialsDialog
+          seller={mpstatsSeller}
+          pending={mpstatsMutation.isPending}
+          verifying={mpstatsVerifyMutation.isPending}
+          error={formError}
+          onClose={() => setMPStatsSeller(null)}
+          onSubmit={(value) => mpstatsMutation.mutate(value)}
+          onVerify={() => mpstatsVerifyMutation.mutate()}
+        />
+      )}
       {archiving && (
         <ConfirmDialog
           title="Отправить в архив?"
-          description={`«${archiving.name}» отключится от всех автоматизаций и перестанет собирать данные. Ключи всех маркетплейсов будут удалены, собранная история останется. Вернуть можно в любой момент.`}
+          description={`«${archiving.name}» отключится от всех автоматизаций и перестанет собирать данные. Ключи всех маркетплейсов и токен MPStats будут удалены, собранная история останется. Вернуть можно в любой момент.`}
           confirmLabel="В архив"
           pendingLabel="Архивируем…"
           pending={archiveMutation.isPending}

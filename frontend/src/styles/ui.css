@@ -113,7 +113,7 @@ input[type="range"] { accent-color: var(--accent); }
 /* Шапка и строки — отдельные сетки, поэтому минимальная ширина у них одна и
    та же числом: с max-content каждая считала бы fr-колонки по-своему, и
    заголовки разъезжались бы с ячейками. Число = сумма минимумов колонок. */
-.registry-head, .registry-row { min-width: 1046px; }
+.registry-head, .registry-row { min-width: 1200px; }
 .turnover-head, .turnover-row { min-width: 1050px; }
 .article-head, .article-row { min-width: 810px; }
 .fbs-head, .fbs-row { min-width: 950px; }

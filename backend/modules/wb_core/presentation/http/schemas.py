@@ -86,6 +86,20 @@ class OzonCredentials(BaseModel):
         return self
 
 
+class MPStatsCredentials(BaseModel):
+    """Токен MPStats селлера: кабинет MPStats → Настройки → API."""
+
+    token: SecretStr = Field(min_length=10, max_length=4096)
+
+    @field_validator("token")
+    @classmethod
+    def normalize_token(cls, value: SecretStr) -> SecretStr:
+        normalized = value.get_secret_value().strip()
+        if len(normalized) < 10 or any(character.isspace() for character in normalized):
+            raise ValueError("Токен MPStats вводится целиком, без пробелов и переносов")
+        return SecretStr(normalized)
+
+
 class SellerResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -101,6 +115,8 @@ class SellerResponse(BaseModel):
     egress_error: str | None = None
     ozon_egress_status: str = "undelivered"
     ozon_egress_error: str | None = None
+    mpstats_egress_status: str = "undelivered"
+    mpstats_egress_error: str | None = None
     egress_ip: str | None = None
 
 

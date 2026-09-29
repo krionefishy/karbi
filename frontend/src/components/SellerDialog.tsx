@@ -1,8 +1,13 @@
 import { Eye, EyeOff, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 
-import type { OzonCredentialsInput, Seller, SellerInput } from "../features/sellers/types";
-import { isOzonMissing } from "../features/sellers/types";
+import type {
+  MPStatsCredentialsInput,
+  OzonCredentialsInput,
+  Seller,
+  SellerInput,
+} from "../features/sellers/types";
+import { isMPStatsMissing, isOzonMissing } from "../features/sellers/types";
 
 interface Props {
   seller?: Seller;
@@ -293,6 +298,103 @@ export function OzonCredentialsDialog({
             </button>
             <button className="primary-button" disabled={pending}>
               {pending ? "Сохраняем…" : missing ? "Подключить" : "Заменить учётку"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+interface MPStatsProps {
+  seller: Seller;
+  pending: boolean;
+  verifying: boolean;
+  error: string;
+  onClose: () => void;
+  onSubmit: (value: MPStatsCredentialsInput) => void;
+  onVerify: () => void;
+}
+
+export function MPStatsCredentialsDialog({
+  seller,
+  pending,
+  verifying,
+  error,
+  onClose,
+  onSubmit,
+  onVerify,
+}: MPStatsProps) {
+  const [showToken, setShowToken] = useState(false);
+  const missing = isMPStatsMissing(seller);
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    onSubmit({ token: String(form.get("token")).trim() });
+  }
+  return (
+    <div className="modal-overlay" role="presentation">
+      <section className="seller-dialog" role="dialog" aria-modal="true" aria-labelledby="mpstats-dialog-title">
+        <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
+          <X size={18} />
+        </button>
+        <h2 id="mpstats-dialog-title">
+          {missing ? `Подключить MPStats для «${seller.name}»` : `Токен MPStats «${seller.name}»`}
+        </h2>
+        <p className="muted">
+          Токен берётся в кабинете MPStats: Настройки → API. Он хранится на шлюзе и никогда не
+          отображается после сохранения.
+        </p>
+        {/* Токен умирает молча: MPStats перевыпускает его при смене пароля
+            аккаунта, и узнаём мы об этом только по отказу. */}
+        <p className="muted">
+          При смене пароля аккаунта MPStats токен перевыпускается — старый перестаёт работать, и
+          новый нужно ввести здесь.
+        </p>
+        {!missing && (
+          <p className="muted">
+            Сейчас: {seller.mpstats_egress_status}
+            {seller.mpstats_egress_error ? ` — ${seller.mpstats_egress_error}` : ""}
+          </p>
+        )}
+        <form className="seller-form" onSubmit={submit}>
+          <label>
+            <span className="field-label">Токен MPStats</span>
+            <span className="password-field">
+              <input
+                name="token"
+                type={showToken ? "text" : "password"}
+                minLength={10}
+                required
+                autoComplete="off"
+                placeholder="Вставьте токен"
+              />
+              <button type="button" onClick={() => setShowToken((value) => !value)} aria-label="Показать токен">
+                {showToken ? <EyeOff size={17} /> : <Eye size={17} />}
+              </button>
+            </span>
+          </label>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            {!missing && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={verifying}
+                onClick={onVerify}
+              >
+                {verifying ? "Проверяем…" : "Перепроверить"}
+              </button>
+            )}
+            <button type="button" className="secondary-button" onClick={onClose}>
+              Отмена
+            </button>
+            <button className="primary-button" disabled={pending}>
+              {pending ? "Сохраняем…" : missing ? "Подключить" : "Заменить токен"}
             </button>
           </div>
         </form>
