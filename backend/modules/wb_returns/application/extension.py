@@ -173,7 +173,7 @@ class ExtensionService:
         seller = await self.sellers.get(pairing.seller_id)
         if seller is None or seller.archived_at is not None:
             raise PairingCodeInvalidError
-        await self.returns.revoke_installs_of_same_browser(pairing.seller_id, install_id, now=stamp)
+        await self.returns.revoke_superseded_installs(pairing.seller_id, install_id, now=stamp)
         token = TOKEN_PREFIX + secrets.token_urlsafe(32)
         install = await self.returns.add_install(
             seller_id=pairing.seller_id,

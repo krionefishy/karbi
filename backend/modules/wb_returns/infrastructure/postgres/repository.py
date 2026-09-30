@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -443,14 +443,18 @@ class ReturnsRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def revoke_installs_of_same_browser(self, seller_id: uuid.UUID, install_id: str, *, now: datetime) -> None:
-        """Повторная пара из того же браузера заменяет прежнюю установку, а не копит их."""
+    async def revoke_superseded_installs(self, seller_id: uuid.UUID, install_id: str, *, now: datetime) -> None:
+        """Новая пара заменяет прежнюю установку того же браузера и все неработающие установки кабинета.
+
+        Иначе брошенная попытка (расширение переставили, вход не удался) остаётся
+        в `needs_login` навсегда и каждый день шлёт тревогу рядом с исправной установкой.
+        """
         await self.session.execute(
             update(ExtensionInstallModel)
             .where(
                 ExtensionInstallModel.seller_id == seller_id,
-                ExtensionInstallModel.install_id == install_id[:64],
                 ExtensionInstallModel.revoked_at.is_(None),
+                or_(ExtensionInstallModel.install_id == install_id[:64], ExtensionInstallModel.state != "ok"),
             )
             .values(revoked_at=now)
         )

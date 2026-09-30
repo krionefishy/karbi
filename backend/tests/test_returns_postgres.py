@@ -25,6 +25,7 @@ from backend.modules.wb_returns.application import (
 from backend.modules.wb_returns.domain import RETURN_READY, RETURN_TRANSIT, Claim, ReturnItem
 from backend.modules.wb_returns.infrastructure.postgres import (
     ClaimModel,
+    ExtensionInstallModel,
     NotificationLogModel,
     ReturnModel,
     ReturnsRepository,
@@ -495,3 +496,32 @@ async def test_extension_alerts_fire_once_a_day(database: Database, seller: uuid
     async with database.session() as session:
         later = await notifications(session).notify(seller, now=NOW + timedelta(days=1, hours=1))
     assert (later.sent, later.alerts) == (1, 3)
+
+
+async def test_a_new_pair_replaces_the_broken_installs_but_keeps_a_working_one(
+    database: Database, seller: uuid.UUID
+) -> None:
+    async def pair(install_id: str) -> uuid.UUID:
+        async with database.session() as session:
+            pairing = await extension(session).create_pairing_code(seller, now=NOW)
+            await session.commit()
+            paired = await extension(session).pair(pairing.code, install_id=install_id, browser="Chrome", now=NOW)
+        return paired.install_id
+
+    async def beat(install: uuid.UUID, state: str) -> None:
+        async with database.session() as session:
+            model = await session.get(ExtensionInstallModel, install)
+            assert model is not None
+            await extension(session).heartbeat(model, state=state, error=None, now=NOW)
+
+    working = await pair("chrome-working")
+    await beat(working, "ok")
+    # Брошенная попытка: расширение переставили, вход на WB так и не выполнили.
+    abandoned = await pair("chrome-abandoned")
+    await beat(abandoned, "needs_login")
+
+    fresh = await pair("chrome-fresh")
+
+    async with database.session() as session:
+        active = {item.id for item in await ReturnsRepository(session).active_installs(seller)}
+    assert active == {working, fresh}
