@@ -6,6 +6,25 @@ import { ApiError } from "../../api/http";
 import { Shell } from "../../components/Shell";
 import { BotDialog } from "../../components/BotDialog";
 import { createBot, deleteBot, getBots } from "../../features/admin/api";
+import type { BotDelivery } from "../../features/admin/types";
+
+const moment = (value: string) =>
+  new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+/** Отказы после последней доставки — признак сломанного канала, а не одного заблокированного чата. */
+function DeliveryState({ delivery }: { delivery: BotDelivery }) {
+  if (delivery.failed_count > 0) {
+    return (
+      <span className="form-error" role="alert">
+        Не доставлено {delivery.failed_count}
+        {delivery.failed_since ? ` с ${moment(delivery.failed_since)}` : ""}
+        {delivery.last_error ? `: ${delivery.last_error}` : ""}
+      </span>
+    );
+  }
+  if (delivery.last_sent_at) return <span className="muted">Последнее — {moment(delivery.last_sent_at)}</span>;
+  return <span className="muted">Ещё ничего не отправлял</span>;
+}
 
 export function BotsPage() {
   const queryClient = useQueryClient();
@@ -78,6 +97,7 @@ export function BotsPage() {
                 <th>Код</th>
                 <th>Название</th>
                 <th>Ссылка-приглашение</th>
+                <th>Доставка</th>
                 <th aria-label="Действия" />
               </tr>
             </thead>
@@ -89,6 +109,9 @@ export function BotsPage() {
                   </td>
                   <td>{bot.title || "—"}</td>
                   <td className="muted">{bot.invite_link_template.replace("{token}", "…")}</td>
+                  <td>
+                    <DeliveryState delivery={bot.delivery} />
+                  </td>
                   <td>
                     <span className="registry-row-actions">
                       <button

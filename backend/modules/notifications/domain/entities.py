@@ -16,6 +16,16 @@ class Bot:
 
 
 @dataclass(frozen=True, slots=True)
+class BotDelivery:
+    """Доходят ли сообщения бота: последнее доставленное и что не ушло после него."""
+
+    last_sent_at: datetime | None = None
+    failed_count: int = 0
+    failed_since: datetime | None = None
+    last_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Update:
     """One inbound message, in our own terms.
 

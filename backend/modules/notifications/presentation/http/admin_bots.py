@@ -9,14 +9,21 @@ from fastapi import APIRouter, HTTPException, Response, status
 
 from backend.app.http.authentication import CurrentAdmin
 from backend.modules.notifications.application import BotAdminService, BotNotFoundError, BotRejectedError
-from backend.modules.notifications.domain import Bot, MessengerTemporaryError
-from backend.modules.notifications.presentation.http.schemas import BotCreate, BotResponse
+from backend.modules.notifications.domain import Bot, BotDelivery, MessengerTemporaryError
+from backend.modules.notifications.presentation.http.schemas import BotCreate, BotDeliveryResponse, BotResponse
 
 router = APIRouter(prefix="/admin/bots", tags=["admin-bots"])
 
 
-def bot_response(bot: Bot) -> BotResponse:
+def bot_response(bot: Bot, delivery: BotDelivery | None = None) -> BotResponse:
+    state = delivery or BotDelivery()
     return BotResponse(
+        delivery=BotDeliveryResponse(
+            last_sent_at=state.last_sent_at,
+            failed_count=state.failed_count,
+            failed_since=state.failed_since,
+            last_error=state.last_error,
+        ),
         id=str(bot.id),
         code=bot.code,
         title=bot.title,
@@ -27,7 +34,8 @@ def bot_response(bot: Bot) -> BotResponse:
 @router.get("", response_model=list[BotResponse])
 @inject
 async def list_bots(_: CurrentAdmin, service: FromDishka[BotAdminService]) -> list[BotResponse]:
-    return [bot_response(bot) for bot in await service.list_bots()]
+    delivery = await service.delivery()
+    return [bot_response(bot, delivery.get(bot.id)) for bot in await service.list_bots()]
 
 
 @router.post("", response_model=BotResponse, status_code=status.HTTP_201_CREATED)

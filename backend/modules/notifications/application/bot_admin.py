@@ -6,11 +6,12 @@ and the template invitation links are built from.
 """
 
 import logging
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application.bots import BotNotFoundError, BotRegistry
-from backend.modules.notifications.domain import Bot, MessengerPermanentError
+from backend.modules.notifications.domain import Bot, BotDelivery, MessengerPermanentError
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
 
@@ -29,6 +30,9 @@ class BotAdminService:
 
     async def list_bots(self) -> list[Bot]:
         return await self.registry.active()
+
+    async def delivery(self) -> dict[uuid.UUID, BotDelivery]:
+        return await self.repository.delivery_by_bot()
 
     async def register(self, *, code: str, title: str, token: str) -> Bot:
         """Hand the token to the relay first, record the bot only if it took it.

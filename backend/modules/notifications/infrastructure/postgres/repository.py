@@ -2,10 +2,11 @@ import random
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.notifications.domain import BotDelivery
 from backend.modules.notifications.infrastructure.postgres.models import (
     BotCursorModel,
     BotModel,
@@ -23,6 +24,49 @@ class NotificationRepository:
         return list(
             await self.session.scalars(select(BotModel).where(BotModel.is_active).order_by(BotModel.created_at))
         )
+
+    async def delivery_by_bot(self) -> dict[uuid.UUID, BotDelivery]:
+        """Последняя доставка каждого бота и всё, что после неё сдалось в `failed`.
+
+        Отказ одного чата (бота заблокировали) тонет в следующих доставках, а
+        сломанный канал до релея копит отказы без единой доставки после них.
+        """
+        last_sent = {
+            bot_id: sent_at
+            for bot_id, sent_at in await self.session.execute(
+                select(OutgoingMessageModel.bot_id, func.max(OutgoingMessageModel.sent_at))
+                .where(OutgoingMessageModel.status == "sent")
+                .group_by(OutgoingMessageModel.bot_id)
+            )
+        }
+        sent = (
+            select(OutgoingMessageModel.bot_id, func.max(OutgoingMessageModel.sent_at).label("at"))
+            .where(OutgoingMessageModel.status == "sent")
+            .group_by(OutgoingMessageModel.bot_id)
+            .subquery()
+        )
+        failed = await self.session.execute(
+            select(
+                OutgoingMessageModel.bot_id,
+                func.count(),
+                func.min(OutgoingMessageModel.created_at),
+                func.array_agg(aggregate_order_by(OutgoingMessageModel.error, OutgoingMessageModel.created_at.desc()))[
+                    1
+                ],
+            )
+            .outerjoin(sent, sent.c.bot_id == OutgoingMessageModel.bot_id)
+            .where(
+                OutgoingMessageModel.status == "failed",
+                or_(sent.c.at.is_(None), OutgoingMessageModel.created_at > sent.c.at),
+            )
+            .group_by(OutgoingMessageModel.bot_id)
+        )
+        result = {bot_id: BotDelivery(last_sent_at=sent_at) for bot_id, sent_at in last_sent.items()}
+        for bot_id, count, since, error in failed:
+            result[bot_id] = BotDelivery(
+                last_sent_at=last_sent.get(bot_id), failed_count=count, failed_since=since, last_error=error
+            )
+        return result
 
     async def bot_by_code(self, code: str) -> BotModel | None:
         return await self.session.scalar(select(BotModel).where(BotModel.code == code))

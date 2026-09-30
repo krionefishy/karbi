@@ -5,6 +5,7 @@ arrives from the browser and leaves for the relay in the same request, and is
 never stored on this side.
 """
 
+from datetime import datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
@@ -22,8 +23,18 @@ class BotCreate(BaseModel):
     token: SecretStr
 
 
+class BotDeliveryResponse(BaseModel):
+    """Когда бот последний раз доставил сообщение и сколько не ушло после этого."""
+
+    last_sent_at: datetime | None = None
+    failed_count: int = 0
+    failed_since: datetime | None = None
+    last_error: str | None = None
+
+
 class BotResponse(BaseModel):
     id: str
     code: str
     title: str
     invite_link_template: str
+    delivery: BotDeliveryResponse = BotDeliveryResponse()

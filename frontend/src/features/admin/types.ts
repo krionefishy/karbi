@@ -20,11 +20,19 @@ export interface EmployeeUpdate {
 
 /** A bot as this server knows it: no token, only the link template the relay
  * handed back at registration. */
+export interface BotDelivery {
+  last_sent_at: string | null;
+  failed_count: number;
+  failed_since: string | null;
+  last_error: string | null;
+}
+
 export interface NotificationBot {
   id: string;
   code: string;
   title: string;
   invite_link_template: string;
+  delivery: BotDelivery;
 }
 
 export interface BotCreate {

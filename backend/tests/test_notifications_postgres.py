@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
+from sqlalchemy import update as sa_update
 
 from backend.modules.notifications.application import BotRegistry, DispatchService, SubscriptionService
 from backend.modules.notifications.domain import (
@@ -546,3 +547,34 @@ async def test_delivery_only_touches_the_bot_it_was_asked_for(notifications) -> 
             await session.execute(delete(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == other.id))
             await session.execute(delete(BotModel).where(BotModel.id == other.id))
             await session.commit()
+
+
+async def test_delivery_state_counts_only_what_failed_after_the_last_success(notifications) -> None:
+    database, bot = notifications
+
+    async def state():
+        async with database.session() as session:
+            return (await NotificationRepository(session).delivery_by_bot()).get(bot.id)
+
+    assert await state() is None
+
+    await subscribe(database, bot, chat_id=555, update_id=1)
+    await deliver(database, FakeRelay())
+    healthy = await state()
+    assert healthy is not None and healthy.last_sent_at is not None and healthy.failed_count == 0
+
+    # Канал до релея сломан: сообщения исчерпывают попытки и после последней доставки копятся отказы.
+    await dispatch_queue(database, request(bot.code, dedupe_key="turnover:2026-08-20"))
+    await dispatch_queue(database, request(bot.code, dedupe_key="turnover:2026-08-21"))
+    async with database.session() as session:
+        await session.execute(
+            sa_update(OutgoingMessageModel)
+            .where(OutgoingMessageModel.bot_id == bot.id, OutgoingMessageModel.status == "queued")
+            .values(status="failed", error="relay answered 401: unauthorized")
+        )
+        await session.commit()
+
+    broken = await state()
+    assert broken is not None
+    assert (broken.failed_count, broken.last_error) == (2, "relay answered 401: unauthorized")
+    assert broken.last_sent_at == healthy.last_sent_at and broken.failed_since is not None

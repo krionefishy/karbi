@@ -22,6 +22,7 @@ const bot: NotificationBot = {
   code: "turnover-alerts",
   title: "Оборачиваемость",
   invite_link_template: "https://t.me/mplace_auto_bot?start={token}",
+  delivery: { last_sent_at: "2026-09-28T15:04:05Z", failed_count: 0, failed_since: null, last_error: null },
 };
 
 function renderPage() {
@@ -49,6 +50,25 @@ describe("BotsPage", () => {
     // The token placeholder is what makes it a template, not a link to click.
     expect(await screen.findByText("https://t.me/mplace_auto_bot?start=…")).toBeInTheDocument();
     expect(screen.getByText("turnover-alerts")).toBeInTheDocument();
+  });
+
+  it("flags a bot whose messages stopped reaching anyone", async () => {
+    getBots.mockResolvedValue([
+      {
+        ...bot,
+        delivery: {
+          last_sent_at: "2026-09-28T15:04:05Z",
+          failed_count: 30,
+          failed_since: "2026-09-29T09:32:13Z",
+          last_error: "relay answered 401: unauthorized",
+        },
+      },
+    ]);
+    renderPage();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Не доставлено 30");
+    expect(alert).toHaveTextContent("relay answered 401: unauthorized");
   });
 
   it("says plainly when nothing is connected", async () => {
