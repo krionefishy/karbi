@@ -12,7 +12,7 @@ Marketplace Auto — внутренняя платформа автоматиз�
 | [architecture/](architecture/) | из чего состоит система и почему именно так |
 | [business/](business/) | предметная область: селлеры, артикулы, уведомления, админка |
 | [automations/](automations/) | по одному файлу на автоматизацию |
-| [BACKUPS.md](BACKUPS.md), [KEY_ROTATION.md](KEY_ROTATION.md) | эксплуатационные процедуры |
+| [BACKUPS.md](BACKUPS.md), [KEY_ROTATION.md](KEY_ROTATION.md), [MONITORING.md](MONITORING.md) | эксплуатационные процедуры |
 
 ### architecture
 

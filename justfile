@@ -33,6 +33,10 @@ lint:
 test:
     CONFIG_PATH={{ test_config }} uv run pytest
 
+# После изменения маршрутов API: пересобрать конфиг внешнего мониторинга.
+monitoring-config:
+    CONFIG_PATH={{ test_config }} uv run python -m backend.commands.monitoring_config
+
 test-infra-up:
     {{ test_compose }} up -d
     @for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do if {{ test_compose }} exec -T db-test pg_isready -U karbi -d karbi_test >/dev/null 2>&1 && {{ test_compose }} exec -T redis-test redis-cli ping >/dev/null 2>&1; then exit 0; fi; sleep 1; done; {{ test_compose }} logs; exit 1

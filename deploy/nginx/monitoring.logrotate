@@ -1,0 +1,16 @@
+# Кладётся в /etc/logrotate.d/nginx-monitoring скриптом render-hosts.sh.
+# Имя файла лога намеренно не *.log: под общий шаблон /etc/logrotate.d/nginx он
+# попасть не должен — там сжатие, а сборщик мониторинга дочитывает ротированные
+# файлы как есть и сжатые пропускает.
+/var/log/nginx/marketplace-auto-monitoring.json {
+    daily
+    rotate 7
+    missingok
+    notifempty
+    nocompress
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        invoke-rc.d nginx rotate >/dev/null 2>&1
+    endscript
+}
