@@ -18,6 +18,7 @@ from backend.modules.wb_core.presentation.http.schemas import (
     SellerResponse,
     SellerRestore,
     SellerUpdate,
+    TaxRateUpdate,
 )
 from backend.modules.wb_core.presentation.http.utils import (
     archived_conflict,
@@ -105,6 +106,21 @@ async def ozon_egress_verify(
         seller = await service.refresh_ozon_egress(seller_id)
     except SellerNotFoundError as error:
         raise not_found() from error
+    return await one_seller_response(service, seller)
+
+
+@router.put("/{seller_id}/tax-rate", response_model=SellerResponse)
+@inject
+async def set_tax_rate(
+    seller_id: uuid.UUID, payload: TaxRateUpdate, _: CurrentPrincipal, service: FromDishka[SellerService]
+) -> SellerResponse:
+    """Новая ставка налога: действует с указанной даты и прошлые периоды не меняет."""
+    try:
+        seller = await service.set_tax_rate(seller_id, payload.rate, payload.effective_from)
+    except SellerNotFoundError as error:
+        raise not_found() from error
+    except SellerArchivedError as error:
+        raise archived_conflict() from error
     return await one_seller_response(service, seller)
 
 

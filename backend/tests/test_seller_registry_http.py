@@ -219,3 +219,25 @@ async def test_a_token_pasted_in_pieces_never_reaches_the_gateway(registry) -> N
     assert refused.status_code == 422
     # Отвергнутое значение не должно вернуться в тексте ошибки.
     assert "aaaa1111" not in refused.text
+
+
+async def test_a_tax_rate_takes_effect_on_its_date_and_keeps_the_previous_one(registry) -> None:
+    """Ставка — версиями: будущая не действует сегодня, а первая покрывает и прошлое."""
+    _, client = registry
+    seller = await create_seller(client, "Реестр Налог", "wb-registry-key-tax")
+    assert (seller["tax_rate"], seller["tax_rate_from"]) == (None, None)
+    path = f"{API}/wb/sellers/{seller['id']}/tax-rate"
+
+    first = await client.put(path, json={"rate": "8", "effective_from": "2026-01-01"})
+    planned = await client.put(path, json={"rate": "10.5", "effective_from": "2999-01-01"})
+
+    assert first.status_code == 200, first.text
+    assert (first.json()["tax_rate"], first.json()["tax_rate_from"]) == (8.0, "2026-01-01")
+    # Ставка с будущей даты записана, но сегодня действует прежняя.
+    assert (planned.json()["tax_rate"], planned.json()["tax_rate_from"]) == (8.0, "2026-01-01")
+    corrected = await client.put(path, json={"rate": "12", "effective_from": "2026-01-01"})
+    assert corrected.json()["tax_rate"] == 12.0
+    [listed] = [item for item in (await client.get(f"{API}/wb/sellers")).json() if item["id"] == seller["id"]]
+    assert listed["tax_rate"] == 12.0
+    assert (await client.put(path, json={"rate": "101"})).status_code == 422
+    assert (await client.put(f"{API}/wb/sellers/{uuid.uuid4()}/tax-rate", json={"rate": "8"})).status_code == 404

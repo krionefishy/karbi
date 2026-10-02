@@ -1,9 +1,26 @@
 import uuid
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timedelta
+from dataclasses import asdict, fields
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import BigInteger, Integer, String, any_, bindparam, delete, func, or_, select, text, update
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    Integer,
+    String,
+    any_,
+    bindparam,
+    case,
+    cast,
+    delete,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
@@ -12,10 +29,14 @@ from sqlalchemy.sql import ColumnElement
 from backend.modules.wb_core.domain import (
     CHAT_SENDER_SELLER,
     CHAT_SOURCE_API,
+    SALES_RETURN_DOC_TYPE,
     ChatEvent,
     FbsOrder,
     FbsSupply,
     ReviewFact,
+    SalesReport,
+    SalesReportRow,
+    SalesReportTotals,
     SellerWarehouse,
     StockFact,
     WarehouseRemain,
@@ -30,6 +51,8 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     FbsWarehouseStockModel,
     MirrorStateModel,
     ReviewFactModel,
+    SalesReportModel,
+    SalesReportRowModel,
     SellerWarehouseModel,
     StockFactModel,
     WarehouseRemainModel,
@@ -37,6 +60,13 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
 )
 
 _INSERT_CHUNK = 1000
+# asyncpg принимает не больше 32 767 параметров на запрос: у широкой таблицы
+# порция строк считается от числа колонок, а не берётся круглой.
+_MAX_QUERY_PARAMETERS = 32_767
+
+
+def _chunk_size(rows: list[dict[str, Any]]) -> int:
+    return max(1, min(_INSERT_CHUNK, _MAX_QUERY_PARAMETERS // max(len(rows[0]), 1))) if rows else _INSERT_CHUNK
 
 
 class MirrorRepository:
@@ -621,6 +651,166 @@ class MirrorRepository:
             has_attachments=row.has_attachments,
         )
 
+    # --- отчёты реализации --------------------------------------------------------------
+
+    async def upsert_sales_reports(self, seller_id: uuid.UUID, reports: Iterable[SalesReport], *, now: datetime) -> int:
+        """Шапки перечитываются каждым сбором; докуда дочитаны строки — не трогается."""
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(report)} for report in reports]
+        chunk = _chunk_size(rows)
+        for offset in range(0, len(rows), chunk):
+            statement = insert(SalesReportModel).values(rows[offset : offset + chunk])
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "report_id"],
+                    set_={
+                        column: getattr(excluded, column)
+                        for column in rows[0]
+                        if column not in ("seller_id", "report_id")
+                    },
+                )
+            )
+        return len(rows)
+
+    async def pending_sales_reports(self, seller_id: uuid.UUID, *, limit: int) -> list[tuple[int, int]]:
+        """Отчёты с недочитанными строками и курсор каждого, старшие первыми."""
+        rows = await self.session.execute(
+            select(SalesReportModel.report_id, SalesReportModel.rows_cursor)
+            .where(SalesReportModel.seller_id == seller_id, SalesReportModel.rows_loaded_at.is_(None))
+            .order_by(SalesReportModel.date_from, SalesReportModel.report_type, SalesReportModel.report_id)
+            .limit(limit)
+        )
+        return [(int(report_id), int(cursor)) for report_id, cursor in rows.all()]
+
+    async def insert_sales_report_rows(
+        self, seller_id: uuid.UUID, rows: Iterable[SalesReportRow], *, now: datetime
+    ) -> int:
+        """Строка отчёта неизменяема: пришедшая второй раз (повтор страницы) не переписывается."""
+        values = [{"seller_id": seller_id, "collected_at": now, **asdict(row)} for row in rows]
+        chunk = _chunk_size(values)
+        for offset in range(0, len(values), chunk):
+            statement = insert(SalesReportRowModel).values(values[offset : offset + chunk])
+            await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id", "rrd_id"]))
+        return len(values)
+
+    async def advance_sales_report(
+        self, seller_id: uuid.UUID, report_id: int, *, cursor: int, loaded_at: datetime | None
+    ) -> None:
+        """Курсор двигается с каждой страницей; отметка «дочитан» — только на последней."""
+        changes: dict[str, Any] = {"rows_cursor": cursor}
+        if loaded_at is not None:
+            changes["rows_loaded_at"] = loaded_at
+        await self.session.execute(
+            update(SalesReportModel)
+            .where(SalesReportModel.seller_id == seller_id, SalesReportModel.report_id == report_id)
+            .values(**changes)
+        )
+
+    async def sales_reports(
+        self, seller_id: uuid.UUID, *, period: str, since: date, until: date
+    ) -> list[tuple[SalesReport, datetime | None]]:
+        """Шапки отчётов, чей период пересекает окно, с отметкой «строки дочитаны»."""
+        rows = await self.session.scalars(
+            select(SalesReportModel)
+            .where(
+                SalesReportModel.seller_id == seller_id,
+                SalesReportModel.period == period,
+                SalesReportModel.date_to >= since,
+                SalesReportModel.date_from <= until,
+            )
+            .order_by(SalesReportModel.date_from, SalesReportModel.report_type, SalesReportModel.report_id)
+        )
+        return [(self._sales_report(row), row.rows_loaded_at) for row in rows]
+
+    async def sales_report(self, seller_id: uuid.UUID, report_id: int) -> SalesReport | None:
+        row = await self.session.get(SalesReportModel, (seller_id, report_id))
+        return self._sales_report(row) if row else None
+
+    async def sales_report_rows(self, seller_id: uuid.UUID, report_ids: Iterable[int]) -> list[SalesReportRow]:
+        wanted = {report_id for report_id in report_ids if report_id}
+        if not wanted:
+            return []
+        rows = await self.session.scalars(
+            select(SalesReportRowModel)
+            .where(
+                SalesReportRowModel.seller_id == seller_id,
+                _any_of(SalesReportRowModel.report_id, wanted, BigInteger),
+            )
+            .order_by(SalesReportRowModel.rrd_id)
+        )
+        return [self._sales_report_row(row) for row in rows]
+
+    async def sales_report_totals(self, seller_id: uuid.UUID, report_ids: Iterable[int]) -> list[SalesReportTotals]:
+        """Строки отчётов, сложенные по артикулу, размеру и виду операции.
+
+        Год кабинета — миллионы строк, а разных ключей в отчёте — сотни:
+        складывает база, наружу уходит только сумма.
+        """
+        wanted = {report_id for report_id in report_ids if report_id}
+        if not wanted:
+            return []
+        model = SalesReportRowModel
+        # Недельный отчёт на стыке месяцев WB делит не всегда: месяц операции — в ключе.
+        month = cast(func.date_trunc("month", model.rr_date), Date).label("month")
+        keys = (
+            model.report_id,
+            month,
+            model.nm_id,
+            model.tech_size,
+            model.doc_type_name,
+            model.seller_oper_name,
+            model.bonus_type_name,
+            model.srv_dbs,
+        )
+        sums = {name: func.coalesce(func.sum(getattr(model, name)), 0).label(name) for name in _TOTALS_SUMMED}
+        result = await self.session.execute(
+            select(
+                *keys,
+                func.max(model.vendor_code).label("vendor_code"),
+                func.count().label("rows"),
+                func.coalesce(func.sum(model.retail_price_withdisc * model.quantity), 0).label("gross"),
+                *sums.values(),
+            )
+            .where(model.seller_id == seller_id, _any_of(model.report_id, wanted, BigInteger))
+            .group_by(*keys)
+            .order_by(*keys)
+        )
+        names = [field.name for field in fields(SalesReportTotals)]
+        return [SalesReportTotals(**{name: getattr(row, name) for name in names}) for row in result.all()]
+
+    async def sales_report_row_sums(self, seller_id: uuid.UUID, report_id: int) -> dict[str, Decimal]:
+        """Суммы строк по тем колонкам, итоги которых WB кладёт в шапку.
+
+        Возврат WB отдаёт положительной строкой с типом документа «Возврат»,
+        а в итогах шапки вычитает — так же считаем и здесь.
+        """
+        sign = case((SalesReportRowModel.doc_type_name == SALES_RETURN_DOC_TYPE, -1), else_=1)
+        columns = {
+            "retail_amount_sum": SalesReportRowModel.retail_amount * sign,
+            "for_pay_sum": SalesReportRowModel.for_pay * sign,
+            "delivery_service_sum": SalesReportRowModel.delivery_service,
+            "paid_storage_sum": SalesReportRowModel.paid_storage,
+            "paid_acceptance_sum": SalesReportRowModel.paid_acceptance,
+            "deduction_sum": SalesReportRowModel.deduction,
+            "penalty_sum": SalesReportRowModel.penalty,
+            "additional_payment_sum": SalesReportRowModel.additional_payment,
+        }
+        result = await self.session.execute(
+            select(*(func.coalesce(func.sum(column), 0).label(name) for name, column in columns.items())).where(
+                SalesReportRowModel.seller_id == seller_id, SalesReportRowModel.report_id == report_id
+            )
+        )
+        row = result.one()
+        return {name: Decimal(str(getattr(row, name))) for name in columns}
+
+    @staticmethod
+    def _sales_report(row: SalesReportModel) -> SalesReport:
+        return SalesReport(**{field.name: getattr(row, field.name) for field in fields(SalesReport)})
+
+    @staticmethod
+    def _sales_report_row(row: SalesReportRowModel) -> SalesReportRow:
+        return SalesReportRow(**{field.name: getattr(row, field.name) for field in fields(SalesReportRow)})
+
     # --- catalog ----------------------------------------------------------------
 
     async def lock_catalog(self, seller_id: uuid.UUID) -> None:
@@ -632,6 +822,31 @@ class MirrorRepository:
     async def _insert(self, model: Any, rows: list[dict[str, Any]]) -> None:
         for offset in range(0, len(rows), _INSERT_CHUNK):
             await self.session.execute(insert(model).values(rows[offset : offset + _INSERT_CHUNK]))
+
+
+# Колонки строки отчёта, которые в сводке складываются как есть.
+_TOTALS_SUMMED = (
+    "quantity",
+    "delivery_amount",
+    "return_amount",
+    "retail_amount",
+    "for_pay",
+    "delivery_service",
+    "rebill_logistic_cost",
+    "penalty",
+    "additional_payment",
+    "paid_storage",
+    "deduction",
+    "paid_acceptance",
+    "cashback_amount",
+    "cashback_discount",
+    "cashback_commission_change",
+    "acquiring_fee",
+    "ppvz_reward",
+    "vw",
+    "vw_nds",
+    "ppvz_sales_commission",
+)
 
 
 def _any_of(column: InstrumentedAttribute[Any], values: Iterable[Any], item_type: type) -> ColumnElement[bool]:

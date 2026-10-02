@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -330,6 +331,13 @@ class CoreMirrorConfig:
     # скачивание — раз в минуту на ключ. Раз в шесть часов хватает, чтобы
     # логист утром видел остаток после ночных отгрузок.
     remains_interval_minutes: int = 360
+    # Отчёты реализации: шапки с начала истории и строки по отчёту, не больше
+    # `sales_reports_per_run` отчётов за проход — каждая страница строк стоит
+    # минуту лимита WB. Недельный отчёт выходит в понедельник, к вечеру
+    # вторника он дочитан при любом интервале короче суток.
+    sales_reports_interval_minutes: int = 30
+    sales_reports_per_run: int = 4
+    sales_reports_history_from: str = "2026-01-01"
 
 
 @dataclass(frozen=True, slots=True)
@@ -543,9 +551,13 @@ class Settings:
             "supplies_hour",
             "supplies_minute",
             "remains_interval_minutes",
+            "sales_reports_interval_minutes",
+            "sales_reports_per_run",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
+        if "sales_reports_history_from" in core_mirror:
+            core_mirror["sales_reports_history_from"] = str(core_mirror["sales_reports_history_from"])
         if "stock_slot_hours" in core_mirror:
             core_mirror["stock_slot_hours"] = tuple(int(hour) for hour in core_mirror["stock_slot_hours"])
         review_chats = dict(data.get("review_chats", {}))
@@ -693,6 +705,12 @@ class Settings:
             raise ValueError("core_mirror.chats_* must be positive")
         if mirror.remains_interval_minutes < 1:
             raise ValueError("core_mirror.remains_interval_minutes must be positive")
+        if min(mirror.sales_reports_interval_minutes, mirror.sales_reports_per_run) < 1:
+            raise ValueError("core_mirror.sales_reports_* must be positive")
+        try:
+            date.fromisoformat(mirror.sales_reports_history_from)
+        except ValueError as error:
+            raise ValueError("core_mirror.sales_reports_history_from must be a date (YYYY-MM-DD)") from error
         chats = self.review_chats
         if (
             min(chats.reply_window_hours, chats.max_period_days, chats.baseline_days, chats.follow_up_within_minutes)

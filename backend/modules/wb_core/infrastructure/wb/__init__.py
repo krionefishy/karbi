@@ -21,6 +21,12 @@ from backend.modules.wb_core.infrastructure.wb.feedbacks import (
     FeedbackProduct,
     WBFeedbackClient,
 )
+from backend.modules.wb_core.infrastructure.wb.finance import (
+    FINANCE_BUCKET,
+    ROW_REQUEST_FIELDS,
+    SalesReportPage,
+    WBSalesReportsClient,
+)
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 from backend.modules.wb_core.infrastructure.wb.marketplace import (
     CHRT_CHUNK,
@@ -34,9 +40,11 @@ __all__ = [
     "CHAT_BUCKET",
     "CHRT_CHUNK",
     "FEEDBACKS_BUCKET",
+    "FINANCE_BUCKET",
     "MARKETPLACE_BUCKET",
     "MAX_PAGES",
     "PAGE_LIMIT",
+    "ROW_REQUEST_FIELDS",
     "CatalogCard",
     "CatalogSnapshot",
     "ChatEventsPage",
@@ -45,12 +53,14 @@ __all__ = [
     "FBOStockRow",
     "FeedbackAggregation",
     "FeedbackProduct",
+    "SalesReportPage",
     "WBAnalyticsClient",
     "WBChatClient",
     "WBContentClient",
     "WBFeedbackClient",
     "WBJsonClient",
     "WBMarketplaceClient",
+    "WBSalesReportsClient",
     "WBPermanentError",
     "WBWarehouseRemainsClient",
     "WBTemporaryError",

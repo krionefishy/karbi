@@ -1,6 +1,8 @@
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 ARTICLE_STATES = ("active", "archived", "feedback_only")
 
@@ -50,6 +52,32 @@ class Seller:
     @property
     def is_archived(self) -> bool:
         return self.archived_at is not None
+
+
+@dataclass(frozen=True, slots=True)
+class TaxRate:
+    """Ставка налога селлера в процентах, действующая с `effective_from`.
+
+    Ставка — свойство юрлица, а не маркетплейса: у селлера она одна на WB и
+    Ozon. Версии не переписываются: ставки меняются с нового года, и расчёт
+    прошлого периода должен остаться со своей.
+    """
+
+    effective_from: date
+    rate: Decimal
+
+
+def tax_rate_on(rates: Sequence[TaxRate], day: date) -> TaxRate | None:
+    """Ставка, действовавшая в `day`; до самой первой версии — она же, как у себестоимости."""
+    ordered = sorted(rates, key=lambda item: item.effective_from)
+    if not ordered:
+        return None
+    current = ordered[0]
+    for rate in ordered:
+        if rate.effective_from > day:
+            break
+        current = rate
+    return current
 
 
 @dataclass(frozen=True, slots=True)

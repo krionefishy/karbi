@@ -2,6 +2,7 @@ import asyncio
 import logging
 import signal
 from collections.abc import Callable, Coroutine
+from datetime import date
 
 from backend.infrastructure.logging import configure_logging
 from backend.modules.wb_core.application import MirrorService
@@ -12,8 +13,10 @@ from backend.modules.wb_core.infrastructure.wb import (
     WBContentClient,
     WBFeedbackClient,
     WBMarketplaceClient,
+    WBSalesReportsClient,
     WBWarehouseRemainsClient,
 )
+from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.kafka_streams.kafka import ensure_topics
 from backend.shared.settings import Settings, load_settings
 from backend.storage.pg import Database
@@ -48,9 +51,13 @@ class WBCoreWorkerApplication:
             feedbacks=WBFeedbackClient(gateway, page_size=self.settings.worker.feedback_page_size),
             chats=WBChatClient(gateway),
             remains=WBWarehouseRemainsClient(gateway),
+            sales_reports=WBSalesReportsClient(gateway),
             orders_history_months=self.settings.core_mirror.orders_history_months,
             chats_history_days=self.settings.core_mirror.chats_history_days,
             chats_pages_per_run=self.settings.core_mirror.chats_pages_per_run,
+            sales_reports_history_from=date.fromisoformat(self.settings.core_mirror.sales_reports_history_from),
+            sales_reports_per_run=self.settings.core_mirror.sales_reports_per_run,
+            heartbeat=touch_heartbeat,
         )
         self.worker = WBCoreWorker(self.database, self.mirror, self.settings)
         self.catalog_consumer = self._create_consumer()

@@ -1,9 +1,10 @@
 import logging
 import uuid
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from backend.modules.wb_core.domain import (
     CHAT_SENDER_CLIENT,
@@ -12,11 +13,14 @@ from backend.modules.wb_core.domain import (
     MIRROR_ORDERS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
+    MIRROR_SALES_REPORTS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
+    SALES_REPORT_WEEKLY,
     ChatEvent,
     FbsOrder,
     ReviewFact,
+    SalesReportRow,
     SellerWarehouse,
     StockFact,
 )
@@ -30,6 +34,7 @@ from backend.modules.wb_core.infrastructure.wb import (
     WBFeedbackClient,
     WBMarketplaceClient,
     WBPermanentError,
+    WBSalesReportsClient,
     WBTemporaryError,
     WBWarehouseRemainsClient,
 )
@@ -41,6 +46,19 @@ NO_MEDIA = (0, 0)
 LIVE_ORDERS_MONTHS = 3
 # Свежие задания перечитываются с таким запасом: в поставку их кладут не сразу.
 ORDERS_OVERLAP = timedelta(days=3)
+# Даты отчётов реализации WB считает по Москве; окно списка — до сегодняшнего дня по ней.
+WB_TIMEZONE = ZoneInfo("Europe/Moscow")
+# Итоги шапки, по которым дочитанный отчёт сверяется с суммой своих строк.
+SALES_REPORT_CHECKED_SUMS = (
+    "retail_amount_sum",
+    "for_pay_sum",
+    "delivery_service_sum",
+    "paid_storage_sum",
+    "paid_acceptance_sum",
+    "deduction_sum",
+    "penalty_sum",
+    "additional_payment_sum",
+)
 
 
 class SellerGoneError(Exception):
@@ -93,6 +111,15 @@ class ChatsOutcome:
     caught_up: bool
 
 
+@dataclass(frozen=True, slots=True)
+class SalesReportsOutcome:
+    reports: int
+    loaded: int
+    pages: int
+    rows: int
+    pending: int
+
+
 class MirrorService:
     """Зеркало WB по селлеру: каталог, остатки, отзывы, задания и поставки FBS, чаты.
 
@@ -115,9 +142,13 @@ class MirrorService:
         feedbacks: WBFeedbackClient,
         chats: WBChatClient,
         remains: WBWarehouseRemainsClient | None = None,
+        sales_reports: WBSalesReportsClient | None = None,
         orders_history_months: int = 6,
         chats_history_days: int = 90,
         chats_pages_per_run: int = 100,
+        sales_reports_history_from: date = date(2026, 1, 1),
+        sales_reports_per_run: int = 4,
+        heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
         self.content = content
@@ -126,9 +157,15 @@ class MirrorService:
         self.feedbacks = feedbacks
         self.chats = chats
         self.remains = remains
+        self.sales_reports = sales_reports
         self.orders_history_months = orders_history_months
         self.chats_history_days = chats_history_days
         self.chats_pages_per_run = chats_pages_per_run
+        self.sales_reports_history_from = sales_reports_history_from
+        self.sales_reports_per_run = sales_reports_per_run
+        # Долгий сбор отмечается между страницами: каждая ждёт минуту лимита WB, а
+        # healthcheck воркера считает процесс мёртвым после четверти часа тишины.
+        self._heartbeat = heartbeat or (lambda: None)
         self.logger = logging.getLogger("wb.core.mirror")
 
     # --- catalog ------------------------------------------------------------------
@@ -454,6 +491,119 @@ class MirrorService:
             await mirror.insert_chat_events(seller_id, kept, now=stamp)
             await mirror.save_chat_cursor(seller_id, cursor, tail_reached_at=stamp if caught_up else None)
             await session.commit()
+
+    # --- отчёты реализации ----------------------------------------------------------
+
+    async def collect_sales_reports(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> SalesReportsOutcome:
+        """Шапки недельных отчётов с начала истории и строки отчётов, которых ещё нет.
+
+        Список перечитывается весь: он один запрос, а отчёт за прошлую неделю
+        WB выкладывает в понедельник, иногда с задержкой. Строки читаются по
+        отчёту, страница за страницей, каждая — своей транзакцией с курсором:
+        сбой на второй странице не заставляет перечитывать первую. За один
+        проход дочитывается не больше `sales_reports_per_run` отчётов: каждая
+        страница — минута под лимитом WB, а воркер за это время держит
+        остальные виды зеркала.
+        """
+        if self.sales_reports is None:
+            raise WBPermanentError("Отчёты реализации не подключены к зеркалу")
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_SALES_REPORTS, stamp)
+            await session.commit()
+        until = stamp.astimezone(WB_TIMEZONE).date()
+        try:
+            reports = await self.sales_reports.reports(
+                seller_key, self.sales_reports_history_from, until, period=SALES_REPORT_WEEKLY
+            )
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_SALES_REPORTS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            await mirror.upsert_sales_reports(seller_id, reports, now=stamp)
+            await session.commit()
+            pending = await mirror.pending_sales_reports(seller_id, limit=self.sales_reports_per_run)
+        loaded = pages = rows = 0
+        refused: list[str] = []
+        try:
+            for report_id, cursor in pending:
+                try:
+                    while True:
+                        self._heartbeat()
+                        page = await self.sales_reports.page(seller_key, report_id, cursor=cursor)
+                        pages += 1
+                        rows += len(page.rows)
+                        if not page.exhausted and page.cursor <= cursor:
+                            # Полная страница, а курсор стоит: следующий запрос вернул бы её же.
+                            raise WBPermanentError(f"WB Finance API: курсор отчёта {report_id} не двигается")
+                        cursor = max(cursor, page.cursor)
+                        await self._write_sales_report_page(
+                            seller_id, report_id, page.rows, cursor, stamp, loaded=page.exhausted
+                        )
+                        if page.exhausted:
+                            loaded += 1
+                            break
+                except WBPermanentError as error:
+                    # Отказ по одному отчёту не должен запирать остальные: он старший в
+                    # очереди, и без пропуска новые недели не читались бы никогда.
+                    refused.append(f"отчёт {report_id}: {error}")
+        except WBTemporaryError as error:
+            await self._fail(seller_id, MIRROR_SALES_REPORTS, str(error))
+            raise
+        if refused:
+            text = "; ".join(refused)
+            await self._fail(seller_id, MIRROR_SALES_REPORTS, text)
+            raise WBPermanentError(text)
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_SALES_REPORTS, now=stamp)
+            await session.commit()
+        outcome = SalesReportsOutcome(len(reports), loaded, pages, rows, len(pending) - loaded)
+        self.logger.info("sales_reports_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    async def _write_sales_report_page(
+        self,
+        seller_id: uuid.UUID,
+        report_id: int,
+        rows: list[SalesReportRow],
+        cursor: int,
+        stamp: datetime,
+        *,
+        loaded: bool,
+    ) -> None:
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            await mirror.insert_sales_report_rows(seller_id, rows, now=stamp)
+            await mirror.advance_sales_report(seller_id, report_id, cursor=cursor, loaded_at=stamp if loaded else None)
+            if loaded:
+                await self._check_sales_report_sums(mirror, seller_id, report_id)
+            await session.commit()
+
+    async def _check_sales_report_sums(self, mirror: MirrorRepository, seller_id: uuid.UUID, report_id: int) -> None:
+        """Дочитанный отчёт сверяется с итогами WB из шапки; расхождение — в журнал, не отказ.
+
+        Отчёт при этом остаётся дочитанным: WB не отдаст других строк, а
+        молчаливая дыра в деньгах хуже строки в журнале.
+        """
+        header = await mirror.sales_report(seller_id, report_id)
+        if header is None:
+            return
+        sums = await mirror.sales_report_row_sums(seller_id, report_id)
+        mismatch = {
+            name: (str(getattr(header, name)), str(sums[name]))
+            for name in SALES_REPORT_CHECKED_SUMS
+            if getattr(header, name) != sums[name]
+        }
+        if mismatch:
+            self.logger.warning(
+                "sales_report_sums_mismatch",
+                extra={"seller_id": str(seller_id), "report_id": report_id, "mismatch": mismatch},
+            )
 
     @staticmethod
     def _unknown_cards(aggregation: FeedbackAggregation, known: set[str]) -> list[CatalogCard]:

@@ -1,13 +1,18 @@
 from collections.abc import Sequence
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
 
 from backend.modules.wb_core.application import SellerService
-from backend.modules.wb_core.domain import Article, Seller
+from backend.modules.wb_core.domain import Article, Seller, TaxRate, tax_rate_on
 from backend.modules.wb_core.presentation.http.schemas import ArticleResponse, SellerResponse
 
+# Какая ставка «действует сегодня», решает московская дата — как у отчётов WB.
+MOSCOW = ZoneInfo("Europe/Moscow")
 
-def seller_response(seller: Seller, automations: Sequence[str] = ()) -> SellerResponse:
+
+def seller_response(seller: Seller, automations: Sequence[str] = (), tax: TaxRate | None = None) -> SellerResponse:
     return SellerResponse(
         id=seller.id,
         name=seller.name,
@@ -24,13 +29,21 @@ def seller_response(seller: Seller, automations: Sequence[str] = ()) -> SellerRe
         mpstats_egress_status=seller.mpstats_egress_status,
         mpstats_egress_error=seller.mpstats_egress_error,
         egress_ip=seller.egress_ip,
+        tax_rate=float(tax.rate) if tax else None,
+        tax_rate_from=tax.effective_from.isoformat() if tax else None,
     )
 
 
 async def seller_responses(service: SellerService, sellers: Sequence[Seller]) -> list[SellerResponse]:
     """Render sellers together with the automations they are connected to."""
-    membership = await service.automations_of([seller.id for seller in sellers])
-    return [seller_response(seller, membership.get(seller.id, [])) for seller in sellers]
+    ids = [seller.id for seller in sellers]
+    membership = await service.automations_of(ids)
+    rates = await service.tax_rates(ids)
+    today = datetime.now(MOSCOW).date()
+    return [
+        seller_response(seller, membership.get(seller.id, []), tax_rate_on(rates.get(seller.id, []), today))
+        for seller in sellers
+    ]
 
 
 async def one_seller_response(service: SellerService, seller: Seller) -> SellerResponse:

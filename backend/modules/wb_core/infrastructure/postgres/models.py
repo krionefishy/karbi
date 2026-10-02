@@ -1,15 +1,18 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     MetaData,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -162,7 +165,7 @@ class MirrorStateModel(WBCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains')",
+            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', 'sales_reports')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -385,3 +388,166 @@ class ChatCursorModel(WBCoreBase):
     )
     next: Mapped[int] = mapped_column(BigInteger, nullable=False)
     tail_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# Деньги отчёта реализации: рубли с копейками, как их отдаёт WB.
+MONEY = Numeric(14, 2)
+# Проценты и коэффициенты WB бывают длиннее копеек.
+RATIO = Numeric(14, 4)
+
+
+class SalesReportModel(WBCoreBase):
+    """Шапка отчёта реализации WB с итогами — копия строки списка отчётов.
+
+    `rows_cursor` и `rows_loaded_at` — докуда дочитана детализация: страницы
+    пишутся по одной, и сбой на второй не заставляет перечитывать первую.
+    Отчёт WB не меняет, поэтому дочитанный больше не трогают.
+    """
+
+    __tablename__ = "sales_reports"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    report_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    report_type: Mapped[int] = mapped_column(Integer, nullable=False)
+    period: Mapped[str] = mapped_column(String(8), nullable=False)
+    date_from: Mapped[date] = mapped_column(Date, nullable=False)
+    date_to: Mapped[date] = mapped_column(Date, nullable=False)
+    create_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="")
+    seller_finance_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    retail_amount_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    for_pay_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    delivery_service_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    paid_storage_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    paid_acceptance_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    deduction_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    penalty_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    additional_payment_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_amount_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_discount_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_commission_change_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    bank_payment_sum: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    rows_cursor: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    rows_loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("period IN ('weekly', 'daily')", name="ck_wb_core_sales_reports_period"),
+        Index("ix_wb_core_sales_reports_period", "seller_id", "period", "date_from"),
+    )
+
+
+class SalesReportRowModel(WBCoreBase):
+    """Строка детализации отчёта реализации — копия ответа WB, поля названы как у WB.
+
+    Строка неизменяема; `rrdId` уникален в пределах кабинета. Суточные и
+    недельные отчёты состоят из одних и тех же строк, поэтому ключ — без
+    отчёта, а отчёт — колонкой. Строковые поля — без предела длины: слишком
+    длинное название от WB не должно ронять вставку всей страницы.
+    """
+
+    __tablename__ = "sales_report_rows"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    rrd_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    report_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    gi_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    doc_type_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    seller_oper_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    bonus_type_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    srid: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    order_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    shk_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    sticker_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    order_uid: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    trbx_id: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    order_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sale_dt: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rr_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fix_tariff_date_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    fix_tariff_date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    nm_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    vendor_code: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    brand_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    subject_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tech_size: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sku: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retail_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    retail_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    retail_price_withdisc: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_percent: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    commission_percent: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    spp: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    product_discount_for_report: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    seller_promo: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    seller_promo_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    seller_promo_discount: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    kvw_base: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    kvw: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    sup_rating_up: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    is_kgvp_v2: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    dlv_prc: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    ppvz_sales_commission: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    for_pay: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    ppvz_reward: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    acquiring_fee: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    acquiring_percent: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    acquiring_bank: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    payment_processing: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    vw: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    vw_nds: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    delivery_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    return_amount: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    delivery_service: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    rebill_logistic_cost: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    rebill_logistic_org: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    penalty: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    additional_payment: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    paid_storage: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    deduction: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    paid_acceptance: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_discount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    cashback_commission_change: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    installment_cofinancing_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    wibes_discount_percent: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    loyalty_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    loyalty_discount: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    warehouse_logistics_coeff: Mapped[Decimal] = mapped_column(RATIO, nullable=False, default=0)
+    payment_schedule: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    office_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ppvz_office_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    ppvz_office_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    delivery_method: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    srv_dbs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_b2b: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    country: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    gi_box_type_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    declaration_number: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_wb_core_sales_report_rows_report", "seller_id", "report_id"),
+        Index("ix_wb_core_sales_report_rows_nm", "seller_id", "nm_id", "rr_date"),
+    )
+
+
+class SellerTaxRateModel(WBCoreBase):
+    """Ставка налога селлера в процентах с даты `effective_from`; версии не переписываются."""
+
+    __tablename__ = "seller_tax_rates"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    effective_from: Mapped[date] = mapped_column(Date, primary_key=True)
+    rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (CheckConstraint("rate >= 0 AND rate <= 100", name="ck_wb_core_seller_tax_rates_rate"),)

@@ -6,6 +6,7 @@ from backend.modules.wb_core.application.mirror import (
     OrdersOutcome,
     RemainsOutcome,
     ReviewsOutcome,
+    SalesReportsOutcome,
     SellerGoneError,
     StocksOutcome,
     SuppliesOutcome,
@@ -13,11 +14,13 @@ from backend.modules.wb_core.application.mirror import (
 from backend.modules.wb_core.application.mirror_ports import (
     ChatMirror,
     ChatMirrorState,
+    MirroredSalesReport,
     OrderMirror,
     OrderTrace,
     RemainsMirror,
     RemainsSnapshot,
     ReviewMirror,
+    SalesReportMirror,
     StockMirror,
 )
 from backend.modules.wb_core.application.sellers import (
@@ -37,6 +40,7 @@ __all__ = [
     "ChatsOutcome",
     "DuplicateCredentialError",
     "MirrorService",
+    "MirroredSalesReport",
     "OrderMirror",
     "OrderTrace",
     "OrdersOutcome",
@@ -45,6 +49,8 @@ __all__ = [
     "RemainsSnapshot",
     "ReviewMirror",
     "ReviewsOutcome",
+    "SalesReportMirror",
+    "SalesReportsOutcome",
     "SellerArchivedError",
     "SellerGoneError",
     "SellerNotFoundError",

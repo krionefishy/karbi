@@ -1,4 +1,6 @@
 import uuid
+from datetime import date
+from decimal import Decimal
 
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 
@@ -100,6 +102,13 @@ class MPStatsCredentials(BaseModel):
         return SecretStr(normalized)
 
 
+class TaxRateUpdate(BaseModel):
+    """Ставка налога селлера в процентах; без даты действует с сегодняшнего дня."""
+
+    rate: Decimal = Field(ge=0, le=100, decimal_places=2)
+    effective_from: date | None = None
+
+
 class SellerResponse(BaseModel):
     id: uuid.UUID
     name: str
@@ -118,6 +127,9 @@ class SellerResponse(BaseModel):
     mpstats_egress_status: str = "undelivered"
     mpstats_egress_error: str | None = None
     egress_ip: str | None = None
+    # Действующая сегодня ставка налога, % — и с какого дня; None — не задана.
+    tax_rate: float | None = None
+    tax_rate_from: str | None = None
 
 
 class ArticleResponse(BaseModel):

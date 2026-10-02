@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Iterable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import case, delete, func, select, update
@@ -14,12 +15,14 @@ from backend.modules.wb_core.domain import (
     Article,
     BarcodeCard,
     Seller,
+    TaxRate,
 )
 from backend.modules.wb_core.infrastructure.postgres.models import (
     ArticleModel,
     InboxEventModel,
     OutboxEventModel,
     SellerModel,
+    SellerTaxRateModel,
 )
 from backend.modules.wb_core.infrastructure.wb import CatalogCard
 
@@ -57,6 +60,30 @@ class SellerRepository:
 
     async def get(self, seller_id: uuid.UUID) -> SellerModel | None:
         return await self.session.get(SellerModel, seller_id)
+
+    async def tax_rates(self, seller_ids: Iterable[uuid.UUID]) -> dict[uuid.UUID, list[TaxRate]]:
+        """Все версии ставки налога по селлерам, старшие первыми."""
+        wanted = list(seller_ids)
+        found: dict[uuid.UUID, list[TaxRate]] = {seller_id: [] for seller_id in wanted}
+        if not wanted:
+            return found
+        rows = await self.session.scalars(
+            select(SellerTaxRateModel)
+            .where(SellerTaxRateModel.seller_id.in_(wanted))
+            .order_by(SellerTaxRateModel.seller_id, SellerTaxRateModel.effective_from)
+        )
+        for row in rows:
+            found[row.seller_id].append(TaxRate(row.effective_from, row.rate))
+        return found
+
+    async def set_tax_rate(self, seller_id: uuid.UUID, rate: Decimal, effective_from: date) -> None:
+        """Версия на ту же дату переписывается: опечатку исправляют, не плодя версий."""
+        statement = insert(SellerTaxRateModel).values(seller_id=seller_id, effective_from=effective_from, rate=rate)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "effective_from"], set_={"rate": statement.excluded.rate}
+            )
+        )
 
     async def create(self, name: str) -> SellerModel:
         seller = SellerModel(name=name, catalog_sync_status="queued")

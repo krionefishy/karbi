@@ -14,6 +14,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_ORDERS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
+    MIRROR_SALES_REPORTS,
     MIRROR_STOCKS,
     MIRROR_SUPPLIES,
 )
@@ -25,7 +26,7 @@ from backend.storage.pg import Database
 
 
 class WBCoreWorker:
-    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты, склады WB.
+    """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты, склады WB, фин. отчёты.
 
     Подключение к автоматизациям на зеркало не влияет — оно нужно любой из
     них, и собирается один раз. Отметка сбора хранится на паре «селлер + вид»;
@@ -78,6 +79,7 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_SUPPLIES, now)
         await self.collect_due(MIRROR_CHATS, now)
         await self.collect_due(MIRROR_REMAINS, now)
+        await self.collect_due(MIRROR_SALES_REPORTS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
@@ -108,6 +110,8 @@ class WBCoreWorker:
             return now - timedelta(minutes=self.config.chats_interval_minutes)
         if kind == MIRROR_REMAINS:
             return now - timedelta(minutes=self.config.remains_interval_minutes)
+        if kind == MIRROR_SALES_REPORTS:
+            return now - timedelta(minutes=self.config.sales_reports_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -135,9 +139,10 @@ class WBCoreWorker:
                 if seller.egress_status in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind not in (MIRROR_CATALOG, MIRROR_CHATS):
+            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS):
                 # Без каталога нечем ключевать остатки и отзывы: у нового селлера
-                # первый сбор остатков дал бы нули на весь срез. Чатам каталог не нужен.
+                # первый сбор остатков дал бы нули на весь срез. Чатам и отчётам
+                # реализации каталог не нужен: артикул в них приходит от WB.
                 catalog = await mirror.states(MIRROR_CATALOG)
                 candidates = [
                     seller_id
@@ -166,6 +171,7 @@ class WBCoreWorker:
             MIRROR_SUPPLIES: self.mirror.collect_supplies,
             MIRROR_CHATS: self.mirror.collect_chats,
             MIRROR_REMAINS: self.mirror.collect_remains,
+            MIRROR_SALES_REPORTS: self.mirror.collect_sales_reports,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 # Виды зеркала: по каждому у селлера своя отметка сбора.
 MIRROR_CATALOG = "catalog"
@@ -9,6 +10,7 @@ MIRROR_ORDERS = "orders"
 MIRROR_SUPPLIES = "supplies"
 MIRROR_CHATS = "chats"
 MIRROR_REMAINS = "remains"
+MIRROR_SALES_REPORTS = "sales_reports"
 MIRROR_KINDS = (
     MIRROR_CATALOG,
     MIRROR_STOCKS,
@@ -17,7 +19,19 @@ MIRROR_KINDS = (
     MIRROR_SUPPLIES,
     MIRROR_CHATS,
     MIRROR_REMAINS,
+    MIRROR_SALES_REPORTS,
 )
+
+# Периодичность отчётов реализации: WB формирует и недельные, и суточные из
+# одних и тех же строк. Зеркало хранит недельные — по ним считают деньги.
+SALES_REPORT_WEEKLY = "weekly"
+SALES_REPORT_DAILY = "daily"
+# Тип отчёта: 1 — основной, 2 — «по выкупам» (продажи с отложенной оплатой).
+# За неделю у кабинета выходят оба, и суммы недели — их сумма.
+SALES_REPORT_MAIN = 1
+SALES_REPORT_BUYOUT = 2
+# Возврат приходит положительной строкой с этим типом документа: знак ставит читающий.
+SALES_RETURN_DOC_TYPE = "Возврат"
 
 # Откуда пришло сборочное задание: живой список отдаёт только последние три
 # месяца, старше — архив с другим набором полей.
@@ -166,6 +180,170 @@ class ChatEvent:
     rid: str | None
     text: str | None
     has_attachments: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SalesReport:
+    """Отчёт реализации WB — шапка с итогами, как её отдаёт список отчётов.
+
+    Итоги здесь — слово WB, а не наша сумма строк: по ним сверяется, что
+    детализация дочитана целиком. Отчёт неизменяем после создания.
+    """
+
+    report_id: int
+    report_type: int
+    period: str
+    date_from: date
+    date_to: date
+    create_date: date | None
+    currency: str
+    seller_finance_name: str
+    retail_amount_sum: Decimal
+    for_pay_sum: Decimal
+    delivery_service_sum: Decimal
+    paid_storage_sum: Decimal
+    paid_acceptance_sum: Decimal
+    deduction_sum: Decimal
+    penalty_sum: Decimal
+    additional_payment_sum: Decimal
+    cashback_amount_sum: Decimal
+    cashback_discount_sum: Decimal
+    cashback_commission_change_sum: Decimal
+    bank_payment_sum: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class SalesReportRow:
+    """Строка детализации отчёта реализации — копия ответа WB.
+
+    Имена полей — имена WB в snake_case, чтобы строку можно было сверить с
+    документацией без словаря. Не хранятся коды маркировки, реквизиты
+    B2B-покупателей и номера УПД: отчётам о деньгах они не нужны, а строк
+    в году миллионы.
+    """
+
+    rrd_id: int
+    report_id: int
+    gi_id: int | None
+    doc_type_name: str
+    seller_oper_name: str
+    bonus_type_name: str
+    srid: str
+    order_id: int | None
+    shk_id: int | None
+    sticker_id: int | None
+    order_uid: str
+    trbx_id: str
+    order_dt: datetime | None
+    sale_dt: datetime | None
+    rr_date: date | None
+    fix_tariff_date_from: date | None
+    fix_tariff_date_to: date | None
+    nm_id: int
+    vendor_code: str
+    title: str
+    brand_name: str
+    subject_name: str
+    tech_size: str
+    sku: str
+    quantity: int
+    retail_price: Decimal
+    retail_amount: Decimal
+    retail_price_withdisc: Decimal
+    sale_percent: Decimal
+    commission_percent: Decimal
+    spp: Decimal
+    product_discount_for_report: Decimal
+    seller_promo: Decimal
+    seller_promo_id: int | None
+    seller_promo_discount: Decimal
+    kvw_base: Decimal
+    kvw: Decimal
+    sup_rating_up: Decimal
+    is_kgvp_v2: Decimal
+    dlv_prc: Decimal
+    ppvz_sales_commission: Decimal
+    for_pay: Decimal
+    ppvz_reward: Decimal
+    acquiring_fee: Decimal
+    acquiring_percent: Decimal
+    acquiring_bank: str
+    payment_processing: str
+    vw: Decimal
+    vw_nds: Decimal
+    delivery_amount: int
+    return_amount: int
+    delivery_service: Decimal
+    rebill_logistic_cost: Decimal
+    rebill_logistic_org: str
+    penalty: Decimal
+    additional_payment: Decimal
+    paid_storage: Decimal
+    deduction: Decimal
+    paid_acceptance: Decimal
+    cashback_amount: Decimal
+    cashback_discount: Decimal
+    cashback_commission_change: Decimal
+    installment_cofinancing_amount: Decimal
+    wibes_discount_percent: Decimal
+    loyalty_id: int | None
+    loyalty_discount: Decimal
+    warehouse_logistics_coeff: Decimal
+    payment_schedule: str
+    office_name: str
+    ppvz_office_name: str
+    ppvz_office_id: int | None
+    delivery_method: str
+    srv_dbs: bool
+    is_b2b: bool
+    country: str
+    gi_box_type_name: str
+    declaration_number: str
+
+
+@dataclass(frozen=True, slots=True)
+class SalesReportTotals:
+    """Суммы строк отчёта реализации по артикулу и виду операции — те же цифры WB, только сложенные.
+
+    Ключ — отчёт, месяц операции, артикул, размер и три названия, которыми WB описывает
+    строку: по ним читающий сам решает, продажа это, логистика или удержание.
+    Знак возврата не применён: `doc_type_name` в ключе, вычитает читающий.
+    `gross` — цена продавца до скидки WB (`retailPriceWithDisc`), умноженная
+    на количество.
+    """
+
+    report_id: int
+    # Первый день месяца, в котором WB провёл операцию (`rrDate`); `None` — строка без даты.
+    month: date | None
+    nm_id: int
+    vendor_code: str
+    tech_size: str
+    doc_type_name: str
+    seller_oper_name: str
+    bonus_type_name: str
+    srv_dbs: bool
+    rows: int
+    quantity: int
+    delivery_amount: int
+    return_amount: int
+    gross: Decimal
+    retail_amount: Decimal
+    for_pay: Decimal
+    delivery_service: Decimal
+    rebill_logistic_cost: Decimal
+    penalty: Decimal
+    additional_payment: Decimal
+    paid_storage: Decimal
+    deduction: Decimal
+    paid_acceptance: Decimal
+    cashback_amount: Decimal
+    cashback_discount: Decimal
+    cashback_commission_change: Decimal
+    acquiring_fee: Decimal
+    ppvz_reward: Decimal
+    vw: Decimal
+    vw_nds: Decimal
+    ppvz_sales_commission: Decimal
 
 
 def is_review_prompt(sender: str, source: str, text: str | None) -> bool:

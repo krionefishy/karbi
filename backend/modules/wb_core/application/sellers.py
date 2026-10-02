@@ -2,7 +2,9 @@ import logging
 import time
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,7 @@ from backend.modules.wb_core.domain import (
     MARKETPLACES,
     Article,
     Seller,
+    TaxRate,
 )
 from backend.modules.wb_core.domain.entities import (
     EGRESS_DISABLED,
@@ -25,6 +28,9 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGateway
 from backend.shared.kafka_streams.topics import WBCoreTopics
 from backend.shared.outbox import OutboxRepository
+
+# «Сегодня» для даты начала действия ставки — московское, как у отчётов WB.
+MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 class SellerNotFoundError(Exception):
@@ -232,6 +238,17 @@ class SellerService:
         if await self.repository.get(seller_id) is None:
             raise SellerNotFoundError
         return await self.repository.list_articles(seller_id)
+
+    async def tax_rates(self, seller_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, list[TaxRate]]:
+        return await self.repository.tax_rates(seller_ids)
+
+    async def set_tax_rate(self, seller_id: uuid.UUID, rate: Decimal, effective_from: date | None) -> Seller:
+        """Новая версия ставки: действует с указанной даты, без даты — с сегодняшнего дня по Москве."""
+        await self._active(seller_id)
+        day = effective_from or datetime.now(MOSCOW).date()
+        await self.repository.set_tax_rate(seller_id, rate, day)
+        await self.session.commit()
+        return await self._reload(seller_id)
 
     async def automations_of(self, seller_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
         """Which automations each seller belongs to, in one pass per automation."""

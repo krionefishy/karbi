@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,15 +10,20 @@ from backend.modules.wb_core.domain import (
     MIRROR_ORDERS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
+    MIRROR_SALES_REPORTS,
     MIRROR_STOCKS,
+    SALES_REPORT_WEEKLY,
     ChatEvent,
     FbsOrder,
     FbsSupply,
     ReviewFact,
+    SalesReport,
+    SalesReportRow,
+    SalesReportTotals,
     StockFact,
     WarehouseRemain,
 )
-from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, MirrorStateModel
 
 
 class StockMirror:
@@ -192,3 +197,47 @@ class ChatMirror:
             synced_through=cursor.tail_reached_at if cursor else None,
             error=state.error,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class MirroredSalesReport:
+    """Отчёт реализации в зеркале: шапка WB и когда дочитаны его строки (`None` — ещё нет)."""
+
+    report: SalesReport
+    rows_loaded_at: datetime | None
+
+    @property
+    def loaded(self) -> bool:
+        return self.rows_loaded_at is not None
+
+
+class SalesReportMirror:
+    """Что автоматизации читают из зеркала отчётов реализации.
+
+    Шапки с итогами WB — чтобы знать, какие отчёты за период вышли и все ли
+    дочитаны; строки — чтобы считать по артикулам. Деньги за неделю — сумма
+    обоих типов отчёта за неё, это забота читающего.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def reports(
+        self, seller_id: uuid.UUID, *, since: date, until: date, period: str = SALES_REPORT_WEEKLY
+    ) -> list[MirroredSalesReport]:
+        """Отчёты, чей период пересекает окно, старшие первыми."""
+        return [
+            MirroredSalesReport(report, loaded_at)
+            for report, loaded_at in await self.mirror.sales_reports(seller_id, period=period, since=since, until=until)
+        ]
+
+    async def rows(self, seller_id: uuid.UUID, report_ids: Iterable[int]) -> list[SalesReportRow]:
+        return await self.mirror.sales_report_rows(seller_id, report_ids)
+
+    async def totals(self, seller_id: uuid.UUID, report_ids: Iterable[int]) -> list[SalesReportTotals]:
+        """Строки отчётов, сложенные по артикулу и виду операции; знак возврата ставит читающий."""
+        return await self.mirror.sales_report_totals(seller_id, report_ids)
+
+    async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
+        """`None` — зеркало до этого селлера ещё не доходило."""
+        return await self.mirror.state(seller_id, MIRROR_SALES_REPORTS)
