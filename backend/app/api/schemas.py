@@ -23,6 +23,9 @@ class AutomationResponse(BaseModel):
     id: str
     title: str
     description: str
+    # automation — работает по расписанию с подключёнными селлерами; tool — инструмент,
+    # который запускает человек: ни селлеров, ни запусков у него нет.
+    kind: str = "automation"
     status: str
     seller_count: int
     runs_last_24h: int

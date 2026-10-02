@@ -5,6 +5,7 @@ import type {
   Seller,
   SellerArticle,
   SellerInput,
+  TaxRateInput,
 } from "./types";
 
 export function getSellers(includeArchived = false) {
@@ -52,6 +53,13 @@ export const setOzonCredentials = (sellerId: string, payload: OzonCredentialsInp
 /** Перепроверить учётку Ozon (после перевыпуска ключа — он живёт полгода). */
 export const verifyOzonEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon-verify`, { method: "POST" });
+
+/** Новая ставка налога: действует со своей даты и прошлые периоды не меняет. */
+export const setTaxRate = (sellerId: string, payload: TaxRateInput) =>
+  apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/tax-rate`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 
 /** Завести или заменить токен MPStats. Ключ WB для этого вводить не нужно. */
 export const setMPStatsCredentials = (sellerId: string, payload: MPStatsCredentialsInput) =>

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Seller } from "../features/sellers/types";
-import { MPStatsCredentialsDialog, OzonCredentialsDialog, SellerDialog } from "./SellerDialog";
+import { MPStatsCredentialsDialog, OzonCredentialsDialog, SellerDialog, TaxRateDialog } from "./SellerDialog";
 
 describe("SellerDialog", () => {
   it("submits seller name and API key", () => {
@@ -32,6 +32,8 @@ function seller(overrides: Partial<Seller> = {}): Seller {
     mpstats_egress_status: "undelivered",
     mpstats_egress_error: null,
     egress_ip: null,
+  tax_rate: null,
+  tax_rate_from: null,
     ...overrides,
   };
 }
@@ -150,5 +152,28 @@ describe("MPStatsCredentialsDialog", () => {
 
     expect(onVerify).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Заменить токен" })).toBeTruthy();
+  });
+});
+
+describe("TaxRateDialog", () => {
+  it("отправляет ставку с точкой и дату начала, а без даты — null", () => {
+    const submit = vi.fn();
+    render(
+      <TaxRateDialog
+        seller={seller({ tax_rate: 8, tax_rate_from: "2026-01-01" })}
+        pending={false}
+        error=""
+        onClose={() => undefined}
+        onSubmit={submit}
+      />,
+    );
+    expect(screen.getByText("Сейчас: 8 % с 01.01.2026")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Ставка, %"), { target: { value: "10,5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(submit).toHaveBeenLastCalledWith({ rate: "10.5", effective_from: null });
+
+    fireEvent.change(screen.getByLabelText("Действует с"), { target: { value: "2027-01-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(submit).toHaveBeenLastCalledWith({ rate: "10.5", effective_from: "2027-01-01" });
   });
 });

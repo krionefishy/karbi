@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.api.automations import router as automations_router
+from backend.modules.fin_reports.presentation.http import router as fin_reports_router
 from backend.modules.notifications.presentation.http import admin_bots_router
 from backend.modules.platform.presentation.http import admin_users_router
 from backend.modules.platform.presentation.http import router as auth_router
@@ -36,6 +37,7 @@ router.include_router(wb_returns_router)
 router.include_router(wb_returns_extension_router)
 router.include_router(wb_podsort_router)
 router.include_router(wb_box_stickers_router)
+router.include_router(fin_reports_router)
 router.include_router(automations_router)
 
 

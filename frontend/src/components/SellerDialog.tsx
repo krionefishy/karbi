@@ -6,6 +6,7 @@ import type {
   OzonCredentialsInput,
   Seller,
   SellerInput,
+  TaxRateInput,
 } from "../features/sellers/types";
 import { isMPStatsMissing, isOzonMissing } from "../features/sellers/types";
 
@@ -395,6 +396,78 @@ export function MPStatsCredentialsDialog({
             </button>
             <button className="primary-button" disabled={pending}>
               {pending ? "Сохраняем…" : missing ? "Подключить" : "Заменить токен"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+interface TaxRateProps {
+  seller: Seller;
+  pending: boolean;
+  error: string;
+  onClose: () => void;
+  onSubmit: (value: TaxRateInput) => void;
+}
+
+/** Ставка налога селлера: версия со своей датой, прошлые периоды остаются с прежней. */
+export function TaxRateDialog({ seller, pending, error, onClose, onSubmit }: TaxRateProps) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    onSubmit({
+      rate: String(form.get("rate")).trim().replace(",", "."),
+      effective_from: String(form.get("effective_from") || "") || null,
+    });
+  }
+  return (
+    <div className="modal-overlay" role="presentation">
+      <section className="seller-dialog" role="dialog" aria-modal="true" aria-labelledby="tax-dialog-title">
+        <button className="dialog-close" onClick={onClose} aria-label="Закрыть">
+          <X size={18} />
+        </button>
+        <h2 id="tax-dialog-title">Ставка налога «{seller.name}»</h2>
+        <p className="muted">
+          Ставка одна на Wildberries и Ozon. Новая действует со своей даты — отчёты за прошлые периоды
+          считаются по прежней.
+        </p>
+        {seller.tax_rate !== null && (
+          <p className="muted">
+            Сейчас: {seller.tax_rate.toLocaleString("ru-RU")} %
+            {seller.tax_rate_from ? ` с ${seller.tax_rate_from.split("-").reverse().join(".")}` : ""}
+          </p>
+        )}
+        <form className="seller-form" onSubmit={submit}>
+          <label>
+            <span className="field-label">Ставка, %</span>
+            <input
+              name="rate"
+              inputMode="decimal"
+              pattern="\d{1,3}([.,]\d{1,2})?"
+              required
+              autoComplete="off"
+              placeholder="например, 8"
+              defaultValue={seller.tax_rate ?? ""}
+            />
+          </label>
+          <label>
+            <span className="field-label">Действует с</span>
+            <input name="effective_from" type="date" />
+          </label>
+          <p className="muted">Без даты ставка действует с сегодняшнего дня.</p>
+          {error && (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <button type="button" className="secondary-button" onClick={onClose}>
+              Отмена
+            </button>
+            <button className="primary-button" disabled={pending}>
+              {pending ? "Сохраняем…" : "Сохранить"}
             </button>
           </div>
         </form>

@@ -118,6 +118,9 @@ jobs:
       - name: Apply WB podsort migrations
         run: uv run alembic -n wb_podsort upgrade head
 
+      - name: Apply fin reports migrations
+        run: uv run alembic -n fin_reports upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend

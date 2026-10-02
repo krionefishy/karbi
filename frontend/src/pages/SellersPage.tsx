@@ -5,6 +5,7 @@ import {
   BarChart3,
   KeyRound,
   Pencil,
+  Percent,
   Plus,
   RefreshCw,
   Store,
@@ -20,6 +21,7 @@ import {
   OzonCredentialsDialog,
   RestoreSellerDialog,
   SellerDialog,
+  TaxRateDialog,
 } from "../components/SellerDialog";
 import { getAutomations } from "../features/automations/api";
 import {
@@ -31,6 +33,7 @@ import {
   retrySellerSync,
   setMPStatsCredentials,
   setOzonCredentials,
+  setTaxRate,
   updateSeller,
   verifyMPStatsEgress,
   verifyOzonEgress,
@@ -41,6 +44,7 @@ import type {
   OzonCredentialsInput,
   Seller,
   SellerInput,
+  TaxRateInput,
 } from "../features/sellers/types";
 import { isMPStatsMissing, isOzonMissing } from "../features/sellers/types";
 
@@ -72,6 +76,7 @@ export function SellersPage() {
   const [restoring, setRestoring] = useState<Seller | null>(null);
   const [ozonSeller, setOzonSeller] = useState<Seller | null>(null);
   const [mpstatsSeller, setMPStatsSeller] = useState<Seller | null>(null);
+  const [taxSeller, setTaxSeller] = useState<Seller | null>(null);
   const [formError, setFormError] = useState("");
 
   const { data: sellers = [], isLoading } = useQuery({
@@ -88,6 +93,10 @@ export function SellersPage() {
   });
   const { data: automations = [] } = useQuery({ queryKey: ["automations"], queryFn: getAutomations });
   const automationTitles = new Map(automations.map((item) => [item.id, item.title]));
+  // Подключение к автоматизации, убранной из каталога, в реестре не показывается;
+  // пока каталог не пришёл, отсеивать нечем — показываем как есть.
+  const shownAutomations = (ids: string[]) =>
+    automations.length === 0 ? ids : ids.filter((id) => automationTitles.has(id));
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["wb-sellers"] });
   const saveMutation = useMutation({
@@ -161,6 +170,15 @@ export function SellersPage() {
     },
     onError: (error) =>
       setFormError(error instanceof ApiError ? error.message : "Не удалось сохранить токен MPStats"),
+  });
+  const taxMutation = useMutation({
+    mutationFn: (payload: TaxRateInput) => setTaxRate((taxSeller as Seller).id, payload),
+    onSuccess: async () => {
+      setTaxSeller(null);
+      setFormError("");
+      await refresh();
+    },
+    onError: (error) => setFormError(error instanceof ApiError ? error.message : "Не удалось сохранить ставку налога"),
   });
   const mpstatsVerifyMutation = useMutation({
     mutationFn: () => verifyMPStatsEgress((mpstatsSeller as Seller).id),
@@ -276,9 +294,9 @@ export function SellersPage() {
                           seller.mpstats_egress_status)}
                 </span>
                 <span className="registry-automations">
-                  {seller.automations.length === 0
+                  {shownAutomations(seller.automations).length === 0
                     ? "—"
-                    : seller.automations.map((id) => (
+                    : shownAutomations(seller.automations).map((id) => (
                         <span className="automation-badge" key={id}>
                           {automationTitles.get(id) ?? id}
                         </span>
@@ -355,6 +373,20 @@ export function SellersPage() {
                         <BarChart3 size={15} />
                       </button>
                       <button
+                        title={
+                          seller.tax_rate === null
+                            ? "Задать ставку налога"
+                            : `Ставка налога: ${seller.tax_rate.toLocaleString("ru-RU")} %`
+                        }
+                        aria-label={`Ставка налога ${seller.name}`}
+                        onClick={() => {
+                          setFormError("");
+                          setTaxSeller(seller);
+                        }}
+                      >
+                        <Percent size={15} />
+                      </button>
+                      <button
                         title="В архив"
                         aria-label={`Отправить в архив ${seller.name}`}
                         onClick={() => setArchiving(seller)}
@@ -399,6 +431,15 @@ export function SellersPage() {
           onClose={() => setMPStatsSeller(null)}
           onSubmit={(value) => mpstatsMutation.mutate(value)}
           onVerify={() => mpstatsVerifyMutation.mutate()}
+        />
+      )}
+      {taxSeller && (
+        <TaxRateDialog
+          seller={taxSeller}
+          pending={taxMutation.isPending}
+          error={formError}
+          onClose={() => setTaxSeller(null)}
+          onSubmit={(value) => taxMutation.mutate(value)}
         />
       )}
       {archiving && (

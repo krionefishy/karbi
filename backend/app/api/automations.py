@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 from backend.app.api.schemas import AutomationResponse, AutomationSellerAttach
 from backend.app.api.utils import automation_catalog
 from backend.app.http.authentication import CurrentPrincipal
+from backend.modules.fin_reports.application import FinReportsService
 from backend.modules.wb_card_checklist.application import ChecklistService
 from backend.modules.wb_core.application import (
     AutomationNotFoundError,
@@ -16,7 +17,6 @@ from backend.modules.wb_core.application import (
 )
 from backend.modules.wb_core.presentation.http.schemas import SellerResponse
 from backend.modules.wb_core.presentation.http.utils import archived_conflict, not_found, seller_responses
-from backend.modules.wb_fbs_distribution.application import FbsDistributionService
 from backend.modules.wb_fbs_penalties.application import PenaltiesService
 from backend.modules.wb_fbs_stocks.application import FbsStocksService
 from backend.modules.wb_podsort.application import PodsortService
@@ -39,25 +39,25 @@ async def automations(
     _: CurrentPrincipal,
     reviews: FromDishka[ReviewSyncService],
     turnover: FromDishka[TurnoverService],
-    fbs_distribution: FromDishka[FbsDistributionService],
     card_checklist: FromDishka[ChecklistService],
     fbs_stocks: FromDishka[FbsStocksService],
     fbs_penalties: FromDishka[PenaltiesService],
     review_chats: FromDishka[ReviewChatsService],
     returns: FromDishka[ReturnsService],
     podsort: FromDishka[PodsortService],
+    fin_reports: FromDishka[FinReportsService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
     return automation_catalog(
         await reviews.overview(),
         await turnover.overview(),
-        await fbs_distribution.overview(),
         await card_checklist.overview(),
         await fbs_stocks.overview(),
         await fbs_penalties.overview(),
         await review_chats.overview(),
         await returns.overview(),
         await podsort.overview(),
+        await fin_reports.overview(),
         settings,
     )
 

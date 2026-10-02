@@ -12,6 +12,7 @@ const automation: Automation = {
   id: "wb-reviews",
   title: "Мониторинг отзывов Wildberries",
   description: "Ежедневные снимки отзывов.",
+  kind: "automation",
   status: "degraded",
   seller_count: 4,
   runs_last_24h: 2,
@@ -71,5 +72,26 @@ describe("AutomationsPage", () => {
     expect(await screen.findByText("Ещё не запускалась")).toBeInTheDocument();
     expect(screen.getByText("ещё не запускалась")).toBeInTheDocument();
     expect(screen.getByText("ни разу")).toBeInTheDocument();
+  });
+
+  it("shows a tool without sellers, runs or schedule", async () => {
+    renderPage([
+      {
+        ...automation,
+        id: "wb-box-stickers",
+        title: "Стикеры коробов",
+        kind: "tool",
+        status: "active",
+        seller_count: 0,
+        last_run: null,
+        last_success_at: null,
+        next_run_at: null,
+      },
+    ]);
+
+    expect(await screen.findByText("Инструмент")).toBeInTheDocument();
+    expect(screen.queryByText("Селлеров")).not.toBeInTheDocument();
+    expect(screen.queryByText("Следующий запуск")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Открыть/ })).toHaveAttribute("href", "/automations/wb-box-stickers");
   });
 });

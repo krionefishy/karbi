@@ -9,7 +9,8 @@ import { AppRoutes } from "./App";
 vi.mock("../pages/AutomationsPage", () => ({ AutomationsPage: () => <div>каталог автоматизаций</div> }));
 vi.mock("../pages/ReviewsPage", () => ({ ReviewsPage: () => <div>отзывы</div> }));
 vi.mock("../pages/TurnoverPage", () => ({ TurnoverPage: () => <div>оборачиваемость</div> }));
-vi.mock("../pages/FbsDistributionPage", () => ({ FbsDistributionPage: () => <div>распределение FBS</div> }));
+vi.mock("../pages/FinReportsPage", () => ({ FinReportsPage: () => <div>финансовые отчёты</div> }));
+vi.mock("../pages/BoxStickersPage", () => ({ BoxStickersPage: () => <div>стикеры коробов</div> }));
 vi.mock("../pages/CardChecklistPage", () => ({ CardChecklistPage: () => <div>чек-лист</div> }));
 vi.mock("../pages/FbsStocksPage", () => ({ FbsStocksPage: () => <div>остатки FBS</div> }));
 vi.mock("../pages/FbsPenaltiesPage", () => ({ FbsPenaltiesPage: () => <div>штрафы FBS</div> }));
@@ -44,12 +45,13 @@ describe("маршруты автоматизаций", () => {
   it.each([
     ["/automations/wb-reviews", "отзывы"],
     ["/automations/wb-turnover", "оборачиваемость"],
-    ["/automations/wb-fbs-distribution", "распределение FBS"],
     ["/automations/wb-card-checklist", "чек-лист"],
     ["/automations/wb-fbs-stocks", "остатки FBS"],
     ["/automations/wb-fbs-penalties", "штрафы FBS"],
     ["/automations/wb-returns", "возвраты WB"],
     ["/automations/wb-podsort", "подсорт WB"],
+    ["/automations/wb-box-stickers", "стикеры коробов"],
+    ["/automations/fin-reports", "финансовые отчёты"],
   ])("%s открывает свою страницу", (path, expected) => {
     open(path);
 

@@ -2,6 +2,25 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.app.api.schemas import AutomationResponse, AutomationRunResponse
+from backend.modules.fin_reports.application import (
+    AUTOMATION_ID as FIN_REPORTS_ID,
+)
+from backend.modules.fin_reports.application import (
+    DESCRIPTION as FIN_REPORTS_DESCRIPTION,
+)
+from backend.modules.fin_reports.application import (
+    TITLE as FIN_REPORTS_TITLE,
+)
+from backend.modules.fin_reports.application import FinReportsOverview
+from backend.modules.wb_box_stickers.application import (
+    AUTOMATION_ID as WB_BOX_STICKERS_ID,
+)
+from backend.modules.wb_box_stickers.application import (
+    DESCRIPTION as WB_BOX_STICKERS_DESCRIPTION,
+)
+from backend.modules.wb_box_stickers.application import (
+    TITLE as WB_BOX_STICKERS_TITLE,
+)
 from backend.modules.wb_card_checklist.application import (
     AUTOMATION_ID as WB_CHECKLIST_ID,
 )
@@ -12,16 +31,6 @@ from backend.modules.wb_card_checklist.application import (
     TITLE as WB_CHECKLIST_TITLE,
 )
 from backend.modules.wb_card_checklist.application import ChecklistOverview
-from backend.modules.wb_fbs_distribution.application import (
-    AUTOMATION_ID as WB_FBS_ID,
-)
-from backend.modules.wb_fbs_distribution.application import (
-    DESCRIPTION as WB_FBS_DESCRIPTION,
-)
-from backend.modules.wb_fbs_distribution.application import (
-    TITLE as WB_FBS_TITLE,
-)
-from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
 from backend.modules.wb_fbs_penalties.application import (
     AUTOMATION_ID as WB_FBS_PENALTIES_ID,
 )
@@ -221,13 +230,13 @@ def collection_run_response(run: CollectionRunModel) -> AutomationRunResponse:
 def automation_catalog(
     reviews: SyncOverview,
     turnover: TurnoverOverview,
-    fbs_distribution: DistributionCatalogOverview,
     card_checklist: ChecklistOverview,
     fbs_stocks: BoardOverview,
     fbs_penalties: PenaltiesOverview,
     review_chats: ReviewChatsOverview,
     returns: ReturnsOverview,
     podsort: PodsortOverview,
+    fin_reports: FinReportsOverview,
     settings: Settings,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
@@ -253,18 +262,6 @@ def automation_catalog(
             last_run=collection_run_response(turnover.last_run) if turnover.last_run else None,
             last_success_at=turnover.last_success_at.isoformat() if turnover.last_success_at else None,
             next_run_at=next_turnover_run_at(settings).isoformat(),
-        ),
-        AutomationResponse(
-            id=WB_FBS_ID,
-            title=WB_FBS_TITLE,
-            description=WB_FBS_DESCRIPTION,
-            status=fbs_distribution.status,
-            seller_count=fbs_distribution.seller_count,
-            runs_last_24h=0,
-            last_run=None,
-            last_success_at=None,
-            # Расписания ещё нет: модуль подключает селлеров, но ничего не запускает.
-            next_run_at=None,
         ),
         AutomationResponse(
             id=WB_CHECKLIST_ID,
@@ -333,5 +330,31 @@ def automation_catalog(
             last_run=None,
             last_success_at=podsort.last_success_at.isoformat() if podsort.last_success_at else None,
             next_run_at=next_podsort_run_at(settings, podsort).isoformat(),
+        ),
+        AutomationResponse(
+            id=FIN_REPORTS_ID,
+            title=FIN_REPORTS_TITLE,
+            description=FIN_REPORTS_DESCRIPTION,
+            status=fin_reports.status,
+            seller_count=fin_reports.seller_count,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=fin_reports.last_success_at.isoformat() if fin_reports.last_success_at else None,
+            # Своего расписания нет: отчёт считается при открытии из зеркала отчётов реализации.
+            next_run_at=None,
+        ),
+        AutomationResponse(
+            id=WB_BOX_STICKERS_ID,
+            title=WB_BOX_STICKERS_TITLE,
+            description=WB_BOX_STICKERS_DESCRIPTION,
+            # Инструмент: файл собирает человек по кнопке, поэтому ни селлеров,
+            # ни запусков по расписанию у карточки нет.
+            kind="tool",
+            status="active",
+            seller_count=0,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=None,
+            next_run_at=None,
         ),
     ]

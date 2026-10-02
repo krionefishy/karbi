@@ -11,10 +11,10 @@ import { CardChecklistPage } from "../pages/CardChecklistPage";
 import { ReviewChatsPage } from "../pages/ReviewChatsPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
-import { FbsDistributionPage } from "../pages/FbsDistributionPage";
 import { FbsPenaltiesPage } from "../pages/FbsPenaltiesPage";
 import { PodsortPage } from "../pages/PodsortPage";
 import { BoxStickersPage } from "../pages/BoxStickersPage";
+import { FinReportsPage } from "../pages/FinReportsPage";
 import { ReturnsPage } from "../pages/ReturnsPage";
 import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
@@ -37,7 +37,6 @@ export function AppRoutes() {
         <Route path="/sellers" element={<SellersPage />} />
         <Route path="/automations/wb-reviews" element={<ReviewsPage />} />
         <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
-        <Route path="/automations/wb-fbs-distribution" element={<FbsDistributionPage />} />
         <Route path="/automations/wb-card-checklist" element={<CardChecklistPage />} />
         <Route path="/automations/wb-fbs-stocks" element={<FbsStocksPage />} />
         <Route path="/automations/wb-fbs-penalties" element={<FbsPenaltiesPage />} />
@@ -45,6 +44,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-returns" element={<ReturnsPage />} />
         <Route path="/automations/wb-podsort" element={<PodsortPage />} />
         <Route path="/automations/wb-box-stickers" element={<BoxStickersPage />} />
+        <Route path="/automations/fin-reports" element={<FinReportsPage />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />

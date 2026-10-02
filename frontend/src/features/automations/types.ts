@@ -20,6 +20,8 @@ export interface Automation {
   id: string;
   title: string;
   description: string;
+  /** tool — инструмент, который запускает человек: без селлеров и расписания. */
+  kind: "automation" | "tool";
   status: AutomationStatus;
   seller_count: number;
   runs_last_24h: number;

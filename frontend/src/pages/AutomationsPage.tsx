@@ -74,47 +74,53 @@ export function AutomationsPage() {
                     <span className="automation-icon">
                       <Icon size={20} />
                     </span>
-                    <span className={`status-badge status-${automation.status}`}>
-                      <span />
-                      {statusLabels[automation.status]}
-                    </span>
+                    {automation.kind === "tool" ? (
+                      <span className="status-badge status-idle">Инструмент</span>
+                    ) : (
+                      <span className={`status-badge status-${automation.status}`}>
+                        <span />
+                        {statusLabels[automation.status]}
+                      </span>
+                    )}
                   </div>
                   <h2>{automation.title}</h2>
                   <p className="muted">{automation.description}</p>
-                  <dl className="automation-meta">
-                    <div>
-                      <dt>Селлеров</dt>
-                      <dd>{sellerLabel(automation.seller_count)}</dd>
-                    </div>
-                    <div>
-                      <dt>Последний запуск</dt>
-                      <dd>
-                        {momentLabel(automation.last_run?.finished_at ?? automation.last_run?.created_at ?? null,
-                          "ещё не запускалась")}
-                        {automation.last_run && (
-                          <span className="automation-run-detail">
-                            {automation.last_run.completed_sellers} из {automation.last_run.total_sellers}
-                            {automation.last_run.failed_sellers > 0 && (
-                              <b className="automation-failed"> · {automation.last_run.failed_sellers} с ошибкой</b>
-                            )}
-                            {durationLabel(automation.last_run.duration_seconds) &&
-                              ` · ${durationLabel(automation.last_run.duration_seconds)}`}
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Успешно завершалась</dt>
-                      <dd>{momentLabel(automation.last_success_at, "ни разу")}</dd>
-                    </div>
-                    <div>
-                      <dt>Следующий запуск</dt>
-                      <dd>
-                        {momentLabel(automation.next_run_at)}
-                        <span className="automation-run-detail">за сутки запусков: {automation.runs_last_24h}</span>
-                      </dd>
-                    </div>
-                  </dl>
+                  {automation.kind !== "tool" && (
+                    <dl className="automation-meta">
+                      <div>
+                        <dt>Селлеров</dt>
+                        <dd>{sellerLabel(automation.seller_count)}</dd>
+                      </div>
+                      <div>
+                        <dt>Последний запуск</dt>
+                        <dd>
+                          {momentLabel(automation.last_run?.finished_at ?? automation.last_run?.created_at ?? null,
+                            "ещё не запускалась")}
+                          {automation.last_run && (
+                            <span className="automation-run-detail">
+                              {automation.last_run.completed_sellers} из {automation.last_run.total_sellers}
+                              {automation.last_run.failed_sellers > 0 && (
+                                <b className="automation-failed"> · {automation.last_run.failed_sellers} с ошибкой</b>
+                              )}
+                              {durationLabel(automation.last_run.duration_seconds) &&
+                                ` · ${durationLabel(automation.last_run.duration_seconds)}`}
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Успешно завершалась</dt>
+                        <dd>{momentLabel(automation.last_success_at, "ни разу")}</dd>
+                      </div>
+                      <div>
+                        <dt>Следующий запуск</dt>
+                        <dd>
+                          {momentLabel(automation.next_run_at)}
+                          <span className="automation-run-detail">за сутки запусков: {automation.runs_last_24h}</span>
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
                   <Link className="secondary-button card-action" to={`/automations/${automation.id}`}>
                     Открыть <ArrowRight size={16} />
                   </Link>

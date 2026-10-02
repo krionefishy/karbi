@@ -416,3 +416,31 @@
 .box-stickers-file { display: flex; flex-direction: column; align-self: flex-start; color: var(--ink); }
 .box-stickers-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .box-stickers-problems { margin: 0; padding-left: 18px; }
+
+/* Финансовые отчёты: строки ОПиУ сверху вниз, по колонке на период или кабинет. */
+.fin-toolbar { align-items: flex-end; }
+.fin-toolbar .mode-switch { margin-bottom: 0; margin-right: auto; }
+.fin-table { margin-bottom: var(--space-5); }
+.fin-table .stocks-head > * { align-items: flex-end; text-align: right; }
+.fin-table .stocks-head > .checklist-sticky { align-items: flex-start; text-align: left; }
+.fin-period { color: inherit; font: inherit; background: transparent; border: 0; border-radius: 0; cursor: pointer; }
+.fin-period:hover { background: var(--surface-hover); }
+.fin-period-active { box-shadow: inset 0 -2px 0 var(--accent); color: var(--ink); }
+.fin-period small, .fin-head-cell small { color: var(--warning, var(--ink-muted)); font-size: 11px; font-weight: 500; }
+.fin-cell { align-items: flex-end; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-row-total { font-weight: 600; background: var(--surface-hover); }
+.fin-row-subtotal { font-weight: 600; }
+.fin-row-item > .checklist-sticky { padding-left: 22px; }
+.fin-row-info { color: var(--ink-muted); font-style: italic; }
+.fin-row-info > .checklist-sticky { padding-left: 22px; }
+.fin-subtitle { margin: 0 0 var(--space-3); font-size: 15px; }
+.fin-subtitle small { font-weight: 400; }
+.fin-uncosted summary { cursor: pointer; }
+.fin-uncosted ul { margin: var(--space-3) 0 0; padding-left: 18px; max-height: 240px; overflow: auto; }
+.fin-costs { margin-bottom: var(--space-5); padding: var(--space-5); }
+.fin-costs > p { margin: var(--space-3) 0 0; }
+.fin-upload-result { margin-top: var(--space-3); }
+.fin-upload-result p, .fin-upload-result ul { margin: var(--space-2) 0 0; }
+.fin-upload-result ul { padding-left: 18px; }
+.fin-costs .stocks-toolbar { align-items: flex-end; }
+.fin-costs-from { margin-left: auto; }

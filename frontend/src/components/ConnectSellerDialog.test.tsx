@@ -21,6 +21,8 @@ function seller(id: string, name: string): Seller {
     mpstats_egress_status: "undelivered",
     mpstats_egress_error: null,
     egress_ip: null,
+  tax_rate: null,
+  tax_rate_from: null,
   };
 }
 

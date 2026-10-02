@@ -19,6 +19,9 @@ export interface Seller {
   mpstats_egress_error: string | null;
   /** Адрес общий: у селлера он один на оба маркетплейса и на MPStats. */
   egress_ip: string | null;
+  /** Действующая сегодня ставка налога, % — и с какого дня; null — не задана. */
+  tax_rate: number | null;
+  tax_rate_from: string | null;
 }
 
 export type EgressStatus =
@@ -64,6 +67,12 @@ export interface OzonCredentialsInput {
 /** Учётка Ozon ни разу не доезжала до шлюза — это не ошибка, а «ещё не заводили». */
 export const isOzonMissing = (seller: Seller) =>
   seller.ozon_egress_status === "undelivered" && seller.ozon_egress_error === null;
+
+/** Ставка налога в процентах; без даты действует с сегодняшнего дня. */
+export interface TaxRateInput {
+  rate: string;
+  effective_from: string | null;
+}
 
 /** Токен MPStats: кабинет MPStats → Настройки → API. */
 export interface MPStatsCredentialsInput {

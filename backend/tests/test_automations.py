@@ -8,8 +8,8 @@ from backend.app.api.utils import (
     next_run_at,
     next_turnover_run_at,
 )
+from backend.modules.fin_reports.application import FinReportsOverview
 from backend.modules.wb_card_checklist.application import ChecklistOverview
-from backend.modules.wb_fbs_distribution.application import DistributionCatalogOverview
 from backend.modules.wb_fbs_penalties.application import PenaltiesOverview
 from backend.modules.wb_fbs_stocks.application import BoardOverview
 from backend.modules.wb_podsort.application import PodsortOverview
@@ -26,11 +26,6 @@ SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 def quiet_turnover() -> TurnoverOverview:
     """A turnover automation that has never run — the reviews card must not care."""
     return TurnoverOverview(seller_count=0, last_run=None, last_success_at=None, runs_last_24h=0)
-
-
-def quiet_fbs() -> DistributionCatalogOverview:
-    """Same for FBS distribution: an idle card must not colour its neighbours."""
-    return DistributionCatalogOverview(seller_count=0)
 
 
 def quiet_checklist() -> ChecklistOverview:
@@ -51,6 +46,10 @@ def quiet_chats() -> ReviewChatsOverview:
 
 def quiet_returns() -> ReturnsOverview:
     return ReturnsOverview(seller_count=0, last_success_at=None, failing=0)
+
+
+def quiet_fin_reports() -> FinReportsOverview:
+    return FinReportsOverview(seller_count=0, last_success_at=None, failing=0)
 
 
 def quiet_podsort() -> PodsortOverview:
@@ -102,13 +101,13 @@ def test_catalog_reports_the_run_that_actually_happened() -> None:
     [automation, *_] = automation_catalog(
         overview,
         quiet_turnover(),
-        quiet_fbs(),
         quiet_checklist(),
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
         quiet_returns(),
         quiet_podsort(),
+        quiet_fin_reports(),
         SETTINGS,
     )
 
@@ -144,13 +143,13 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
     [automation, *_] = automation_catalog(
         overview,
         quiet_turnover(),
-        quiet_fbs(),
         quiet_checklist(),
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
         quiet_returns(),
         quiet_podsort(),
+        quiet_fin_reports(),
         SETTINGS,
     )
 
@@ -177,30 +176,30 @@ def test_the_catalog_lists_every_automation() -> None:
     (
         reviews_card,
         turnover_card,
-        fbs_card,
         checklist_card,
         stocks_card,
         penalties_card,
         chats_card,
         returns_card,
         podsort_card,
+        fin_card,
+        stickers_card,
     ) = automation_catalog(
         SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
         turnover,
-        DistributionCatalogOverview(seller_count=3),
         ChecklistOverview(seller_count=2, last_success_at=None, failing=0),
         BoardOverview(seller_count=5, last_success_at=None, failing=0),
         PenaltiesOverview(seller_count=1, last_success_at=None, failing=0),
         ReviewChatsOverview(seller_count=2, last_success_at=None, failing=0),
         ReturnsOverview(seller_count=1, last_success_at=None, failing=0),
         PodsortOverview(seller_count=4, last_success_at=None, failing=0),
+        FinReportsOverview(seller_count=6, last_success_at=None, failing=0),
         SETTINGS,
     )
 
-    assert (reviews_card.id, turnover_card.id, fbs_card.id, checklist_card.id, stocks_card.id, penalties_card.id) == (
+    assert (reviews_card.id, turnover_card.id, checklist_card.id, stocks_card.id, penalties_card.id) == (
         "wb-reviews",
         "wb-turnover",
-        "wb-fbs-distribution",
         "wb-card-checklist",
         "wb-fbs-stocks",
         "wb-fbs-penalties",
@@ -212,9 +211,16 @@ def test_the_catalog_lists_every_automation() -> None:
     assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
-    assert (fbs_card.seller_count, fbs_card.status) == (3, "idle")
-    # Расписания у модуля пока нет, и карточка не должна его выдумывать.
-    assert fbs_card.next_run_at is None
+    # Распределение FBS в каталог не попадает; стикеры — инструмент без селлеров и расписания.
+    assert (stickers_card.id, stickers_card.kind, stickers_card.next_run_at) == ("wb-box-stickers", "tool", None)
+    assert reviews_card.kind == "automation"
+    # Финансовые отчёты считаются при открытии: расписания у карточки нет.
+    assert (fin_card.id, fin_card.seller_count, fin_card.status, fin_card.next_run_at) == (
+        "fin-reports",
+        6,
+        "idle",
+        None,
+    )
 
 
 def test_the_turnover_card_points_at_its_nearest_daily_step() -> None:
@@ -235,16 +241,16 @@ def test_the_checklist_card_reports_collection_state() -> None:
     healthy = ChecklistOverview(seller_count=3, last_success_at=collected, failing=0)
     failing = ChecklistOverview(seller_count=3, last_success_at=collected, failing=1)
 
-    *_, card, _, _, _, _, _ = automation_catalog(
+    _, _, card, *_ = automation_catalog(
         quiet_overview(),
         quiet_turnover(),
-        quiet_fbs(),
         healthy,
         quiet_stocks(),
         quiet_penalties(),
         quiet_chats(),
         quiet_returns(),
         quiet_podsort(),
+        quiet_fin_reports(),
         SETTINGS,
     )
 

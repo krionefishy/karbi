@@ -1,4 +1,5 @@
 import {
+  Calculator,
   ClipboardCheck,
   Gauge,
   Grid3x3,
@@ -8,7 +9,6 @@ import {
   ReceiptText,
   Truck,
   Undo2,
-  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,13 +24,13 @@ export interface AutomationNavItem {
 export const automationNav: AutomationNavItem[] = [
   { id: "wb-reviews", title: "Мониторинг отзывов", icon: MessageSquareText },
   { id: "wb-turnover", title: "Оборачиваемость", icon: Gauge },
-  { id: "wb-fbs-distribution", title: "Распределение FBS", icon: Warehouse },
   { id: "wb-card-checklist", title: "Чек-лист карточек", icon: ClipboardCheck },
   { id: "wb-fbs-stocks", title: "Остатки FBS", icon: Grid3x3 },
   { id: "wb-fbs-penalties", title: "Штрафы FBS", icon: ReceiptText },
   { id: "wb-review-chats", title: "Чаты после отзыва", icon: MessagesSquare },
   { id: "wb-returns", title: "Возвраты WB", icon: Undo2 },
   { id: "wb-podsort", title: "Подсорт WB", icon: Truck },
+  { id: "fin-reports", title: "Финансовые отчёты", icon: Calculator },
   { id: "wb-box-stickers", title: "Стикеры коробов", icon: Package },
 ];
 

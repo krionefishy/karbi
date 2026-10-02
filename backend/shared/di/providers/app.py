@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 from dishka import Provider, Scope, from_context, provide
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.fin_reports.application import FinReportsEnrollment, FinReportsService
+from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
 from backend.modules.notifications.application import BotAdminService, BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
@@ -453,6 +455,25 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def fin_reports_repository(self, session: AsyncSession) -> FinReportsRepository:
+        return FinReportsRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def fin_reports_enrollment(self, fin_reports: FinReportsRepository) -> FinReportsEnrollment:
+        return FinReportsEnrollment(fin_reports)
+
+    @provide(scope=Scope.REQUEST)
+    def fin_reports_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        fin_reports: FinReportsRepository,
+        settings: Settings,
+    ) -> FinReportsService:
+        """Расчёт при чтении из зеркала отчётов реализации wb_core; своего сбора нет."""
+        return FinReportsService(session, sellers, fin_reports, timezone=ZoneInfo(settings.core_mirror.timezone))
+
+    @provide(scope=Scope.REQUEST)
     def podsort_repository(self, session: AsyncSession) -> PodsortRepository:
         return PodsortRepository(session)
 
@@ -490,6 +511,7 @@ class SessionProvider(Provider):
         review_chats: ReviewChatsEnrollment,
         returns: ReturnsEnrollment,
         podsort: PodsortEnrollment,
+        fin_reports: FinReportsEnrollment,
     ) -> list[AutomationEnrollment]:
         """Every automation a seller can be connected to. New module — new line here."""
         return [
@@ -502,6 +524,7 @@ class SessionProvider(Provider):
             review_chats,
             returns,
             podsort,
+            fin_reports,
         ]
 
     @provide(scope=Scope.REQUEST)

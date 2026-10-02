@@ -30,6 +30,13 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 # Сколько имён коробов показывать в одной проблеме: дальше список никто не читает.
 NAMES_LIMIT = 10
 
+AUTOMATION_ID = "wb-box-stickers"
+TITLE = "Стикеры коробов"
+DESCRIPTION = (
+    "Собирает PDF стикеров коробов FBO-поставки в порядке строк Excel коробовки — "
+    "чтобы клеить подряд, не сверяя каждый короб."
+)
+
 
 class StickerBuildError(Exception):
     """Сопоставление с проблемами или собранный файл не прошёл проверку."""
