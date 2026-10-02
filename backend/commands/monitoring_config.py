@@ -114,16 +114,14 @@ def build_config(app: FastAPI | None = None) -> dict[str, Any]:
     if missing:
         raise SystemExit(f"нет названия раздела в SERVICE_NAMES: {', '.join(missing)}")
 
+    # Имена контейнеров, а не сервисов compose: в сети мониторинга есть свой
+    # `api` на том же порту, и короткое имя резолвилось бы в оба.
+    api_health: dict[str, Any] = {
+        "health_url": f"http://karbi-api-1:8000{BASE_PATH}/health/ready",
+        "health_body": {"database": True, "redis": True},
+    }
     services: list[dict[str, Any]] = [
-        {
-            "id": "api",
-            "name": "API",
-            "prefix": "/",
-            # Имена контейнеров, а не сервисов compose: в сети мониторинга есть
-            # свой `api` на том же порту, и короткое имя резолвилось бы в оба.
-            "health_url": f"http://karbi-api-1:8000{BASE_PATH}/health/ready",
-            "health_body": {"database": True, "redis": True},
-        },
+        {"id": "api", "name": "API", "prefix": "/", **api_health},
         {
             # Запросы фронта лежат вне /api/v1 и в отчёты не попадают; раздел
             # нужен только ради проверки доступности, префикс ни с чем не совпадает.
@@ -133,8 +131,16 @@ def build_config(app: FastAPI | None = None) -> dict[str, Any]:
             "health_url": "http://karbi-frontend-1/health",
         },
     ]
+    # Разделы — части одного процесса API, отдельного health у них нет. Проверка
+    # у всех та же, что у API: без неё страница статусов показывала бы по каждому
+    # разделу «не настроено», хотя он работает.
     services += [
-        {"id": prefix.strip("/").replace("/", "-"), "name": SERVICE_NAMES[prefix], "prefix": prefix}
+        {
+            "id": prefix.strip("/").replace("/", "-"),
+            "name": SERVICE_NAMES[prefix],
+            "prefix": prefix,
+            **api_health,
+        }
         for prefix in prefixes
     ]
 

@@ -1,7 +1,7 @@
 # Мониторинг
 
 Отдельный стек [krionefishy/monitoring](https://github.com/krionefishy/monitoring)
-`v2.0.0` на том же сервере: графики запросов, коды ответов, задержки, ошибки по
+`v2.1.0` на том же сервере: графики запросов, коды ответов, задержки, ошибки по
 ручкам и доступность API и фронта. Приложение о нём не знает — мониторинг читает
 лог хостового nginx и сам опрашивает health. Своя база, свои пользователи, свой
 compose-проект `monitoring_marketplace_auto`; в `deploy/compose.yaml` его нет.
@@ -14,7 +14,8 @@ compose-проект `monitoring_marketplace_auto`; в `deploy/compose.yaml` е�
 - Разделы — по префиксу автоматизации (`/wb/returns` → «Возвраты»). Первый
   сегмент пути у нас почти всегда `wb`, поэтому встроенная группировка
   мониторинга по нему бесполезна.
-- Доступность: API (`/api/v1/health/ready`, база и Redis) и фронт. У воркеров
+- Доступность: API (`/api/v1/health/ready`, база и Redis) и фронт. Разделы
+  автоматизаций — части того же процесса, их карточки повторяют проверку API. У воркеров
   HTTP нет, мониторинг их не видит — за ними следит healthcheck compose.
 - MCP — отдельное приложение, ему нужен свой экземпляр.
 - Бэкенд `X-Request-ID` пока не пишет в свои логи: по идентификатору из
@@ -77,7 +78,7 @@ sudo systemctl reload nginx
 
 ```bash
 sudo git clone https://github.com/krionefishy/monitoring.git /opt/monitoring
-sudo git -C /opt/monitoring checkout v2.0.0
+sudo git -C /opt/monitoring checkout v2.1.0
 sudo install -d -m 0755 /etc/monitoring-marketplace-auto
 sudo install -m 0600 /opt/monitoring/monitor-service/deploy/.env.example /etc/monitoring-marketplace-auto/runtime.env
 ```

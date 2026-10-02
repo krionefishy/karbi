@@ -32,3 +32,8 @@ def test_monitoring_config_names_match_nginx_log_format() -> None:
     assert f'"application":"{config["application"]}"' in log_format
     assert f'"environment":"{config["environment"]}"' in log_format
     assert all(f"access_log {config['log_path']} monitoring_json" in t for t in templates)
+
+
+def test_every_monitoring_service_has_a_health_check() -> None:
+    # Раздел без health_url мониторинг показывает как «Unknown · не настроено».
+    assert all(service.get("health_url") for service in build_config()["services"])
