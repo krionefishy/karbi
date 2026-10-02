@@ -37,7 +37,7 @@ server {
     # Второй лог — для мониторинга (deploy/nginx/monitoring-log-format.conf).
     # Обычный назван явно: свой access_log в server отменяет унаследованный.
     access_log /var/log/nginx/access.log;
-    access_log /var/log/nginx/marketplace-auto-monitoring.json monitoring_json buffer=64k flush=5s;
+    access_log /var/log/nginx/marketplace-auto-monitoring.json monitoring_json buffer=64k flush=5s if=$monitor_loggable;
 
     # По этому идентификатору запись в мониторинге находит ответ у клиента.
     add_header X-Request-ID $request_id always;
