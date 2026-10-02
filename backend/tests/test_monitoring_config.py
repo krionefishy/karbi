@@ -1,13 +1,9 @@
-import json
 import re
+from pathlib import Path
 
-from backend.commands.monitoring_config import CONFIG_FILE, build_config, render
+from backend.commands.monitoring_config import build_config
 
-
-def test_monitoring_config_matches_api_routes() -> None:
-    # Новый маршрут без записи в конфиге мониторинг свалил бы в «/[unknown]»
-    # вместе со сканерами, и его ошибки потерялись бы среди чужих.
-    assert CONFIG_FILE.read_text() == render(), "обновить: uv run python -m backend.commands.monitoring_config"
+NGINX = Path(__file__).resolve().parents[2] / "deploy/nginx"
 
 
 def test_monitoring_rules_normalise_identifiers() -> None:
@@ -27,11 +23,9 @@ def test_monitoring_rules_normalise_identifiers() -> None:
 
 
 def test_monitoring_config_names_match_nginx_log_format() -> None:
-    config = json.loads(CONFIG_FILE.read_text())
-    log_format = (CONFIG_FILE.parents[1] / "nginx/monitoring-log-format.conf").read_text()
-    templates = [
-        (CONFIG_FILE.parents[1] / f"nginx/host-{site}.conf.template").read_text() for site in ("public", "admin")
-    ]
+    config = build_config()
+    log_format = (NGINX / "monitoring-log-format.conf").read_text()
+    templates = [(NGINX / f"host-{site}.conf.template").read_text() for site in ("public", "admin")]
 
     # Сборщик молча отбрасывает строки с чужим application и не видит лог по
     # другому пути — расхождение выглядело бы как «запросов нет».

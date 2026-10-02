@@ -33,7 +33,7 @@ lint:
 test:
     CONFIG_PATH={{ test_config }} uv run pytest
 
-# После изменения маршрутов API: пересобрать конфиг внешнего мониторинга.
+# Напечатать конфиг внешнего мониторинга; на сервер он попадает сам при выкладке.
 monitoring-config:
     CONFIG_PATH={{ test_config }} uv run python -m backend.commands.monitoring_config
 

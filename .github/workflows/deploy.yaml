@@ -155,3 +155,9 @@ jobs:
 
             sudo docker compose --env-file .env -f deploy/compose.yaml ps
             sudo docker image prune --force
+
+            # Последним шагом и уже после всех проверок приложения: конфиг
+            # мониторинга печатает выкаченный API, так что новые ручки попадают
+            # в отчёты без ручных действий. Красный шаг здесь значит «приложение
+            # выкачено, мониторинг остался на прежнем конфиге».
+            bash deploy/monitoring/sync-config.sh

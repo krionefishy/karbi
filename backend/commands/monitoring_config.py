@@ -1,25 +1,22 @@
-"""Конфиг внешнего мониторинга (deploy/monitoring/application.json) из маршрутов API.
+"""Конфиг внешнего мониторинга (application.json) из маршрутов API.
 
 Мониторинг читает лог хостового nginx и сам ничего не знает о приложении:
 какой путь к какому разделу относится и где в пути идентификатор, ему говорит
-этот файл. Писать его руками — значит забыть про него при первом же новом
-маршруте, поэтому он собирается из самого приложения, а тест сверяет файл с кодом.
+этот файл. В репозитории его нет: он печатается из работающего API при каждой
+выкладке (deploy/monitoring/sync-config.sh), поэтому отстать от маршрутов не может.
 
-    uv run python -m backend.commands.monitoring_config          # переписать файл
-    uv run python -m backend.commands.monitoring_config --check  # только сверить
+    uv run python -m backend.commands.monitoring_config   # напечатать
 """
 
 import json
 import re
 import sys
-from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
 
 from backend.app.application import create_app
 
-CONFIG_FILE = Path(__file__).resolve().parents[2] / "deploy/monitoring/application.json"
 BASE_PATH = "/api/v1"
 LOG_PATH = "/var/log/nginx/marketplace-auto-monitoring.json"
 
@@ -160,15 +157,7 @@ def render() -> str:
 
 
 def main() -> None:
-    rendered = render()
-    if "--check" in sys.argv[1:]:
-        if not CONFIG_FILE.exists() or CONFIG_FILE.read_text() != rendered:
-            raise SystemExit(
-                f"{CONFIG_FILE.name} отстал от маршрутов API: uv run python -m backend.commands.monitoring_config"
-            )
-        return
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(rendered)
+    sys.stdout.write(render())
 
 
 if __name__ == "__main__":
