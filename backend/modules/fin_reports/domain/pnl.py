@@ -165,8 +165,9 @@ def statement(
         values[SURCHARGES] += money(item.additional_payment)
         values[STORAGE] -= money(item.paid_storage)
         values[ACCEPTANCE] -= money(item.paid_acceptance)
-        values[LOYALTY_POINTS] -= money(item.cashback_amount)
-        values[LOYALTY_PROGRAM] -= money(item.cashback_commission_change)
+        # Лояльность у возврата WB тоже отдаёт положительной и в итогах вычитает — как выручку.
+        values[LOYALTY_POINTS] -= sign * money(item.cashback_amount)
+        values[LOYALTY_PROGRAM] -= sign * money(item.cashback_commission_change)
         if item.deduction:
             values[deduction_kind(item.bonus_type_name)] -= money(item.deduction)
     return result.close()

@@ -93,7 +93,11 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
                 bonus_type_name='Возврат неиспользованного остатка аванса за услугу "Баллы за отзывы"',
                 deduction=money("-520364.16"),
             ),
-            totals(cashback_amount=money("198540"), cashback_commission_change=money("10666.96")),
+            # Живые строки недели: у двух возвратов лояльность положительная, WB её вычитает.
+            totals(
+                doc_type_name="Продажа", cashback_amount=money("199482"), cashback_commission_change=money("10761.16")
+            ),
+            totals(doc_type_name="Возврат", cashback_amount=money("942"), cashback_commission_change=money("94.2")),
         ],
         # 1260 проданных за вычетом возвратов по 1532,45 ₽ дают себестоимость недели из отчёта.
         lambda nm_id: money("1532.45"),
