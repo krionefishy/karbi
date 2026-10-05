@@ -286,7 +286,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
-    mem_limit: 384m
+    # Отчёты реализации читаются страницами по пять тысяч строк: после догрузки истории
+    # процесс держал 364 МБ из прежних 384.
+    mem_limit: 512m
     command: ["python", "-m", "backend.workers.wb_core.main"]
     environment: *application-environment
     volumes:
