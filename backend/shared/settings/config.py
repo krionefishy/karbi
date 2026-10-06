@@ -407,6 +407,20 @@ class ReturnsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class FinReportsConfig:
+    """Финансовые отчёты: как часто складывать дочитанные зеркалом отчёты реализации. Часы московские."""
+
+    timezone: str = "Europe/Moscow"
+    # Зеркало читает список отчётов раз в полчаса; сборка втрое чаще — новый
+    # отчёт появляется на странице не позже чем через десять минут после него.
+    # Проход без новых отчётов — два коротких запроса на кабинет.
+    build_interval_minutes: int = 10
+    # Потолок отчётов на кабинет за проход: первая сборка года не должна
+    # держать остальные кабинеты, остаток доберёт следующий проход.
+    reports_per_run: int = 40
+
+
+@dataclass(frozen=True, slots=True)
 class PodsortConfig:
     """Подсорт WB: сколько дней заказов держать и как быстро их догружать. Часы московские."""
 
@@ -451,6 +465,7 @@ class Settings:
     review_chats: ReviewChatsConfig
     returns: ReturnsConfig
     podsort: PodsortConfig
+    fin_reports: FinReportsConfig
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -586,6 +601,10 @@ class Settings:
         ):
             if key in podsort:
                 podsort[key] = int(podsort[key])
+        fin_reports = dict(data.get("fin_reports", {}))
+        for key in ("build_interval_minutes", "reports_per_run"):
+            if key in fin_reports:
+                fin_reports[key] = int(fin_reports[key])
         returns = dict(data.get("returns", {}))
         for key in (
             "poll_minutes",
@@ -641,6 +660,7 @@ class Settings:
             review_chats=ReviewChatsConfig(**review_chats),
             returns=ReturnsConfig(**returns),
             podsort=PodsortConfig(**podsort),
+            fin_reports=FinReportsConfig(**fin_reports),
         )
         settings.validate_values()
         return settings
@@ -765,6 +785,8 @@ class Settings:
             or min(podsort.settle_hours, podsort.request_interval_seconds) < 0
         ):
             raise ValueError("podsort: history_days, days_per_run, refresh and retry minutes must be positive")
+        if min(self.fin_reports.build_interval_minutes, self.fin_reports.reports_per_run) < 1:
+            raise ValueError("fin_reports: build_interval_minutes and reports_per_run must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")
         if any(not 0 <= hour <= 23 for hour in self.turnover.stock_slot_hours):

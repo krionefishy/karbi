@@ -14,6 +14,7 @@ class SellerStateResponse(BaseModel):
     reports: int
     pending_reports: int
     collected_at: str | None
+    built_at: str | None
     error: str | None
 
 

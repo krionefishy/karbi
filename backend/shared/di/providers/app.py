@@ -470,8 +470,8 @@ class SessionProvider(Provider):
         fin_reports: FinReportsRepository,
         settings: Settings,
     ) -> FinReportsService:
-        """Расчёт при чтении из зеркала отчётов реализации wb_core; своего сбора нет."""
-        return FinReportsService(session, sellers, fin_reports, timezone=ZoneInfo(settings.core_mirror.timezone))
+        """Строки ОПиУ — при чтении из сумм, которые воркер сложил из зеркала отчётов реализации."""
+        return FinReportsService(session, sellers, fin_reports, timezone=ZoneInfo(settings.fin_reports.timezone))
 
     @provide(scope=Scope.REQUEST)
     def podsort_repository(self, session: AsyncSession) -> PodsortRepository:

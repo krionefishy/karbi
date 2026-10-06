@@ -419,7 +419,7 @@ export function FinReportsPage() {
               {sellers.map((seller) => {
                 const state = pnl.sellers.find((item) => item.seller_id === seller.id);
                 return (
-                  <div key={seller.id} className="stocks-warehouse-row podsort-seller-row">
+                  <div key={seller.id} className="stocks-warehouse-row podsort-seller-row fin-seller-row">
                     <span>
                       <strong>{seller.name}</strong>
                       {state && (
@@ -431,7 +431,7 @@ export function FinReportsPage() {
                       )}
                     </span>
                     {/* При фильтре по одному кабинету про остальные сервер не рассказывает — молчим. */}
-                    <span className="muted">{state ? `Отчёты WB: ${stamp(state.collected_at)}` : ""}</span>
+                    <span className="muted">{state ? `Отчёты WB: ${stamp(state.collected_at)} · собрано: ${stamp(state.built_at)}` : ""}</span>
                     <button
                       className="secondary-button stocks-hidden-action"
                       onClick={() => setDetaching(seller)}

@@ -132,6 +132,7 @@ prod-deploy:
     @test "$({{ prod_compose }} ps --status running -q wb-core-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-fbs-penalties-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-returns-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q fin-reports-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 
 # Start production containers without rebuilding images.

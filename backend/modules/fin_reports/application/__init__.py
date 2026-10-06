@@ -1,3 +1,4 @@
+from backend.modules.fin_reports.application.build import FACTS_VERSION, BuildOutcome, FactsBuilder
 from backend.modules.fin_reports.application.costs import (
     CostFile,
     CostFileError,
@@ -24,13 +25,16 @@ from backend.modules.fin_reports.application.view import (
 
 __all__ = [
     "AUTOMATION_ID",
+    "FACTS_VERSION",
     "DESCRIPTION",
     "TITLE",
     "XLSX_MEDIA_TYPE",
+    "BuildOutcome",
     "CostFile",
     "CostFileError",
     "CostRow",
     "CostUploadResult",
+    "FactsBuilder",
     "FinReportFile",
     "FinReportsEnrollment",
     "FinReportsOverview",

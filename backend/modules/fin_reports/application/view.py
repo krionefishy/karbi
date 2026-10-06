@@ -36,6 +36,8 @@ class SellerState:
     reports: int
     pending_reports: int
     collected_at: datetime | None
+    # Когда воркер в последний раз складывал отчёты кабинета в суммы; `None` — ещё ни разу.
+    built_at: datetime | None
     error: str | None
 
 

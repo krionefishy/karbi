@@ -49,6 +49,7 @@ def pnl_response(view: PnlView) -> PnlResponse:
                 reports=state.reports,
                 pending_reports=state.pending_reports,
                 collected_at=state.collected_at.isoformat() if state.collected_at else None,
+                built_at=state.built_at.isoformat() if state.built_at else None,
                 error=state.error,
             )
             for state in view.sellers

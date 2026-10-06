@@ -281,6 +281,24 @@ services:
       - internal
       - egress
 
+  fin-reports-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    mem_limit: 256m
+    command: ["python", "-m", "backend.workers.fin_reports.main"]
+    environment: *application-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck: *worker-healthcheck
+    # В WB не ходит: складывает то, что зеркало wb_core уже прочитало.
+    networks:
+      - internal
+
   wb-core-worker:
     build:
       context: ..

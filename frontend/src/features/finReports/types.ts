@@ -19,6 +19,8 @@ export interface PnlSellerState {
   /** Отчёты WB за год, строки которых ещё не дочитаны: их денег в цифрах нет. */
   pending_reports: number;
   collected_at: string | null;
+  /** Когда воркер в последний раз складывал отчёты кабинета; null — ещё ни разу. */
+  built_at: string | null;
   error: string | null;
 }
 

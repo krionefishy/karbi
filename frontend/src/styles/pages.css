@@ -444,3 +444,4 @@
 .fin-upload-result ul { padding-left: 18px; }
 .fin-costs .stocks-toolbar { align-items: flex-end; }
 .fin-costs-from { margin-left: auto; }
+.fin-seller-row { grid-template-columns: minmax(240px, 1fr) minmax(260px, auto) 48px; }

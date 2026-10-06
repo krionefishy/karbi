@@ -4,7 +4,7 @@ import io
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import fields, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -15,7 +15,7 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import delete, update
 
 from backend.app.application import Application
-from backend.modules.fin_reports.application import CostFileError, match_cabinets, read_cost_file
+from backend.modules.fin_reports.application import CostFileError, FactsBuilder, match_cabinets, read_cost_file
 from backend.modules.fin_reports.domain import (
     GRANULARITY_MONTH,
     GRANULARITY_WEEK,
@@ -27,11 +27,12 @@ from backend.modules.fin_reports.domain import (
     period_of,
     statement,
 )
-from backend.modules.fin_reports.infrastructure.postgres import CostPriceModel, FinReportsRepository
+from backend.modules.fin_reports.infrastructure.postgres import CostPriceModel, FinReportsRepository, WbReportModel
 from backend.modules.wb_core.domain import SalesReport, SalesReportRow, SalesReportTotals
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.shared.settings import load_settings
+from backend.workers.fin_reports.worker import FinReportsWorker
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 API = "/api/v1/fin-reports"
@@ -385,6 +386,9 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
         for report_id in (JUL_AUG, AUG31, SEP01, W38, W39_MAIN, W39_BUYOUT):
             await mirror.advance_sales_report(seller_id, report_id, cursor=10, loaded_at=stamp)
         await session.commit()
+    # Отчёт на странице — из сумм, которые складывает воркер; здесь его проход сделан руками.
+    outcome = await FactsBuilder(application.database).build(seller_id, limit=100, now=stamp)
+    assert (outcome.built, outcome.left) == (6, 0)
     try:
         yield seller_id
     finally:
@@ -596,3 +600,58 @@ async def test_the_export_has_the_period_by_cabinet_weeks_months_and_missing_cos
     missing = workbook["Без себестоимости"]
     own_rows = [row for row in missing.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Финтест Ф.Ф."]
     assert {row[1] for row in own_rows} == {str(DRILL), str(SAW)}
+
+
+async def test_a_report_shows_up_only_after_the_worker_has_folded_it(
+    client: AsyncClient, seller: uuid.UUID, application: Application
+) -> None:
+    """Зеркало дочитало отчёт, но воркер ещё не сложил — период «неполный», а не с дырой в цифрах."""
+    await connect(client, seller)
+    params: dict[str, str | int] = {"year": 2026, "granularity": "week", "seller_id": str(seller)}
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        await MirrorRepository(session).advance_sales_report(seller, PENDING, cursor=10, loaded_at=stamp)
+        await session.commit()
+
+    before = (await client.get(API, params=params)).json()
+    week = next(item for item in before["periods"] if item["key"] == "2026-W40")
+    assert week["pending_sellers"] == [str(seller)] and before["sellers"][0]["pending_reports"] == 1
+
+    worker = FinReportsWorker(application.database, SETTINGS, now=lambda: stamp)
+    assert await worker.tick() >= 1
+    # Сложено — и до следующего интервала воркер зеркало не трогает; сложенное не пересобирается.
+    assert await worker.tick() == 0
+    interval = timedelta(minutes=SETTINGS.fin_reports.build_interval_minutes)
+    later = FinReportsWorker(application.database, SETTINGS, now=lambda: stamp + interval)
+    assert await later.tick() == 0
+
+    after = (await client.get(API, params=params)).json()
+    week = next(item for item in after["periods"] if item["key"] == "2026-W40")
+    assert week["pending_sellers"] == [] and week["by_seller"][str(seller)]["revenue_before_spp"] == 9999.0
+    [state] = after["sellers"]
+    assert (state["pending_reports"], state["built_at"]) == (0, stamp.isoformat())
+
+
+async def test_a_long_backlog_is_folded_in_portions_without_waiting_for_the_interval(
+    seller: uuid.UUID, application: Application
+) -> None:
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        repository = FinReportsRepository(session)
+        await repository.track(seller)
+        await session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller))
+        await session.commit()
+    builder = FactsBuilder(application.database)
+
+    first = await builder.build(seller, limit=4, now=stamp)
+    second = await builder.build(seller, limit=4, now=stamp)
+    third = await builder.build(seller, limit=4, now=stamp)
+
+    # Старшие отчёты первыми; остаток добирается следующим проходом, сложенное не трогается.
+    assert [(first.built, first.left), (second.built, second.left), (third.built, third.left)] == [
+        (4, 2),
+        (2, 0),
+        (0, 0),
+    ]
+    async with application.database.session() as session:
+        assert len(await FinReportsRepository(session).built_reports(seller)) == 6

@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.fin_reports.application.build import FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
 from backend.modules.fin_reports.application.view import (
@@ -48,10 +49,11 @@ class FinReportsQueryError(Exception):
 
 
 class FinReportsService:
-    """ОПиУ подключённых кабинетов: считается при чтении из зеркала отчётов реализации.
+    """ОПиУ подключённых кабинетов из сумм, которые воркер сложил из зеркала отчётов реализации.
 
-    Своего сбора нет. Отчёт WB неизменяем, а себестоимость и состав строк
-    меняются — пересчёт при чтении избавляет от пересборки истории.
+    Суммы отчёта неизменяемы, а себестоимость и состав строк меняются —
+    поэтому строки ОПиУ считаются при чтении из готовых сумм: быстро и без
+    пересборки истории при каждой правке цены.
     """
 
     def __init__(
@@ -142,9 +144,9 @@ class FinReportsService:
         uncosted: dict[tuple[uuid.UUID, int], tuple[str, Decimal]],
     ) -> SellerState:
         """Отчёты кабинета за год — в общие колонки периодов."""
-        mirrored = await self.mirror.reports(
-            seller.id, since=date(year, 1, 1) - YEAR_MARGIN, until=date(year, 12, 31) + YEAR_MARGIN
-        )
+        since, until = date(year, 1, 1) - YEAR_MARGIN, date(year, 12, 31) + YEAR_MARGIN
+        mirrored = await self.mirror.reports(seller.id, since=since, until=until)
+        built = await self.repository.built_reports(seller.id)
         # Год периода считается по неделе, а не по дате: неделя с 29 декабря — уже следующий год.
         # У месяцев отчёт на стыке лет нужен обоим годам — его строки делятся по дате операции.
         in_year = [
@@ -152,9 +154,16 @@ class FinReportsService:
             for item in mirrored
             if year in {period_of(day, granularity).year for day in (item.report.date_from, item.report.date_to)}
         ]
-        loaded = {item.report.report_id: item.report for item in in_year if item.loaded}
+        # В цифры идёт отчёт, который зеркало дочитало, а воркер уже сложил; остальные — «неполные».
+        loaded = {
+            item.report.report_id: item.report
+            for item in in_year
+            if item.loaded and built.get(item.report.report_id) == FACTS_VERSION
+        }
         by_period: dict[tuple[int, Period], list[SalesReportTotals]] = defaultdict(list)
-        for totals in await self.mirror.totals(seller.id, loaded):
+        for totals in await self.repository.facts(seller.id, since=since, until=until):
+            if totals.report_id not in loaded:
+                continue
             report = loaded[totals.report_id]
             # Неделя — отчёт целиком. Месяц — по дате операции WB: отчёт недели на стыке
             # месяцев WB делит не всегда, и его строки расходятся по двум месяцам.
@@ -179,7 +188,7 @@ class FinReportsService:
 
         for item in in_year:
             report = item.report
-            if item.loaded:
+            if report.report_id in loaded:
                 continue
             # Недочитанный отчёт делает неполным каждый период, которого касается.
             for day in (report.date_from, report.date_to):
@@ -203,6 +212,7 @@ class FinReportsService:
             reports=len(in_year),
             pending_reports=len(in_year) - len(loaded),
             collected_at=state.collected_at if state else None,
+            built_at=(await self.repository.last_built_at([seller.id])).get(seller.id),
             error=state.error if state else None,
         )
 
