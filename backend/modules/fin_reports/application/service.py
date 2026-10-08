@@ -11,11 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.fin_reports.application.build import FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
+from backend.modules.fin_reports.application.stocks import read_live_stock
 from backend.modules.fin_reports.application.view import (
+    ArticlesView,
     CostUploadResult,
     FinReportsOverview,
     PeriodColumn,
     PnlView,
+    SellerArticles,
     SellerState,
     UncostedArticle,
 )
@@ -25,18 +28,23 @@ from backend.modules.fin_reports.domain import (
     GRANULARITY_WEEK,
     MARKETPLACE_WB,
     ZERO,
+    AdSpend,
     CostBook,
     CostPrice,
     Period,
     Statement,
+    Stock,
+    article_rows,
     parse_period,
     period_bounds,
     period_of,
     statement,
+    stock_rows,
 )
+from backend.modules.fin_reports.domain.pnl import money
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
 from backend.modules.wb_core.application import SalesReportMirror
-from backend.modules.wb_core.domain import SalesReport, SalesReportTotals, Seller
+from backend.modules.wb_core.domain import SalesReport, SalesReportTotals, Seller, tax_rate_on
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
 # Отчёт недели на стыке лет начинается в соседнем году: окно чтения — с запасом в неделю.
@@ -250,7 +258,86 @@ class FinReportsService:
         elif weeks.periods:
             # Без выбора — последняя неделя, по которой дочитаны все кабинеты.
             chosen = next((column for column in weeks.periods if not column.pending), weeks.periods[0])
-        return await asyncio.to_thread(build_workbook, weeks, months, chosen, self.today())
+        articles = None
+        if chosen is not None and chosen.period.granularity == GRANULARITY_WEEK:
+            articles = await self.articles(chosen.period, chosen.date_from, chosen.date_to)
+        return await asyncio.to_thread(build_workbook, weeks, months, chosen, articles, self.today())
+
+    # --- артикулы и остатки ---------------------------------------------------------
+
+    async def articles(self, period: Period, date_from: date, date_to: date) -> ArticlesView:
+        """Листы «По артикулам» и «Остатки» за неделю по всем подключённым кабинетам."""
+        now = datetime.now(UTC)
+        sellers = await self.tracked()
+        books = await self._cost_books([seller.id for seller in sellers])
+        rates = await self.sellers.tax_rates([seller.id for seller in sellers])
+        result: list[SellerArticles] = []
+        stock_taken_at: datetime | None = None
+        stock_is_live = False
+        for seller in sellers:
+            built = await self.repository.built_reports(seller.id)
+            mirrored = await self.mirror.reports(seller.id, since=date_from, until=date_to)
+            in_week = [item for item in mirrored if period_of(item.report.date_from, GRANULARITY_WEEK) == period]
+            ready = {
+                item.report.report_id
+                for item in in_week
+                if item.loaded and built.get(item.report.report_id) == FACTS_VERSION
+            }
+            totals = [
+                item
+                for item in await self.repository.facts(seller.id, since=date_from, until=date_to)
+                if item.report_id in ready
+            ]
+            stocks = await self.repository.stock_snapshot(seller.id, date_to)
+            if stocks is None:
+                live = await read_live_stock(self.session, seller.id, now=now)
+                stocks, stock_is_live = live.stocks, True
+                stock_taken_at = live.taken_at
+            tax = tax_rate_on(rates.get(seller.id, []), date_to)
+            rows = article_rows(
+                totals,
+                cost_of=self._cost_on(books[seller.id], date_to),
+                stock_of=self._stock_in(stocks),
+                # Рекламы по артикулам пока нет: рекламный API в зеркало не подключён.
+                ads_of=self._no_ads,
+                tax_rate=tax.rate / 100 if tax else ZERO,
+            )
+            last_price = await self._last_prices(seller.id, date_to)
+            result.append(
+                SellerArticles(
+                    seller_id=seller.id,
+                    name=seller.name,
+                    rows=rows,
+                    stocks=stock_rows(rows, last_price_of=last_price.get),
+                    pending=len(ready) < len(in_week),
+                    tax_rate=tax.rate if tax else None,
+                )
+            )
+        return ArticlesView(period, date_from, date_to, result, stock_taken_at, stock_is_live)
+
+    @staticmethod
+    def _stock_in(stocks: dict[tuple[int, str], Stock]) -> Callable[[int, str], Stock]:
+        def stock(nm_id: int, tech_size: str) -> Stock:
+            return stocks.get((nm_id, tech_size), Stock())
+
+        return stock
+
+    @staticmethod
+    def _no_ads(nm_id: int) -> AdSpend:
+        return AdSpend()
+
+    async def _last_prices(self, seller_id: uuid.UUID, until: date) -> dict[int, Decimal]:
+        """Последний средний чек до СПП по артикулу — для остатка, который на неделе не продавался."""
+        latest: dict[int, tuple[int, Decimal, int]] = {}
+        for item in await self.repository.facts(seller_id, since=date(until.year, 1, 1), until=until):
+            if item.doc_type_name != "Продажа" or not item.quantity:
+                continue
+            known = latest.get(item.nm_id)
+            if known is None or item.report_id > known[0]:
+                latest[item.nm_id] = (item.report_id, money(item.gross), item.quantity)
+            elif item.report_id == known[0]:
+                latest[item.nm_id] = (known[0], known[1] + money(item.gross), known[2] + item.quantity)
+        return {nm_id: gross / quantity for nm_id, (_, gross, quantity) in latest.items() if quantity}
 
     # --- себестоимость -----------------------------------------------------------
 

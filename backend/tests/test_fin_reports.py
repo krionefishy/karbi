@@ -17,6 +17,7 @@ from sqlalchemy import delete, update
 from backend.app.application import Application
 from backend.modules.fin_reports.application import CostFileError, FactsBuilder, match_cabinets, read_cost_file
 from backend.modules.fin_reports.domain import (
+    ARTICLE_COLUMNS,
     GRANULARITY_MONTH,
     GRANULARITY_WEEK,
     CostBook,
@@ -581,7 +582,24 @@ async def test_the_export_has_the_period_by_cabinet_weeks_months_and_missing_cos
     assert response.status_code == 200, response.text
     assert "pnl_wb_2026-W39" in response.headers["content-disposition"]
     workbook = load_workbook(io.BytesIO(response.content))
-    assert workbook.sheetnames == ["ОПиУ 39 (21.09-27.09)", "Недели 2026", "Месяцы 2026", "Без себестоимости"]
+    assert workbook.sheetnames == [
+        "ОПиУ 39 (21.09-27.09)",
+        "Недели 2026",
+        "Месяцы 2026",
+        "По артикулам 39 нед.",
+        "Остатки 39 нед.",
+        "Без себестоимости",
+    ]
+    articles = workbook["По артикулам 39 нед."]
+    header = [cell.value for cell in articles[1]]
+    assert header[:5] == ["ИП", "Артикул ВБ", "Артикул продавца", "Размер", "Доставки"] and len(header) == 1 + len(
+        ARTICLE_COLUMNS
+    )
+    own_articles = [row for row in articles.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Финтест Ф.Ф."]
+    drill = next(row for row in own_articles if row[1] == str(DRILL))
+    # Две продажи шуруповёрта минус возврат; выручка до СПП 5000 + 600 − 1000.
+    assert (drill[7], drill[13], drill[header.index("Вся стоимость реализованного товара до СПП")]) == (2, 1, 4600)
+    assert any("Остатки — из зеркала" in str(row[0]) for row in articles.iter_rows(min_row=2, values_only=True))
     period = workbook.worksheets[0]
     header = [cell.value for cell in period[1]]
     assert header[:2] == ["Статья", "WB итого"] and "ИП Финтест Ф.Ф." in header

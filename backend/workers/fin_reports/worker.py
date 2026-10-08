@@ -2,10 +2,11 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import structlog
 
-from backend.modules.fin_reports.application import FactsBuilder
+from backend.modules.fin_reports.application import FactsBuilder, StockSnapshots
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.heartbeat import touch_heartbeat
@@ -34,6 +35,7 @@ class FinReportsWorker:
         self.config = settings.fin_reports
         self._now = now or (lambda: datetime.now(UTC))
         self.builder = FactsBuilder(database, heartbeat=touch_heartbeat)
+        self.snapshots = StockSnapshots(database, timezone=ZoneInfo(self.config.timezone))
         self.logger = structlog.get_logger("fin_reports_worker")
         self._stop = asyncio.Event()
         self._built_at: datetime | None = None
@@ -76,11 +78,22 @@ class FinReportsWorker:
             outcome = await self.build(seller_id, now)
             built += outcome[0]
             left += outcome[1]
+            await self.snapshot(seller_id, now)
         # Потолок за проход не дал дойти до конца — следующий проход сразу, без интервала.
         self._built_at = None if left else now
         if built:
             self.logger.info("fin_reports_built", reports=built, left=left)
         return built
+
+    async def snapshot(self, seller_id: uuid.UUID, now: datetime) -> None:
+        """Остаток на конец закрытой недели — один раз в неделю, в понедельник после трёх."""
+        try:
+            week_end = await self.snapshots.take(seller_id, now=now)
+        except Exception:
+            self.logger.exception("fin_reports_snapshot_failed", seller_id=str(seller_id))
+            return
+        if week_end is not None:
+            self.logger.info("fin_reports_stock_snapshot", seller_id=str(seller_id), week_end=week_end.isoformat())
 
     async def build(self, seller_id: uuid.UUID, now: datetime) -> tuple[int, int]:
         """Один кабинет: (сложено, осталось). Сбой одного кабинета не трогает остальных."""

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 
-from backend.modules.fin_reports.domain import Period, Statement
+from backend.modules.fin_reports.domain import ArticleRow, Period, Statement, StockRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,3 +91,28 @@ class CostUploadResult:
     unknown_cabinets: list[str]
     problems: list[str]
     effective_from: date
+
+
+@dataclass(frozen=True, slots=True)
+class SellerArticles:
+    """Листы «По артикулам» и «Остатки» одного кабинета за неделю."""
+
+    seller_id: uuid.UUID
+    name: str
+    rows: list[ArticleRow]
+    stocks: list[StockRow]
+    # Отчёты недели у кабинета есть, но не все дочитаны и сложены.
+    pending: bool
+    # Ставка налога, по которой считалась колонка «Налог»; `None` — не задана, налог ноль.
+    tax_rate: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class ArticlesView:
+    period: Period
+    date_from: date
+    date_to: date
+    sellers: list[SellerArticles]
+    # Откуда остаток: снимок на конец недели или зеркало на момент выгрузки.
+    stock_taken_at: datetime | None
+    stock_is_live: bool

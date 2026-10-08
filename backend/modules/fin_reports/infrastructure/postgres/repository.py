@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, fields
 from datetime import date, datetime
 
@@ -7,12 +7,13 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.fin_reports.domain import CostPrice
+from backend.modules.fin_reports.domain import CostPrice, Stock
 from backend.modules.fin_reports.infrastructure.postgres.models import (
     CostPriceModel,
     TrackedSellerModel,
     WbFactModel,
     WbReportModel,
+    WbStockSnapshotModel,
 )
 from backend.modules.wb_core.domain import SalesReport, SalesReportTotals
 
@@ -41,6 +42,7 @@ class FinReportsRepository:
         await self.session.execute(delete(CostPriceModel).where(CostPriceModel.seller_id == seller_id))
         await self.session.execute(delete(WbFactModel).where(WbFactModel.seller_id == seller_id))
         await self.session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller_id))
+        await self.session.execute(delete(WbStockSnapshotModel).where(WbStockSnapshotModel.seller_id == seller_id))
         await self.untrack(seller_id)
 
     # --- себестоимость -----------------------------------------------------------
@@ -159,3 +161,54 @@ class FinReportsRepository:
         )
         names = [field.name for field in fields(SalesReportTotals)]
         return [SalesReportTotals(**{name: getattr(row, name) for name in names}) for row in rows]
+
+    # --- снимки остатков ---------------------------------------------------------------
+
+    async def snapshot_weeks(self, seller_id: uuid.UUID) -> set[date]:
+        rows = await self.session.scalars(
+            select(WbStockSnapshotModel.week_end).where(WbStockSnapshotModel.seller_id == seller_id).distinct()
+        )
+        return set(rows)
+
+    async def save_stock_snapshot(
+        self, seller_id: uuid.UUID, week_end: date, stocks: Mapping[tuple[int, str], Stock], *, now: datetime
+    ) -> int:
+        """Снимок недели целиком; повторный снимок той же недели переписывает прежний."""
+        await self.session.execute(
+            delete(WbStockSnapshotModel).where(
+                WbStockSnapshotModel.seller_id == seller_id, WbStockSnapshotModel.week_end == week_end
+            )
+        )
+        rows = [
+            {
+                "seller_id": seller_id,
+                "week_end": week_end,
+                "nm_id": nm_id,
+                "tech_size": tech_size,
+                "in_warehouse": stock.in_warehouse,
+                "to_client": stock.to_client,
+                "from_client": stock.from_client,
+                "total": stock.total,
+                "taken_at": now,
+            }
+            for (nm_id, tech_size), stock in stocks.items()
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            await self.session.execute(insert(WbStockSnapshotModel).values(rows[offset : offset + _INSERT_CHUNK]))
+        return len(rows)
+
+    async def stock_snapshot(self, seller_id: uuid.UUID, week_end: date) -> dict[tuple[int, str], Stock] | None:
+        """`None` — снимка этой недели нет (неделя раньше первого снимка или ещё не закрыта)."""
+        rows = list(
+            await self.session.scalars(
+                select(WbStockSnapshotModel).where(
+                    WbStockSnapshotModel.seller_id == seller_id, WbStockSnapshotModel.week_end == week_end
+                )
+            )
+        )
+        if not rows:
+            return None
+        return {
+            (row.nm_id, row.tech_size): Stock(row.in_warehouse, row.to_client, row.from_client, row.total)
+            for row in rows
+        }

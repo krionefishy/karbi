@@ -4,6 +4,7 @@ from backend.modules.fin_reports.infrastructure.postgres.models import (
     TrackedSellerModel,
     WbFactModel,
     WbReportModel,
+    WbStockSnapshotModel,
 )
 from backend.modules.fin_reports.infrastructure.postgres.repository import FinReportsRepository
 
@@ -14,4 +15,5 @@ __all__ = [
     "TrackedSellerModel",
     "WbFactModel",
     "WbReportModel",
+    "WbStockSnapshotModel",
 ]

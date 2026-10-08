@@ -128,3 +128,26 @@ class WbFactModel(FinReportsBase):
     ppvz_sales_commission: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
 
     __table_args__ = (Index("ix_fin_reports_wb_facts_report", "seller_id", "report_id"),)
+
+
+class WbStockSnapshotModel(FinReportsBase):
+    """Остаток артикула на конец недели — снимок зеркала остатков wb_core.
+
+    Зеркало хранит только текущий остаток, а листу нужен остаток «на последнюю
+    неделю»: снимается в начале следующей недели и больше не меняется. Прошлые
+    недели задним числом не восстановить — WB историю остатков не отдаёт.
+    """
+
+    __tablename__ = "wb_stock_snapshots"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    # Воскресенье недели, которую закрывает снимок.
+    week_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    nm_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tech_size: Mapped[str] = mapped_column(String(64), primary_key=True, default="")
+    in_warehouse: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    to_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Остаток по отчёту аналитики WB — отдельный источник, в старом листе шёл своей колонкой.
+    total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

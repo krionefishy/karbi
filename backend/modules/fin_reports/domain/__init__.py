@@ -53,3 +53,26 @@ __all__ = [
     "period_of",
     "statement",
 ]
+from backend.modules.fin_reports.domain.articles import (  # noqa: E402
+    ARTICLE_COLUMNS,
+    NO_ARTICLE,
+    UNVERIFIED_COLUMNS,
+    AdSpend,
+    ArticleRow,
+    Stock,
+    article_rows,
+)
+from backend.modules.fin_reports.domain.stocks import NO_SALES, StockRow, stock_rows  # noqa: E402
+
+__all__ += [
+    "ARTICLE_COLUMNS",
+    "NO_ARTICLE",
+    "NO_SALES",
+    "UNVERIFIED_COLUMNS",
+    "AdSpend",
+    "ArticleRow",
+    "Stock",
+    "StockRow",
+    "article_rows",
+    "stock_rows",
+]
