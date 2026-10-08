@@ -148,6 +148,6 @@ class WbStockSnapshotModel(FinReportsBase):
     in_warehouse: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     to_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Остаток по отчёту аналитики WB — отдельный источник, в старом листе шёл своей колонкой.
+    # Всего: на складах плюс в пути туда и обратно.
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

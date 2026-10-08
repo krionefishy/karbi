@@ -5,7 +5,6 @@
 """
 
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -14,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.fin_reports.domain import Stock
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
-from backend.modules.wb_core.application import RemainsMirror, StockMirror
+from backend.modules.wb_core.application import RemainsMirror
 from backend.modules.wb_core.domain import WarehouseRemain
 from backend.storage.pg import Database
 
@@ -26,8 +25,6 @@ SERVICE_ROWS = {TO_CLIENT_ROW, FROM_CLIENT_ROW, TOTAL_ROW}
 # Снимок закрытой недели берётся не раньше этого часа понедельника: зеркало
 # остатков обновляется раз в шесть часов, и ночной срез уже должен лечь.
 SNAPSHOT_HOUR = 3
-# Остаток по отчёту аналитики считается годным столько дней, как у зеркала.
-STOCK_FRESH = timedelta(days=2)
 
 
 def last_closed_week_end(now: datetime, timezone: ZoneInfo) -> date | None:
@@ -39,11 +36,11 @@ def last_closed_week_end(now: datetime, timezone: ZoneInfo) -> date | None:
     return monday - timedelta(days=1)
 
 
-def fold_remains(remains: Mapping[int, int], rows: list[WarehouseRemain]) -> dict[tuple[int, str], Stock]:
+def fold_remains(rows: list[WarehouseRemain]) -> dict[tuple[int, str], Stock]:
     """Строки отчёта по складам — в остаток по артикулу и размеру.
 
-    `remains` — остаток по артикулу из отчёта аналитики (отдельный источник);
-    он ложится на размер с наибольшим остатком, чтобы не задвоиться по размерам.
+    «Всего» — склады плюс путь туда и обратно. Отчёт аналитики WB для этого не
+    годится: у него «доступно к продаже» — 3 штуки при 249 на складах.
     """
     folded: dict[tuple[int, str], list[int]] = {}
     for row in rows:
@@ -58,17 +55,7 @@ def fold_remains(remains: Mapping[int, int], rows: list[WarehouseRemain]) -> dic
             values[2] += row.quantity
         elif row.warehouse_name not in SERVICE_ROWS:
             values[0] += row.quantity
-    totals_placed: set[int] = set()
-    stocks: dict[tuple[int, str], Stock] = {}
-    for key in sorted(folded, key=lambda item: (item[0], -folded[item][0], item[1])):
-        nm_id, _ = key
-        total = remains.get(nm_id, 0) if nm_id not in totals_placed else 0
-        totals_placed.add(nm_id)
-        stocks[key] = Stock(folded[key][0], folded[key][1], folded[key][2], total)
-    for nm_id, total in remains.items():
-        if nm_id not in totals_placed and total:
-            stocks[(nm_id, "")] = Stock(0, 0, 0, total)
-    return stocks
+    return {key: Stock(values[0], values[1], values[2], sum(values)) for key, values in folded.items()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,9 +67,7 @@ class LiveStock:
 async def read_live_stock(session: AsyncSession, seller_id: uuid.UUID, *, now: datetime) -> LiveStock:
     """Остаток из зеркала прямо сейчас — для недели, снимок которой ещё не снят."""
     remains = await RemainsMirror(session).snapshot(seller_id)
-    facts = await StockMirror(session).stock(seller_id, fresh_since=now - STOCK_FRESH) or {}
-    totals = {int(article): fact.fbo_quantity for article, fact in facts.items() if article.isdigit()}
-    return LiveStock(fold_remains(totals, list(remains.remains)), remains.collected_at)
+    return LiveStock(fold_remains(list(remains.remains)), remains.collected_at)
 
 
 class StockSnapshots:

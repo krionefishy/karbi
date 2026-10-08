@@ -147,7 +147,7 @@ def test_stock_rows_use_the_week_price_or_the_last_known_one() -> None:
     assert (saw.stock_price, saw.turnover_days, saw.category) == (money(3600), None, "Нет продаж!")
 
 
-def test_remains_fold_into_stock_per_size_and_the_analytics_total_lands_once() -> None:
+def test_remains_fold_into_stock_per_size() -> None:
     remain = lambda size, warehouse, quantity: WarehouseRemain(  # noqa: E731
         f"20{size}", str(DRILL), size, "KARBI", warehouse, quantity
     )
@@ -161,12 +161,12 @@ def test_remains_fold_into_stock_per_size_and_the_analytics_total_lands_once() -
         WarehouseRemain("3", "not-a-number", "", "x", "Коледино", 1),
     ]
 
-    stocks = fold_remains({DRILL: 20, SAW: 6}, rows)
+    stocks = fold_remains(rows)
 
-    # Итог отчёта не прибавляется к складам; остаток аналитики — на размер с большим остатком.
-    assert stocks[(DRILL, "S")] == Stock(in_warehouse=7, to_client=4, from_client=0, total=0)
-    assert stocks[(DRILL, "M")] == Stock(in_warehouse=9, to_client=0, from_client=1, total=20)
-    assert stocks[(SAW, "")] == Stock(total=6)
+    # Итог отчёта не прибавляется к складам; «всего» — склады плюс путь туда и обратно.
+    assert stocks[(DRILL, "S")] == Stock(in_warehouse=7, to_client=4, from_client=0, total=11)
+    assert stocks[(DRILL, "M")] == Stock(in_warehouse=9, to_client=0, from_client=1, total=10)
+    assert (SAW, "") not in stocks
 
 
 def test_the_closed_week_is_snapshotted_from_monday_morning() -> None:
