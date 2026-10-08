@@ -12,6 +12,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_OZON_ACCRUALS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -29,6 +30,7 @@ from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, Se
 from backend.modules.wb_core.infrastructure.wb import (
     CatalogCard,
     FeedbackAggregation,
+    OzonFinanceClient,
     WBAdvertClient,
     WBAnalyticsClient,
     WBChatClient,
@@ -125,6 +127,13 @@ class AdvertsOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class OzonAccrualsOutcome:
+    days: int
+    lines: int
+    collected_through: date | None
+
+
+@dataclass(frozen=True, slots=True)
 class SalesReportsOutcome:
     reports: int
     loaded: int
@@ -157,6 +166,7 @@ class MirrorService:
         remains: WBWarehouseRemainsClient | None = None,
         sales_reports: WBSalesReportsClient | None = None,
         adverts: WBAdvertClient | None = None,
+        ozon_finance: OzonFinanceClient | None = None,
         orders_history_months: int = 6,
         chats_history_days: int = 90,
         chats_pages_per_run: int = 100,
@@ -165,6 +175,9 @@ class MirrorService:
         adverts_history_from: date = date(2026, 1, 1),
         adverts_windows_per_run: int = 3,
         adverts_overlap_days: int = 3,
+        ozon_history_from: date = date(2026, 1, 1),
+        ozon_days_per_run: int = 14,
+        ozon_overlap_days: int = 3,
         heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
@@ -184,6 +197,10 @@ class MirrorService:
         self.adverts_history_from = adverts_history_from
         self.adverts_windows_per_run = adverts_windows_per_run
         self.adverts_overlap_days = adverts_overlap_days
+        self.ozon_finance = ozon_finance
+        self.ozon_history_from = ozon_history_from
+        self.ozon_days_per_run = ozon_days_per_run
+        self.ozon_overlap_days = ozon_overlap_days
         # Долгий сбор отмечается между страницами: каждая ждёт минуту лимита WB, а
         # healthcheck воркера считает процесс мёртвым после четверти часа тишины.
         self._heartbeat = heartbeat or (lambda: None)
@@ -570,6 +587,53 @@ class MirrorService:
             await session.commit()
         outcome = AdvertsOutcome(windows, campaigns, spend_rows, stat_rows, collected_through)
         self.logger.info("adverts_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    # --- начисления Ozon ---------------------------------------------------------------
+
+    async def collect_ozon_accruals(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OzonAccrualsOutcome:
+        """Начисления Ozon по дням от курсора: день — своей транзакцией, за проход — не больше `ozon_days_per_run`.
+
+        Последние `ozon_overlap_days` дней перечитываются: Ozon дописывает
+        начисления за прошедшие дни. Сегодняшний день не читается — он ещё
+        идёт.
+        """
+        if self.ozon_finance is None:
+            raise WBPermanentError("Начисления Ozon не подключены к зеркалу")
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        yesterday = stamp.astimezone(WB_TIMEZONE).date() - timedelta(days=1)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_OZON_ACCRUALS, stamp)
+            await session.commit()
+            cursor = await MirrorRepository(session).ozon_cursor(seller_id)
+        day = self.ozon_history_from
+        if cursor is not None:
+            day = max(day, cursor - timedelta(days=self.ozon_overlap_days))
+        days = lines = 0
+        collected_through = cursor
+        try:
+            while day <= yesterday and days < self.ozon_days_per_run:
+                self._heartbeat()
+                accruals = await self.ozon_finance.accruals(seller_key, day)
+                async with self.database.session() as session:
+                    await self._ensure_alive(session, seller_id)
+                    mirror = MirrorRepository(session)
+                    lines += await mirror.replace_ozon_accruals(seller_id, day, accruals, now=stamp)
+                    collected_through = day
+                    await mirror.save_ozon_cursor(seller_id, day)
+                    await session.commit()
+                days += 1
+                day += timedelta(days=1)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_OZON_ACCRUALS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_OZON_ACCRUALS, now=stamp)
+            await session.commit()
+        outcome = OzonAccrualsOutcome(days, lines, collected_through)
+        self.logger.info("ozon_accruals_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
 
     # --- отчёты реализации ----------------------------------------------------------

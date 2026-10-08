@@ -35,6 +35,12 @@ from backend.modules.wb_core.infrastructure.wb.marketplace import (
     Warehouse,
     WBMarketplaceClient,
 )
+from backend.modules.wb_core.infrastructure.wb.ozon import (
+    OZON_PERFORMANCE_API,
+    OZON_SELLER_API,
+    OzonFinanceClient,
+    OzonJsonClient,
+)
 
 __all__ = [
     "ADVERT_BUCKET",
@@ -45,6 +51,8 @@ __all__ = [
     "FINANCE_BUCKET",
     "MARKETPLACE_BUCKET",
     "MAX_PAGES",
+    "OZON_PERFORMANCE_API",
+    "OZON_SELLER_API",
     "PAGE_LIMIT",
     "ROW_REQUEST_FIELDS",
     "CatalogCard",
@@ -55,6 +63,8 @@ __all__ = [
     "FBOStockRow",
     "FeedbackAggregation",
     "FeedbackProduct",
+    "OzonFinanceClient",
+    "OzonJsonClient",
     "SalesReportPage",
     "WBAdvertClient",
     "WBAnalyticsClient",

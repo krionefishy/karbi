@@ -345,6 +345,11 @@ class CoreMirrorConfig:
     adverts_interval_minutes: int = 360
     adverts_windows_per_run: int = 3
     adverts_overlap_days: int = 3
+    # Начисления Ozon по дням: за проход не больше `ozon_days_per_run` дней (день —
+    # до нескольких страниц по 300 начислений), последние дни перечитываются.
+    ozon_interval_minutes: int = 180
+    ozon_days_per_run: int = 14
+    ozon_overlap_days: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +583,9 @@ class Settings:
             "adverts_interval_minutes",
             "adverts_windows_per_run",
             "adverts_overlap_days",
+            "ozon_interval_minutes",
+            "ozon_days_per_run",
+            "ozon_overlap_days",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -739,6 +747,8 @@ class Settings:
             raise ValueError("core_mirror.sales_reports_* must be positive")
         if min(mirror.adverts_interval_minutes, mirror.adverts_windows_per_run) < 1 or mirror.adverts_overlap_days < 0:
             raise ValueError("core_mirror.adverts_* must be positive")
+        if min(mirror.ozon_interval_minutes, mirror.ozon_days_per_run) < 1 or mirror.ozon_overlap_days < 0:
+            raise ValueError("core_mirror.ozon_* must be positive")
         try:
             date.fromisoformat(mirror.sales_reports_history_from)
         except ValueError as error:

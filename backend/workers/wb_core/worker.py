@@ -13,6 +13,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_OZON_ACCRUALS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -82,6 +83,7 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_REMAINS, now)
         await self.collect_due(MIRROR_SALES_REPORTS, now)
         await self.collect_due(MIRROR_ADVERTS, now)
+        await self.collect_due(MIRROR_OZON_ACCRUALS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
@@ -116,6 +118,8 @@ class WBCoreWorker:
             return now - timedelta(minutes=self.config.sales_reports_interval_minutes)
         if kind == MIRROR_ADVERTS:
             return now - timedelta(minutes=self.config.adverts_interval_minutes)
+        if kind == MIRROR_OZON_ACCRUALS:
+            return now - timedelta(minutes=self.config.ozon_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -137,13 +141,19 @@ class WBCoreWorker:
         async with self.database.session() as session:
             # Только селлеры с рабочим ключом на шлюзе: остальных шлюз отвергнет,
             # и ошибка зеркала заслонила бы настоящую причину — недоставленный ключ.
+            # Ozon — своя учётка: ключ WB тут ни при чём, и наоборот.
+            status_of = (
+                (lambda seller: seller.ozon_egress_status)
+                if kind == MIRROR_OZON_ACCRUALS
+                else (lambda seller: seller.egress_status)
+            )
             candidates = [
                 seller.id
                 for seller in await SellerRepository(session).list_sellers()
-                if seller.egress_status in EGRESS_SERVABLE
+                if status_of(seller) in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS):
+            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS, MIRROR_OZON_ACCRUALS):
                 # Без каталога нечем ключевать остатки и отзывы: у нового селлера
                 # первый сбор остатков дал бы нули на весь срез. Чатам и отчётам
                 # реализации каталог не нужен: артикул в них приходит от WB.
@@ -177,6 +187,7 @@ class WBCoreWorker:
             MIRROR_REMAINS: self.mirror.collect_remains,
             MIRROR_SALES_REPORTS: self.mirror.collect_sales_reports,
             MIRROR_ADVERTS: self.mirror.collect_adverts,
+            MIRROR_OZON_ACCRUALS: self.mirror.collect_ozon_accruals,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

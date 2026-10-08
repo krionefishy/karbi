@@ -166,7 +166,7 @@ class MirrorStateModel(WBCoreBase):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', "
-            "'sales_reports', 'adverts')",
+            "'sales_reports', 'adverts', 'ozon_accruals')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -617,6 +617,46 @@ class AdvertCursorModel(WBCoreBase):
     """Докуда дочитаны списания и статистика рекламы кабинета: день, закрытый целиком."""
 
     __tablename__ = "advert_cursors"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    collected_through: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class OzonAccrualLineModel(WBCoreBase):
+    """Строка начисления Ozon — копия ответа `/v1/finance/accrual/by-day`, развёрнутая построчно."""
+
+    __tablename__ = "ozon_accrual_lines"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    accrual_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    line_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    unit_number: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    delivery_schema: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    line: Mapped[str] = mapped_column(String(16), nullable=False)
+    sku: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    type_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_commission: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    bonus: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    coinvestment: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_wb_core_ozon_accrual_lines_day", "seller_id", "day"),)
+
+
+class OzonAccrualCursorModel(WBCoreBase):
+    """Докуда дочитаны начисления Ozon кабинета: день, прочитанный целиком."""
+
+    __tablename__ = "ozon_accrual_cursors"
 
     seller_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True

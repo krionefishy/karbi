@@ -39,6 +39,11 @@ class EgressAdminError(Exception):
         self.status_code = status_code
 
 
+# Маршруты шлюза: у WB и Ozon один конверт, разные хосты и ключи за ним.
+WB_ROUTE = "/api/v1/wb/request"
+OZON_ROUTE = "/api/v1/ozon/request"
+
+
 class EgressGateway:
     """Один клиент на процесс: и WB-запросы, и управление селлерами."""
 
@@ -80,6 +85,7 @@ class EgressGateway:
         priority: str = "background",
         api_name: str = "WB API",
         category: str = "",
+        route: str = WB_ROUTE,
     ) -> Any:
         """Тело ответа WB, либо та же пара ошибок, что была у прямых клиентов.
 
@@ -92,7 +98,14 @@ class EgressGateway:
         last_error = ""
         for attempt in range(ATTEMPTS):
             payload = await self._send(
-                seller_id=seller_id, api=api, method=method, path=path, params=params, json=json, priority=priority
+                seller_id=seller_id,
+                api=api,
+                method=method,
+                path=path,
+                params=params,
+                json=json,
+                priority=priority,
+                route=route,
             )
             if isinstance(payload, _Retry):
                 last_error = payload.reason
@@ -119,6 +132,31 @@ class EgressGateway:
             return payload.get("body")
         raise WBTemporaryError(f"{api_name}: {last_error or 'запрос не прошёл'}")
 
+    async def call_ozon(
+        self,
+        *,
+        seller_id: str,
+        api: str,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json: Any | None = None,
+        priority: str = "background",
+        api_name: str = "Ozon API",
+    ) -> Any:
+        """То же, что `call`, но в Ozon: `api` — «seller» или «performance», хост выбирает шлюз."""
+        return await self.call(
+            seller_id=seller_id,
+            api=api,
+            method=method,
+            path=path,
+            params=params,
+            json=json,
+            priority=priority,
+            api_name=api_name,
+            route=OZON_ROUTE,
+        )
+
     async def _send(
         self,
         *,
@@ -129,11 +167,12 @@ class EgressGateway:
         params: dict[str, Any] | None,
         json: Any | None,
         priority: str,
+        route: str = WB_ROUTE,
     ) -> "dict[str, Any] | _Retry":
         client = self._require_client()
         try:
             response = await client.post(
-                "/api/v1/wb/request",
+                route,
                 json={
                     "seller_id": seller_id,
                     "api": api,

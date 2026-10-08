@@ -18,6 +18,7 @@ from backend.shared.settings import EgressConfig
 
 EGRESS_URL = "https://egress.test:8443"
 REQUEST_URL = f"{EGRESS_URL}/api/v1/wb/request"
+OZON_REQUEST_URL = f"{EGRESS_URL}/api/v1/ozon/request"
 
 
 def egress_config(**overrides: Any) -> EgressConfig:
@@ -40,8 +41,12 @@ class EgressStub:
 
     def __init__(self, router: respx.MockRouter) -> None:
         self.calls: list[dict[str, Any]] = []
+        # Маршрут каждого вызова: WB или Ozon.
+        self.routes: list[str] = []
         self._rules: list[tuple[str, str, Any]] = []
         router.post(REQUEST_URL).mock(side_effect=self._handle)
+        # Ozon ходит тем же конвертом по своему маршруту — правила общие.
+        router.post(OZON_REQUEST_URL).mock(side_effect=self._handle)
 
     def on(
         self,
@@ -69,6 +74,7 @@ class EgressStub:
     def _handle(self, request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
         self.calls.append(payload)
+        self.routes.append(request.url.path)
         for method, path, resolver in self._rules:
             if payload["method"] == method and payload["path"] == path:
                 wb_status, wb_body = resolver(payload)

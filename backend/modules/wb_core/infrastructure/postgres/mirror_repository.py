@@ -36,6 +36,7 @@ from backend.modules.wb_core.domain import (
     ChatEvent,
     FbsOrder,
     FbsSupply,
+    OzonAccrualLine,
     ReviewFact,
     SalesReport,
     SalesReportRow,
@@ -57,6 +58,8 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     FbsSupplyModel,
     FbsWarehouseStockModel,
     MirrorStateModel,
+    OzonAccrualCursorModel,
+    OzonAccrualLineModel,
     ReviewFactModel,
     SalesReportModel,
     SalesReportRowModel,
@@ -992,6 +995,54 @@ class MirrorRepository:
             )
             for row in rows
         }
+
+    # --- начисления Ozon ------------------------------------------------------------------
+
+    async def ozon_cursor(self, seller_id: uuid.UUID) -> date | None:
+        row = await self.session.get(OzonAccrualCursorModel, seller_id)
+        return row.collected_through if row else None
+
+    async def save_ozon_cursor(self, seller_id: uuid.UUID, collected_through: date) -> None:
+        statement = insert(OzonAccrualCursorModel).values(seller_id=seller_id, collected_through=collected_through)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id"], set_={"collected_through": statement.excluded.collected_through}
+            )
+        )
+
+    async def replace_ozon_accruals(
+        self, seller_id: uuid.UUID, day: date, lines: Iterable[OzonAccrualLine], *, now: datetime
+    ) -> int:
+        """День целиком: начисление, пропавшее из ответа, пропадает и отсюда."""
+        await self.session.execute(
+            delete(OzonAccrualLineModel).where(
+                OzonAccrualLineModel.seller_id == seller_id, OzonAccrualLineModel.day == day
+            )
+        )
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(line)} for line in lines]
+        chunk = _chunk_size(rows)
+        for offset in range(0, len(rows), chunk):
+            statement = insert(OzonAccrualLineModel).values(rows[offset : offset + chunk])
+            # Одно начисление может прийти в двух днях (Ozon правит дату): побеждает свежее.
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "accrual_id", "line_no"],
+                    set_={column: getattr(excluded, column) for column in rows[0] if column != "seller_id"},
+                )
+            )
+        return len(rows)
+
+    async def ozon_accruals(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAccrualLine]:
+        rows = await self.session.scalars(
+            select(OzonAccrualLineModel).where(
+                OzonAccrualLineModel.seller_id == seller_id,
+                OzonAccrualLineModel.day >= since,
+                OzonAccrualLineModel.day <= until,
+            )
+        )
+        names = [field.name for field in fields(OzonAccrualLine)]
+        return [OzonAccrualLine(**{name: getattr(row, name) for name in names}) for row in rows]
 
     # --- catalog ----------------------------------------------------------------
 

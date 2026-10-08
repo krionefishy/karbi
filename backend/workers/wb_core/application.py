@@ -8,6 +8,7 @@ from backend.infrastructure.logging import configure_logging
 from backend.modules.wb_core.application import MirrorService
 from backend.modules.wb_core.infrastructure.wb import (
     EgressGateway,
+    OzonFinanceClient,
     WBAdvertClient,
     WBAnalyticsClient,
     WBChatClient,
@@ -54,6 +55,7 @@ class WBCoreWorkerApplication:
             remains=WBWarehouseRemainsClient(gateway),
             sales_reports=WBSalesReportsClient(gateway),
             adverts=WBAdvertClient(gateway),
+            ozon_finance=OzonFinanceClient(gateway),
             orders_history_months=self.settings.core_mirror.orders_history_months,
             chats_history_days=self.settings.core_mirror.chats_history_days,
             chats_pages_per_run=self.settings.core_mirror.chats_pages_per_run,
@@ -62,6 +64,9 @@ class WBCoreWorkerApplication:
             adverts_history_from=date.fromisoformat(self.settings.core_mirror.sales_reports_history_from),
             adverts_windows_per_run=self.settings.core_mirror.adverts_windows_per_run,
             adverts_overlap_days=self.settings.core_mirror.adverts_overlap_days,
+            ozon_history_from=date.fromisoformat(self.settings.core_mirror.sales_reports_history_from),
+            ozon_days_per_run=self.settings.core_mirror.ozon_days_per_run,
+            ozon_overlap_days=self.settings.core_mirror.ozon_overlap_days,
             heartbeat=touch_heartbeat,
         )
         self.worker = WBCoreWorker(self.database, self.mirror, self.settings)

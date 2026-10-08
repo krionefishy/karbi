@@ -9,6 +9,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_ADVERTS,
     MIRROR_CHATS,
     MIRROR_ORDERS,
+    MIRROR_OZON_ACCRUALS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -20,6 +21,7 @@ from backend.modules.wb_core.domain import (
     ChatEvent,
     FbsOrder,
     FbsSupply,
+    OzonAccrualLine,
     ReviewFact,
     SalesReport,
     SalesReportRow,
@@ -268,3 +270,19 @@ class AdvertMirror:
 
     async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
         return await self.mirror.state(seller_id, MIRROR_ADVERTS)
+
+
+class OzonAccrualMirror:
+    """Что автоматизации читают о начислениях Ozon: строки за окно дней и докуда они прочитаны."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def lines(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAccrualLine]:
+        return await self.mirror.ozon_accruals(seller_id, since=since, until=until)
+
+    async def collected_through(self, seller_id: uuid.UUID) -> date | None:
+        return await self.mirror.ozon_cursor(seller_id)
+
+    async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
+        return await self.mirror.state(seller_id, MIRROR_OZON_ACCRUALS)

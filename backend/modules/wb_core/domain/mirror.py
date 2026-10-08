@@ -12,6 +12,7 @@ MIRROR_CHATS = "chats"
 MIRROR_REMAINS = "remains"
 MIRROR_SALES_REPORTS = "sales_reports"
 MIRROR_ADVERTS = "adverts"
+MIRROR_OZON_ACCRUALS = "ozon_accruals"
 MIRROR_KINDS = (
     MIRROR_CATALOG,
     MIRROR_STOCKS,
@@ -22,6 +23,7 @@ MIRROR_KINDS = (
     MIRROR_REMAINS,
     MIRROR_SALES_REPORTS,
     MIRROR_ADVERTS,
+    MIRROR_OZON_ACCRUALS,
 )
 
 # Периодичность отчётов реализации: WB формирует и недельные, и суточные из
@@ -386,6 +388,43 @@ class AdvertNmStat:
     canceled: int
     amount: Decimal
     orders_amount: Decimal
+
+
+# Откуда в начислении Ozon строка: услуга по отправлению, товарная услуга, услуга без
+# товара, по грузоместу, доставка в составе отправления или сама продажа.
+OZON_LINE_ITEM = "item"
+OZON_LINE_NON_ITEM = "non_item"
+OZON_LINE_CONTAINER = "container"
+OZON_LINE_DELIVERY = "delivery"
+OZON_LINE_SALE = "sale"
+
+
+@dataclass(frozen=True, slots=True)
+class OzonAccrualLine:
+    """Одна строка начисления Ozon из `/v1/finance/accrual/by-day` — копия ответа, развёрнутая построчно.
+
+    Начисление — отправление, товар или услуга без товара; внутри него несколько
+    сумм с типами из справочника начислений. Продажа — строка `sale` с ценой
+    продавца (`sale_amount`), ценой для покупателя (`sale_price`), баллами
+    Ozon (`bonus`), софинансированием и вознаграждением за продажу.
+    """
+
+    accrual_id: int
+    line_no: int
+    day: date
+    category: str
+    unit_number: str
+    delivery_schema: str
+    line: str
+    sku: int
+    type_id: int
+    quantity: int
+    amount: Decimal
+    sale_amount: Decimal
+    sale_price: Decimal
+    sale_commission: Decimal
+    bonus: Decimal
+    coinvestment: Decimal
 
 
 def is_review_prompt(sender: str, source: str, text: str | None) -> bool:
