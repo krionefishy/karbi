@@ -1,5 +1,6 @@
 from backend.modules.wb_core.application.enrollment import AutomationEnrollment
 from backend.modules.wb_core.application.mirror import (
+    AdvertsOutcome,
     CatalogOutcome,
     ChatsOutcome,
     MirrorService,
@@ -12,6 +13,7 @@ from backend.modules.wb_core.application.mirror import (
     SuppliesOutcome,
 )
 from backend.modules.wb_core.application.mirror_ports import (
+    AdvertMirror,
     ChatMirror,
     ChatMirrorState,
     MirroredSalesReport,
@@ -32,6 +34,8 @@ from backend.modules.wb_core.application.sellers import (
 )
 
 __all__ = [
+    "AdvertMirror",
+    "AdvertsOutcome",
     "AutomationEnrollment",
     "AutomationNotFoundError",
     "CatalogOutcome",

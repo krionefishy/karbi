@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.domain import (
+    MIRROR_ADVERTS,
     MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_REMAINS,
@@ -13,6 +14,9 @@ from backend.modules.wb_core.domain import (
     MIRROR_SALES_REPORTS,
     MIRROR_STOCKS,
     SALES_REPORT_WEEKLY,
+    AdvertCampaign,
+    AdvertNmStat,
+    AdvertSpend,
     ChatEvent,
     FbsOrder,
     FbsSupply,
@@ -241,3 +245,26 @@ class SalesReportMirror:
     async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
         """`None` — зеркало до этого селлера ещё не доходило."""
         return await self.mirror.state(seller_id, MIRROR_SALES_REPORTS)
+
+
+class AdvertMirror:
+    """Что автоматизации читают о рекламе: списания и статистика по артикулам за окно дней."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def spend(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[AdvertSpend]:
+        return await self.mirror.advert_spend(seller_id, since=since, until=until)
+
+    async def nm_stats(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[AdvertNmStat]:
+        return await self.mirror.advert_nm_stats(seller_id, since=since, until=until)
+
+    async def campaigns(self, seller_id: uuid.UUID, advert_ids: Iterable[int]) -> dict[int, AdvertCampaign]:
+        return await self.mirror.advert_campaigns(seller_id, advert_ids)
+
+    async def collected_through(self, seller_id: uuid.UUID) -> date | None:
+        """Последний день, списания и статистика за который прочитаны целиком."""
+        return await self.mirror.advert_cursor(seller_id)
+
+    async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
+        return await self.mirror.state(seller_id, MIRROR_ADVERTS)

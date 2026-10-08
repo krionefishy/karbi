@@ -1,3 +1,4 @@
+from backend.modules.wb_core.infrastructure.wb.advert import ADVERT_BUCKET, WBAdvertClient
 from backend.modules.wb_core.infrastructure.wb.analytics import (
     ANALYTICS_BUCKET,
     MAX_PAGES,
@@ -36,6 +37,7 @@ from backend.modules.wb_core.infrastructure.wb.marketplace import (
 )
 
 __all__ = [
+    "ADVERT_BUCKET",
     "ANALYTICS_BUCKET",
     "CHAT_BUCKET",
     "CHRT_CHUNK",
@@ -54,6 +56,7 @@ __all__ = [
     "FeedbackAggregation",
     "FeedbackProduct",
     "SalesReportPage",
+    "WBAdvertClient",
     "WBAnalyticsClient",
     "WBChatClient",
     "WBContentClient",

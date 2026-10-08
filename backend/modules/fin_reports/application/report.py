@@ -173,7 +173,17 @@ def _articles_sheet(sheet: Worksheet, view: ArticlesView) -> None:
     untaxed = [seller.name for seller in view.sellers if seller.tax_rate is None]
     if untaxed:
         notes.append(f"Ставка налога не задана: {', '.join(untaxed)} — колонка «Налог» нулевая.")
-    notes.append("Реклама по артикулам пока не собирается — колонки рекламы нулевые.")
+    behind = [
+        f"{seller.name} (по {seller.ads_through:%d.%m})" if seller.ads_through else seller.name
+        for seller in view.sellers
+        if seller.ads_through is None or seller.ads_through < view.date_to
+    ]
+    if behind:
+        notes.append(f"Реклама дочитана не до конца недели: {', '.join(behind)}.")
+    notes.append(
+        "Реклама по артикулам: списания кампаний поделены по статистике артикулов за неделю; "
+        "кампании, которых нет в зеркале, — в строке «(пусто)»."
+    )
     notes.append("Колонки без источника в WB, оставлены для раскладки: " + ", ".join(UNVERIFIED_COLUMNS) + ".")
     for note in notes:
         sheet.append([])

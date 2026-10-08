@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.fin_reports.application.ads import week_ads
 from backend.modules.fin_reports.application.build import FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
@@ -294,14 +295,23 @@ class FinReportsService:
                 stocks, stock_is_live = live.stocks, True
                 stock_taken_at = live.taken_at
             tax = tax_rate_on(rates.get(seller.id, []), date_to)
+            ads = await week_ads(self.session, seller.id, since=date_from, until=date_to)
             rows = article_rows(
                 totals,
                 cost_of=self._cost_on(books[seller.id], date_to),
                 stock_of=self._stock_in(stocks),
-                # Рекламы по артикулам пока нет: рекламный API в зеркало не подключён.
-                ads_of=self._no_ads,
+                ads_of=ads.of,
                 tax_rate=tax.rate / 100 if tax else ZERO,
             )
+            # Списания кампаний, которых зеркало не знает, — в строку без артикула.
+            for row in rows:
+                if not row.nm_id:
+                    row.ads = AdSpend(
+                        ads.unallocated.balance,
+                        ads.unallocated.account,
+                        ads.unallocated.bonus,
+                        row.ads.promotion_info,
+                    )
             last_price = await self._last_prices(seller.id, date_to)
             result.append(
                 SellerArticles(
@@ -311,6 +321,7 @@ class FinReportsService:
                     stocks=stock_rows(rows, last_price_of=last_price.get),
                     pending=len(ready) < len(in_week),
                     tax_rate=tax.rate if tax else None,
+                    ads_through=ads.collected_through,
                 )
             )
         return ArticlesView(period, date_from, date_to, result, stock_taken_at, stock_is_live)
@@ -321,10 +332,6 @@ class FinReportsService:
             return stocks.get((nm_id, tech_size), Stock())
 
         return stock
-
-    @staticmethod
-    def _no_ads(nm_id: int) -> AdSpend:
-        return AdSpend()
 
     async def _last_prices(self, seller_id: uuid.UUID, until: date) -> dict[int, Decimal]:
         """Последний средний чек до СПП по артикулу — для остатка, который на неделе не продавался."""

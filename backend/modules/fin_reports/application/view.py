@@ -105,6 +105,8 @@ class SellerArticles:
     pending: bool
     # Ставка налога, по которой считалась колонка «Налог»; `None` — не задана, налог ноль.
     tax_rate: Decimal | None
+    # Докуда зеркало рекламы прочитало списания; раньше конца недели — реклама неполная.
+    ads_through: date | None
 
 
 @dataclass(frozen=True, slots=True)

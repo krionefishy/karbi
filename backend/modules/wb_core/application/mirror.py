@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 from backend.modules.wb_core.domain import (
     CHAT_SENDER_CLIENT,
+    MIRROR_ADVERTS,
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
@@ -28,6 +29,7 @@ from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, Se
 from backend.modules.wb_core.infrastructure.wb import (
     CatalogCard,
     FeedbackAggregation,
+    WBAdvertClient,
     WBAnalyticsClient,
     WBChatClient,
     WBContentClient,
@@ -48,6 +50,8 @@ LIVE_ORDERS_MONTHS = 3
 ORDERS_OVERLAP = timedelta(days=3)
 # Даты отчётов реализации WB считает по Москве; окно списка — до сегодняшнего дня по ней.
 WB_TIMEZONE = ZoneInfo("Europe/Moscow")
+# Окно рекламного API: списания и статистика — не больше 31 дня за запрос.
+MAX_ADVERT_WINDOW = 31
 # Итоги шапки, по которым дочитанный отчёт сверяется с суммой своих строк.
 SALES_REPORT_CHECKED_SUMS = (
     "retail_amount_sum",
@@ -112,6 +116,15 @@ class ChatsOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class AdvertsOutcome:
+    windows: int
+    campaigns: int
+    spend_rows: int
+    stat_rows: int
+    collected_through: date | None
+
+
+@dataclass(frozen=True, slots=True)
 class SalesReportsOutcome:
     reports: int
     loaded: int
@@ -143,11 +156,15 @@ class MirrorService:
         chats: WBChatClient,
         remains: WBWarehouseRemainsClient | None = None,
         sales_reports: WBSalesReportsClient | None = None,
+        adverts: WBAdvertClient | None = None,
         orders_history_months: int = 6,
         chats_history_days: int = 90,
         chats_pages_per_run: int = 100,
         sales_reports_history_from: date = date(2026, 1, 1),
         sales_reports_per_run: int = 4,
+        adverts_history_from: date = date(2026, 1, 1),
+        adverts_windows_per_run: int = 3,
+        adverts_overlap_days: int = 3,
         heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
@@ -163,6 +180,10 @@ class MirrorService:
         self.chats_pages_per_run = chats_pages_per_run
         self.sales_reports_history_from = sales_reports_history_from
         self.sales_reports_per_run = sales_reports_per_run
+        self.adverts = adverts
+        self.adverts_history_from = adverts_history_from
+        self.adverts_windows_per_run = adverts_windows_per_run
+        self.adverts_overlap_days = adverts_overlap_days
         # Долгий сбор отмечается между страницами: каждая ждёт минуту лимита WB, а
         # healthcheck воркера считает процесс мёртвым после четверти часа тишины.
         self._heartbeat = heartbeat or (lambda: None)
@@ -491,6 +512,65 @@ class MirrorService:
             await mirror.insert_chat_events(seller_id, kept, now=stamp)
             await mirror.save_chat_cursor(seller_id, cursor, tail_reached_at=stamp if caught_up else None)
             await session.commit()
+
+    # --- реклама -------------------------------------------------------------------
+
+    async def collect_adverts(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> AdvertsOutcome:
+        """Списания, состав кампаний и статистика по артикулам — окнами по 31 дню от курсора.
+
+        Курсор — последний день, прочитанный целиком; следующий проход начинает
+        на `adverts_overlap_days` раньше: WB дописывает вчерашние списания
+        и статистику с задержкой. Окно пишется своей транзакцией, за проход —
+        не больше `adverts_windows_per_run` окон: статистика — три запроса в
+        минуту, и догон истории не должен держать остальные виды зеркала.
+        """
+        if self.adverts is None:
+            raise WBPermanentError("Реклама не подключена к зеркалу")
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        today = stamp.astimezone(WB_TIMEZONE).date()
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_ADVERTS, stamp)
+            await session.commit()
+            cursor = await MirrorRepository(session).advert_cursor(seller_id)
+        start = self.adverts_history_from
+        if cursor is not None:
+            start = max(start, cursor - timedelta(days=self.adverts_overlap_days))
+        windows = 0
+        campaigns = spend_rows = stat_rows = 0
+        collected_through = cursor
+        try:
+            while start <= today and windows < self.adverts_windows_per_run:
+                self._heartbeat()
+                end = min(start + timedelta(days=MAX_ADVERT_WINDOW - 1), today)
+                spend = await self.adverts.spend(seller_key, start, end)
+                advert_ids = {item.advert_id for item in spend}
+                known = await self.adverts.campaigns(seller_key, advert_ids) if advert_ids else []
+                stats = await self.adverts.nm_stats(seller_key, advert_ids, start, end) if advert_ids else []
+                async with self.database.session() as session:
+                    await self._ensure_alive(session, seller_id)
+                    mirror = MirrorRepository(session)
+                    campaigns += await mirror.upsert_advert_campaigns(seller_id, known, now=stamp)
+                    spend_rows += await mirror.replace_advert_spend(seller_id, start, end, spend, now=stamp)
+                    stat_rows += await mirror.replace_advert_nm_stats(
+                        seller_id, advert_ids, start, end, stats, now=stamp
+                    )
+                    # Сегодняшний день ещё дописывается: курсор не заходит за вчера.
+                    collected_through = min(end, today - timedelta(days=1))
+                    await mirror.save_advert_cursor(seller_id, collected_through)
+                    await session.commit()
+                windows += 1
+                start = end + timedelta(days=1)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_ADVERTS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_ADVERTS, now=stamp)
+            await session.commit()
+        outcome = AdvertsOutcome(windows, campaigns, spend_rows, stat_rows, collected_through)
+        self.logger.info("adverts_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
 
     # --- отчёты реализации ----------------------------------------------------------
 

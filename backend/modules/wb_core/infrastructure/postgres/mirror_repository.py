@@ -30,6 +30,9 @@ from backend.modules.wb_core.domain import (
     CHAT_SENDER_SELLER,
     CHAT_SOURCE_API,
     SALES_RETURN_DOC_TYPE,
+    AdvertCampaign,
+    AdvertNmStat,
+    AdvertSpend,
     ChatEvent,
     FbsOrder,
     FbsSupply,
@@ -43,6 +46,10 @@ from backend.modules.wb_core.domain import (
     WbOffice,
 )
 from backend.modules.wb_core.infrastructure.postgres.models import (
+    AdvertCampaignModel,
+    AdvertCursorModel,
+    AdvertNmStatModel,
+    AdvertSpendModel,
     ChatCursorModel,
     ChatEventModel,
     FbsOrderArchiveMonthModel,
@@ -810,6 +817,181 @@ class MirrorRepository:
     @staticmethod
     def _sales_report_row(row: SalesReportRowModel) -> SalesReportRow:
         return SalesReportRow(**{field.name: getattr(row, field.name) for field in fields(SalesReportRow)})
+
+    # --- реклама ------------------------------------------------------------------------
+
+    async def advert_cursor(self, seller_id: uuid.UUID) -> date | None:
+        row = await self.session.get(AdvertCursorModel, seller_id)
+        return row.collected_through if row else None
+
+    async def save_advert_cursor(self, seller_id: uuid.UUID, collected_through: date) -> None:
+        statement = insert(AdvertCursorModel).values(seller_id=seller_id, collected_through=collected_through)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id"], set_={"collected_through": statement.excluded.collected_through}
+            )
+        )
+
+    async def upsert_advert_campaigns(
+        self, seller_id: uuid.UUID, campaigns: Iterable[AdvertCampaign], *, now: datetime
+    ) -> int:
+        rows = [
+            {
+                "seller_id": seller_id,
+                "advert_id": item.advert_id,
+                "name": item.name,
+                "status": item.status,
+                "payment_type": item.payment_type,
+                "bid_type": item.bid_type,
+                "nm_ids": list(item.nm_ids),
+                "updated_at": item.updated_at,
+                "collected_at": now,
+            }
+            for item in campaigns
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(AdvertCampaignModel).values(rows[offset : offset + _INSERT_CHUNK])
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "advert_id"],
+                    set_={
+                        "name": excluded.name,
+                        "status": excluded.status,
+                        "payment_type": excluded.payment_type,
+                        "bid_type": excluded.bid_type,
+                        "nm_ids": excluded.nm_ids,
+                        "updated_at": excluded.updated_at,
+                        "collected_at": excluded.collected_at,
+                    },
+                )
+            )
+        return len(rows)
+
+    async def replace_advert_spend(
+        self, seller_id: uuid.UUID, since: date, until: date, spend: Iterable[AdvertSpend], *, now: datetime
+    ) -> int:
+        """Окно дней целиком: списание, пропавшее из ответа, пропадает и отсюда."""
+        await self.session.execute(
+            delete(AdvertSpendModel).where(
+                AdvertSpendModel.seller_id == seller_id,
+                AdvertSpendModel.day >= since,
+                AdvertSpendModel.day <= until,
+            )
+        )
+        rows = [
+            {
+                "seller_id": seller_id,
+                "advert_id": item.advert_id,
+                "day": item.day,
+                "payment_type": item.payment_type,
+                "amount": item.amount,
+                "collected_at": now,
+            }
+            for item in spend
+            if since <= item.day <= until
+        ]
+        await self._insert(AdvertSpendModel, rows)
+        return len(rows)
+
+    async def replace_advert_nm_stats(
+        self,
+        seller_id: uuid.UUID,
+        advert_ids: Iterable[int],
+        since: date,
+        until: date,
+        stats: Iterable[AdvertNmStat],
+        *,
+        now: datetime,
+    ) -> int:
+        """Окно дней для названных кампаний целиком — те же правила, что у списаний."""
+        wanted = {advert_id for advert_id in advert_ids}
+        if not wanted:
+            return 0
+        await self.session.execute(
+            delete(AdvertNmStatModel).where(
+                AdvertNmStatModel.seller_id == seller_id,
+                _any_of(AdvertNmStatModel.advert_id, wanted, BigInteger),
+                AdvertNmStatModel.day >= since,
+                AdvertNmStatModel.day <= until,
+            )
+        )
+        rows = [
+            {
+                "seller_id": seller_id,
+                "advert_id": item.advert_id,
+                "day": item.day,
+                "nm_id": item.nm_id,
+                "views": item.views,
+                "clicks": item.clicks,
+                "orders": item.orders,
+                "shks": item.shks,
+                "atbs": item.atbs,
+                "canceled": item.canceled,
+                "amount": item.amount,
+                "orders_amount": item.orders_amount,
+                "collected_at": now,
+            }
+            for item in stats
+            if item.advert_id in wanted and since <= item.day <= until
+        ]
+        await self._insert(AdvertNmStatModel, rows)
+        return len(rows)
+
+    async def advert_spend(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[AdvertSpend]:
+        rows = await self.session.scalars(
+            select(AdvertSpendModel).where(
+                AdvertSpendModel.seller_id == seller_id, AdvertSpendModel.day >= since, AdvertSpendModel.day <= until
+            )
+        )
+        return [AdvertSpend(row.advert_id, row.day, row.payment_type, row.amount) for row in rows]
+
+    async def advert_nm_stats(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[AdvertNmStat]:
+        rows = await self.session.scalars(
+            select(AdvertNmStatModel).where(
+                AdvertNmStatModel.seller_id == seller_id,
+                AdvertNmStatModel.day >= since,
+                AdvertNmStatModel.day <= until,
+            )
+        )
+        return [
+            AdvertNmStat(
+                row.advert_id,
+                row.day,
+                row.nm_id,
+                row.views,
+                row.clicks,
+                row.orders,
+                row.shks,
+                row.atbs,
+                row.canceled,
+                row.amount,
+                row.orders_amount,
+            )
+            for row in rows
+        ]
+
+    async def advert_campaigns(self, seller_id: uuid.UUID, advert_ids: Iterable[int]) -> dict[int, AdvertCampaign]:
+        wanted = {advert_id for advert_id in advert_ids if advert_id}
+        if not wanted:
+            return {}
+        rows = await self.session.scalars(
+            select(AdvertCampaignModel).where(
+                AdvertCampaignModel.seller_id == seller_id, _any_of(AdvertCampaignModel.advert_id, wanted, BigInteger)
+            )
+        )
+        return {
+            row.advert_id: AdvertCampaign(
+                advert_id=row.advert_id,
+                name=row.name,
+                status=row.status,
+                payment_type=row.payment_type,
+                bid_type=row.bid_type,
+                nm_ids=tuple(int(nm_id) for nm_id in row.nm_ids),
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        }
 
     # --- catalog ----------------------------------------------------------------
 

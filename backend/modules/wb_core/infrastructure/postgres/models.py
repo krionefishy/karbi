@@ -165,7 +165,8 @@ class MirrorStateModel(WBCoreBase):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', 'sales_reports')",
+            "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', "
+            "'sales_reports', 'adverts')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -551,3 +552,73 @@ class SellerTaxRateModel(WBCoreBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (CheckConstraint("rate >= 0 AND rate <= 100", name="ck_wb_core_seller_tax_rates_rate"),)
+
+
+class AdvertCampaignModel(WBCoreBase):
+    """Рекламная кампания — копия ответа `/api/advert/v2/adverts`; артикулы кампании списком."""
+
+    __tablename__ = "advert_campaigns"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    advert_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payment_type: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    bid_type: Mapped[str] = mapped_column(String(16), nullable=False, default="")
+    nm_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AdvertSpendModel(WBCoreBase):
+    """Списание за кампанию за день по типу оплаты — строки `/adv/v1/upd`, сложенные по дню."""
+
+    __tablename__ = "advert_spend"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    advert_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    payment_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_wb_core_advert_spend_day", "seller_id", "day"),)
+
+
+class AdvertNmStatModel(WBCoreBase):
+    """Статистика кампании по артикулу за день — `/adv/v3/fullstats`, площадки сложены."""
+
+    __tablename__ = "advert_nm_stats"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    advert_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    nm_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    views: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    shks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    atbs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    canceled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    orders_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_wb_core_advert_nm_stats_day", "seller_id", "day"),)
+
+
+class AdvertCursorModel(WBCoreBase):
+    """Докуда дочитаны списания и статистика рекламы кабинета: день, закрытый целиком."""
+
+    __tablename__ = "advert_cursors"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    collected_through: Mapped[date] = mapped_column(Date, nullable=False)

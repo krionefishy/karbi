@@ -11,6 +11,7 @@ MIRROR_SUPPLIES = "supplies"
 MIRROR_CHATS = "chats"
 MIRROR_REMAINS = "remains"
 MIRROR_SALES_REPORTS = "sales_reports"
+MIRROR_ADVERTS = "adverts"
 MIRROR_KINDS = (
     MIRROR_CATALOG,
     MIRROR_STOCKS,
@@ -20,6 +21,7 @@ MIRROR_KINDS = (
     MIRROR_CHATS,
     MIRROR_REMAINS,
     MIRROR_SALES_REPORTS,
+    MIRROR_ADVERTS,
 )
 
 # Периодичность отчётов реализации: WB формирует и недельные, и суточные из
@@ -344,6 +346,46 @@ class SalesReportTotals:
     vw: Decimal
     vw_nds: Decimal
     ppvz_sales_commission: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class AdvertCampaign:
+    """Рекламная кампания WB: какие артикулы она продвигает и чем оплачивается."""
+
+    advert_id: int
+    name: str
+    status: int
+    payment_type: str
+    bid_type: str
+    nm_ids: tuple[int, ...]
+    updated_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class AdvertSpend:
+    """Списание за кампанию за день с типом оплаты («Баланс», «Счет», «Бонусы») — строка `/adv/v1/upd`."""
+
+    advert_id: int
+    day: date
+    payment_type: str
+    amount: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class AdvertNmStat:
+    """Статистика кампании по артикулу за день — из `/adv/v3/fullstats`, площадки сложены."""
+
+    advert_id: int
+    day: date
+    nm_id: int
+    views: int
+    clicks: int
+    orders: int
+    shks: int
+    atbs: int
+    canceled: int
+    amount: Decimal
+    orders_amount: Decimal
 
 
 def is_review_prompt(sender: str, source: str, text: str | None) -> bool:

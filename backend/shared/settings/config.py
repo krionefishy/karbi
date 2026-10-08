@@ -338,6 +338,13 @@ class CoreMirrorConfig:
     sales_reports_interval_minutes: int = 30
     sales_reports_per_run: int = 4
     sales_reports_history_from: str = "2026-01-01"
+    # Реклама: списания, состав кампаний и статистика по артикулам окнами по 31 дню.
+    # Статистика — три запроса в минуту, поэтому за проход не больше трёх окон;
+    # история с той же даты, что у отчётов реализации. Вчерашние списания WB
+    # дописывает с задержкой — последние дни перечитываются.
+    adverts_interval_minutes: int = 360
+    adverts_windows_per_run: int = 3
+    adverts_overlap_days: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -568,6 +575,9 @@ class Settings:
             "remains_interval_minutes",
             "sales_reports_interval_minutes",
             "sales_reports_per_run",
+            "adverts_interval_minutes",
+            "adverts_windows_per_run",
+            "adverts_overlap_days",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -727,6 +737,8 @@ class Settings:
             raise ValueError("core_mirror.remains_interval_minutes must be positive")
         if min(mirror.sales_reports_interval_minutes, mirror.sales_reports_per_run) < 1:
             raise ValueError("core_mirror.sales_reports_* must be positive")
+        if min(mirror.adverts_interval_minutes, mirror.adverts_windows_per_run) < 1 or mirror.adverts_overlap_days < 0:
+            raise ValueError("core_mirror.adverts_* must be positive")
         try:
             date.fromisoformat(mirror.sales_reports_history_from)
         except ValueError as error:

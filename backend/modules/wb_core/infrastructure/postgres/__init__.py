@@ -1,5 +1,9 @@
 from backend.modules.wb_core.infrastructure.postgres.mirror_repository import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import (
+    AdvertCampaignModel,
+    AdvertCursorModel,
+    AdvertNmStatModel,
+    AdvertSpendModel,
     ArticleModel,
     ChatCursorModel,
     ChatEventModel,
@@ -22,6 +26,10 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
 from backend.modules.wb_core.infrastructure.postgres.repository import SellerRepository
 
 __all__ = [
+    "AdvertCampaignModel",
+    "AdvertCursorModel",
+    "AdvertNmStatModel",
+    "AdvertSpendModel",
     "ArticleModel",
     "ChatCursorModel",
     "ChatEventModel",

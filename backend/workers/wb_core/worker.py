@@ -9,6 +9,7 @@ import structlog
 from backend.modules.wb_core.application import MirrorService, SellerGoneError
 from backend.modules.wb_core.domain import (
     EGRESS_SERVABLE,
+    MIRROR_ADVERTS,
     MIRROR_CATALOG,
     MIRROR_CHATS,
     MIRROR_ORDERS,
@@ -80,6 +81,7 @@ class WBCoreWorker:
         await self.collect_due(MIRROR_CHATS, now)
         await self.collect_due(MIRROR_REMAINS, now)
         await self.collect_due(MIRROR_SALES_REPORTS, now)
+        await self.collect_due(MIRROR_ADVERTS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
@@ -112,6 +114,8 @@ class WBCoreWorker:
             return now - timedelta(minutes=self.config.remains_interval_minutes)
         if kind == MIRROR_SALES_REPORTS:
             return now - timedelta(minutes=self.config.sales_reports_interval_minutes)
+        if kind == MIRROR_ADVERTS:
+            return now - timedelta(minutes=self.config.adverts_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -139,7 +143,7 @@ class WBCoreWorker:
                 if seller.egress_status in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS):
+            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS):
                 # Без каталога нечем ключевать остатки и отзывы: у нового селлера
                 # первый сбор остатков дал бы нули на весь срез. Чатам и отчётам
                 # реализации каталог не нужен: артикул в них приходит от WB.
@@ -172,6 +176,7 @@ class WBCoreWorker:
             MIRROR_CHATS: self.mirror.collect_chats,
             MIRROR_REMAINS: self.mirror.collect_remains,
             MIRROR_SALES_REPORTS: self.mirror.collect_sales_reports,
+            MIRROR_ADVERTS: self.mirror.collect_adverts,
         }[kind]
         try:
             await operation(seller_id, now=self._now())

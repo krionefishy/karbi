@@ -15,11 +15,18 @@ from openpyxl import Workbook, load_workbook
 from sqlalchemy import delete, update
 
 from backend.app.application import Application
-from backend.modules.fin_reports.application import CostFileError, FactsBuilder, match_cabinets, read_cost_file
+from backend.modules.fin_reports.application import (
+    CostFileError,
+    FactsBuilder,
+    match_cabinets,
+    read_cost_file,
+    week_ads,
+)
 from backend.modules.fin_reports.domain import (
     ARTICLE_COLUMNS,
     GRANULARITY_MONTH,
     GRANULARITY_WEEK,
+    AdSpend,
     CostBook,
     CostPrice,
     Period,
@@ -29,7 +36,14 @@ from backend.modules.fin_reports.domain import (
     statement,
 )
 from backend.modules.fin_reports.infrastructure.postgres import CostPriceModel, FinReportsRepository, WbReportModel
-from backend.modules.wb_core.domain import SalesReport, SalesReportRow, SalesReportTotals
+from backend.modules.wb_core.domain import (
+    AdvertCampaign,
+    AdvertNmStat,
+    AdvertSpend,
+    SalesReport,
+    SalesReportRow,
+    SalesReportTotals,
+)
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.shared.settings import load_settings
@@ -673,3 +687,66 @@ async def test_a_long_backlog_is_folded_in_portions_without_waiting_for_the_inte
     ]
     async with application.database.session() as session:
         assert len(await FinReportsRepository(session).built_reports(seller)) == 6
+
+
+# --- реклама по артикулам из зеркала ----------------------------------------------------
+
+
+async def test_campaign_spend_is_split_between_articles_by_their_stats(
+    application: Application, seller: uuid.UUID
+) -> None:
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    week = (date(2026, 9, 21), date(2026, 9, 27))
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.upsert_advert_campaigns(
+            seller,
+            [
+                AdvertCampaign(1, "пара", 9, "cpm", "unified", (DRILL, SAW), None),
+                AdvertCampaign(2, "без статистики", 9, "cpm", "unified", (DRILL, SAW), None),
+            ],
+            now=stamp,
+        )
+        await mirror.replace_advert_spend(
+            seller,
+            *week,
+            [
+                AdvertSpend(1, date(2026, 9, 22), "Баланс", Decimal("300")),
+                AdvertSpend(1, date(2026, 9, 23), "Счет", Decimal("100")),
+                AdvertSpend(2, date(2026, 9, 24), "Бонусы", Decimal("50")),
+                AdvertSpend(3, date(2026, 9, 24), "Баланс", Decimal("7")),
+                AdvertSpend(1, date(2026, 9, 28), "Баланс", Decimal("999")),
+            ],
+            now=stamp,
+        )
+        await mirror.replace_advert_nm_stats(
+            seller,
+            [1],
+            *week,
+            [
+                AdvertNmStat(1, date(2026, 9, 22), DRILL, 0, 0, 0, 0, 0, 0, Decimal("150"), Decimal(0)),
+                AdvertNmStat(1, date(2026, 9, 23), SAW, 0, 0, 0, 0, 0, 0, Decimal("50"), Decimal(0)),
+            ],
+            now=stamp,
+        )
+        await mirror.save_advert_cursor(seller, date(2026, 9, 26))
+        await session.commit()
+
+        ads = await week_ads(session, seller, since=week[0], until=week[1])
+
+    drill, saw = ads.of(DRILL), ads.of(SAW)
+    # Кампания 1: 400 ₽ делятся 3:1 по статистике; кампания 2 без статистики — поровну; кампания 3 неизвестна.
+    assert (drill.balance, drill.account, drill.bonus, drill.promotion_info) == (
+        Decimal("225.00"),
+        Decimal("75.00"),
+        Decimal("25.00"),
+        Decimal("150.00"),
+    )
+    assert (saw.balance, saw.account, saw.bonus, saw.promotion_info) == (
+        Decimal("75.00"),
+        Decimal("25.00"),
+        Decimal("25.00"),
+        Decimal("50.00"),
+    )
+    assert ads.unallocated.balance == Decimal("7.00") and ads.collected_through == date(2026, 9, 26)
+    assert ads.of(999) == AdSpend()
