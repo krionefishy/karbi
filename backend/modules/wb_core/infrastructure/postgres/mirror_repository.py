@@ -1033,6 +1033,11 @@ class MirrorRepository:
             )
         return len(rows)
 
+    async def ozon_first_day(self, seller_id: uuid.UUID) -> date | None:
+        return await self.session.scalar(
+            select(func.min(OzonAccrualLineModel.day)).where(OzonAccrualLineModel.seller_id == seller_id)
+        )
+
     async def ozon_accruals(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAccrualLine]:
         rows = await self.session.scalars(
             select(OzonAccrualLineModel).where(

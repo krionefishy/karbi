@@ -151,3 +151,36 @@ class WbStockSnapshotModel(FinReportsBase):
     # Всего: на складах плюс в пути туда и обратно.
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OzonDayModel(FinReportsBase):
+    """День начислений Ozon, строки которого уже сложены в `ozon_facts`."""
+
+    __tablename__ = "ozon_days"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OzonFactModel(FinReportsBase):
+    """Начисления Ozon за день, сложенные по SKU, виду строки и типу начисления."""
+
+    __tablename__ = "ozon_facts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    day: Mapped[date] = mapped_column(Date, nullable=False)
+    sku: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    line: Mapped[str] = mapped_column(String(16), nullable=False)
+    type_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_amount: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_price: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    sale_commission: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    bonus: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    coinvestment: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+
+    __table_args__ = (Index("ix_fin_reports_ozon_facts_day", "seller_id", "day"),)

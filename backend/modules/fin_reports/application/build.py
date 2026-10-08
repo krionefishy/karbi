@@ -11,12 +11,14 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
-from backend.modules.wb_core.application import SalesReportMirror
+from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMirror
 from backend.storage.pg import Database
 
 # Версия правила сложения. Меняется, когда в суммах появляется новое поле или
 # ключ: отчёты, сложенные по старой версии, пересобираются сами.
 FACTS_VERSION = 1
+# Отдельная версия для начислений Ozon: их правило сложения своё.
+OZON_FACTS_VERSION = 1
 # С какого дня отчёты вообще интересны: раньше зеркало не хранит.
 HISTORY_FROM = date(2024, 1, 1)
 # Окно в будущее — на отчёт, период которого зеркало записало с завтрашней датой.
@@ -52,6 +54,33 @@ class FactsBuilder:
                 totals = await SalesReportMirror(session).totals(seller_id, [report.report_id])
                 await FinReportsRepository(session).save_report_facts(
                     seller_id, report, totals, version=FACTS_VERSION, now=stamp
+                )
+                await session.commit()
+        return BuildOutcome(built=min(len(due), limit), left=max(len(due) - limit, 0))
+
+    async def build_ozon(self, seller_id: uuid.UUID, *, limit: int, now: datetime | None = None) -> BuildOutcome:
+        """Дни начислений Ozon, которые зеркало дочитало, а суммы модуля ещё не видели."""
+        stamp = now or datetime.now(UTC)
+        async with self.database.session() as session:
+            mirror = OzonAccrualMirror(session)
+            through = await mirror.collected_through(seller_id)
+            first = await mirror.first_day(seller_id)
+            built = await FinReportsRepository(session).built_ozon_days(seller_id)
+        if through is None or first is None:
+            return BuildOutcome(built=0, left=0)
+        # Дни от первого начисления до курсора зеркала; пустой день тоже складывается — нулём.
+        first = min(first, *built) if built else first
+        due = [
+            day
+            for day in (first + timedelta(days=offset) for offset in range((through - first).days + 1))
+            if built.get(day) != OZON_FACTS_VERSION
+        ]
+        for day in due[:limit]:
+            self._heartbeat()
+            async with self.database.session() as session:
+                lines = await OzonAccrualMirror(session).lines(seller_id, since=day, until=day)
+                await FinReportsRepository(session).save_ozon_day(
+                    seller_id, day, lines, version=OZON_FACTS_VERSION, now=stamp
                 )
                 await session.commit()
         return BuildOutcome(built=min(len(due), limit), left=max(len(due) - limit, 0))

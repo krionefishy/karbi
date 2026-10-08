@@ -27,7 +27,7 @@ class PeriodResponse(BaseModel):
     values: dict[str, float]
     # Кабинет -> строка отчёта -> сумма.
     by_seller: dict[str, dict[str, float]]
-    # Кабинеты, у которых отчёт WB за период ещё не дочитан: цифры по ним неполные.
+    # Кабинеты, у которых отчёт WB (день начислений Ozon) за период ещё не дочитан: цифры неполные.
     pending_sellers: list[str]
     # Выручка до СПП по артикулам без себестоимости.
     uncosted: float
@@ -44,6 +44,8 @@ class UncostedArticleResponse(BaseModel):
 class PnlResponse(BaseModel):
     year: int
     granularity: str
+    # wb — отчёты реализации WB, ozon — начисления Ozon по дням; набор строк у каждого свой.
+    marketplace: str
     lines: list[LineResponse]
     sellers: list[SellerStateResponse]
     periods: list[PeriodResponse]

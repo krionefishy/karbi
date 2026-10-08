@@ -13,7 +13,8 @@ from backend.modules.fin_reports.application import (
     FinReportsService,
     PnlView,
 )
-from backend.modules.fin_reports.domain import GRANULARITY_WEEK, LINES, Statement
+from backend.modules.fin_reports.application.view import Figures
+from backend.modules.fin_reports.domain import GRANULARITY_WEEK, LINES, MARKETPLACE_OZON, MARKETPLACE_WB, OZON_LINES
 from backend.modules.fin_reports.presentation.http.schemas import (
     CostUploadResponse,
     LineResponse,
@@ -33,15 +34,17 @@ def bad_query(error: Exception) -> HTTPException:
     return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error))
 
 
-def _values(figures: Statement) -> dict[str, float]:
+def _values(figures: Figures) -> dict[str, float]:
     return {key: float(value) for key, value in figures.values.items()}
 
 
 def pnl_response(view: PnlView) -> PnlResponse:
+    lines = OZON_LINES if view.marketplace == MARKETPLACE_OZON else LINES
     return PnlResponse(
         year=view.year,
         granularity=view.granularity,
-        lines=[LineResponse(key=line.key, title=line.title, level=line.level) for line in LINES],
+        marketplace=view.marketplace,
+        lines=[LineResponse(key=line.key, title=line.title, level=line.level) for line in lines],
         sellers=[
             SellerStateResponse(
                 seller_id=str(state.seller_id),
@@ -90,10 +93,11 @@ async def pnl(
     year: int | None = Query(default=None),
     granularity: str = Query(default=GRANULARITY_WEEK),
     seller_id: uuid.UUID | None = Query(default=None),
+    marketplace: str = Query(default=MARKETPLACE_WB),
 ) -> PnlResponse:
     """ОПиУ за год по неделям или месяцам: сумма по кабинетам и разбивка по каждому."""
     try:
-        view = await service.view(year=year, granularity=granularity, seller_id=seller_id)
+        view = await service.view(year=year, granularity=granularity, seller_id=seller_id, marketplace=marketplace)
     except FinReportsQueryError as error:
         raise bad_query(error) from error
     return pnl_response(view)
@@ -106,9 +110,10 @@ async def export_pnl(
     service: FromDishka[FinReportsService],
     year: int | None = Query(default=None),
     period: str | None = Query(default=None),
+    marketplace: str = Query(default=MARKETPLACE_WB),
 ) -> Response:
     try:
-        report = await service.export(year=year, period=period or None)
+        report = await service.export(year=year, period=period or None, marketplace=marketplace)
     except FinReportsQueryError as error:
         raise bad_query(error) from error
     encoded = urllib.parse.quote(report.filename)

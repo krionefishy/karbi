@@ -1,5 +1,8 @@
 export type Granularity = "week" | "month";
 
+/** wb — отчёты реализации WB, ozon — начисления Ozon по дням; набор строк у каждого свой. */
+export type Marketplace = "wb" | "ozon";
+
 /** total — итог, subtotal — подытог, item — статья расходов, info — справочная строка. */
 export type LineLevel = "total" | "subtotal" | "item" | "info";
 
@@ -15,8 +18,9 @@ export type PnlValues = Record<string, number>;
 export interface PnlSellerState {
   seller_id: string;
   name: string;
+  /** Отчёты WB за год; у Ozon — дни начислений. */
   reports: number;
-  /** Отчёты WB за год, строки которых ещё не дочитаны: их денег в цифрах нет. */
+  /** Отчёты WB (дни Ozon) за год, которые ещё не дочитаны: их денег в цифрах нет. */
   pending_reports: number;
   collected_at: string | null;
   /** Когда воркер в последний раз складывал отчёты кабинета; null — ещё ни разу. */
@@ -39,6 +43,7 @@ export interface PnlPeriod {
 export interface UncostedArticle {
   seller_id: string;
   seller_name: string;
+  /** nmId у WB, SKU у Ozon. */
   nm_id: number;
   vendor_code: string;
   revenue: number;
@@ -47,6 +52,7 @@ export interface UncostedArticle {
 export interface Pnl {
   year: number;
   granularity: Granularity;
+  marketplace: Marketplace;
   lines: PnlLine[];
   sellers: PnlSellerState[];
   periods: PnlPeriod[];
@@ -56,7 +62,7 @@ export interface Pnl {
 }
 
 export interface CostUploadResult {
-  marketplace: "wb" | "ozon";
+  marketplace: Marketplace;
   added: number;
   changed: number;
   unchanged: number;

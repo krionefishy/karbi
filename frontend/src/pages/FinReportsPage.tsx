@@ -7,8 +7,8 @@ import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { Shell } from "../components/Shell";
 import { downloadPnl, getPnl, uploadCosts } from "../features/finReports/api";
-import { articles, defaultPeriod, money, reports, uploadSummary } from "../features/finReports/format";
-import type { CostUploadResult, Granularity, PnlLine, PnlValues } from "../features/finReports/types";
+import { articles, days, defaultPeriod, money, reports, uploadSummary } from "../features/finReports/format";
+import type { CostUploadResult, Granularity, Marketplace, PnlLine, PnlValues } from "../features/finReports/types";
 import { attachSeller, detachSeller, getAutomationSellers, getSellers } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
 
@@ -20,6 +20,15 @@ const GRANULARITIES: { value: Granularity; label: string }[] = [
   { value: "week", label: "Недели" },
   { value: "month", label: "Месяцы" },
 ];
+const MARKETPLACES: { value: Marketplace; label: string }[] = [
+  { value: "wb", label: "Wildberries" },
+  { value: "ozon", label: "Ozon" },
+];
+/** Что дочитывает зеркало: у WB — отчёты реализации, у Ozon — начисления по дням. */
+const SOURCE: Record<Marketplace, { title: string; unit: (count: number) => string; tag: string }> = {
+  wb: { title: "Отчёты WB", unit: reports, tag: "WB" },
+  ozon: { title: "Начисления Ozon", unit: days, tag: "Ozon" },
+};
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 const dayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
@@ -97,6 +106,7 @@ export function FinReportsPage() {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   const [granularity, setGranularity] = useState<Granularity>("week");
+  const [marketplace, setMarketplace] = useState<Marketplace>("wb");
   const [sellerId, setSellerId] = useState("");
   const [period, setPeriod] = useState("");
   const [connecting, setConnecting] = useState(false);
@@ -122,8 +132,8 @@ export function FinReportsPage() {
     isPlaceholderData: pnlStale,
     error: loadError,
   } = useQuery({
-    queryKey: ["fin-reports", year, granularity, sellerId],
-    queryFn: () => getPnl(year, granularity, sellerId),
+    queryKey: ["fin-reports", year, granularity, sellerId, marketplace],
+    queryFn: () => getPnl(year, granularity, sellerId, marketplace),
     placeholderData: (previous) => previous,
   });
 
@@ -147,7 +157,7 @@ export function FinReportsPage() {
   };
 
   const exportMutation = useMutation({
-    mutationFn: () => downloadPnl(year, period),
+    mutationFn: () => downloadPnl(year, period, marketplace),
     onSuccess: ({ blob, filename }) => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -194,6 +204,7 @@ export function FinReportsPage() {
   const failing = (pnl?.sellers ?? []).filter((state) => state.error);
   const uncostedRevenue = (pnl?.uncosted ?? []).reduce((sum, item) => sum + item.revenue, 0);
   const years = Array.from({ length: currentYear - FIRST_YEAR + 1 }, (_, index) => currentYear - index);
+  const source = SOURCE[marketplace];
 
   return (
     <Shell current={AUTOMATION_TITLE}>
@@ -202,8 +213,8 @@ export function FinReportsPage() {
           <div>
             <h1>{AUTOMATION_TITLE}</h1>
             <p className="muted">
-              ОПиУ по отчётам реализации Wildberries: недели и месяцы, сводно и по каждому кабинету. Цифры считаются
-              из отчётов WB, себестоимость — из загруженного файла.
+              ОПиУ по отчётам реализации Wildberries и начислениям Ozon: недели и месяцы, сводно и по каждому
+              кабинету. Цифры считаются из данных маркетплейсов, себестоимость — из загруженных файлов.
             </p>
           </div>
           <div className="review-sync-actions">
@@ -227,14 +238,14 @@ export function FinReportsPage() {
         )}
         {failing.map((state) => (
           <div key={state.seller_id} className="checklist-notice">
-            {state.name}: отчёты WB не читаются — {state.error}
+            {state.name}: {source.title.toLowerCase()} не читаются — {state.error}
           </div>
         ))}
         {pending.length > 0 && (
           <div className="checklist-notice">
-            Отчёты WB ещё дочитываются:{" "}
-            {pending.map((state) => `${state.name} — ${reports(state.pending_reports)}`).join(", ")}. Периоды с пометкой
-            «неполный» досчитаются сами.
+            {source.title} ещё дочитываются:{" "}
+            {pending.map((state) => `${state.name} — ${source.unit(state.pending_reports)}`).join(", ")}. Периоды с
+            пометкой «неполный» досчитаются сами.
           </div>
         )}
         {pnl && pnl.uncosted.length > 0 && (
@@ -271,6 +282,19 @@ export function FinReportsPage() {
         ) : (
           <>
             <div className="checklist-toolbar fin-toolbar">
+              <div className="mode-switch" role="tablist" aria-label="Маркетплейс">
+                {MARKETPLACES.map((item) => (
+                  <button
+                    key={item.value}
+                    role="tab"
+                    aria-selected={marketplace === item.value}
+                    className={marketplace === item.value ? "mode-active" : undefined}
+                    onClick={() => setMarketplace(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
               <div className="mode-switch" role="tablist" aria-label="Разрез отчёта">
                 {GRANULARITIES.map((item) => (
                   <button
@@ -309,8 +333,12 @@ export function FinReportsPage() {
 
             {pnl.periods.length === 0 ? (
               <div className="empty-state">
-                <h2>Отчётов за {pnl.year} год пока нет</h2>
-                <p>Зеркало отчётов реализации ещё не дошло до подключённых кабинетов — обычно это вопрос часа.</p>
+                <h2>{marketplace === "wb" ? "Отчётов" : "Начислений Ozon"} за {pnl.year} год пока нет</h2>
+                <p>
+                  {marketplace === "wb"
+                    ? "Зеркало отчётов реализации ещё не дошло до подключённых кабинетов — обычно это вопрос часа."
+                    : "У подключённых кабинетов нет учётки Ozon или зеркало начислений ещё не дошло до них."}
+                </p>
               </div>
             ) : (
               <>
@@ -343,7 +371,7 @@ export function FinReportsPage() {
                       label="ОПиУ выбранного периода по кабинетам"
                       lines={pnl.lines}
                       columns={[
-                        { key: "total", title: "WB итого", values: chosen.values },
+                        { key: "total", title: `${source.tag} итого`, values: chosen.values },
                         ...pnl.sellers.map((state) => ({
                           key: state.seller_id,
                           title: state.name,
@@ -388,7 +416,8 @@ export function FinReportsPage() {
                 </button>
               </div>
               <p className="muted">
-                Excel с колонками «Кабинет», «АртикулВБ» и «Себес, руб». Без даты новая цена действует с дня загрузки
+                Excel с колонками «Кабинет», «АртикулВБ» (для Ozon — «SKU») и «Себес, руб»: маркетплейс
+                определяется по заголовку. Без даты новая цена действует с дня загрузки
                 и прошлые периоды не меняет; цена, которая не изменилась, заново не записывается. Чтобы исправить
                 ошибку, загрузите файл с датой, с которой цена должна действовать.
               </p>
@@ -422,16 +451,20 @@ export function FinReportsPage() {
                   <div key={seller.id} className="stocks-warehouse-row podsort-seller-row fin-seller-row">
                     <span>
                       <strong>{seller.name}</strong>
-                      {state && (
+                      {state ? (
                         <em className="muted">
                           {" "}
-                          · {reports(state.reports)} за год
+                          · {source.unit(state.reports)} за год
                           {state.pending_reports > 0 && `, дочитывается ${state.pending_reports}`}
                         </em>
+                      ) : (
+                        marketplace === "ozon" && !sellerId && <em className="muted"> · без учётки Ozon</em>
                       )}
                     </span>
                     {/* При фильтре по одному кабинету про остальные сервер не рассказывает — молчим. */}
-                    <span className="muted">{state ? `Отчёты WB: ${stamp(state.collected_at)} · собрано: ${stamp(state.built_at)}` : ""}</span>
+                    <span className="muted">
+                      {state ? `${source.title}: ${stamp(state.collected_at)} · собрано: ${stamp(state.built_at)}` : ""}
+                    </span>
                     <button
                       className="secondary-button stocks-hidden-action"
                       onClick={() => setDetaching(seller)}

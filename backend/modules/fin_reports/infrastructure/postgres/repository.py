@@ -2,20 +2,24 @@ import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, fields
 from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.fin_reports.domain import CostPrice, Stock
+from backend.modules.fin_reports.domain import CostPrice, OzonFact, Stock
 from backend.modules.fin_reports.infrastructure.postgres.models import (
     CostPriceModel,
+    OzonDayModel,
+    OzonFactModel,
     TrackedSellerModel,
     WbFactModel,
     WbReportModel,
     WbStockSnapshotModel,
 )
-from backend.modules.wb_core.domain import SalesReport, SalesReportTotals
+from backend.modules.wb_core.domain import OzonAccrualLine, SalesReport, SalesReportTotals
 
 _INSERT_CHUNK = 1000
 # Предел asyncpg на число параметров запроса: порция широкой таблицы считается от колонок.
@@ -43,6 +47,8 @@ class FinReportsRepository:
         await self.session.execute(delete(WbFactModel).where(WbFactModel.seller_id == seller_id))
         await self.session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller_id))
         await self.session.execute(delete(WbStockSnapshotModel).where(WbStockSnapshotModel.seller_id == seller_id))
+        await self.session.execute(delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id))
+        await self.session.execute(delete(OzonDayModel).where(OzonDayModel.seller_id == seller_id))
         await self.untrack(seller_id)
 
     # --- себестоимость -----------------------------------------------------------
@@ -212,3 +218,70 @@ class FinReportsRepository:
             (row.nm_id, row.tech_size): Stock(row.in_warehouse, row.to_client, row.from_client, row.total)
             for row in rows
         }
+
+    # --- сложенные начисления Ozon ---------------------------------------------------------
+
+    async def built_ozon_days(self, seller_id: uuid.UUID) -> dict[date, int]:
+        rows = await self.session.execute(
+            select(OzonDayModel.day, OzonDayModel.version).where(OzonDayModel.seller_id == seller_id)
+        )
+        return {day: int(version) for day, version in rows.all()}
+
+    async def last_ozon_built_at(self, seller_id: uuid.UUID) -> datetime | None:
+        return await self.session.scalar(
+            select(func.max(OzonDayModel.built_at)).where(OzonDayModel.seller_id == seller_id)
+        )
+
+    async def save_ozon_day(
+        self, seller_id: uuid.UUID, day: date, lines: Iterable[OzonAccrualLine], *, version: int, now: datetime
+    ) -> int:
+        """День целиком: строки складываются по SKU, виду и типу; прежние суммы дня уходят."""
+        await self.session.execute(
+            delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id, OzonFactModel.day == day)
+        )
+        folded: dict[tuple[int, str, int], list[Any]] = {}
+        for line in lines:
+            values = folded.setdefault((line.sku, line.line, line.type_id), [0, *([Decimal("0.00")] * 6)])
+            values[0] += line.quantity
+            values[1] += line.amount
+            values[2] += line.sale_amount
+            values[3] += line.sale_price
+            values[4] += line.sale_commission
+            values[5] += line.bonus
+            values[6] += line.coinvestment
+        rows = [
+            {
+                "seller_id": seller_id,
+                "day": day,
+                "sku": sku,
+                "line": kind,
+                "type_id": type_id,
+                "quantity": values[0],
+                "amount": values[1],
+                "sale_amount": values[2],
+                "sale_price": values[3],
+                "sale_commission": values[4],
+                "bonus": values[5],
+                "coinvestment": values[6],
+            }
+            for (sku, kind, type_id), values in folded.items()
+        ]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            await self.session.execute(insert(OzonFactModel).values(rows[offset : offset + _INSERT_CHUNK]))
+        statement = insert(OzonDayModel).values(seller_id=seller_id, day=day, version=version, built_at=now)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "day"],
+                set_={"version": statement.excluded.version, "built_at": statement.excluded.built_at},
+            )
+        )
+        return len(rows)
+
+    async def ozon_facts(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonFact]:
+        rows = await self.session.scalars(
+            select(OzonFactModel).where(
+                OzonFactModel.seller_id == seller_id, OzonFactModel.day >= since, OzonFactModel.day <= until
+            )
+        )
+        names = [field.name for field in fields(OzonFact)]
+        return [OzonFact(**{name: getattr(row, name) for name in names}) for row in rows]

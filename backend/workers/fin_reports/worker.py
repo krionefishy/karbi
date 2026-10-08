@@ -8,6 +8,7 @@ import structlog
 
 from backend.modules.fin_reports.application import FactsBuilder, StockSnapshots
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
+from backend.modules.wb_core.domain import EGRESS_SERVABLE
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
@@ -69,16 +70,20 @@ class FinReportsWorker:
             return 0
         async with self.database.session() as session:
             tracked = await FinReportsRepository(session).tracked_seller_ids()
-            sellers = [seller.id for seller in await SellerRepository(session).list_sellers() if seller.id in tracked]
+            sellers = [seller for seller in await SellerRepository(session).list_sellers() if seller.id in tracked]
         built = left = 0
-        for seller_id in sellers:
+        for seller in sellers:
             if self._stop.is_set():
                 break
             touch_heartbeat()
-            outcome = await self.build(seller_id, now)
+            outcome = await self.build(seller.id, now)
             built += outcome[0]
             left += outcome[1]
-            await self.snapshot(seller_id, now)
+            await self.snapshot(seller.id, now)
+            if seller.ozon_egress_status in EGRESS_SERVABLE:
+                outcome = await self.build_ozon(seller.id, now)
+                built += outcome[0]
+                left += outcome[1]
         # Потолок за проход не дал дойти до конца — следующий проход сразу, без интервала.
         self._built_at = None if left else now
         if built:
@@ -94,6 +99,14 @@ class FinReportsWorker:
             return
         if week_end is not None:
             self.logger.info("fin_reports_stock_snapshot", seller_id=str(seller_id), week_end=week_end.isoformat())
+
+    async def build_ozon(self, seller_id: uuid.UUID, now: datetime) -> tuple[int, int]:
+        try:
+            outcome = await self.builder.build_ozon(seller_id, limit=self.config.ozon_days_per_run, now=now)
+        except Exception:
+            self.logger.exception("fin_reports_ozon_build_failed", seller_id=str(seller_id))
+            return 0, 0
+        return outcome.built, outcome.left
 
     async def build(self, seller_id: uuid.UUID, now: datetime) -> tuple[int, int]:
         """Один кабинет: (сложено, осталось). Сбой одного кабинета не трогает остальных."""

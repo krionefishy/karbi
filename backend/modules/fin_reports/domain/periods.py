@@ -7,7 +7,7 @@
 
 from calendar import monthrange
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 GRANULARITY_WEEK = "week"
 GRANULARITY_MONTH = "month"
@@ -66,6 +66,14 @@ def period_bounds(period: Period, date_from: date, date_to: date) -> tuple[date,
         return date_from, date_to
     first = date(period.year, period.number, 1)
     return first, date(period.year, period.number, monthrange(period.year, period.number)[1])
+
+
+def period_days(period: Period) -> tuple[date, date]:
+    """Календарные границы периода: понедельник–воскресенье ISO-недели либо месяц."""
+    if period.granularity == GRANULARITY_WEEK:
+        first = date.fromisocalendar(period.year, period.number, 1)
+        return first, first + timedelta(days=6)
+    return period_bounds(period, first := date(period.year, period.number, 1), first)
 
 
 def parse_period(key: str) -> Period:

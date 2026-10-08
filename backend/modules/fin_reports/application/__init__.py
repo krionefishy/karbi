@@ -1,5 +1,5 @@
 from backend.modules.fin_reports.application.ads import WeekAds, week_ads
-from backend.modules.fin_reports.application.build import FACTS_VERSION, BuildOutcome, FactsBuilder
+from backend.modules.fin_reports.application.build import FACTS_VERSION, OZON_FACTS_VERSION, BuildOutcome, FactsBuilder
 from backend.modules.fin_reports.application.costs import (
     CostFile,
     CostFileError,
@@ -25,17 +25,21 @@ from backend.modules.fin_reports.application.stocks import (
 from backend.modules.fin_reports.application.view import (
     ArticlesView,
     CostUploadResult,
+    Figures,
     FinReportsOverview,
     PeriodColumn,
     PnlView,
     SellerArticles,
+    SellerSkus,
     SellerState,
+    SkusView,
     UncostedArticle,
 )
 
 __all__ = [
     "AUTOMATION_ID",
     "FACTS_VERSION",
+    "OZON_FACTS_VERSION",
     "DESCRIPTION",
     "TITLE",
     "XLSX_MEDIA_TYPE",
@@ -46,6 +50,7 @@ __all__ = [
     "CostRow",
     "CostUploadResult",
     "FactsBuilder",
+    "Figures",
     "FinReportFile",
     "FinReportsEnrollment",
     "FinReportsOverview",
@@ -55,7 +60,9 @@ __all__ = [
     "PeriodColumn",
     "PnlView",
     "SellerArticles",
+    "SellerSkus",
     "SellerState",
+    "SkusView",
     "StockSnapshots",
     "UncostedArticle",
     "WeekAds",

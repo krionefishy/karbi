@@ -9,43 +9,53 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.fin_reports.application.ads import week_ads
-from backend.modules.fin_reports.application.build import FACTS_VERSION
+from backend.modules.fin_reports.application.build import FACTS_VERSION, OZON_FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
 from backend.modules.fin_reports.application.stocks import read_live_stock
 from backend.modules.fin_reports.application.view import (
     ArticlesView,
     CostUploadResult,
+    Figures,
     FinReportsOverview,
     PeriodColumn,
     PnlView,
     SellerArticles,
+    SellerSkus,
     SellerState,
+    SkusView,
     UncostedArticle,
 )
 from backend.modules.fin_reports.domain import (
     GRANULARITIES,
     GRANULARITY_MONTH,
     GRANULARITY_WEEK,
+    MARKETPLACE_OZON,
     MARKETPLACE_WB,
+    MARKETPLACES,
     ZERO,
     AdSpend,
     CostBook,
     CostPrice,
+    OzonFact,
+    OzonStatement,
     Period,
     Statement,
     Stock,
     article_rows,
+    ozon_sku_rows,
+    ozon_statement,
     parse_period,
     period_bounds,
+    period_days,
     period_of,
     statement,
     stock_rows,
 )
 from backend.modules.fin_reports.domain.pnl import money
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
-from backend.modules.wb_core.application import SalesReportMirror
-from backend.modules.wb_core.domain import SalesReport, SalesReportTotals, Seller, tax_rate_on
+from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMirror
+from backend.modules.wb_core.domain import EGRESS_SERVABLE, SalesReport, SalesReportTotals, Seller, tax_rate_on
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
 # Отчёт недели на стыке лет начинается в соседнем году: окно чтения — с запасом в неделю.
@@ -78,6 +88,7 @@ class FinReportsService:
         self.repository = repository
         self.timezone = timezone
         self.mirror = SalesReportMirror(session)
+        self.ozon = OzonAccrualMirror(session)
 
     def today(self, now: datetime | None = None) -> date:
         return (now or datetime.now(UTC)).astimezone(self.timezone).date()
@@ -101,10 +112,19 @@ class FinReportsService:
 
     # --- отчёт ------------------------------------------------------------------
 
-    async def view(self, *, year: int | None, granularity: str, seller_id: uuid.UUID | None = None) -> PnlView:
+    async def view(
+        self,
+        *,
+        year: int | None,
+        granularity: str,
+        seller_id: uuid.UUID | None = None,
+        marketplace: str = MARKETPLACE_WB,
+    ) -> PnlView:
         year = year or self.today().year
         if granularity not in GRANULARITIES:
             raise FinReportsQueryError("Отчёт строится по неделям или по месяцам")
+        if marketplace not in MARKETPLACES:
+            raise FinReportsQueryError("Отчёт строится по Wildberries или по Ozon")
         if not FIRST_YEAR <= year <= self.today().year + 1:
             raise FinReportsQueryError("За этот год отчётов нет")
         sellers = await self.tracked()
@@ -112,23 +132,31 @@ class FinReportsService:
             sellers = [seller for seller in sellers if seller.id == seller_id]
             if not sellers:
                 raise FinReportsQueryError("Кабинет не подключён к финансовым отчётам")
-        books = await self._cost_books([seller.id for seller in sellers])
+        books = await self._cost_books([seller.id for seller in sellers], marketplace)
         columns: dict[Period, PeriodColumn] = {}
         states: list[SellerState] = []
         uncosted: dict[tuple[uuid.UUID, int], tuple[str, Decimal]] = {}
+        fresh: Callable[[], Figures] = Statement if marketplace == MARKETPLACE_WB else OzonStatement
         for seller in sellers:
-            states.append(await self._collect(seller, year, granularity, books[seller.id], columns, uncosted))
+            state: SellerState | None
+            if marketplace == MARKETPLACE_WB:
+                state = await self._collect(seller, year, granularity, books[seller.id], columns, uncosted)
+            else:
+                state = await self._collect_ozon(seller, year, granularity, books[seller.id], columns, uncosted)
+            if state is not None:
+                states.append(state)
         periods = [columns[period] for period in sorted(columns, reverse=True)]
-        total = Statement()
-        total_by_seller: dict[uuid.UUID, Statement] = {seller.id: Statement() for seller in sellers}
+        total = fresh()
+        total_by_seller: dict[uuid.UUID, Figures] = {state.seller_id: fresh() for state in states}
         for column in periods:
             total.add(column.total)
             for owner, figures in column.by_seller.items():
                 total_by_seller[owner].add(figures)
-        names = {seller.id: seller.name for seller in sellers}
+        names = {state.seller_id: state.name for state in states}
         return PnlView(
             year=year,
             granularity=granularity,
+            marketplace=marketplace,
             sellers=states,
             periods=periods,
             total=total.close(),
@@ -225,6 +253,78 @@ class FinReportsService:
             error=state.error if state else None,
         )
 
+    async def _collect_ozon(
+        self,
+        seller: Seller,
+        year: int,
+        granularity: str,
+        book: CostBook,
+        columns: dict[Period, PeriodColumn],
+        uncosted: dict[tuple[uuid.UUID, int], tuple[str, Decimal]],
+    ) -> SellerState | None:
+        """Начисления Ozon кабинета за год — в общие колонки периодов; без учётки Ozon кабинета в отчёте нет.
+
+        Период считается по дням: неделя — семь календарных дней, месяц — месяц.
+        День до вчерашнего, которого в суммах ещё нет, делает период неполным.
+        """
+        through = await self.ozon.collected_through(seller.id)
+        if through is None and seller.ozon_egress_status not in EGRESS_SERVABLE:
+            return None
+        since, until = date(year, 1, 1) - YEAR_MARGIN, date(year, 12, 31) + YEAR_MARGIN
+        built = await self.repository.built_ozon_days(seller.id)
+        ready = {day for day, version in built.items() if version == OZON_FACTS_VERSION}
+        yesterday = self.today() - timedelta(days=1)
+
+        def column_of(period: Period) -> PeriodColumn | None:
+            if period.year != year:
+                return None
+            column = columns.get(period)
+            if column is None:
+                date_from, date_to = period_days(period)
+                column = columns[period] = PeriodColumn(period, date_from, date_to, total=OzonStatement())
+            return column
+
+        def remember(sku: int, revenue: Decimal) -> None:
+            key = (seller.id, sku)
+            uncosted[key] = ("", uncosted.get(key, ("", ZERO))[1] + revenue)
+
+        first = min(ready) if ready else through
+        days_in_year = pending_days = 0
+        if first is not None:
+            day = max(first, since)
+            while day <= min(yesterday, until):
+                column = column_of(period_of(day, granularity))
+                if column is not None:
+                    if day in ready:
+                        days_in_year += 1
+                    else:
+                        pending_days += 1
+                        column.pending.add(seller.id)
+                day += timedelta(days=1)
+        by_period: dict[Period, list[OzonFact]] = defaultdict(list)
+        for fact in await self.repository.ozon_facts(seller.id, since=since, until=until):
+            if fact.day in ready:
+                by_period[period_of(fact.day, granularity)].append(fact)
+        for period, facts in by_period.items():
+            column = column_of(period)
+            if column is None:
+                continue
+            figures = ozon_statement(facts, self._cost_on(book, column.date_to), on_uncosted=remember)
+            column.by_seller.setdefault(seller.id, OzonStatement()).add(figures)
+            column.by_seller[seller.id].close()
+            column.total.add(figures)
+            column.total.close()
+        state = await self.ozon.state(seller.id)
+        return SellerState(
+            seller_id=seller.id,
+            name=seller.name,
+            reports=days_in_year,
+            pending_reports=pending_days,
+            collected_at=state.collected_at if state else None,
+            built_at=await self.repository.last_ozon_built_at(seller.id),
+            error=state.error if state else None,
+        )
+
     @staticmethod
     def _cost_on(book: CostBook, day: date) -> Callable[[int], Decimal | None]:
         """Себестоимость артикула на конец отчёта: цена, действовавшая в тот период."""
@@ -234,18 +334,20 @@ class FinReportsService:
 
         return cost
 
-    async def _cost_books(self, seller_ids: list[uuid.UUID]) -> dict[uuid.UUID, CostBook]:
+    async def _cost_books(
+        self, seller_ids: list[uuid.UUID], marketplace: str = MARKETPLACE_WB
+    ) -> dict[uuid.UUID, CostBook]:
         prices: dict[uuid.UUID, list[CostPrice]] = {seller_id: [] for seller_id in seller_ids}
-        for price in await self.repository.cost_prices(seller_ids, MARKETPLACE_WB):
+        for price in await self.repository.cost_prices(seller_ids, marketplace):
             prices[price.seller_id].append(price)
         return {seller_id: CostBook(items) for seller_id, items in prices.items()}
 
     # --- выгрузка ---------------------------------------------------------------
 
-    async def export(self, *, year: int | None, period: str | None) -> FinReportFile:
+    async def export(self, *, year: int | None, period: str | None, marketplace: str = MARKETPLACE_WB) -> FinReportFile:
         """Книга за год: выбранный период в разрезе кабинетов, недели, месяцы и артикулы без себестоимости."""
-        weeks = await self.view(year=year, granularity=GRANULARITY_WEEK)
-        months = await self.view(year=year, granularity=GRANULARITY_MONTH)
+        weeks = await self.view(year=year, granularity=GRANULARITY_WEEK, marketplace=marketplace)
+        months = await self.view(year=year, granularity=GRANULARITY_MONTH, marketplace=marketplace)
         chosen: PeriodColumn | None = None
         if period:
             try:
@@ -259,10 +361,13 @@ class FinReportsService:
         elif weeks.periods:
             # Без выбора — последняя неделя, по которой дочитаны все кабинеты.
             chosen = next((column for column in weeks.periods if not column.pending), weeks.periods[0])
-        articles = None
+        articles = skus = None
         if chosen is not None and chosen.period.granularity == GRANULARITY_WEEK:
-            articles = await self.articles(chosen.period, chosen.date_from, chosen.date_to)
-        return await asyncio.to_thread(build_workbook, weeks, months, chosen, articles, self.today())
+            if marketplace == MARKETPLACE_WB:
+                articles = await self.articles(chosen.period, chosen.date_from, chosen.date_to)
+            else:
+                skus = await self.ozon_skus(chosen.period, chosen.date_from, chosen.date_to)
+        return await asyncio.to_thread(build_workbook, weeks, months, chosen, articles, self.today(), skus=skus)
 
     # --- артикулы и остатки ---------------------------------------------------------
 
@@ -325,6 +430,35 @@ class FinReportsService:
                 )
             )
         return ArticlesView(period, date_from, date_to, result, stock_taken_at, stock_is_live)
+
+    async def ozon_skus(self, period: Period, date_from: date, date_to: date) -> SkusView:
+        """Лист «ЮНИТ Ozon» за неделю по кабинетам с учёткой Ozon."""
+        sellers = await self.tracked()
+        books = await self._cost_books([seller.id for seller in sellers], MARKETPLACE_OZON)
+        yesterday = self.today() - timedelta(days=1)
+        result: list[SellerSkus] = []
+        for seller in sellers:
+            through = await self.ozon.collected_through(seller.id)
+            if through is None and seller.ozon_egress_status not in EGRESS_SERVABLE:
+                continue
+            built = await self.repository.built_ozon_days(seller.id)
+            ready = {day for day, version in built.items() if version == OZON_FACTS_VERSION}
+            facts = [
+                fact
+                for fact in await self.repository.ozon_facts(seller.id, since=date_from, until=date_to)
+                if fact.day in ready
+            ]
+            days = (date_from + timedelta(days=offset) for offset in range((date_to - date_from).days + 1))
+            result.append(
+                SellerSkus(
+                    seller_id=seller.id,
+                    name=seller.name,
+                    rows=ozon_sku_rows(facts, self._cost_on(books[seller.id], date_to)),
+                    pending=any(day not in ready for day in days if day <= yesterday),
+                    collected_through=through,
+                )
+            )
+        return SkusView(period, date_from, date_to, result)
 
     @staticmethod
     def _stock_in(stocks: dict[tuple[int, str], Stock]) -> Callable[[int, str], Stock]:

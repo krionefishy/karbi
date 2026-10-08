@@ -430,6 +430,8 @@ class FinReportsConfig:
     # Потолок отчётов на кабинет за проход: первая сборка года не должна
     # держать остальные кабинеты, остаток доберёт следующий проход.
     reports_per_run: int = 40
+    # Дней начислений Ozon на кабинет за проход.
+    ozon_days_per_run: int = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -620,7 +622,7 @@ class Settings:
             if key in podsort:
                 podsort[key] = int(podsort[key])
         fin_reports = dict(data.get("fin_reports", {}))
-        for key in ("build_interval_minutes", "reports_per_run"):
+        for key in ("build_interval_minutes", "reports_per_run", "ozon_days_per_run"):
             if key in fin_reports:
                 fin_reports[key] = int(fin_reports[key])
         returns = dict(data.get("returns", {}))
@@ -807,7 +809,14 @@ class Settings:
             or min(podsort.settle_hours, podsort.request_interval_seconds) < 0
         ):
             raise ValueError("podsort: history_days, days_per_run, refresh and retry minutes must be positive")
-        if min(self.fin_reports.build_interval_minutes, self.fin_reports.reports_per_run) < 1:
+        if (
+            min(
+                self.fin_reports.build_interval_minutes,
+                self.fin_reports.reports_per_run,
+                self.fin_reports.ozon_days_per_run,
+            )
+            < 1
+        ):
             raise ValueError("fin_reports: build_interval_minutes and reports_per_run must be positive")
         if not self.turnover.stock_slot_hours:
             raise ValueError("turnover.stock_slot_hours must contain at least one hour")

@@ -1,17 +1,17 @@
 import { apiDownload, apiRequest } from "../../api/http";
-import type { CostUploadResult, Granularity, Pnl } from "./types";
+import type { CostUploadResult, Granularity, Marketplace, Pnl } from "./types";
 
 const root = "/api/v1/fin-reports";
 
-export function getPnl(year: number, granularity: Granularity, sellerId: string) {
-  const params = new URLSearchParams({ year: String(year), granularity });
+export function getPnl(year: number, granularity: Granularity, sellerId: string, marketplace: Marketplace) {
+  const params = new URLSearchParams({ year: String(year), granularity, marketplace });
   if (sellerId) params.set("seller_id", sellerId);
   return apiRequest<Pnl>(`${root}?${params.toString()}`);
 }
 
 /** Книга за год: выбранный период по кабинетам, недели, месяцы и артикулы без себестоимости. */
-export function downloadPnl(year: number, period: string) {
-  const params = new URLSearchParams({ year: String(year) });
+export function downloadPnl(year: number, period: string, marketplace: Marketplace) {
+  const params = new URLSearchParams({ year: String(year), marketplace });
   if (period) params.set("period", period);
   return apiDownload(`${root}/export?${params.toString()}`);
 }

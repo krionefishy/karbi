@@ -25,6 +25,7 @@ function plural(count: number, one: string, few: string, many: string): string {
 
 export const articles = (count: number) => `${count} ${plural(count, "артикул", "артикула", "артикулов")}`;
 export const reports = (count: number) => `${count} ${plural(count, "отчёт", "отчёта", "отчётов")}`;
+export const days = (count: number) => `${count} ${plural(count, "день", "дня", "дней")}`;
 
 /** Что сделала загрузка файла себестоимости — одной фразой. */
 export function uploadSummary(result: CostUploadResult): string {

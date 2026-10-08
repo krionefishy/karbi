@@ -284,5 +284,9 @@ class OzonAccrualMirror:
     async def collected_through(self, seller_id: uuid.UUID) -> date | None:
         return await self.mirror.ozon_cursor(seller_id)
 
+    async def first_day(self, seller_id: uuid.UUID) -> date | None:
+        """Первый день, за который у кабинета есть начисления; `None` — зеркало ещё пустое."""
+        return await self.mirror.ozon_first_day(seller_id)
+
     async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
         return await self.mirror.state(seller_id, MIRROR_OZON_ACCRUALS)

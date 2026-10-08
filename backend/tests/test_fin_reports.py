@@ -29,17 +29,25 @@ from backend.modules.fin_reports.domain import (
     AdSpend,
     CostBook,
     CostPrice,
+    OzonFact,
     Period,
     deduction_kind,
+    ozon_sku_rows,
+    ozon_statement,
     parse_period,
     period_of,
     statement,
 )
 from backend.modules.fin_reports.infrastructure.postgres import CostPriceModel, FinReportsRepository, WbReportModel
 from backend.modules.wb_core.domain import (
+    OZON_LINE_DELIVERY,
+    OZON_LINE_ITEM,
+    OZON_LINE_NON_ITEM,
+    OZON_LINE_SALE,
     AdvertCampaign,
     AdvertNmStat,
     AdvertSpend,
+    OzonAccrualLine,
     SalesReport,
     SalesReportRow,
     SalesReportTotals,
@@ -597,9 +605,9 @@ async def test_the_export_has_the_period_by_cabinet_weeks_months_and_missing_cos
     assert "pnl_wb_2026-W39" in response.headers["content-disposition"]
     workbook = load_workbook(io.BytesIO(response.content))
     assert workbook.sheetnames == [
-        "ОПиУ 39 (21.09-27.09)",
-        "Недели 2026",
-        "Месяцы 2026",
+        "ОПиУ WB 39 (21.09-27.09)",
+        "Недели WB 2026",
+        "Месяцы WB 2026",
         "По артикулам 39 нед.",
         "Остатки 39 нед.",
         "Без себестоимости",
@@ -627,7 +635,7 @@ async def test_the_export_has_the_period_by_cabinet_weeks_months_and_missing_cos
     ]
     assert period.cell(row=2, column=column).value == 5500
     assert labels[-1] == "Валовая маржа"
-    weeks = workbook["Недели 2026"]
+    weeks = workbook["Недели WB 2026"]
     assert [cell.value for cell in weeks[1]][1:3] == ["2026 ИТОГО", "40 (28.09-04.10)"]
     missing = workbook["Без себестоимости"]
     own_rows = [row for row in missing.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Финтест Ф.Ф."]
@@ -750,3 +758,215 @@ async def test_campaign_spend_is_split_between_articles_by_their_stats(
     )
     assert ads.unallocated.balance == Decimal("7.00") and ads.collected_through == date(2026, 9, 26)
     assert ads.of(999) == AdSpend()
+
+
+# --- Ozon -----------------------------------------------------------------------------
+
+SPEAKER, BRUSH = 2468858781, 5365042812
+
+
+def ozon_line(accrual_id: int, line_no: int, day: date, line: str, **values: Any) -> OzonAccrualLine:
+    base: dict[str, Any] = {
+        "accrual_id": accrual_id,
+        "line_no": line_no,
+        "day": day,
+        "category": "POSTING",
+        "unit_number": "",
+        "delivery_schema": "Fbo",
+        "line": line,
+        "sku": 0,
+        "type_id": 0,
+        "quantity": 0,
+        "amount": money(0),
+        "sale_amount": money(0),
+        "sale_price": money(0),
+        "sale_commission": money(0),
+        "bonus": money(0),
+        "coinvestment": money(0),
+    }
+    return OzonAccrualLine(**{**base, **values})
+
+
+def ozon_week() -> list[OzonAccrualLine]:
+    """Неделя 39: продажа двух колонок с доставкой, возврат одной, услуга по щётке и реклама без SKU."""
+    sale_day, return_day = date(2026, 9, 24), date(2026, 9, 25)
+    return [
+        ozon_line(
+            1,
+            0,
+            sale_day,
+            OZON_LINE_SALE,
+            sku=SPEAKER,
+            quantity=2,
+            amount=money("-1304.16"),
+            sale_amount=money(2508),
+            sale_price=money("1142.10"),
+            sale_commission=money("-1304.16"),
+            bonus=money("1354.48"),
+            coinvestment=money("11.42"),
+        ),
+        ozon_line(1, 1, sale_day, OZON_LINE_DELIVERY, sku=SPEAKER, type_id=32, quantity=2, amount=money(-75)),
+        ozon_line(1, 2, sale_day, OZON_LINE_DELIVERY, sku=SPEAKER, type_id=29, quantity=2, amount=money("-9.99")),
+        ozon_line(
+            2,
+            0,
+            return_day,
+            OZON_LINE_SALE,
+            sku=SPEAKER,
+            quantity=1,
+            amount=money(260),
+            sale_amount=money(-500),
+            sale_price=money(-200),
+            sale_commission=money(260),
+        ),
+        ozon_line(3, 0, sale_day, OZON_LINE_ITEM, sku=BRUSH, type_id=1, quantity=1, amount=money("-20.63")),
+        ozon_line(4, 0, sale_day, OZON_LINE_NON_ITEM, type_id=41, amount=money("-28433.34")),
+    ]
+
+
+def test_the_ozon_statement_takes_revenue_from_the_sale_and_the_rest_by_accrual_type() -> None:
+    facts = [
+        OzonFact(
+            day=line.day,
+            sku=line.sku,
+            line=line.line,
+            type_id=line.type_id,
+            quantity=line.quantity,
+            amount=line.amount,
+            sale_amount=line.sale_amount,
+            sale_price=line.sale_price,
+            sale_commission=line.sale_commission,
+            bonus=line.bonus,
+            coinvestment=line.coinvestment,
+        )
+        for line in ozon_week()
+    ]
+    uncosted: list[tuple[int, Decimal]] = []
+
+    figures = ozon_statement(
+        facts, {SPEAKER: money(100)}.get, on_uncosted=lambda sku, sale: uncosted.append((sku, sale))
+    )
+
+    assert figures.values == {
+        "revenue_with_points": money(2008),
+        "revenue": money("953.52"),
+        "points": money("1365.90"),
+        # Две колонки ушли, одна вернулась: себестоимость — за одну.
+        "cost": money(-100),
+        "commission": money("-1044.16"),
+        "delivery": money("-84.99"),
+        "returns": money(0),
+        "advertising": money("-28433.34"),
+        "external_marketing": money(0),
+        "additional_services": money("-20.63"),
+        "compensations": money(0),
+        "eaeu_services": money(0),
+        "direct_expenses": money("-29683.12"),
+        "gross_margin": money("-27675.12"),
+    }
+    assert uncosted == []
+    rows = ozon_sku_rows(facts, {SPEAKER: money(100)}.get)
+    speaker, brush, blank_row = rows
+    assert (speaker.sku, speaker.sales, speaker.returns, speaker.unit_cost) == (SPEAKER, 2, 1, money(100))
+    assert (speaker.payout, speaker.cost_of_sales, speaker.operating_profit) == (
+        money("878.85"),
+        money(100),
+        money("778.85"),
+    )
+    assert (brush.sku, brush.additional_services) == (BRUSH, money("-20.63"))
+    assert (blank_row.sku, blank_row.advertising, blank_row.payout) == (0, money("-28433.34"), money("-28433.34"))
+
+
+@pytest_asyncio.fixture
+async def ozon_seller(application: Application) -> AsyncIterator[uuid.UUID]:
+    stamp = datetime(2026, 9, 29, 6, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        model = SellerModel(
+            name="ИП Озонтест О.О.",
+            catalog_sync_status="success",
+            egress_status="verified",
+            ozon_egress_status="verified",
+        )
+        session.add(model)
+        await session.flush()
+        seller_id = model.id
+        mirror = MirrorRepository(session)
+        by_day: dict[date, list[OzonAccrualLine]] = {}
+        for line in ozon_week():
+            by_day.setdefault(line.day, []).append(line)
+        for offset in range(8):
+            day = date(2026, 9, 21) + timedelta(days=offset)
+            await mirror.replace_ozon_accruals(seller_id, day, by_day.get(day, []), now=stamp)
+        # Зеркало дочитало неделю 39 целиком и первый день недели 40.
+        await mirror.save_ozon_cursor(seller_id, date(2026, 9, 28))
+        await session.commit()
+    try:
+        # Складываются дни с первого начисления: пустые дни до него суммам не нужны.
+        outcome = await FactsBuilder(application.database).build_ozon(seller_id, limit=100, now=stamp)
+        assert (outcome.built, outcome.left) == (5, 0)
+        yield seller_id
+    finally:
+        async with application.database.session() as session:
+            await FinReportsRepository(session).purge(seller_id)
+            await session.execute(delete(SellerModel).where(SellerModel.id == seller_id))
+            await session.commit()
+
+
+async def test_ozon_weeks_come_from_folded_days_and_a_week_with_unread_days_is_pending(
+    client: AsyncClient, ozon_seller: uuid.UUID
+) -> None:
+    await connect(client, ozon_seller)
+    uploaded = await client.post(
+        f"{API}/costs",
+        files={"workbook": ("ozon.xlsx", cost_workbook(OZON_HEADER, [["Ип Озонтест", "", 1, "", SPEAKER, "", 100]]))},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert (uploaded.json()["marketplace"], uploaded.json()["added"]) == ("ozon", 1), uploaded.text
+
+    response = await client.get(API, params={"year": 2026, "marketplace": "ozon", "seller_id": str(ozon_seller)})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["marketplace"] == "ozon"
+    assert [line["key"] for line in body["lines"]][:3] == ["revenue_with_points", "revenue", "points"]
+    week39 = next(item for item in body["periods"] if item["key"] == "2026-W39")
+    assert (week39["label"], week39["date_from"], week39["date_to"]) == ("39 (21.09-27.09)", "2026-09-21", "2026-09-27")
+    assert week39["pending_sellers"] == []
+    assert own(body, ozon_seller, "2026-W39")["gross_margin"] == pytest.approx(-27675.12)
+    assert own(body, ozon_seller, "2026-W39")["cost"] == -100
+    # Неделя 40 начата, но дни после 28.09 зеркало ещё не читало.
+    week40 = next(item for item in body["periods"] if item["key"] == "2026-W40")
+    assert week40["pending_sellers"] == [str(ozon_seller)]
+    state = next(item for item in body["sellers"] if item["seller_id"] == str(ozon_seller))
+    assert state["reports"] == 5 and state["pending_reports"] > 0 and state["built_at"]
+    assert body["uncosted"] == []
+
+    months = await client.get(API, params={"year": 2026, "marketplace": "ozon", "granularity": "month"})
+    assert own(months.json(), ozon_seller, "2026-M09")["revenue_with_points"] == 2008
+
+    export = await client.get(f"{API}/export", params={"year": 2026, "period": "2026-W39", "marketplace": "ozon"})
+    assert export.status_code == 200, export.text
+    assert "pnl_ozon_2026-W39" in export.headers["content-disposition"]
+    workbook = load_workbook(io.BytesIO(export.content))
+    assert workbook.sheetnames == [
+        "ОПиУ Ozon 39 (21.09-27.09)",
+        "Недели Ozon 2026",
+        "Месяцы Ozon 2026",
+        "ЮНИТ Ozon 39 нед.",
+        "Без себестоимости",
+    ]
+    period = workbook.worksheets[0]
+    header = [cell.value for cell in period[1]]
+    assert header[:2] == ["Статья", "Ozon итого"] and "ИП Озонтест О.О." in header
+    assert period.cell(row=2, column=1).value == "Реализация до СПП (с баллами)"
+    assert period.cell(row=2, column=header.index("ИП Озонтест О.О.") + 1).value == 2008
+    skus = workbook["ЮНИТ Ozon 39 нед."]
+    rows = [row for row in skus.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Озонтест О.О."]
+    assert [(row[1], row[2], row[3]) for row in rows] == [(str(SPEAKER), 2, 1), (str(BRUSH), 0, 0), ("(пусто)", 0, 0)]
+    assert rows[0][-1] == pytest.approx(778.85)
+
+
+async def test_the_ozon_report_refuses_an_unknown_marketplace(client: AsyncClient) -> None:
+    response = await client.get(API, params={"marketplace": "yandex"})
+
+    assert response.status_code == 422

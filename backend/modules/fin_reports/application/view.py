@@ -2,8 +2,20 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any, Protocol
 
-from backend.modules.fin_reports.domain import ArticleRow, Period, Statement, StockRow
+from backend.modules.fin_reports.domain import ArticleRow, OzonSkuRow, Period, Statement, StockRow
+
+
+class Figures(Protocol):
+    """ОПиУ одного периода — WB или Ozon: строки, сумма с другим и закрытие производных."""
+
+    values: dict[str, Decimal]
+    uncosted: Decimal
+
+    def add(self, other: Any) -> None: ...
+
+    def close(self) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +40,8 @@ class SellerState:
     """Кабинет в отчёте и состояние его зеркала.
 
     `pending_reports` — отчёты года, строки которых зеркало ещё не дочитало:
-    их денег в цифрах нет, и отчёт обязан это сказать.
+    их денег в цифрах нет, и отчёт обязан это сказать. У Ozon вместо отчётов
+    считаются дни начислений.
     """
 
     seller_id: uuid.UUID
@@ -48,9 +61,9 @@ class PeriodColumn:
     period: Period
     date_from: date
     date_to: date
-    total: Statement = field(default_factory=Statement)
-    by_seller: dict[uuid.UUID, Statement] = field(default_factory=dict)
-    # Кабинеты, у которых за период есть недочитанный отчёт.
+    total: Figures = field(default_factory=Statement)
+    by_seller: dict[uuid.UUID, Figures] = field(default_factory=dict)
+    # Кабинеты, у которых за период есть недочитанный отчёт (у Ozon — день).
     pending: set[uuid.UUID] = field(default_factory=set)
 
     @property
@@ -64,6 +77,7 @@ class UncostedArticle:
 
     seller_id: uuid.UUID
     seller_name: str
+    # nmId у WB, SKU у Ozon.
     nm_id: int
     vendor_code: str
     revenue: Decimal
@@ -73,11 +87,13 @@ class UncostedArticle:
 class PnlView:
     year: int
     granularity: str
+    # wb — из отчётов реализации, ozon — из начислений по дням; строки у них свои.
+    marketplace: str
     sellers: list[SellerState]
     # Свежие первыми — как в отчёте, к которому привык финансист.
     periods: list[PeriodColumn]
-    total: Statement
-    total_by_seller: dict[uuid.UUID, Statement]
+    total: Figures
+    total_by_seller: dict[uuid.UUID, Figures]
     uncosted: list[UncostedArticle]
 
 
@@ -118,3 +134,23 @@ class ArticlesView:
     # Откуда остаток: снимок на конец недели или зеркало на момент выгрузки.
     stock_taken_at: datetime | None
     stock_is_live: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SellerSkus:
+    """Лист «ЮНИТ Ozon» одного кабинета за неделю."""
+
+    seller_id: uuid.UUID
+    name: str
+    rows: list[OzonSkuRow]
+    # Не все дни недели дочитаны и сложены: строки неполные.
+    pending: bool
+    collected_through: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class SkusView:
+    period: Period
+    date_from: date
+    date_to: date
+    sellers: list[SellerSkus]
