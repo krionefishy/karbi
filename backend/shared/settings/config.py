@@ -346,9 +346,10 @@ class CoreMirrorConfig:
     adverts_windows_per_run: int = 3
     adverts_overlap_days: int = 3
     # Начисления Ozon по дням: за проход не больше `ozon_days_per_run` дней (день —
-    # до нескольких страниц по 300 начислений), последние дни перечитываются.
-    ozon_interval_minutes: int = 180
-    ozon_days_per_run: int = 14
+    # до нескольких страниц по 300 начислений, лимиты Ozon это не задевает), последние
+    # дни перечитываются. Год истории при таких порциях дочитывается за полсуток.
+    ozon_interval_minutes: int = 120
+    ozon_days_per_run: int = 45
     ozon_overlap_days: int = 3
 
 
