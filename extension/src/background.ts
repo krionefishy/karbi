@@ -18,6 +18,8 @@ const HEARTBEAT_MINUTES = 10;
 const COLLECT_HOURS_MSK = [0, 12];
 const COLLECT_MINUTE = 5;
 const PAGE_TIMEOUT_MS = 45_000;
+// Кода на сегодня нет, а последний заход был давно — идём за ним по heartbeat, не дожидаясь будильника.
+const MISSING_CODE_RETRY_MS = 30 * 60_000;
 
 let running: Promise<void> | null = null;
 
@@ -33,7 +35,9 @@ chrome.action.onClicked.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === COLLECT_ALARM) {
-    void collect("schedule").finally(scheduleCollect);
+    // Следующий заход назначается до текущего: если сервис-воркер умрёт посреди сбора,
+    // цепочка будильников не оборвётся (так пять установок молчали днями при живом heartbeat).
+    void scheduleCollect().then(() => collect("schedule"));
   } else if (alarm.name === HEARTBEAT_ALARM) {
     void heartbeat();
   } else if (alarm.name === RETRY_ALARM) {
@@ -87,6 +91,18 @@ async function scheduleCollect(): Promise<void> {
   const when = nextCollectAt();
   await chrome.alarms.create(COLLECT_ALARM, { when: when.getTime() });
   await saveSettings({ nextRunAt: when.toISOString() });
+}
+
+/** Будильник сбора мог потеряться (браузер снёс будильники, воркер умер до перепланирования) — восстановить. */
+async function ensureCollectScheduled(): Promise<void> {
+  const alarm = await chrome.alarms.get(COLLECT_ALARM);
+  if (!alarm || alarm.scheduledTime < Date.now() - 60_000) await scheduleCollect();
+}
+
+function isStale(stamp: string | null, maxAgeMs: number): boolean {
+  if (!stamp) return true;
+  const at = Date.parse(stamp);
+  return Number.isNaN(at) || at < Date.now() - maxAgeMs;
 }
 
 async function api<T>(settings: Settings, path: string, body: unknown): Promise<T> {
@@ -144,7 +160,9 @@ async function heartbeat(): Promise<void> {
       { state: settings.lastState ?? "ok", error: settings.lastError },
     );
     await saveSettings({ hasCodeToday: reply.has_code_today, sellerName: reply.seller_name || settings.sellerName });
+    await ensureCollectScheduled();
     if (reply.refresh_code) await collect("task");
+    else if (!reply.has_code_today && isStale(settings.lastRunAt, MISSING_CODE_RETRY_MS)) await collect("missing");
   } catch (error) {
     await saveSettings({ lastError: `heartbeat: ${error instanceof Error ? error.message : String(error)}` });
   }
