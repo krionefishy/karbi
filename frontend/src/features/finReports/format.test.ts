@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { articles, defaultPeriod, money, uploadSummary } from "./format";
+import { articles, defaultPeriod, localToday, money, uploadSummary } from "./format";
 import type { PnlPeriod } from "./types";
 
-const period = (key: string, pending: string[]): PnlPeriod => ({
+const period = (key: string, pending: string[], open = false): PnlPeriod => ({
   key,
   label: key,
   date_from: "2026-09-21",
@@ -11,6 +11,7 @@ const period = (key: string, pending: string[]): PnlPeriod => ({
   values: {},
   by_seller: {},
   pending_sellers: pending,
+  open,
   uncosted: 0,
 });
 
@@ -26,6 +27,15 @@ describe("финансовые отчёты: формат", () => {
     expect(defaultPeriod([period("2026-W40", ["a"]), period("2026-W39", []), period("2026-W38", [])])).toBe("2026-W39");
     expect(defaultPeriod([period("2026-W40", ["a"])])).toBe("2026-W40");
     expect(defaultPeriod([])).toBe("");
+  });
+
+  it("идущий период по умолчанию не берёт: неделя Ozon по вчерашний день дочитана, но не закрыта", () => {
+    expect(defaultPeriod([period("2026-W41", [], true), period("2026-W40", [])])).toBe("2026-W40");
+    expect(defaultPeriod([period("2026-W41", [], true)])).toBe("2026-W41");
+  });
+
+  it("сегодняшняя дата — по местным часам, а не по UTC", () => {
+    expect(localToday(new Date(2026, 9, 9, 1, 30))).toBe("2026-10-09");
   });
 
   it("склоняет артикулы и пересказывает загрузку файла", () => {

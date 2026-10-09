@@ -907,18 +907,23 @@ class MirrorRepository:
         *,
         now: datetime,
     ) -> int:
-        """Окно дней для названных кампаний целиком — те же правила, что у списаний."""
+        """Окно дней целиком — те же правила, что у списаний.
+
+        Удаляется статистика всех кампаний окна, а не только названных: списание,
+        пропавшее при перечитывании, уносит с собой и статистику своей кампании.
+        """
         wanted = {advert_id for advert_id in advert_ids}
-        if not wanted:
-            return 0
         await self.session.execute(
             delete(AdvertNmStatModel).where(
                 AdvertNmStatModel.seller_id == seller_id,
-                _any_of(AdvertNmStatModel.advert_id, wanted, BigInteger),
                 AdvertNmStatModel.day >= since,
                 AdvertNmStatModel.day <= until,
             )
         )
+        if not wanted:
+            return 0
+        # Повтор ключа в одном ответе WB уронил бы вставку целиком — побеждает последняя запись.
+        unique = {(item.advert_id, item.day, item.nm_id): item for item in stats}
         rows = [
             {
                 "seller_id": seller_id,
@@ -935,7 +940,7 @@ class MirrorRepository:
                 "orders_amount": item.orders_amount,
                 "collected_at": now,
             }
-            for item in stats
+            for item in unique.values()
             if item.advert_id in wanted and since <= item.day <= until
         ]
         await self._insert(AdvertNmStatModel, rows)
@@ -1013,13 +1018,27 @@ class MirrorRepository:
     async def replace_ozon_accruals(
         self, seller_id: uuid.UUID, day: date, lines: Iterable[OzonAccrualLine], *, now: datetime
     ) -> int:
-        """День целиком: начисление, пропавшее из ответа, пропадает и отсюда."""
+        """День целиком: начисление, пропавшее из ответа, пропадает и отсюда.
+
+        Начисление, которое Ozon перенёс на этот день с другого, удаляется и со
+        старого дня — вместе со строками, которых в новом ответе уже нет.
+        """
+        # Повтор ключа на стыке страниц уронил бы вставку целиком — побеждает последняя строка.
+        unique = {(line.accrual_id, line.line_no): line for line in lines}
         await self.session.execute(
             delete(OzonAccrualLineModel).where(
                 OzonAccrualLineModel.seller_id == seller_id, OzonAccrualLineModel.day == day
             )
         )
-        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(line)} for line in lines]
+        moved = {line.accrual_id for line in unique.values()}
+        if moved:
+            await self.session.execute(
+                delete(OzonAccrualLineModel).where(
+                    OzonAccrualLineModel.seller_id == seller_id,
+                    _any_of(OzonAccrualLineModel.accrual_id, moved, BigInteger),
+                )
+            )
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(line)} for line in unique.values()]
         chunk = _chunk_size(rows)
         for offset in range(0, len(rows), chunk):
             statement = insert(OzonAccrualLineModel).values(rows[offset : offset + chunk])
@@ -1033,10 +1052,14 @@ class MirrorRepository:
             )
         return len(rows)
 
-    async def ozon_first_day(self, seller_id: uuid.UUID) -> date | None:
-        return await self.session.scalar(
-            select(func.min(OzonAccrualLineModel.day)).where(OzonAccrualLineModel.seller_id == seller_id)
+    async def ozon_day_signatures(self, seller_id: uuid.UUID) -> dict[date, tuple[int, datetime]]:
+        """По дню — сколько строк и когда они читались в последний раз: день перечитан, если изменилось."""
+        rows = await self.session.execute(
+            select(OzonAccrualLineModel.day, func.count(), func.max(OzonAccrualLineModel.collected_at))
+            .where(OzonAccrualLineModel.seller_id == seller_id)
+            .group_by(OzonAccrualLineModel.day)
         )
+        return {day: (int(count), collected_at) for day, count, collected_at in rows.all()}
 
     async def ozon_accruals(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAccrualLine]:
         rows = await self.session.scalars(

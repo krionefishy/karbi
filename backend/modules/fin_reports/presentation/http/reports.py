@@ -66,6 +66,7 @@ def pnl_response(view: PnlView) -> PnlResponse:
                 values=_values(column.total),
                 by_seller={str(owner): _values(figures) for owner, figures in column.by_seller.items()},
                 pending_sellers=[str(owner) for owner in column.pending],
+                open=column.open,
                 uncosted=float(column.total.uncosted),
             )
             for column in view.periods

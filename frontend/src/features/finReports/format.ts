@@ -10,9 +10,16 @@ export function money(value: number | undefined): string {
   return /^-?0,00$/.test(text) ? "—" : text;
 }
 
-/** Период по умолчанию — самый свежий, по которому дочитаны все кабинеты. */
+/** Период по умолчанию — самый свежий закрытый, по которому дочитаны все кабинеты. */
 export function defaultPeriod(periods: PnlPeriod[]): string {
-  return (periods.find((item) => item.pending_sellers.length === 0) ?? periods[0])?.key ?? "";
+  return (periods.find((item) => !item.open && item.pending_sellers.length === 0) ?? periods[0])?.key ?? "";
+}
+
+/** Сегодняшняя дата по часам браузера — `toISOString` дал бы вчерашнюю до трёх ночи по Москве. */
+export function localToday(now: Date = new Date()): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
 }
 
 function plural(count: number, one: string, few: string, many: string): string {

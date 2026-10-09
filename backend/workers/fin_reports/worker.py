@@ -8,7 +8,6 @@ import structlog
 
 from backend.modules.fin_reports.application import FactsBuilder, StockSnapshots
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
-from backend.modules.wb_core.domain import EGRESS_SERVABLE
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
@@ -80,10 +79,10 @@ class FinReportsWorker:
             built += outcome[0]
             left += outcome[1]
             await self.snapshot(seller.id, now)
-            if seller.ozon_egress_status in EGRESS_SERVABLE:
-                outcome = await self.build_ozon(seller.id, now)
-                built += outcome[0]
-                left += outcome[1]
+            # Начисления, которые зеркало уже прочитало, складываются и у кабинета с отозванным ключом.
+            outcome = await self.build_ozon(seller.id, now)
+            built += outcome[0]
+            left += outcome[1]
         # Потолок за проход не дал дойти до конца — следующий проход сразу, без интервала.
         self._built_at = None if left else now
         if built:

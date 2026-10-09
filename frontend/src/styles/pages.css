@@ -421,6 +421,8 @@
 .fin-toolbar { align-items: flex-end; }
 .fin-toolbar .mode-switch { margin-bottom: 0; margin-right: auto; }
 .fin-table { margin-bottom: var(--space-5); }
+.fin-stale { opacity: 0.55; transition: opacity 0.2s; }
+.fin-updating { margin: 0 0 var(--space-3); }
 .fin-table .stocks-head > * { align-items: flex-end; text-align: right; }
 .fin-table .stocks-head > .checklist-sticky { align-items: flex-start; text-align: left; }
 .fin-period { color: inherit; font: inherit; background: transparent; border: 0; border-radius: 0; cursor: pointer; }

@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -80,11 +80,18 @@ class WBAdvertClient(WBJsonClient):
             for (advert_id, day, payment_type), amount in folded.items()
         ]
 
-    async def campaigns(self, seller_id: str, advert_ids: Iterable[int]) -> list[AdvertCampaign]:
-        """Состав и настройки кампаний по их номерам; неизвестные номера WB молча опускает."""
+    async def campaigns(
+        self, seller_id: str, advert_ids: Iterable[int], *, heartbeat: Callable[[], None] | None = None
+    ) -> list[AdvertCampaign]:
+        """Состав и настройки кампаний по их номерам; неизвестные номера WB молча опускает.
+
+        `heartbeat` отмечается на каждой порции: у крупного кабинета порций десятки.
+        """
         wanted = sorted({advert_id for advert_id in advert_ids if advert_id})
         found: list[AdvertCampaign] = []
         for offset in range(0, len(wanted), IDS_CHUNK):
+            if heartbeat is not None:
+                heartbeat()
             chunk = wanted[offset : offset + IDS_CHUNK]
             payload = await self.request(
                 "GET", "/api/advert/v2/adverts", seller_id, params={"ids": ",".join(map(str, chunk))}
@@ -97,14 +104,26 @@ class WBAdvertClient(WBJsonClient):
         return found
 
     async def nm_stats(
-        self, seller_id: str, advert_ids: Iterable[int], date_from: date, date_to: date
+        self,
+        seller_id: str,
+        advert_ids: Iterable[int],
+        date_from: date,
+        date_to: date,
+        *,
+        heartbeat: Callable[[], None] | None = None,
     ) -> list[AdvertNmStat]:
-        """Статистика по артикулам и дням для кампаний, площадки сложены."""
+        """Статистика по артикулам и дням для кампаний, площадки сложены.
+
+        Три запроса в минуту: порция из 50 кампаний — минимум 20 секунд, и
+        `heartbeat` между порциями не даёт healthcheck принять долгое окно за зависание.
+        """
         if (date_to - date_from).days >= MAX_WINDOW_DAYS:
             raise WBPermanentError(f"{self.api_name}: окно статистики не больше {MAX_WINDOW_DAYS} дней")
         wanted = sorted({advert_id for advert_id in advert_ids if advert_id})
         stats: list[AdvertNmStat] = []
         for offset in range(0, len(wanted), IDS_CHUNK):
+            if heartbeat is not None:
+                heartbeat()
             chunk = wanted[offset : offset + IDS_CHUNK]
             payload = await self.request(
                 "GET",

@@ -29,6 +29,8 @@ class PeriodResponse(BaseModel):
     by_seller: dict[str, dict[str, float]]
     # Кабинеты, у которых отчёт WB (день начислений Ozon) за период ещё не дочитан: цифры неполные.
     pending_sellers: list[str]
+    # Период ещё идёт (его последний день не раньше сегодняшнего): цифры не итоговые.
+    open: bool
     # Выручка до СПП по артикулам без себестоимости.
     uncosted: float
 

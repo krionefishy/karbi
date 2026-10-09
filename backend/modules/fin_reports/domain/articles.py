@@ -478,11 +478,16 @@ def article_rows(
     stock_of: Callable[[int, str], Stock],
     ads_of: Callable[[int], AdSpend],
     tax_rate: Decimal,
+    stocked: Iterable[tuple[int, str]] = (),
+    unallocated_ads: AdSpend | None = None,
 ) -> list[ArticleRow]:
     """Строки листа за неделю из сложенных строк отчётов этой недели одного кабинета.
 
     `tax_rate` — доля (0.12 для 12 %). Строка без артикула собирает удержания
-    по документам, а не по товару: реклама, отзывы, «Джем».
+    по документам, а не по товару: реклама, отзывы, «Джем», — и списания
+    кампаний, которых зеркало не знает (`unallocated_ads`). `stocked` — артикулы
+    с остатком: без движения за неделю они тоже строки листа, иначе залежавшийся
+    товар выпал бы из «Остатков».
     """
     rows: dict[tuple[int, str], ArticleRow] = {}
     for item in totals:
@@ -493,6 +498,14 @@ def article_rows(
         if not row.vendor_code and item.vendor_code:
             row.vendor_code = item.vendor_code
         _accumulate(row, item)
+    for nm_id, tech_size in stocked:
+        if nm_id and (nm_id, tech_size) not in rows and stock_of(nm_id, tech_size).in_warehouse > 0:
+            rows[(nm_id, tech_size)] = ArticleRow(nm_id=nm_id, tech_size=tech_size)
+    if unallocated_ads is not None and (unallocated_ads.balance or unallocated_ads.account or unallocated_ads.bonus):
+        blank = rows.setdefault((NO_ARTICLE, ""), ArticleRow(nm_id=NO_ARTICLE))
+        blank.ads = AdSpend(
+            unallocated_ads.balance, unallocated_ads.account, unallocated_ads.bonus, blank.ads.promotion_info
+        )
     for (nm_id, tech_size), row in rows.items():
         row.tax_rate = tax_rate
         row.unit_cost = cost_of(nm_id) if nm_id else None

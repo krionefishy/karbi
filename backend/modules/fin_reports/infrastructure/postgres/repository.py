@@ -1,15 +1,16 @@
 import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, fields
+from dataclasses import asdict, dataclass, fields
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.fin_reports.domain import CostPrice, OzonFact, Stock
+from backend.modules.fin_reports.domain.articles import SALE_DOC_TYPE
 from backend.modules.fin_reports.infrastructure.postgres.models import (
     CostPriceModel,
     OzonDayModel,
@@ -18,12 +19,22 @@ from backend.modules.fin_reports.infrastructure.postgres.models import (
     WbFactModel,
     WbReportModel,
     WbStockSnapshotModel,
+    WbStockWeekModel,
 )
 from backend.modules.wb_core.domain import OzonAccrualLine, SalesReport, SalesReportTotals
 
 _INSERT_CHUNK = 1000
 # Предел asyncpg на число параметров запроса: порция широкой таблицы считается от колонок.
 _MAX_QUERY_PARAMETERS = 32_767
+
+
+@dataclass(frozen=True, slots=True)
+class OzonDayMark:
+    """Чем сложен день Ozon: версия правила и отпечаток дня в зеркале (строк, время чтения)."""
+
+    version: int
+    mirror_lines: int
+    mirror_collected_at: datetime | None
 
 
 class FinReportsRepository:
@@ -47,6 +58,7 @@ class FinReportsRepository:
         await self.session.execute(delete(WbFactModel).where(WbFactModel.seller_id == seller_id))
         await self.session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller_id))
         await self.session.execute(delete(WbStockSnapshotModel).where(WbStockSnapshotModel.seller_id == seller_id))
+        await self.session.execute(delete(WbStockWeekModel).where(WbStockWeekModel.seller_id == seller_id))
         await self.session.execute(delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id))
         await self.session.execute(delete(OzonDayModel).where(OzonDayModel.seller_id == seller_id))
         await self.untrack(seller_id)
@@ -168,18 +180,52 @@ class FinReportsRepository:
         names = [field.name for field in fields(SalesReportTotals)]
         return [SalesReportTotals(**{name: getattr(row, name) for name in names}) for row in rows]
 
+    async def last_sale_prices(self, seller_id: uuid.UUID, *, until: date) -> dict[int, Decimal]:
+        """Средний чек до СПП по артикулу из последнего отчёта с его продажами — для остатка без продаж."""
+        sales = (
+            WbFactModel.seller_id == seller_id,
+            WbFactModel.doc_type_name == SALE_DOC_TYPE,
+            WbFactModel.quantity > 0,
+        )
+        reports = select(WbReportModel.report_id).where(
+            WbReportModel.seller_id == seller_id, WbReportModel.date_to <= until
+        )
+        latest = (
+            select(WbFactModel.nm_id, func.max(WbFactModel.report_id).label("report_id"))
+            .where(*sales, WbFactModel.report_id.in_(reports))
+            .group_by(WbFactModel.nm_id)
+            .subquery()
+        )
+        rows = await self.session.execute(
+            select(WbFactModel.nm_id, func.sum(WbFactModel.gross), func.sum(WbFactModel.quantity))
+            .join(latest, and_(WbFactModel.nm_id == latest.c.nm_id, WbFactModel.report_id == latest.c.report_id))
+            .where(*sales)
+            .group_by(WbFactModel.nm_id)
+        )
+        return {int(nm_id): Decimal(gross) / quantity for nm_id, gross, quantity in rows if quantity}
+
     # --- снимки остатков ---------------------------------------------------------------
 
     async def snapshot_weeks(self, seller_id: uuid.UUID) -> set[date]:
+        """Недели, снимок которых снят, — по отметке, а не по строкам: пустой остаток тоже снимок."""
         rows = await self.session.scalars(
-            select(WbStockSnapshotModel.week_end).where(WbStockSnapshotModel.seller_id == seller_id).distinct()
+            select(WbStockWeekModel.week_end).where(WbStockWeekModel.seller_id == seller_id)
         )
         return set(rows)
 
     async def save_stock_snapshot(
-        self, seller_id: uuid.UUID, week_end: date, stocks: Mapping[tuple[int, str], Stock], *, now: datetime
+        self,
+        seller_id: uuid.UUID,
+        week_end: date,
+        stocks: Mapping[tuple[int, str], Stock],
+        *,
+        collected_at: datetime,
+        now: datetime,
     ) -> int:
-        """Снимок недели целиком; повторный снимок той же недели переписывает прежний."""
+        """Снимок недели целиком; повторный снимок той же недели переписывает прежний.
+
+        `collected_at` — когда зеркало прочитало этот остаток: по строке видно, насколько он свежий.
+        """
         await self.session.execute(
             delete(WbStockSnapshotModel).where(
                 WbStockSnapshotModel.seller_id == seller_id, WbStockSnapshotModel.week_end == week_end
@@ -195,25 +241,40 @@ class FinReportsRepository:
                 "to_client": stock.to_client,
                 "from_client": stock.from_client,
                 "total": stock.total,
-                "taken_at": now,
+                "taken_at": collected_at,
             }
             for (nm_id, tech_size), stock in stocks.items()
         ]
         for offset in range(0, len(rows), _INSERT_CHUNK):
             await self.session.execute(insert(WbStockSnapshotModel).values(rows[offset : offset + _INSERT_CHUNK]))
+        week = insert(WbStockWeekModel).values(
+            seller_id=seller_id, week_end=week_end, collected_at=collected_at, taken_at=now, rows=len(rows)
+        )
+        await self.session.execute(
+            week.on_conflict_do_update(
+                index_elements=["seller_id", "week_end"],
+                set_={
+                    "collected_at": week.excluded.collected_at,
+                    "taken_at": week.excluded.taken_at,
+                    "rows": week.excluded.rows,
+                },
+            )
+        )
         return len(rows)
 
     async def stock_snapshot(self, seller_id: uuid.UUID, week_end: date) -> dict[tuple[int, str], Stock] | None:
-        """`None` — снимка этой недели нет (неделя раньше первого снимка или ещё не закрыта)."""
-        rows = list(
-            await self.session.scalars(
-                select(WbStockSnapshotModel).where(
-                    WbStockSnapshotModel.seller_id == seller_id, WbStockSnapshotModel.week_end == week_end
-                )
+        """`None` — снимка этой недели нет (неделя раньше первого снимка или ещё не закрыта).
+
+        Снятая неделя с нулём строк — пустой остаток, а не отсутствие снимка.
+        """
+        taken = await self.session.get(WbStockWeekModel, (seller_id, week_end))
+        if taken is None:
+            return None
+        rows = await self.session.scalars(
+            select(WbStockSnapshotModel).where(
+                WbStockSnapshotModel.seller_id == seller_id, WbStockSnapshotModel.week_end == week_end
             )
         )
-        if not rows:
-            return None
         return {
             (row.nm_id, row.tech_size): Stock(row.in_warehouse, row.to_client, row.from_client, row.total)
             for row in rows
@@ -221,11 +282,13 @@ class FinReportsRepository:
 
     # --- сложенные начисления Ozon ---------------------------------------------------------
 
-    async def built_ozon_days(self, seller_id: uuid.UUID) -> dict[date, int]:
+    async def built_ozon_days(self, seller_id: uuid.UUID) -> dict[date, OzonDayMark]:
         rows = await self.session.execute(
-            select(OzonDayModel.day, OzonDayModel.version).where(OzonDayModel.seller_id == seller_id)
+            select(
+                OzonDayModel.day, OzonDayModel.version, OzonDayModel.mirror_lines, OzonDayModel.mirror_collected_at
+            ).where(OzonDayModel.seller_id == seller_id)
         )
-        return {day: int(version) for day, version in rows.all()}
+        return {day: OzonDayMark(int(version), int(lines), collected_at) for day, version, lines, collected_at in rows}
 
     async def last_ozon_built_at(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(
@@ -233,15 +296,27 @@ class FinReportsRepository:
         )
 
     async def save_ozon_day(
-        self, seller_id: uuid.UUID, day: date, lines: Iterable[OzonAccrualLine], *, version: int, now: datetime
+        self,
+        seller_id: uuid.UUID,
+        day: date,
+        lines: Iterable[OzonAccrualLine],
+        *,
+        mark: OzonDayMark,
+        now: datetime,
     ) -> int:
-        """День целиком: строки складываются по SKU, виду и типу; прежние суммы дня уходят."""
+        """День целиком: строки складываются по SKU, виду и типу; прежние суммы дня уходят.
+
+        `mark` — версия правила и отпечаток дня в зеркале, по которому сложено.
+        """
         await self.session.execute(
             delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id, OzonFactModel.day == day)
         )
-        folded: dict[tuple[int, str, int], list[Any]] = {}
+        # Возврат — продажа с минусом: складывается отдельно от продаж того же SKU,
+        # иначе штуки продаж и возврата слились бы в одну, и знак потерялся.
+        folded: dict[tuple[int, str, int, bool], list[Any]] = {}
         for line in lines:
-            values = folded.setdefault((line.sku, line.line, line.type_id), [0, *([Decimal("0.00")] * 6)])
+            key = (line.sku, line.line, line.type_id, line.sale_amount < 0)
+            values = folded.setdefault(key, [0, *([Decimal("0.00")] * 6)])
             values[0] += line.quantity
             values[1] += line.amount
             values[2] += line.sale_amount
@@ -264,15 +339,27 @@ class FinReportsRepository:
                 "bonus": values[5],
                 "coinvestment": values[6],
             }
-            for (sku, kind, type_id), values in folded.items()
+            for (sku, kind, type_id, _), values in folded.items()
         ]
         for offset in range(0, len(rows), _INSERT_CHUNK):
             await self.session.execute(insert(OzonFactModel).values(rows[offset : offset + _INSERT_CHUNK]))
-        statement = insert(OzonDayModel).values(seller_id=seller_id, day=day, version=version, built_at=now)
+        statement = insert(OzonDayModel).values(
+            seller_id=seller_id,
+            day=day,
+            version=mark.version,
+            built_at=now,
+            mirror_lines=mark.mirror_lines,
+            mirror_collected_at=mark.mirror_collected_at,
+        )
         await self.session.execute(
             statement.on_conflict_do_update(
                 index_elements=["seller_id", "day"],
-                set_={"version": statement.excluded.version, "built_at": statement.excluded.built_at},
+                set_={
+                    "version": statement.excluded.version,
+                    "built_at": statement.excluded.built_at,
+                    "mirror_lines": statement.excluded.mirror_lines,
+                    "mirror_collected_at": statement.excluded.mirror_collected_at,
+                },
             )
         )
         return len(rows)

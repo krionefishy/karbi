@@ -65,6 +65,8 @@ class PeriodColumn:
     by_seller: dict[uuid.UUID, Figures] = field(default_factory=dict)
     # Кабинеты, у которых за период есть недочитанный отчёт (у Ozon — день).
     pending: set[uuid.UUID] = field(default_factory=set)
+    # Период ещё идёт: его последний день не раньше сегодняшнего. Цифры заведомо не итоговые.
+    open: bool = False
 
     @property
     def label(self) -> str:

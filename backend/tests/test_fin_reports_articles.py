@@ -191,3 +191,24 @@ def test_a_row_with_only_stock_and_no_sales_is_still_an_article_row() -> None:
         COLUMN["Логистика на единицу товара"](row) == 0
         and COLUMN["Средняя себестоимость на единицу товара"](row) is None
     )
+
+
+def test_a_stocked_article_without_movement_and_unknown_campaign_spend_get_their_rows() -> None:
+    rows = article_rows(
+        [totals(doc_type_name="Продажа", quantity=1, gross=money(1000), retail_amount=money(800), for_pay=money(700))],
+        cost_of=lambda nm_id: money(400),
+        stock_of=lambda nm_id, size: Stock(in_warehouse=30, total=30) if nm_id == SAW else Stock(),
+        ads_of=lambda nm_id: AdSpend(),
+        tax_rate=Decimal("0.08"),
+        stocked=[(SAW, "L"), (DRILL, "0"), (999, "M")],
+        unallocated_ads=AdSpend(balance=money(7)),
+    )
+
+    # Пила не продавалась, но лежит на складе — строка есть; артикул без остатка — нет.
+    assert [(row.nm_id, row.tech_size) for row in rows] == [(DRILL, ""), (SAW, "L"), (0, "")]
+    saw = rows[1]
+    assert (saw.sales, saw.stock_in_warehouse, saw.unit_cost) == (0, 30, money(400))
+    stocks = stock_rows(rows, last_price_of=lambda nm_id: money(3600))
+    assert [(row.nm_id, row.quantity, row.stock_cost) for row in stocks] == [(SAW, 30, money(12000))]
+    # Списания неизвестных кампаний — в строке «(пусто)», даже если удержаний по документам не было.
+    assert rows[-1].ads.balance == money(7)

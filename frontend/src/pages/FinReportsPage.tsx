@@ -7,7 +7,7 @@ import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { Shell } from "../components/Shell";
 import { downloadPnl, getPnl, uploadCosts } from "../features/finReports/api";
-import { articles, days, defaultPeriod, money, reports, uploadSummary } from "../features/finReports/format";
+import { articles, days, defaultPeriod, localToday, money, reports, uploadSummary } from "../features/finReports/format";
 import type { CostUploadResult, Granularity, Marketplace, PnlLine, PnlValues } from "../features/finReports/types";
 import { attachSeller, detachSeller, getAutomationSellers, getSellers } from "../features/sellers/api";
 import type { Seller, SellerInput } from "../features/sellers/types";
@@ -25,9 +25,26 @@ const MARKETPLACES: { value: Marketplace; label: string }[] = [
   { value: "ozon", label: "Ozon" },
 ];
 /** Что дочитывает зеркало: у WB — отчёты реализации, у Ozon — начисления по дням. */
-const SOURCE: Record<Marketplace, { title: string; unit: (count: number) => string; tag: string }> = {
-  wb: { title: "Отчёты WB", unit: reports, tag: "WB" },
-  ozon: { title: "Начисления Ozon", unit: days, tag: "Ozon" },
+const SOURCE: Record<
+  Marketplace,
+  { title: string; unit: (count: number) => string; tag: string; failing: string; partial: string; article: string }
+> = {
+  wb: {
+    title: "Отчёты WB",
+    unit: reports,
+    tag: "WB",
+    failing: "отчёты WB не читаются",
+    partial: "Отчёт WB дочитан не по всем кабинетам",
+    article: "Артикул",
+  },
+  ozon: {
+    title: "Начисления Ozon",
+    unit: days,
+    tag: "Ozon",
+    failing: "начисления Ozon не читаются",
+    partial: "Начисления Ozon дочитаны не по всем кабинетам",
+    article: "SKU",
+  },
 };
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" });
@@ -38,8 +55,10 @@ interface Column {
   key: string;
   title: string;
   values: PnlValues | undefined;
-  /** Отчёт WB по колонке дочитан не весь: цифры неполные. */
+  /** Отчёт WB (день Ozon) по колонке дочитан не весь: цифры неполные. */
   partial?: boolean;
+  /** Период ещё идёт: цифры не итоговые. */
+  open?: boolean;
   /** Итог года: колонка не период, выбрать её нельзя. */
   fixed?: boolean;
 }
@@ -51,19 +70,25 @@ function PnlTable({
   selected,
   onSelect,
   label,
+  partialHint,
+  stale,
 }: {
   lines: PnlLine[];
   columns: Column[];
   selected?: string;
   onSelect?: (key: string) => void;
   label: string;
+  partialHint: string;
+  /** Показаны прежние цифры, новые ещё грузятся. */
+  stale?: boolean;
 }) {
   const template = `minmax(280px, 340px) repeat(${columns.length}, minmax(150px, 1fr))`;
   return (
     <section
-      className="checklist-scroll stocks-scroll fin-table"
+      className={stale ? "checklist-scroll stocks-scroll fin-table fin-stale" : "checklist-scroll stocks-scroll fin-table"}
       style={{ "--stocks-template": template } as React.CSSProperties}
       aria-label={label}
+      aria-busy={stale || undefined}
     >
       <div className="stocks-head">
         <span className="checklist-sticky">Статья</span>
@@ -73,11 +98,12 @@ function PnlTable({
               key={column.key}
               type="button"
               className={column.key === selected ? "fin-period fin-period-active" : "fin-period"}
+              aria-pressed={column.key === selected}
               onClick={() => onSelect(column.key)}
-              title={column.partial ? "Отчёт WB дочитан не по всем кабинетам" : "Показать период по кабинетам"}
+              title={column.partial ? partialHint : column.open ? "Период ещё идёт" : "Показать период по кабинетам"}
             >
               {column.title}
-              {column.partial && <small>неполный</small>}
+              {column.partial ? <small>неполный</small> : column.open && <small>идёт</small>}
             </button>
           ) : (
             <span key={column.key} className="fin-head-cell">
@@ -117,7 +143,7 @@ export function FinReportsPage() {
   const [costsFrom, setCostsFrom] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const { data: sellers = [] } = useQuery({
+  const { data: sellers = [], isLoading: sellersLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
     queryFn: () => getAutomationSellers(AUTOMATION_ID),
   });
@@ -204,7 +230,9 @@ export function FinReportsPage() {
   const failing = (pnl?.sellers ?? []).filter((state) => state.error);
   const uncostedRevenue = (pnl?.uncosted ?? []).reduce((sum, item) => sum + item.revenue, 0);
   const years = Array.from({ length: currentYear - FIRST_YEAR + 1 }, (_, index) => currentYear - index);
-  const source = SOURCE[marketplace];
+  // Подписи — по данным на экране, а не по переключателю: пока грузится Ozon, в таблице ещё WB.
+  const shown = pnl?.marketplace ?? marketplace;
+  const source = SOURCE[shown];
 
   return (
     <Shell current={AUTOMATION_TITLE}>
@@ -222,7 +250,7 @@ export function FinReportsPage() {
               className="primary-button"
               disabled={exportMutation.isPending || !pnl || pnlStale || pnl.periods.length === 0}
               onClick={() => exportMutation.mutate()}
-              title="Выбранный период по кабинетам, недели и месяцы года, артикулы без себестоимости"
+              title="Книга по всем кабинетам: выбранный период по кабинетам, недели и месяцы года, артикулы без себестоимости"
             >
               <Download size={15} />
               {exportMutation.isPending ? "Собираем…" : "Выгрузить в Excel"}
@@ -238,7 +266,7 @@ export function FinReportsPage() {
         )}
         {failing.map((state) => (
           <div key={state.seller_id} className="checklist-notice">
-            {state.name}: {source.title.toLowerCase()} не читаются — {state.error}
+            {state.name}: {source.failing} — {state.error}
           </div>
         ))}
         {pending.length > 0 && (
@@ -257,30 +285,31 @@ export function FinReportsPage() {
             <ul>
               {pnl.uncosted.map((item) => (
                 <li key={`${item.seller_id}:${item.nm_id}`}>
-                  {item.seller_name} · {item.nm_id} · {item.vendor_code || "без артикула продавца"} —{" "}
-                  {money(item.revenue)} ₽
+                  {item.seller_name} · {source.article} {item.nm_id}
+                  {shown === "wb" && ` · ${item.vendor_code || "без артикула продавца"}`} — {money(item.revenue)} ₽
                 </li>
               ))}
             </ul>
           </details>
         )}
 
-        {!pnl ? (
-          // Ошибка первой загрузки уже показана выше: «Загружаем…» рядом с ней висело бы вечно.
-          isLoading && <div className="loading-block">Загружаем данные…</div>
-        ) : sellers.length === 0 ? (
-          <div className="empty-state">
-            <h2>Подключите первый кабинет</h2>
-            <p>
-              Отчёты реализации WB собираются для всех кабинетов с начала года. После подключения кабинет появится в
-              отчёте сразу — с теми неделями, что уже дочитаны.
-            </p>
-            <button className="primary-button" onClick={() => setConnecting(true)}>
-              Подключить селлера
-            </button>
-          </div>
+        {sellers.length === 0 ? (
+          !sellersLoading && (
+            <div className="empty-state">
+              <h2>Подключите первый кабинет</h2>
+              <p>
+                Отчёты реализации WB и начисления Ozon собираются для всех кабинетов с начала года. После
+                подключения кабинет появится в отчёте сразу — с теми неделями, что уже дочитаны.
+              </p>
+              <button className="primary-button" onClick={() => setConnecting(true)}>
+                Подключить селлера
+              </button>
+            </div>
+          )
         ) : (
           <>
+            {/* Переключатели живут независимо от данных: после ошибки по новому запросу
+                нужно иметь возможность вернуться к прежнему году или кабинету. */}
             <div className="checklist-toolbar fin-toolbar">
               <div className="mode-switch" role="tablist" aria-label="Маркетплейс">
                 {MARKETPLACES.map((item) => (
@@ -331,22 +360,32 @@ export function FinReportsPage() {
               </label>
             </div>
 
-            {pnl.periods.length === 0 ? (
+            {!pnl ? (
+              // Ошибка первой загрузки уже показана выше: «Загружаем…» рядом с ней висело бы вечно.
+              isLoading && <div className="loading-block">Загружаем данные…</div>
+            ) : pnl.periods.length === 0 ? (
               <div className="empty-state">
-                <h2>{marketplace === "wb" ? "Отчётов" : "Начислений Ozon"} за {pnl.year} год пока нет</h2>
+                <h2>{shown === "wb" ? "Отчётов" : "Начислений Ozon"} за {pnl.year} год пока нет</h2>
                 <p>
-                  {marketplace === "wb"
+                  {shown === "wb"
                     ? "Зеркало отчётов реализации ещё не дошло до подключённых кабинетов — обычно это вопрос часа."
                     : "У подключённых кабинетов нет учётки Ozon или зеркало начислений ещё не дошло до них."}
                 </p>
               </div>
             ) : (
               <>
+                {pnlStale && (
+                  <p className="muted fin-updating" role="status">
+                    Обновляем… пока показаны прежние цифры ({SOURCE[shown].tag}).
+                  </p>
+                )}
                 <PnlTable
                   label="ОПиУ по периодам"
                   lines={pnl.lines}
                   selected={period}
                   onSelect={setPeriod}
+                  partialHint={source.partial}
+                  stale={pnlStale}
                   columns={[
                     { key: "total", title: `${pnl.year} ИТОГО`, values: pnl.total, fixed: true },
                     ...pnl.periods.map((item) => ({
@@ -354,6 +393,7 @@ export function FinReportsPage() {
                       title: item.label,
                       values: item.values,
                       partial: item.pending_sellers.length > 0,
+                      open: item.open,
                     })),
                   ]}
                 />
@@ -370,6 +410,8 @@ export function FinReportsPage() {
                     <PnlTable
                       label="ОПиУ выбранного периода по кабинетам"
                       lines={pnl.lines}
+                      partialHint={source.partial}
+                      stale={pnlStale}
                       columns={[
                         { key: "total", title: `${source.tag} итого`, values: chosen.values },
                         ...pnl.sellers.map((state) => ({
@@ -403,7 +445,7 @@ export function FinReportsPage() {
                   <input
                     type="date"
                     value={costsFrom}
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={localToday()}
                     onChange={(event) => setCostsFrom(event.target.value)}
                   />
                 </label>
@@ -446,7 +488,7 @@ export function FinReportsPage() {
                 </button>
               </div>
               {sellers.map((seller) => {
-                const state = pnl.sellers.find((item) => item.seller_id === seller.id);
+                const state = pnl?.sellers.find((item) => item.seller_id === seller.id);
                 return (
                   <div key={seller.id} className="stocks-warehouse-row podsort-seller-row fin-seller-row">
                     <span>
@@ -458,7 +500,7 @@ export function FinReportsPage() {
                           {state.pending_reports > 0 && `, дочитывается ${state.pending_reports}`}
                         </em>
                       ) : (
-                        marketplace === "ozon" && !sellerId && <em className="muted"> · без учётки Ozon</em>
+                        pnl && shown === "ozon" && !sellerId && <em className="muted"> · без учётки Ozon</em>
                       )}
                     </span>
                     {/* При фильтре по одному кабинету про остальные сервер не рассказывает — молчим. */}

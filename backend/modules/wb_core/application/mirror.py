@@ -562,8 +562,10 @@ class MirrorService:
                 end = min(start + timedelta(days=MAX_ADVERT_WINDOW - 1), today)
                 spend = await self.adverts.spend(seller_key, start, end)
                 advert_ids = {item.advert_id for item in spend}
-                known = await self.adverts.campaigns(seller_key, advert_ids) if advert_ids else []
-                stats = await self.adverts.nm_stats(seller_key, advert_ids, start, end) if advert_ids else []
+                known, stats = [], []
+                if advert_ids:
+                    known = await self.adverts.campaigns(seller_key, advert_ids, heartbeat=self._heartbeat)
+                    stats = await self.adverts.nm_stats(seller_key, advert_ids, start, end, heartbeat=self._heartbeat)
                 async with self.database.session() as session:
                     await self._ensure_alive(session, seller_id)
                     mirror = MirrorRepository(session)
@@ -620,8 +622,10 @@ class MirrorService:
                     await self._ensure_alive(session, seller_id)
                     mirror = MirrorRepository(session)
                     lines += await mirror.replace_ozon_accruals(seller_id, day, accruals, now=stamp)
-                    collected_through = day
-                    await mirror.save_ozon_cursor(seller_id, day)
+                    # Перечитывание перекрытия курсор назад не двигает: сбой на втором дне
+                    # перекрытия иначе откатывал бы его на три дня за каждый неудачный проход.
+                    collected_through = max(day, cursor) if cursor else day
+                    await mirror.save_ozon_cursor(seller_id, collected_through)
                     await session.commit()
                 days += 1
                 day += timedelta(days=1)

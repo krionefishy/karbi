@@ -166,7 +166,7 @@ class FakeAdverts(WBAdvertClient):
     def nms(advert_id: int) -> tuple[int, ...]:
         return (BRUSH, DRILL) if advert_id == PAIR else (BRUSH,)
 
-    async def campaigns(self, seller_id: str, advert_ids) -> list[AdvertCampaign]:
+    async def campaigns(self, seller_id: str, advert_ids, *, heartbeat=None) -> list[AdvertCampaign]:
         return [
             AdvertCampaign(
                 advert_id, "кампания", 9, "cpm", "unified", (BRUSH, DRILL) if advert_id == PAIR else (BRUSH,), None
@@ -174,7 +174,9 @@ class FakeAdverts(WBAdvertClient):
             for advert_id in sorted(set(advert_ids))
         ]
 
-    async def nm_stats(self, seller_id: str, advert_ids, date_from: date, date_to: date) -> list[AdvertNmStat]:
+    async def nm_stats(
+        self, seller_id: str, advert_ids, date_from: date, date_to: date, *, heartbeat=None
+    ) -> list[AdvertNmStat]:
         self.stat_calls.append(set(advert_ids))
         return [
             AdvertNmStat(item.advert_id, item.day, BRUSH, 10, 1, 0, 0, 0, 0, item.amount, Decimal(0))

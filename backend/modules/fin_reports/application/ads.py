@@ -81,13 +81,25 @@ async def week_ads(session: AsyncSession, seller_id: uuid.UUID, *, since: date, 
         if not shares:
             unallocated.add(item.payment_type, item.amount)
             continue
-        for nm_id, share in shares.items():
-            sums[nm_id].add(item.payment_type, item.amount * share)
+        for nm_id, part in _split(item.amount, shares).items():
+            sums[nm_id].add(item.payment_type, part)
     return WeekAds(
         by_article={nm_id: value.spend() for nm_id, value in sums.items()},
         unallocated=unallocated.spend(),
         collected_through=await mirror.collected_through(seller_id),
     )
+
+
+def _split(amount: Decimal, shares: dict[int, Decimal]) -> dict[int, Decimal]:
+    """Списание по долям с точностью до копейки: остаток округления — артикулу с наибольшей долей.
+
+    Иначе три артикула поровну из 10 ₽ дали бы 3,33 × 3 = 9,99, и колонка рекламы
+    по листу не сошлась бы с суммой списаний.
+    """
+    parts = {nm_id: (amount * share).quantize(KOPECK) for nm_id, share in shares.items()}
+    largest = max(shares, key=lambda nm_id: (shares[nm_id], -nm_id))
+    parts[largest] += amount.quantize(KOPECK) - sum(parts.values(), ZERO)
+    return parts
 
 
 def _shares(weights: dict[int, Decimal], campaign) -> dict[int, Decimal]:

@@ -36,6 +36,8 @@ export interface PnlPeriod {
   values: PnlValues;
   by_seller: Record<string, PnlValues>;
   pending_sellers: string[];
+  /** Период ещё идёт — его последний день не раньше сегодняшнего; цифры не итоговые. */
+  open: boolean;
   /** Выручка до СПП по артикулам без себестоимости. */
   uncosted: number;
 }

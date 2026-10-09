@@ -34,7 +34,6 @@ from backend.modules.fin_reports.domain import (
     MARKETPLACE_WB,
     MARKETPLACES,
     ZERO,
-    AdSpend,
     CostBook,
     CostPrice,
     OzonFact,
@@ -52,7 +51,6 @@ from backend.modules.fin_reports.domain import (
     statement,
     stock_rows,
 )
-from backend.modules.fin_reports.domain.pnl import money
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
 from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE, SalesReport, SalesReportTotals, Seller, tax_rate_on
@@ -146,6 +144,9 @@ class FinReportsService:
             if state is not None:
                 states.append(state)
         periods = [columns[period] for period in sorted(columns, reverse=True)]
+        today = self.today()
+        for column in periods:
+            column.open = column.date_to >= today
         total = fresh()
         total_by_seller: dict[uuid.UUID, Figures] = {state.seller_id: fresh() for state in states}
         for column in periods:
@@ -237,7 +238,9 @@ class FinReportsService:
             column = column_of(period, report)
             if column is None:
                 continue
-            figures = statement(items, self._cost_on(book, report.date_to), on_uncosted=remember)
+            # Себестоимость на конец периода: у месяца строки отчёта на стыке считаются по цене
+            # своего месяца, а не по цене, вступившей в силу первого числа следующего.
+            figures = statement(items, self._cost_on(book, min(report.date_to, column.date_to)), on_uncosted=remember)
             column.by_seller.setdefault(seller.id, Statement()).add(figures)
             column.by_seller[seller.id].close()
             column.total.add(figures)
@@ -272,7 +275,7 @@ class FinReportsService:
             return None
         since, until = date(year, 1, 1) - YEAR_MARGIN, date(year, 12, 31) + YEAR_MARGIN
         built = await self.repository.built_ozon_days(seller.id)
-        ready = {day for day, version in built.items() if version == OZON_FACTS_VERSION}
+        ready = {day for day, mark in built.items() if mark.version == OZON_FACTS_VERSION}
         yesterday = self.today() - timedelta(days=1)
 
         def column_of(period: Period) -> PeriodColumn | None:
@@ -359,8 +362,10 @@ class FinReportsService:
             if chosen is None:
                 raise FinReportsQueryError("За этот период отчётов нет")
         elif weeks.periods:
-            # Без выбора — последняя неделя, по которой дочитаны все кабинеты.
-            chosen = next((column for column in weeks.periods if not column.pending), weeks.periods[0])
+            # Без выбора — последняя закрытая неделя, по которой дочитаны все кабинеты.
+            chosen = next(
+                (column for column in weeks.periods if not column.pending and not column.open), weeks.periods[0]
+            )
         articles = skus = None
         if chosen is not None and chosen.period.granularity == GRANULARITY_WEEK:
             if marketplace == MARKETPLACE_WB:
@@ -407,17 +412,10 @@ class FinReportsService:
                 stock_of=self._stock_in(stocks),
                 ads_of=ads.of,
                 tax_rate=tax.rate / 100 if tax else ZERO,
+                stocked=stocks.keys(),
+                unallocated_ads=ads.unallocated,
             )
-            # Списания кампаний, которых зеркало не знает, — в строку без артикула.
-            for row in rows:
-                if not row.nm_id:
-                    row.ads = AdSpend(
-                        ads.unallocated.balance,
-                        ads.unallocated.account,
-                        ads.unallocated.bonus,
-                        row.ads.promotion_info,
-                    )
-            last_price = await self._last_prices(seller.id, date_to)
+            last_price = await self.repository.last_sale_prices(seller.id, until=date_to)
             result.append(
                 SellerArticles(
                     seller_id=seller.id,
@@ -442,7 +440,7 @@ class FinReportsService:
             if through is None and seller.ozon_egress_status not in EGRESS_SERVABLE:
                 continue
             built = await self.repository.built_ozon_days(seller.id)
-            ready = {day for day, version in built.items() if version == OZON_FACTS_VERSION}
+            ready = {day for day, mark in built.items() if mark.version == OZON_FACTS_VERSION}
             facts = [
                 fact
                 for fact in await self.repository.ozon_facts(seller.id, since=date_from, until=date_to)
@@ -466,19 +464,6 @@ class FinReportsService:
             return stocks.get((nm_id, tech_size), Stock())
 
         return stock
-
-    async def _last_prices(self, seller_id: uuid.UUID, until: date) -> dict[int, Decimal]:
-        """Последний средний чек до СПП по артикулу — для остатка, который на неделе не продавался."""
-        latest: dict[int, tuple[int, Decimal, int]] = {}
-        for item in await self.repository.facts(seller_id, since=date(until.year, 1, 1), until=until):
-            if item.doc_type_name != "Продажа" or not item.quantity:
-                continue
-            known = latest.get(item.nm_id)
-            if known is None or item.report_id > known[0]:
-                latest[item.nm_id] = (item.report_id, money(item.gross), item.quantity)
-            elif item.report_id == known[0]:
-                latest[item.nm_id] = (known[0], known[1] + money(item.gross), known[2] + item.quantity)
-        return {nm_id: gross / quantity for nm_id, (_, gross, quantity) in latest.items() if quantity}
 
     # --- себестоимость -----------------------------------------------------------
 

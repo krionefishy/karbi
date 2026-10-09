@@ -7,6 +7,7 @@ from dataclasses import fields, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -672,6 +673,30 @@ async def test_a_report_shows_up_only_after_the_worker_has_folded_it(
     assert (state["pending_reports"], state["built_at"]) == (0, stamp.isoformat())
 
 
+async def test_a_report_that_fails_to_fold_does_not_block_the_newer_ones(
+    application: Application, seller: uuid.UUID, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        await session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller))
+        await session.commit()
+    original = FinReportsRepository.save_report_facts
+
+    async def flaky(self, seller_id, report, totals, **kwargs):
+        if report.report_id == AUG31:
+            raise RuntimeError("сломанный отчёт")
+        return await original(self, seller_id, report, totals, **kwargs)
+
+    monkeypatch.setattr(FinReportsRepository, "save_report_facts", flaky)
+
+    outcome = await FactsBuilder(application.database).build(seller, limit=100, now=stamp)
+
+    assert (outcome.built, outcome.left, outcome.failed) == (5, 0, 1)
+    async with application.database.session() as session:
+        built = await FinReportsRepository(session).built_reports(seller)
+    assert AUG31 not in built and {SEP01, W38, W39_MAIN, W39_BUYOUT, JUL_AUG} <= set(built)
+
+
 async def test_a_long_backlog_is_folded_in_portions_without_waiting_for_the_interval(
     seller: uuid.UUID, application: Application
 ) -> None:
@@ -758,6 +783,42 @@ async def test_campaign_spend_is_split_between_articles_by_their_stats(
     )
     assert ads.unallocated.balance == Decimal("7.00") and ads.collected_through == date(2026, 9, 26)
     assert ads.of(999) == AdSpend()
+
+
+async def test_campaign_spend_splits_to_the_kopeck_and_stats_of_a_vanished_campaign_go_away(
+    application: Application, seller: uuid.UUID
+) -> None:
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    week = (date(2026, 9, 21), date(2026, 9, 27))
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.upsert_advert_campaigns(
+            seller, [AdvertCampaign(5, "трое поровну", 9, "cpm", "unified", (DRILL, SAW, 777), None)], now=stamp
+        )
+        await mirror.replace_advert_nm_stats(
+            seller,
+            [6],
+            *week,
+            [AdvertNmStat(6, date(2026, 9, 22), DRILL, 0, 0, 0, 0, 0, 0, Decimal("40"), Decimal(0))],
+            now=stamp,
+        )
+        await session.commit()
+        # Перечитывание окна: списание кампании 6 пропало — статистика уходит вместе с ним.
+        await mirror.replace_advert_spend(
+            seller, *week, [AdvertSpend(5, date(2026, 9, 22), "Баланс", Decimal("10"))], now=stamp
+        )
+        await mirror.replace_advert_nm_stats(seller, [5], *week, [], now=stamp)
+        await session.commit()
+
+        ads = await week_ads(session, seller, since=week[0], until=week[1])
+
+    parts = [ads.of(nm_id).balance for nm_id in (DRILL, SAW, 777)]
+    assert sum(parts, Decimal(0)) == Decimal("10.00") and sorted(parts) == [
+        Decimal("3.33"),
+        Decimal("3.33"),
+        Decimal("3.34"),
+    ]
+    assert ads.of(DRILL).promotion_info == Decimal(0)
 
 
 # --- Ozon -----------------------------------------------------------------------------
@@ -966,7 +1027,106 @@ async def test_ozon_weeks_come_from_folded_days_and_a_week_with_unread_days_is_p
     assert rows[0][-1] == pytest.approx(778.85)
 
 
+async def test_an_ozon_day_is_folded_again_when_the_mirror_re_reads_or_moves_its_accruals(
+    client: AsyncClient, ozon_seller: uuid.UUID, application: Application
+) -> None:
+    await connect(client, ozon_seller)
+    later = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
+    sale_day, next_day = date(2026, 9, 24), date(2026, 9, 25)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        # Зеркало перечитало 24.09: Ozon дописал услугу, а рекламное начисление 4 перенёс на 25.09.
+        kept = [line for line in ozon_week() if line.day == sale_day and line.accrual_id != 4]
+        extra = ozon_line(9, 0, sale_day, OZON_LINE_ITEM, sku=BRUSH, type_id=1, quantity=1, amount=money("-10.00"))
+        await mirror.replace_ozon_accruals(ozon_seller, sale_day, [*kept, extra], now=later)
+        moved = [line for line in ozon_week() if line.day == next_day] + [
+            ozon_line(4, 0, next_day, OZON_LINE_NON_ITEM, type_id=41, amount=money("-28433.34"))
+        ]
+        await mirror.replace_ozon_accruals(ozon_seller, next_day, moved, now=later)
+        await session.commit()
+
+    outcome = await FactsBuilder(application.database).build_ozon(ozon_seller, limit=100, now=later)
+
+    assert (outcome.built, outcome.left) == (2, 0)
+    response = await client.get(API, params={"year": 2026, "marketplace": "ozon", "seller_id": str(ozon_seller)})
+    figures = own(response.json(), ozon_seller, "2026-W39")
+    # Реклама не задвоилась, услуга добавилась: −20,63 − 10,00.
+    assert figures["advertising"] == pytest.approx(-28433.34)
+    assert figures["additional_services"] == pytest.approx(-30.63)
+    # Без изменений в зеркале складывать нечего.
+    again = await FactsBuilder(application.database).build_ozon(ozon_seller, limit=100, now=later)
+    assert (again.built, again.left) == (0, 0)
+
+
+async def test_a_sale_and_a_return_of_one_sku_on_one_day_keep_their_pieces(
+    client: AsyncClient, ozon_seller: uuid.UUID, application: Application
+) -> None:
+    await connect(client, ozon_seller)
+    later = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
+    day = date(2026, 9, 26)
+    async with application.database.session() as session:
+        lines = [
+            ozon_line(
+                21, 0, day, OZON_LINE_SALE, sku=SPEAKER, quantity=5, sale_amount=money(5000), sale_price=money(4000)
+            ),
+            ozon_line(
+                22, 0, day, OZON_LINE_SALE, sku=SPEAKER, quantity=1, sale_amount=money(-1000), sale_price=money(-800)
+            ),
+        ]
+        await MirrorRepository(session).replace_ozon_accruals(ozon_seller, day, lines, now=later)
+        await session.commit()
+    await FactsBuilder(application.database).build_ozon(ozon_seller, limit=100, now=later)
+    await client.post(
+        f"{API}/costs",
+        files={"workbook": ("ozon.xlsx", cost_workbook(OZON_HEADER, [["Ип Озонтест", "", 1, "", SPEAKER, "", 100]]))},
+    )
+
+    export = await client.get(f"{API}/export", params={"year": 2026, "period": "2026-W39", "marketplace": "ozon"})
+
+    skus = load_workbook(io.BytesIO(export.content))["ЮНИТ Ozon 39 нед."]
+    header = [cell.value for cell in skus[1]]
+    row = next(
+        r for r in skus.iter_rows(min_row=2, values_only=True) if r[0] == "ИП Озонтест О.О." and r[1] == str(SPEAKER)
+    )
+    # Продажи 2 + 5, возвраты 1 + 1; себестоимость — за пять проданных, а не за семь.
+    assert (row[2], row[3]) == (7, 2)
+    assert row[header.index("Себестоимость реализованного")] == 500
+
+
 async def test_the_ozon_report_refuses_an_unknown_marketplace(client: AsyncClient) -> None:
     response = await client.get(API, params={"marketplace": "yandex"})
 
     assert response.status_code == 422
+
+
+# --- снимки остатков --------------------------------------------------------------------
+
+
+async def test_the_week_snapshot_waits_for_a_fresh_mirror_and_counts_an_empty_stock_as_taken(
+    application: Application, seller: uuid.UUID
+) -> None:
+    from backend.modules.fin_reports.application import StockSnapshots
+    from backend.modules.wb_core.domain import MIRROR_REMAINS
+
+    snapshots = StockSnapshots(application.database, timezone=ZoneInfo("Europe/Moscow"))
+    monday = datetime(2026, 10, 5, 3, 30, tzinfo=ZoneInfo("Europe/Moscow"))
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.record_attempt(seller, MIRROR_REMAINS, now=monday - timedelta(days=3))
+        await mirror.replace_remains(seller, [], now=monday - timedelta(days=3))
+        await mirror.mark_collected(seller, MIRROR_REMAINS, now=monday - timedelta(days=3))
+        await session.commit()
+
+    # Зеркало стоит с пятницы: пятничный остаток воскресным не считается.
+    assert await snapshots.take(seller, now=monday) is None
+
+    async with application.database.session() as session:
+        await MirrorRepository(session).mark_collected(seller, MIRROR_REMAINS, now=monday - timedelta(minutes=10))
+        await session.commit()
+
+    # Свежее чтение с нулём строк — тоже снимок: неделя снята, повторять нечего.
+    assert await snapshots.take(seller, now=monday) == date(2026, 10, 4)
+    assert await snapshots.take(seller, now=monday + timedelta(hours=1)) is None
+    async with application.database.session() as session:
+        assert await FinReportsRepository(session).snapshot_weeks(seller) == {date(2026, 10, 4)}
+        assert await FinReportsRepository(session).stock_snapshot(seller, date(2026, 10, 4)) == {}

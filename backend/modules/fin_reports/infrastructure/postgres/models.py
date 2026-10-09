@@ -162,6 +162,23 @@ class OzonDayModel(FinReportsBase):
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Отпечаток дня в зеркале на момент сложения: число строк и время их чтения.
+    # Зеркало перечитывает последние дни — отпечаток сменился, день складывается заново.
+    mirror_lines: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mirror_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WbStockWeekModel(FinReportsBase):
+    """Неделя, снимок остатков которой снят, — даже если остаток был пустой."""
+
+    __tablename__ = "wb_stock_weeks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    week_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    # Когда зеркало прочитало остаток, который лёг в снимок.
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class OzonFactModel(FinReportsBase):

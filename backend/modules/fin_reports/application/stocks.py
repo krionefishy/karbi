@@ -87,10 +87,13 @@ class StockSnapshots:
                 return None
         async with self.database.session() as session:
             live = await read_live_stock(session, seller_id, now=now)
-        if live.taken_at is None:
-            # Зеркало до кабинета ещё не доходило: пустой снимок врал бы «остатка нет».
+        if live.taken_at is None or live.taken_at.astimezone(self.timezone).date() <= week_end:
+            # Зеркало до кабинета ещё не доходило или стоит с прошлой недели: остаток
+            # с пятницы лёг бы как воскресный. Снимок подождёт свежего чтения.
             return None
         async with self.database.session() as session:
-            await FinReportsRepository(session).save_stock_snapshot(seller_id, week_end, live.stocks, now=now)
+            await FinReportsRepository(session).save_stock_snapshot(
+                seller_id, week_end, live.stocks, collected_at=live.taken_at, now=now
+            )
             await session.commit()
         return week_end
