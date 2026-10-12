@@ -44,6 +44,7 @@ SERVICE_NAMES = {
     "/wb/podsort": "Подсорт",
     "/wb/returns": "Возвраты",
     "/wb/review-chats": "Чаты после отзыва",
+    "/wb/support-bot": "Бот поддержки в чатах",
     "/wb/reviews": "Отзывы",
     "/wb/sellers": "Селлеры",
     "/wb/turnover": "Оборачиваемость",

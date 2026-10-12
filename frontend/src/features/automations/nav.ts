@@ -1,6 +1,7 @@
 import {
   Calculator,
   ClipboardCheck,
+  Bot,
   Gauge,
   Grid3x3,
   MessagesSquare,
@@ -28,6 +29,7 @@ export const automationNav: AutomationNavItem[] = [
   { id: "wb-fbs-stocks", title: "Остатки FBS", icon: Grid3x3 },
   { id: "wb-fbs-penalties", title: "Штрафы FBS", icon: ReceiptText },
   { id: "wb-review-chats", title: "Чаты после отзыва", icon: MessagesSquare },
+  { id: "wb-support-bot", title: "Бот поддержки", icon: Bot },
   { id: "wb-returns", title: "Возвраты WB", icon: Undo2 },
   { id: "wb-podsort", title: "Подсорт WB", icon: Truck },
   { id: "fin-reports", title: "Финансовые отчёты", icon: Calculator },

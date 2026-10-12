@@ -55,6 +55,7 @@ test-migrate:
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_stocks upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_fbs_penalties upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_review_chats upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_support_bot upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_returns upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_podsort upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n fin_reports upgrade head
@@ -92,6 +93,9 @@ migrate-wb-fbs-penalties:
 migrate-wb-review-chats:
     uv run alembic -n wb_review_chats upgrade head
 
+migrate-wb-support-bot:
+    uv run alembic -n wb_support_bot upgrade head
+
 migrate-wb-returns:
     uv run alembic -n wb_returns upgrade head
 
@@ -101,7 +105,7 @@ migrate-wb-podsort:
 migrate-fin-reports:
     uv run alembic -n fin_reports upgrade head
 
-migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-fbs-stocks migrate-wb-fbs-penalties migrate-wb-review-chats migrate-wb-returns migrate-wb-podsort migrate-fin-reports
+migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-fbs-stocks migrate-wb-fbs-penalties migrate-wb-review-chats migrate-wb-support-bot migrate-wb-returns migrate-wb-podsort migrate-fin-reports
 
 compose-up:
     {{ compose }} up -d --build
@@ -132,6 +136,7 @@ prod-deploy:
     @test "$({{ prod_compose }} ps --status running -q wb-core-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-fbs-penalties-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-returns-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q wb-support-bot-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q fin-reports-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 

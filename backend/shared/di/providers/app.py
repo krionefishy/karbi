@@ -55,6 +55,8 @@ from backend.modules.wb_review_chats.application import ReviewChatsEnrollment, R
 from backend.modules.wb_review_chats.infrastructure.postgres import ReviewChatsRepository
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
+from backend.modules.wb_support_bot.application import SupportBotEnrollment, SupportBotService
+from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.modules.wb_turnover.application import ReplenishmentReportService, TurnoverEnrollment, TurnoverService
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
@@ -382,6 +384,21 @@ class SessionProvider(Provider):
         return ReviewChatsEnrollment(tracked)
 
     @provide(scope=Scope.REQUEST)
+    def support_bot_repository(self, session: AsyncSession) -> SupportBotRepository:
+        return SupportBotRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def support_bot_enrollment(self, repository: SupportBotRepository) -> SupportBotEnrollment:
+        return SupportBotEnrollment(repository)
+
+    @provide(scope=Scope.REQUEST)
+    def support_bot_service(
+        self, session: AsyncSession, sellers: SellerRepository, repository: SupportBotRepository
+    ) -> SupportBotService:
+        """Своего сбора нет: чаты берутся из зеркала wb_core, а отправляет воркер бота."""
+        return SupportBotService(session, sellers, repository)
+
+    @provide(scope=Scope.REQUEST)
     def review_chats_service(
         self,
         session: AsyncSession,
@@ -509,6 +526,7 @@ class SessionProvider(Provider):
         fbs_stocks: FbsStocksEnrollment,
         fbs_penalties: PenaltiesEnrollment,
         review_chats: ReviewChatsEnrollment,
+        support_bot: SupportBotEnrollment,
         returns: ReturnsEnrollment,
         podsort: PodsortEnrollment,
         fin_reports: FinReportsEnrollment,
@@ -522,6 +540,7 @@ class SessionProvider(Provider):
             fbs_stocks,
             fbs_penalties,
             review_chats,
+            support_bot,
             returns,
             podsort,
             fin_reports,

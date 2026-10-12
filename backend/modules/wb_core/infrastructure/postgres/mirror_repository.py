@@ -574,6 +574,7 @@ class MirrorRepository:
                 "rid": event.rid,
                 "text": event.text,
                 "has_attachments": event.has_attachments,
+                "reply_sign": event.reply_sign,
                 "collected_at": now,
             }
             for event in events
@@ -636,6 +637,19 @@ class MirrorRepository:
             )
         )
 
+    async def latest_reply_sign(self, seller_id: uuid.UUID, chat_id: str) -> str | None:
+        """Подпись чата из самого свежего события, где она была."""
+        return await self.session.scalar(
+            select(ChatEventModel.reply_sign)
+            .where(
+                ChatEventModel.seller_id == seller_id,
+                ChatEventModel.chat_id == chat_id,
+                ChatEventModel.reply_sign.is_not(None),
+            )
+            .order_by(ChatEventModel.added_at.desc())
+            .limit(1)
+        )
+
     async def first_chat_event_at(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(
             select(func.min(ChatEventModel.added_at)).where(ChatEventModel.seller_id == seller_id)
@@ -659,6 +673,7 @@ class MirrorRepository:
             rid=row.rid,
             text=row.text,
             has_attachments=row.has_attachments,
+            reply_sign=row.reply_sign,
         )
 
     # --- отчёты реализации --------------------------------------------------------------

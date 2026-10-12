@@ -9,6 +9,7 @@ import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { CardChecklistPage } from "../pages/CardChecklistPage";
 import { ReviewChatsPage } from "../pages/ReviewChatsPage";
+import { SupportBotPage } from "../pages/SupportBotPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
 import { SellersPage } from "../pages/SellersPage";
 import { FbsPenaltiesPage } from "../pages/FbsPenaltiesPage";
@@ -41,6 +42,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-fbs-stocks" element={<FbsStocksPage />} />
         <Route path="/automations/wb-fbs-penalties" element={<FbsPenaltiesPage />} />
         <Route path="/automations/wb-review-chats" element={<ReviewChatsPage />} />
+        <Route path="/automations/wb-support-bot" element={<SupportBotPage />} />
         <Route path="/automations/wb-returns" element={<ReturnsPage />} />
         <Route path="/automations/wb-podsort" element={<PodsortPage />} />
         <Route path="/automations/wb-box-stickers" element={<BoxStickersPage />} />

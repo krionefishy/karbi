@@ -33,7 +33,12 @@ class WBJsonClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        form: dict[str, str] | None = None,
+        attempts: int | None = None,
     ) -> Any:
+        extra: dict[str, Any] = {}
+        if attempts is not None:
+            extra["attempts"] = attempts
         return await self.gateway.call(
             seller_id=seller_id,
             api=self.bucket,
@@ -44,4 +49,6 @@ class WBJsonClient:
             priority=self.priority,
             api_name=self.api_name,
             category=self.category,
+            form=form,
+            **extra,
         )

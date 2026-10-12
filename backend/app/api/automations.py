@@ -23,6 +23,7 @@ from backend.modules.wb_podsort.application import PodsortService
 from backend.modules.wb_returns.application import ReturnsService
 from backend.modules.wb_review_chats.application import ReviewChatsService
 from backend.modules.wb_reviews.application import ReviewSyncService
+from backend.modules.wb_support_bot.application import SupportBotService
 from backend.modules.wb_turnover.application import TurnoverService
 from backend.shared.settings import Settings
 
@@ -46,6 +47,7 @@ async def automations(
     returns: FromDishka[ReturnsService],
     podsort: FromDishka[PodsortService],
     fin_reports: FromDishka[FinReportsService],
+    support_bot: FromDishka[SupportBotService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
     return automation_catalog(
@@ -59,6 +61,7 @@ async def automations(
         await podsort.overview(),
         await fin_reports.overview(),
         settings,
+        support_bot=await support_bot.overview(),
     )
 
 

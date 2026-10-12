@@ -81,6 +81,9 @@ async def test_the_wb_review_prompt_is_told_from_our_follow_up() -> None:
     assert prompt.added_at.isoformat() == "2026-09-17T13:35:26.866000+00:00"
     assert not follow_up.review_prompt and follow_up.source == "seller-public-api"
     assert photo.text is None and photo.has_attachments and photo.sender == "client"
+    # подпись чата сохраняется: по ней бот отвечает покупателю; её нет — поле пустое
+    assert prompt.reply_sign == "1:93a20fa0" and follow_up.reply_sign == "1:93a20fa0"
+    assert photo.reply_sign is None
 
 
 async def test_the_first_read_sends_no_cursor_and_an_empty_feed_is_not_an_error() -> None:

@@ -354,6 +354,38 @@ class CoreMirrorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class SupportBotConfig:
+    """Бот поддержки в чатах WB: когда и как часто писать покупателю, который замолчал."""
+
+    timezone: str = "Europe/Moscow"
+    # Окно рассылки по местному времени: вне него бот не пишет ничего.
+    window_start_hour: int = 9
+    window_end_hour: int = 22
+    # Шаг между сообщениями одному покупателю: интервал плюс случайная добавка.
+    interval_minutes: int = 60
+    jitter_min_minutes: int = 1
+    jitter_max_minutes: int = 10
+    # Сколько покупатель должен молчать после ответа нашей стороны, чтобы началась рассылка.
+    silence_hours: int = 4
+    # Сколько дней длится рассылка по одному диалогу и сколько раз её можно запускать.
+    campaign_days: int = 5
+    max_campaigns: int = 1
+    # Потолок сообщений в сутки на кабинет и пауза между отправками.
+    daily_cap_per_seller: int = 400
+    min_gap_seconds: int = 3
+    # Как часто воркер проходит по кабинетам и сколько сообщений уходит кабинету за проход.
+    tick_minutes: int = 10
+    batch_per_tick: int = 20
+    # Диалоги старше этого не разбираются: кампания и тишина давно закончились.
+    history_days: int = 12
+    # Зеркало чатов старше этого считается устаревшим, и бот не пишет.
+    mirror_stale_minutes: int = 90
+    # Шаблон ссылки на чат в кабинете WB: `{chat_id}` — uuid чата без префикса `1:`.
+    # Пусто — ссылку не строим.
+    chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewChatsConfig:
     """Чаты после отзыва: как считать ответ покупателя. Своего сбора нет — читает зеркало чатов."""
 
@@ -481,6 +513,7 @@ class Settings:
     returns: ReturnsConfig
     podsort: PodsortConfig
     fin_reports: FinReportsConfig
+    support_bot: SupportBotConfig = SupportBotConfig()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -600,6 +633,10 @@ class Settings:
         for key in ("reply_window_hours", "max_period_days", "baseline_days", "follow_up_within_minutes"):
             if key in review_chats:
                 review_chats[key] = int(review_chats[key])
+        support_bot = dict(data.get("support_bot", {}))
+        for key, value in list(support_bot.items()):
+            if key not in ("timezone", "chat_url_template"):
+                support_bot[key] = int(value)
         fbs_penalties = dict(data.get("fbs_penalties", {}))
         for key in (
             "poll_hours",
@@ -682,6 +719,7 @@ class Settings:
             returns=ReturnsConfig(**returns),
             podsort=PodsortConfig(**podsort),
             fin_reports=FinReportsConfig(**fin_reports),
+            support_bot=SupportBotConfig(**support_bot),
         )
         settings.validate_values()
         return settings
@@ -762,6 +800,30 @@ class Settings:
             < 1
         ):
             raise ValueError("review_chats.* windows must be positive")
+        bot = self.support_bot
+        ZoneInfo(bot.timezone)
+        if not 0 <= bot.window_start_hour < bot.window_end_hour <= 24:
+            raise ValueError("support_bot.window_start_hour must be earlier than window_end_hour")
+        if bot.jitter_min_minutes < 0 or bot.jitter_max_minutes < bot.jitter_min_minutes:
+            raise ValueError("support_bot.jitter_* must be a non-negative range")
+        if (
+            min(
+                bot.interval_minutes,
+                bot.silence_hours,
+                bot.campaign_days,
+                bot.max_campaigns,
+                bot.daily_cap_per_seller,
+                bot.tick_minutes,
+                bot.batch_per_tick,
+                bot.history_days,
+                bot.mirror_stale_minutes,
+            )
+            < 1
+            or bot.min_gap_seconds < 0
+        ):
+            raise ValueError("support_bot.* limits must be positive")
+        if bot.history_days <= bot.campaign_days:
+            raise ValueError("support_bot.history_days must exceed campaign_days")
         penalties = self.fbs_penalties
         if (
             min(

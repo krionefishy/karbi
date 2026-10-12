@@ -72,4 +72,5 @@ class WBChatClient(WBJsonClient):
             rid=str(card.get("rid")) if card.get("rid") else None,
             text=text,
             has_attachments=bool(attachments.get("images") or attachments.get("files")),
+            reply_sign=str(row["replySign"]) if row.get("replySign") else None,
         )

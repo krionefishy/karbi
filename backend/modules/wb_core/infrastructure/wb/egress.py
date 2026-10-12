@@ -86,8 +86,15 @@ class EgressGateway:
         api_name: str = "WB API",
         category: str = "",
         route: str = WB_ROUTE,
+        form: dict[str, str] | None = None,
+        attempts: int = ATTEMPTS,
     ) -> Any:
         """Тело ответа WB, либо та же пара ошибок, что была у прямых клиентов.
+
+        `form` — поля `multipart/form-data` для методов, которые не принимают JSON
+        (отправка сообщения в чат); шлюз сам собирает из них multipart. `attempts=1`
+        нужен для запросов, которые нельзя повторять: транспортный сбой после того,
+        как WB принял запрос, при повторе даст дубль (сообщение покупателю).
 
         Локальные повторы (ATTEMPTS) существуют только для транспортных сбоев
         до шлюза. Всё, что шлюз донёс как ответ — включая 429 и 5xx от WB, —
@@ -96,7 +103,7 @@ class EgressGateway:
         Дальше этим занимаются повторы уровня задач.
         """
         last_error = ""
-        for attempt in range(ATTEMPTS):
+        for attempt in range(attempts):
             payload = await self._send(
                 seller_id=seller_id,
                 api=api,
@@ -106,10 +113,11 @@ class EgressGateway:
                 json=json,
                 priority=priority,
                 route=route,
+                form=form,
             )
             if isinstance(payload, _Retry):
                 last_error = payload.reason
-                if attempt < ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     await asyncio.sleep(payload.delay + random.uniform(0.1, 0.5))
                     continue
                 raise WBTemporaryError(f"{api_name}: {last_error}")
@@ -168,22 +176,23 @@ class EgressGateway:
         json: Any | None,
         priority: str,
         route: str = WB_ROUTE,
+        form: dict[str, str] | None = None,
     ) -> "dict[str, Any] | _Retry":
         client = self._require_client()
+        envelope: dict[str, Any] = {
+            "seller_id": seller_id,
+            "api": api,
+            "method": method,
+            "path": path,
+            "query": params,
+            "body": json,
+            "priority": priority,
+        }
+        if form is not None:
+            # Поле есть только у запросов с multipart: остальные конверты не меняются.
+            envelope["form"] = form
         try:
-            response = await client.post(
-                route,
-                json={
-                    "seller_id": seller_id,
-                    "api": api,
-                    "method": method,
-                    "path": path,
-                    "query": params,
-                    "body": json,
-                    "priority": priority,
-                },
-                headers=self._headers(),
-            )
+            response = await client.post(route, json=envelope, headers=self._headers())
         except httpx.RequestError as error:
             return _Retry(reason=f"шлюз WB недоступен: {error}", delay=2.0)
         if response.status_code == 200:

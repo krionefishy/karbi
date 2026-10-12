@@ -191,6 +191,10 @@ class ChatMirror:
         """Первое сообщение из API, ушедшее не позже `within` после автосообщения WB; `None` — не было."""
         return await self.mirror.first_api_reply_at(seller_id, within=within)
 
+    async def reply_sign(self, seller_id: uuid.UUID, chat_id: str) -> str | None:
+        """Подпись чата для ответа покупателю; `None` — лента её для чата не отдавала."""
+        return await self.mirror.latest_reply_sign(seller_id, chat_id)
+
     async def state(self, seller_id: uuid.UUID) -> ChatMirrorState | None:
         """`None` — зеркало до этого селлера ещё не доходило."""
         state = await self.mirror.state(seller_id, MIRROR_CHATS)

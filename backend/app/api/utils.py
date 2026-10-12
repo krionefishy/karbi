@@ -92,6 +92,16 @@ from backend.modules.wb_reviews.application import (
 )
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
+from backend.modules.wb_support_bot.application import (
+    AUTOMATION_ID as WB_SUPPORT_BOT_ID,
+)
+from backend.modules.wb_support_bot.application import (
+    DESCRIPTION as WB_SUPPORT_BOT_DESCRIPTION,
+)
+from backend.modules.wb_support_bot.application import (
+    TITLE as WB_SUPPORT_BOT_TITLE,
+)
+from backend.modules.wb_support_bot.application import SupportBotOverview
 from backend.modules.wb_turnover.application import (
     AUTOMATION_ID as WB_TURNOVER_ID,
 )
@@ -156,6 +166,12 @@ def next_review_chats_run_at(
     if overview.last_success_at is None:
         return moment
     return max(moment, overview.last_success_at + timedelta(minutes=settings.core_mirror.chats_interval_minutes))
+
+
+def next_support_bot_run_at(settings: Settings, now: datetime | None = None) -> datetime:
+    """Воркер бота просыпается по расписанию; точное время отправки у каждого диалога своё."""
+    moment = now or datetime.now(ZoneInfo(settings.support_bot.timezone))
+    return moment + timedelta(minutes=10)
 
 
 def next_podsort_run_at(settings: Settings, overview: PodsortOverview, now: datetime | None = None) -> datetime:
@@ -238,9 +254,10 @@ def automation_catalog(
     podsort: PodsortOverview,
     fin_reports: FinReportsOverview,
     settings: Settings,
+    support_bot: SupportBotOverview | None = None,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
-    return [
+    catalog = [
         AutomationResponse(
             id=WB_REVIEWS_ID,
             title=WB_REVIEWS_TITLE,
@@ -358,3 +375,20 @@ def automation_catalog(
             next_run_at=None,
         ),
     ]
+    if support_bot is not None:
+        # Новая карточка идёт перед инструментом, чтобы автоматизации стояли подряд.
+        catalog.insert(
+            -1,
+            AutomationResponse(
+                id=WB_SUPPORT_BOT_ID,
+                title=WB_SUPPORT_BOT_TITLE,
+                description=WB_SUPPORT_BOT_DESCRIPTION,
+                status=support_bot.status,
+                seller_count=support_bot.seller_count,
+                runs_last_24h=0,
+                last_run=None,
+                last_success_at=support_bot.last_success_at.isoformat() if support_bot.last_success_at else None,
+                next_run_at=next_support_bot_run_at(settings).isoformat(),
+            ),
+        )
+    return catalog

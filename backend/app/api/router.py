@@ -18,6 +18,7 @@ from backend.modules.wb_returns.presentation.http import extension_router as wb_
 from backend.modules.wb_returns.presentation.http import router as wb_returns_router
 from backend.modules.wb_review_chats.presentation.http import router as wb_review_chats_router
 from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
+from backend.modules.wb_support_bot.presentation.http import router as wb_support_bot_router
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
 router = APIRouter()
@@ -33,6 +34,7 @@ router.include_router(wb_card_checklist_router)
 router.include_router(wb_fbs_stocks_router)
 router.include_router(wb_fbs_penalties_router)
 router.include_router(wb_review_chats_router)
+router.include_router(wb_support_bot_router)
 router.include_router(wb_returns_router)
 router.include_router(wb_returns_extension_router)
 router.include_router(wb_podsort_router)

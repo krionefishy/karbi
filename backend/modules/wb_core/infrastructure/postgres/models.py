@@ -360,6 +360,7 @@ class ChatEventModel(WBCoreBase):
     rid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     has_attachments: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reply_sign: Mapped[str | None] = mapped_column(String(255), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (

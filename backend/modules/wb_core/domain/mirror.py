@@ -184,6 +184,9 @@ class ChatEvent:
     rid: str | None
     text: str | None
     has_attachments: bool
+    # Подпись чата для ответа покупателю (`POST /seller/message`). Лента отдаёт её
+    # в каждом событии, но нужна она только отправке; None у событий, собранных до wc017.
+    reply_sign: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
