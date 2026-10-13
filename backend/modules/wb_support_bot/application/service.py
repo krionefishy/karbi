@@ -8,6 +8,7 @@ from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_support_bot.domain import DialogState
 from backend.modules.wb_support_bot.infrastructure.postgres import (
+    JOURNAL_STATUSES,
     MODE_DRY_RUN,
     MODE_LIVE,
     DialogKey,
@@ -57,6 +58,21 @@ class SellerBotView:
     mirror_error: str | None
     mirror_read_through: datetime | None
     dry_run: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SendRow:
+    send: SendModel
+    nm_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SendPage:
+    rows: tuple[SendRow, ...]
+    total: int
+    page: int
+    page_size: int
+    counts: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,9 +148,20 @@ class SupportBotService:
         )
         return DialogPage(tuple(rows), total, page, page_size)
 
-    async def sends(self, seller_id: uuid.UUID, *, limit: int = 100, offset: int = 0) -> list[SendModel]:
+    async def sends(self, seller_id: uuid.UUID, *, status: str | None, page: int, page_size: int) -> SendPage:
         await self._tracked(seller_id)
-        return await self.repository.list_sends(seller_id, limit=limit, offset=offset)
+        if status is not None and status not in JOURNAL_STATUSES:
+            raise BotRequestError(f"Неизвестный статус отправки: {status}")
+        rows, total = await self.repository.list_sends(
+            seller_id, status=status, limit=page_size, offset=(page - 1) * page_size
+        )
+        return SendPage(
+            rows=tuple(SendRow(send, nm_id) for send, nm_id in rows),
+            total=total,
+            page=page,
+            page_size=page_size,
+            counts=await self.repository.send_status_counts(seller_id),
+        )
 
     async def set_mode(self, seller_id: uuid.UUID, mode: str) -> None:
         await self._tracked(seller_id)

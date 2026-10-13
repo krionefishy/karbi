@@ -9,16 +9,18 @@ from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_support_bot.application import (
     BotRequestError,
     NotEnrolledError,
+    SendRow,
     SupportBotService,
 )
 from backend.modules.wb_support_bot.domain import chat_url
-from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel, SendModel, TemplateModel
+from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel, TemplateModel
 from backend.modules.wb_support_bot.presentation.http.schemas import (
     DialogActionRequest,
     DialogPageResponse,
     DialogResponse,
     ModeRequest,
     PauseRequest,
+    SendPageResponse,
     SendResponse,
     SupportBotResponse,
     TemplateActiveRequest,
@@ -67,11 +69,14 @@ def dialog_response(model: DialogModel, chat_url_template: str) -> DialogRespons
     )
 
 
-def send_response(model: SendModel) -> SendResponse:
+def send_response(row: SendRow, chat_url_template: str) -> SendResponse:
+    model = row.send
     return SendResponse(
         id=model.id,
         chat_id=model.chat_id,
         prompt_at=model.prompt_at.isoformat(),
+        nm_id=row.nm_id,
+        chat_url=chat_url(chat_url_template, model.chat_id),
         seq=model.seq,
         text=model.text,
         status=model.status,
@@ -130,20 +135,31 @@ async def dialogs(
     )
 
 
-@router.get("/sellers/{seller_id}/sends", response_model=list[SendResponse])
+@router.get("/sellers/{seller_id}/sends", response_model=SendPageResponse)
 @inject
 async def sends(
     seller_id: uuid.UUID,
     _: CurrentPrincipal,
     service: FromDishka[SupportBotService],
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-) -> list[SendResponse]:
+    settings: FromDishka[Settings],
+    status_filter: str | None = Query(default=None, alias="status"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> SendPageResponse:
     try:
-        rows = await service.sends(seller_id, limit=limit, offset=offset)
+        result = await service.sends(seller_id, status=status_filter, page=page, page_size=page_size)
     except (SellerNotFoundError, NotEnrolledError) as error:
         raise not_enrolled() from error
-    return [send_response(item) for item in rows]
+    except BotRequestError as error:
+        raise bad_request(error) from error
+    template = settings.support_bot.chat_url_template
+    return SendPageResponse(
+        sends=[send_response(item, template) for item in result.rows],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+        counts=result.counts,
+    )
 
 
 @router.put("/sellers/{seller_id}/mode", status_code=status.HTTP_204_NO_CONTENT)

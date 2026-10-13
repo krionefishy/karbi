@@ -14,9 +14,14 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     TrackedSellerModel,
     WBSupportBotBase,
 )
-from backend.modules.wb_support_bot.infrastructure.postgres.repository import DialogKey, SupportBotRepository
+from backend.modules.wb_support_bot.infrastructure.postgres.repository import (
+    JOURNAL_STATUSES,
+    DialogKey,
+    SupportBotRepository,
+)
 
 __all__ = [
+    "JOURNAL_STATUSES",
     "DialogKey",
     "SupportBotRepository",
     "MODE_DRY_RUN",

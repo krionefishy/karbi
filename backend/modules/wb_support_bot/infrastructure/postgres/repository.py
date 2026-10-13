@@ -20,6 +20,9 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     TrackedSellerModel,
 )
 
+# Статусы, которые видны в журнале: «запланировано» и «отправляется» живут доли секунды.
+JOURNAL_STATUSES = (SEND_SENT, SEND_UNKNOWN, SEND_FAILED, SEND_DRY_RUN)
+
 
 @dataclass(frozen=True, slots=True)
 class DialogKey:
@@ -240,18 +243,39 @@ class SupportBotRepository:
         )
         return list(rows)
 
-    async def list_sends(self, seller_id: uuid.UUID, *, limit: int = 100, offset: int = 0) -> list[SendModel]:
-        rows = await self.session.scalars(
-            select(SendModel)
-            .where(
-                SendModel.seller_id == seller_id,
-                SendModel.status.in_((SEND_SENT, SEND_UNKNOWN, SEND_FAILED, SEND_DRY_RUN)),
+    async def list_sends(
+        self, seller_id: uuid.UUID, *, status: str | None = None, limit: int = 50, offset: int = 0
+    ) -> tuple[list[tuple[SendModel, int | None]], int]:
+        """Страница журнала с артикулом диалога и общее число строк под фильтр."""
+        conditions: list[ColumnElement[bool]] = [
+            SendModel.seller_id == seller_id,
+            SendModel.status.in_(JOURNAL_STATUSES),
+        ]
+        if status:
+            conditions.append(SendModel.status == status)
+        total = await self.session.scalar(select(func.count()).select_from(SendModel).where(*conditions))
+        rows = await self.session.execute(
+            select(SendModel, DialogModel.nm_id)
+            .outerjoin(
+                DialogModel,
+                (DialogModel.seller_id == SendModel.seller_id)
+                & (DialogModel.chat_id == SendModel.chat_id)
+                & (DialogModel.prompt_at == SendModel.prompt_at),
             )
-            .order_by(SendModel.planned_at.desc())
+            .where(*conditions)
+            .order_by(SendModel.planned_at.desc(), SendModel.id.desc())
             .limit(limit)
             .offset(offset)
         )
-        return list(rows)
+        return [(send, nm_id) for send, nm_id in rows], int(total or 0)
+
+    async def send_status_counts(self, seller_id: uuid.UUID) -> dict[str, int]:
+        rows = await self.session.execute(
+            select(SendModel.status, func.count())
+            .where(SendModel.seller_id == seller_id, SendModel.status.in_(JOURNAL_STATUSES))
+            .group_by(SendModel.status)
+        )
+        return {status: int(count) for status, count in rows}
 
     async def last_activity(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(select(func.max(SendModel.planned_at)).where(SendModel.seller_id == seller_id))

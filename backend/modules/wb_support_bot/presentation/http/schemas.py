@@ -49,12 +49,22 @@ class SendResponse(BaseModel):
     id: int
     chat_id: str
     prompt_at: str
+    nm_id: int | None
+    chat_url: str | None
     seq: int
     text: str
     status: str
     planned_at: str
     sent_at: str | None
     error: str | None
+
+
+class SendPageResponse(BaseModel):
+    sends: list[SendResponse]
+    total: int
+    page: int
+    page_size: int
+    counts: dict[str, int]
 
 
 class ModeRequest(BaseModel):

@@ -57,12 +57,30 @@ export interface BotSend {
   id: number;
   chat_id: string;
   prompt_at: string;
+  nm_id: number | null;
+  chat_url: string | null;
   seq: number;
   text: string;
   status: SendStatus;
   planned_at: string;
   sent_at: string | null;
   error: string | null;
+}
+
+/** Статусы, видимые в журнале: «запланировано» и «отправляется» живут доли секунды. */
+export type JournalStatus = "sent" | "dry_run" | "failed" | "unknown";
+
+export interface SendPage {
+  sends: BotSend[];
+  total: number;
+  page: number;
+  page_size: number;
+  counts: Partial<Record<JournalStatus, number>>;
+}
+
+export interface JournalFilter {
+  status: JournalStatus | "";
+  page: number;
 }
 
 export interface DialogFilter {

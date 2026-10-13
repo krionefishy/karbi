@@ -467,3 +467,21 @@
 .bot-add { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-3); font: inherit; font-size: 14px; color: var(--ink-secondary); background: none; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); cursor: pointer; }
 .bot-add:hover { color: var(--ink); background: var(--surface-hover); }
 .bot-empty { margin: 0; }
+
+.bot-journal { margin-bottom: var(--space-6); }
+.bot-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.bot-pill { padding: 4px 12px; font: inherit; font-size: 13px; color: var(--ink-secondary); background: none; border: 1px solid var(--line-strong); border-radius: var(--radius-full); cursor: pointer; }
+.bot-pill:hover { background: var(--surface-hover); }
+.bot-pill-on { color: var(--surface); background: var(--ink); border-color: var(--ink); }
+.bot-pill-on:hover { background: var(--ink); }
+.bot-journal-table { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow-x: auto; }
+.bot-journal-row { display: grid; grid-template-columns: 100px 190px 120px minmax(240px, 1fr); gap: var(--space-3); align-items: center; padding: var(--space-2) var(--space-3); font-size: 13px; border-top: 1px solid var(--line); }
+.bot-journal-head { font-size: 12px; color: var(--ink-muted); border-top: 0; }
+.bot-journal-when { color: var(--ink-secondary); }
+.bot-journal-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-journal-error { font-style: normal; color: var(--danger, #c62828); }
+.bot-badge { display: inline-block; padding: 2px 8px; font-size: 12px; white-space: nowrap; border-radius: var(--radius-full); background: var(--surface-hover); color: var(--ink-secondary); }
+.bot-badge-sent { background: color-mix(in srgb, #2e7d32 16%, transparent); color: #2e7d32; }
+.bot-badge-dry_run { background: var(--accent-soft); color: var(--accent); }
+.bot-badge-unknown { background: color-mix(in srgb, #b26a00 16%, transparent); color: #b26a00; }
+.bot-badge-failed { background: color-mix(in srgb, #c62828 14%, transparent); color: #c62828; }

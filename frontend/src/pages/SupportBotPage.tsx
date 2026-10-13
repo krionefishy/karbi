@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
+import { SupportBotJournal } from "../components/SupportBotJournal";
 import { SupportBotTemplates } from "../components/SupportBotTemplates";
 import { Shell } from "../components/Shell";
 import {
@@ -23,13 +24,12 @@ import {
 } from "../features/supportBot/api";
 import {
   MODE_LABEL,
-  SEND_LABEL,
   STATE_LABEL,
   STATE_ORDER,
   statusLine,
   totalDialogs,
 } from "../features/supportBot/format";
-import type { BotDialog, DialogFilter, DialogFlag, DialogState } from "../features/supportBot/types";
+import type { BotDialog, DialogFilter, DialogFlag, DialogState, JournalFilter } from "../features/supportBot/types";
 import {
   attachSeller,
   detachSeller,
@@ -62,6 +62,7 @@ export function SupportBotPage() {
   const queryClient = useQueryClient();
   const [sellerId, setSellerId] = useState("");
   const [filter, setFilter] = useState<DialogFilter>({ state: "", flag: "", page: 1 });
+  const [journalFilter, setJournalFilter] = useState<JournalFilter>({ status: "", page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [liveConfirm, setLiveConfirm] = useState(false);
@@ -89,15 +90,19 @@ export function SupportBotPage() {
     placeholderData: (previous) => previous,
   });
   const sends = useQuery({
-    queryKey: ["support-bot-sends", sellerId],
-    queryFn: () => getSends(sellerId),
+    queryKey: ["support-bot-sends", sellerId, journalFilter],
+    queryFn: () => getSends(sellerId, journalFilter),
     enabled: Boolean(sellerId),
+    placeholderData: (previous) => previous,
   });
 
   useEffect(() => {
     if (!sellers.some((item) => item.id === sellerId)) setSellerId(sellers[0]?.id ?? "");
   }, [sellerId, sellers]);
-  useEffect(() => setActionError(""), [sellerId]);
+  useEffect(() => {
+    setActionError("");
+    setJournalFilter({ status: "", page: 1 });
+  }, [sellerId]);
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["support-bot", sellerId] });
@@ -416,19 +421,7 @@ export function SupportBotPage() {
             )}
 
             <h2 className="chats-section-title">Журнал отправок</h2>
-            <section className="checklist-scroll stocks-scroll">
-              {(sends.data ?? []).map((item) => (
-                <div className="stocks-row" key={item.id} style={{ gridTemplateColumns: "150px 150px 1fr" }}>
-                  <span>{stamp(item.sent_at ?? item.planned_at)}</span>
-                  <span className="penalty-kind">
-                    <strong>{SEND_LABEL[item.status]}</strong>
-                    {item.error && <em className="stocks-unknown">{item.error}</em>}
-                  </span>
-                  <span className="chats-reply">{item.text}</span>
-                </div>
-              ))}
-              {(sends.data ?? []).length === 0 && <span className="fbs-row-empty">Отправок ещё не было.</span>}
-            </section>
+            <SupportBotJournal page={sends.data} filter={journalFilter} onFilter={setJournalFilter} />
           </>
         )}
       </main>

@@ -114,3 +114,44 @@ async def test_the_automation_shows_up_in_the_catalog(client: AsyncClient, selle
     catalog = (await client.get("/api/v1/automations")).json()
 
     assert "wb-support-bot" in {item["id"] for item in catalog}
+
+
+async def test_the_journal_is_filtered_counted_and_linked(
+    application: Application, client: AsyncClient, seller: uuid.UUID
+) -> None:
+    from datetime import UTC, datetime
+
+    from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel, SendModel
+
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    prompt = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        session.add(
+            DialogModel(
+                seller_id=seller, chat_id="1:aaaa-bbbb", prompt_at=prompt, state="in_campaign", nm_id=1304195061
+            )
+        )
+        for seq, status in enumerate(["dry_run", "dry_run", "failed"], start=1):
+            session.add(
+                SendModel(
+                    seller_id=seller,
+                    chat_id="1:aaaa-bbbb",
+                    prompt_at=prompt,
+                    seq=seq,
+                    text=f"текст {seq}",
+                    status=status,
+                    planned_at=prompt.replace(hour=10 + seq),
+                    error="нет подписи" if status == "failed" else None,
+                )
+            )
+        await session.commit()
+
+    everything = (await client.get(f"{API}/sellers/{seller}/sends")).json()
+    failed = (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "failed"})).json()
+
+    assert everything["total"] == 3 and everything["counts"] == {"dry_run": 2, "failed": 1}
+    assert everything["sends"][0]["text"] == "текст 3"  # новые сверху
+    assert everything["sends"][0]["nm_id"] == 1304195061
+    assert everything["sends"][0]["chat_url"].endswith("chatId=aaaa-bbbb")
+    assert failed["total"] == 1 and failed["sends"][0]["error"] == "нет подписи"
+    assert (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "nope"})).status_code == 422

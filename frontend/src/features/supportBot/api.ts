@@ -1,5 +1,5 @@
 import { apiRequest } from "../../api/http";
-import type { BotDialog, BotMode, BotSend, DialogFilter, DialogPage, SupportBot, Template } from "./types";
+import type { BotDialog, BotMode, DialogFilter, DialogPage, JournalFilter, SendPage, SupportBot, Template } from "./types";
 
 const root = "/api/v1/wb/support-bot";
 const base = (sellerId: string) => `${root}/sellers/${sellerId}`;
@@ -15,7 +15,11 @@ export function getDialogs(sellerId: string, filter: DialogFilter) {
   return apiRequest<DialogPage>(`${base(sellerId)}/dialogs?${params.toString()}`);
 }
 
-export const getSends = (sellerId: string) => apiRequest<BotSend[]>(`${base(sellerId)}/sends`);
+export function getSends(sellerId: string, filter: JournalFilter) {
+  const params = new URLSearchParams({ page: String(filter.page), page_size: String(PAGE_SIZE) });
+  if (filter.status) params.set("status", filter.status);
+  return apiRequest<SendPage>(`${base(sellerId)}/sends?${params.toString()}`);
+}
 
 export const setMode = (sellerId: string, mode: BotMode) =>
   apiRequest<void>(`${base(sellerId)}/mode`, { method: "PUT", body: JSON.stringify({ mode }) });

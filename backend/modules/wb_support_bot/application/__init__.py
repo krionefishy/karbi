@@ -16,6 +16,8 @@ from backend.modules.wb_support_bot.application.service import (
     DialogPage,
     NotEnrolledError,
     SellerBotView,
+    SendPage,
+    SendRow,
     SupportBotOverview,
     SupportBotService,
 )
@@ -31,6 +33,8 @@ __all__ = [
     "NotEnrolledError",
     "SellerBotView",
     "SellerReport",
+    "SendPage",
+    "SendRow",
     "SupportBotEnrollment",
     "SupportBotOverview",
     "SupportBotProcessor",
