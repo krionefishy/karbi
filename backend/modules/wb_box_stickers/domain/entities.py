@@ -69,3 +69,43 @@ class MatchedBox:
     page_index: int
     quantity: int
     items: tuple[ItemLabel, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AssemblyRow:
+    """Строка таблицы сборки склада: один товар поставки и как он разложен по коробам.
+
+    Схема «3-60+1-40» — три короба по 60 и один на 40; `boxes` — она же, развёрнутая
+    в количество на каждый короб по порядку.
+    """
+
+    line: int
+    supply_id: int | None
+    barcode: str
+    quantity: int | None
+    scheme: str
+    boxes: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Assembly:
+    """Разобранная вставка из таблицы сборки: поставка, строки по порядку, что не сошлось."""
+
+    supply_id: int | None
+    rows: tuple[AssemblyRow, ...]
+    problems: tuple[str, ...]
+
+    @property
+    def boxes(self) -> int:
+        return sum(len(row.boxes) for row in self.rows)
+
+
+@dataclass(frozen=True, slots=True)
+class PackedBox:
+    """Короб шаблона WB, получивший товар: позиция по таблице сборки и что в нём."""
+
+    position: int
+    shk: str
+    package_code: str
+    barcode: str
+    quantity: int
