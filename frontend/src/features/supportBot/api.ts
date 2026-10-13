@@ -26,6 +26,9 @@ export const setPaused = (paused: boolean) =>
 export const addTemplate = (sellerId: string, text: string) =>
   apiRequest<Template>(`${base(sellerId)}/templates`, { method: "POST", body: JSON.stringify({ text }) });
 
+export const updateTemplate = (sellerId: string, id: number, text: string) =>
+  apiRequest<Template>(`${base(sellerId)}/templates/${id}`, { method: "PUT", body: JSON.stringify({ text }) });
+
 export const setTemplateActive = (sellerId: string, id: number, active: boolean) =>
   apiRequest<Template>(`${base(sellerId)}/templates/${id}/active`, {
     method: "PUT",

@@ -79,6 +79,19 @@ async def test_templates_are_added_switched_and_deleted(client: AsyncClient, sel
     assert (await client.delete(f"{API}/sellers/{seller}/templates/{template_id}")).status_code == 422
 
 
+async def test_a_template_text_can_be_edited(client: AsyncClient, seller: uuid.UUID) -> None:
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    created = await client.post(f"{API}/sellers/{seller}/templates", json={"text": "Первый вариант"})
+    template_id = created.json()["id"]
+
+    changed = await client.put(f"{API}/sellers/{seller}/templates/{template_id}", json={"text": "  Второй вариант  "})
+
+    assert changed.status_code == 200 and changed.json()["text"] == "Второй вариант"
+    assert changed.json()["active"] is True
+    assert (await client.put(f"{API}/sellers/{seller}/templates/{template_id}", json={"text": " "})).status_code == 422
+    assert (await client.put(f"{API}/sellers/{seller}/templates/999999", json={"text": "текст"})).status_code == 422
+
+
 async def test_the_mode_can_be_switched_and_garbage_is_refused(client: AsyncClient, seller: uuid.UUID) -> None:
     await client.post(AUTOMATION, json={"seller_id": str(seller)})
 

@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
+import { SupportBotTemplates } from "../components/SupportBotTemplates";
 import { Shell } from "../components/Shell";
 import {
   addTemplate,
@@ -18,6 +19,7 @@ import {
   setMode,
   setPaused,
   setTemplateActive,
+  updateTemplate,
 } from "../features/supportBot/api";
 import {
   MODE_LABEL,
@@ -63,7 +65,6 @@ export function SupportBotPage() {
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [liveConfirm, setLiveConfirm] = useState(false);
-  const [newText, setNewText] = useState("");
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -145,11 +146,18 @@ export function SupportBotPage() {
   const addMutation = useMutation({
     mutationFn: (text: string) => addTemplate(sellerId, text),
     onSuccess: async () => {
-      setNewText("");
       setActionError("");
       await refresh();
     },
     onError: failed("Не удалось добавить текст"),
+  });
+  const saveMutation = useMutation({
+    mutationFn: (item: { id: number; text: string }) => updateTemplate(sellerId, item.id, item.text),
+    onSuccess: async () => {
+      setActionError("");
+      await refresh();
+    },
+    onError: failed("Не удалось сохранить текст"),
   });
   const activeMutation = useMutation({
     mutationFn: (item: { id: number; active: boolean }) => setTemplateActive(sellerId, item.id, item.active),
@@ -286,45 +294,14 @@ export function SupportBotPage() {
               Бот берёт случайный активный текст и не повторяет один и тот же подряд. До 1 000 символов; в тексте нельзя
               просить удалить или изменить отзыв, обещать деньги за удаление, давать контакты вне WB и угрожать.
             </p>
-            <section className="checklist-scroll stocks-scroll">
-              {view.templates.map((item) => (
-                <div className="stocks-row" key={item.id} style={{ gridTemplateColumns: "1fr 120px 120px" }}>
-                  <span className="chats-reply" style={{ opacity: item.active ? 1 : 0.5 }}>
-                    {item.text}
-                  </span>
-                  <button
-                    className="secondary-button"
-                    onClick={() => activeMutation.mutate({ id: item.id, active: !item.active })}
-                  >
-                    {item.active ? "Отключить" : "Включить"}
-                  </button>
-                  <button className="secondary-button" onClick={() => deleteMutation.mutate(item.id)}>
-                    Удалить
-                  </button>
-                </div>
-              ))}
-              {view.templates.length === 0 && <span className="fbs-row-empty">Текстов ещё нет.</span>}
-            </section>
-            <form
-              className="checklist-toolbar"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (newText.trim()) addMutation.mutate(newText);
-              }}
-            >
-              <textarea
-                aria-label="Новый текст напоминания"
-                rows={3}
-                maxLength={1000}
-                style={{ width: "100%" }}
-                placeholder="Здравствуйте! Подскажите, удалось ли решить вопрос с товаром?"
-                value={newText}
-                onChange={(event) => setNewText(event.target.value)}
-              />
-              <button className="primary-button" type="submit" disabled={addMutation.isPending || !newText.trim()}>
-                Добавить текст
-              </button>
-            </form>
+            <SupportBotTemplates
+              templates={view.templates}
+              busy={addMutation.isPending || saveMutation.isPending}
+              onAdd={(text) => addMutation.mutate(text)}
+              onSave={(id, text) => saveMutation.mutate({ id, text })}
+              onToggle={(id, active) => activeMutation.mutate({ id, active })}
+              onDelete={(id) => deleteMutation.mutate(id)}
+            />
 
             <h2 className="chats-section-title">Диалоги</h2>
             <div className="checklist-toolbar penalties-toolbar">

@@ -149,14 +149,29 @@ class SupportBotService:
 
     async def add_template(self, seller_id: uuid.UUID, text: str) -> TemplateModel:
         await self._tracked(seller_id)
+        cleaned = self._clean_text(text)
+        template = await self.repository.add_template(seller_id, cleaned)
+        await self.session.commit()
+        return template
+
+    async def update_template_text(self, seller_id: uuid.UUID, template_id: int, text: str) -> TemplateModel:
+        await self._tracked(seller_id)
+        cleaned = self._clean_text(text)
+        template = await self.repository.get_template(seller_id, template_id)
+        if template is None:
+            raise BotRequestError("Текст не найден")
+        template.text = cleaned
+        await self.session.commit()
+        return template
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
         cleaned = text.strip()
         if not cleaned:
             raise BotRequestError("Текст сообщения пустой")
         if len(cleaned) > MAX_TEMPLATE_LENGTH:
             raise BotRequestError(f"Текст длиннее {MAX_TEMPLATE_LENGTH} символов: WB его не примет")
-        template = await self.repository.add_template(seller_id, cleaned)
-        await self.session.commit()
-        return template
+        return cleaned
 
     async def set_template_active(self, seller_id: uuid.UUID, template_id: int, active: bool) -> TemplateModel:
         await self._tracked(seller_id)

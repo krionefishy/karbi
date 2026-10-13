@@ -180,6 +180,23 @@ async def add_template(
         raise bad_request(error) from error
 
 
+@router.put("/sellers/{seller_id}/templates/{template_id}", response_model=TemplateResponse)
+@inject
+async def update_template(
+    seller_id: uuid.UUID,
+    template_id: int,
+    payload: TemplateRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[SupportBotService],
+) -> TemplateResponse:
+    try:
+        return template_response(await service.update_template_text(seller_id, template_id, payload.text))
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except BotRequestError as error:
+        raise bad_request(error) from error
+
+
 @router.put("/sellers/{seller_id}/templates/{template_id}/active", response_model=TemplateResponse)
 @inject
 async def set_template_active(
