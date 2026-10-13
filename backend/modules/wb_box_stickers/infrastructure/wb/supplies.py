@@ -1,9 +1,10 @@
 from typing import Any
 
-from backend.modules.wb_box_stickers.domain import BoxLine, Package
+from backend.modules.wb_box_stickers.domain import BoxLine, Package, SupplyGood
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 SUPPLIES_BUCKET = "supplies"
+GOODS_PAGE = 1000
 
 
 class WBSuppliesClient(WBJsonClient):
@@ -58,3 +59,36 @@ class WBSuppliesClient(WBJsonClient):
             quantity=total if isinstance(total, int) else sum(line.quantity for line in lines),
             lines=tuple(lines),
         )
+
+    async def goods(self, seller_id: str, supply_id: int) -> list[SupplyGood]:
+        """Товары поставки страницами по тысяче: заявленный баркод и количество."""
+        goods: list[SupplyGood] = []
+        offset = 0
+        while True:
+            payload = await self.request(
+                "GET",
+                f"/api/v1/supplies/{supply_id}/goods",
+                seller_id,
+                params={"limit": GOODS_PAGE, "offset": offset},
+            )
+            if not payload:
+                return goods
+            if not isinstance(payload, list):
+                raise WBPermanentError(f"{self.api_name} вернул товары поставки не списком")
+            for raw in payload:
+                if not isinstance(raw, dict):
+                    continue
+                barcode = str(raw.get("barcode") or "").strip()
+                quantity = raw.get("quantity")
+                if barcode and isinstance(quantity, int):
+                    goods.append(
+                        SupplyGood(
+                            barcode=barcode,
+                            quantity=quantity,
+                            vendor_code=str(raw.get("vendorCode") or ""),
+                            tech_size=str(raw.get("techSize") or ""),
+                        )
+                    )
+            if len(payload) < GOODS_PAGE:
+                return goods
+            offset += GOODS_PAGE

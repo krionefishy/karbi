@@ -8,9 +8,13 @@
 import io
 
 import pytest
+from httpx import AsyncClient
 from openpyxl import load_workbook
 
 from backend.modules.wb_box_stickers.application import (
+    BoxStickerService,
+    PackingService,
+    StickerBuildError,
     StickerInputError,
     pack,
     parse_assembly,
@@ -18,8 +22,10 @@ from backend.modules.wb_box_stickers.application import (
     plan_packing,
     read_workbook,
 )
-from backend.modules.wb_box_stickers.domain import Assembly, AssemblyRow
-from backend.tests.test_box_stickers import BOXES, DRILL, SAW, excel_rows, workbook_xlsx
+from backend.modules.wb_box_stickers.domain import Assembly, AssemblyRow, StoredPacking, SupplyGood
+from backend.modules.wb_box_stickers.infrastructure.redis import PackingStore
+from backend.tests.test_box_stickers import BOXES, DRILL, SAW, FakeSellers, FakeSupplies, excel_rows, workbook_xlsx
+from backend.tests.test_box_stickers import SUPPLY as STICKER_SUPPLY
 
 SUPPLY = "41498020"
 LAMP = "2050000000035"
@@ -178,3 +184,98 @@ def test_pack_writes_only_barcode_and_quantity_into_the_same_file() -> None:
     assert data is None and "нужно 2" in plan.problems[0]
     with pytest.raises(StickerInputError, match="не открывается"):
         pack(b"not an excel", _assembly((DRILL, 50, "2-25")))
+
+
+# --- сервис: сверка с товарами поставки и память между шагами -------------------
+
+
+class FakeStore(PackingStore):
+    def __init__(self) -> None:
+        self.saved: dict[int, StoredPacking] = {}
+
+    async def save(self, packing: StoredPacking) -> None:
+        self.saved[packing.supply_id] = packing
+
+    async def load(self, supply_id: int) -> StoredPacking | None:
+        return self.saved.get(supply_id)
+
+    async def recent(self) -> list[StoredPacking]:
+        return sorted(self.saved.values(), key=lambda item: item.saved_at, reverse=True)
+
+
+class SuppliesWithGoods(FakeSupplies):
+    def __init__(self, goods: list[SupplyGood]) -> None:
+        super().__init__()
+        self.rows_goods = goods
+
+    async def goods(self, seller_id: str, supply_id: int) -> list[SupplyGood]:
+        return list(self.rows_goods)
+
+
+def goods(*items: tuple[str, int]) -> list[SupplyGood]:
+    return [SupplyGood(barcode, quantity, "", "0") for barcode, quantity in items]
+
+
+def rows(*items: tuple[str, int, str], supply: int = STICKER_SUPPLY) -> str:
+    return pasted(
+        *(
+            f"{supply}\t1\t{barcode}\t\tТовар\t{quantity}\t{quantity}\t{quantity}\t{scheme}"
+            for barcode, quantity, scheme in items
+        )
+    )
+
+
+async def test_packing_service_checks_rows_against_supply_goods() -> None:
+    store = FakeStore()
+    supplies = SuppliesWithGoods(goods((DRILL, 50), (SAW, 56)))
+    service = PackingService(FakeSellers(), supplies, store)
+    template = workbook_xlsx(excel_rows([0, 1, 2, 3], filled=False))
+
+    plan = await service.preview(template, rows((DRILL, 50, "2-25"), (SAW, 56, "1-36+1-20")))
+    assert plan.ready and plan.seller_name == "ИП Тестов Т.Т." and len(plan.boxes) == 4
+    assert not store.saved, "предпросмотр ничего не запоминает"
+
+    plan, data = await service.build(template, rows((DRILL, 50, "2-25"), (SAW, 56, "1-36+1-20")))
+    assert data and store.saved[STICKER_SUPPLY].workbook == data
+    assert store.saved[STICKER_SUPPLY].boxes == 4 and store.saved[STICKER_SUPPLY].seller_name == "ИП Тестов Т.Т."
+    assert [item.supply_id for item in await service.recent()] == [STICKER_SUPPLY]
+
+    wrong = await service.preview(template, rows((DRILL, 50, "2-25"), (LAMP, 56, "1-36+1-20")))
+    assert not wrong.ready and wrong.boxes == []
+    assert wrong.problems == [
+        f"Этих баркодов нет в поставке в WB: {LAMP} — не те строки или не та поставка?",
+        f"В поставке в WB заявлены товары, которых нет в строках сборки: {SAW}",
+    ]
+    less = await service.preview(template, rows((DRILL, 50, "2-25"), (SAW, 46, "1-36+1-10")))
+    assert less.problems == [
+        "Количество по коробам не совпадает с заявленным в поставке: "
+        f"{SAW}: по коробам 46 шт, в поставке заявлено 56 шт"
+    ]
+
+    foreign = await service.preview(template, rows((DRILL, 50, "2-25"), (SAW, 56, "1-36+1-20"), supply=40000999))
+    assert any("Поставка 40000999 не нашлась" in problem for problem in foreign.problems)
+    with pytest.raises(StickerBuildError):
+        await service.build(template, rows((DRILL, 50, "2-25")))
+
+
+async def test_sticker_service_takes_remembered_workbook_by_supply() -> None:
+    store = FakeStore()
+    packing = PackingService(FakeSellers(), SuppliesWithGoods(goods((DRILL, 50), (SAW, 56))), store)
+    template = workbook_xlsx(excel_rows([0, 1, 2, 3], filled=False))
+    _, data = await packing.build(template, rows((DRILL, 50, "2-25"), (SAW, 56, "1-36+1-20")))
+
+    stickers = BoxStickerService(FakeSellers(), FakeSupplies(), store)
+    assert await stickers.workbook_for(STICKER_SUPPLY) == data
+    with pytest.raises(StickerInputError, match="загрузите Excel файлом"):
+        await stickers.workbook_for(40000999)
+    assert [box.shk for box in read_workbook(data)] == ["6180474", "6180488", "6180553", "6180598"]
+
+
+async def test_packing_routes_need_login(client: AsyncClient) -> None:
+    files = {"template": ("a.xlsx", b"x")}
+    response = await client.post("/api/v1/wb/box-stickers/packing/check", files=files, data={"assembly": "x"})
+    assert response.status_code == 401
+    response = await client.get("/api/v1/wb/box-stickers/packing/recent")
+    assert response.status_code == 401
+    response = await client.post("/api/v1/wb/box-stickers/check", files={"stickers": ("a.pdf", b"y")})
+    assert response.status_code == 401

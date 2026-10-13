@@ -416,6 +416,9 @@
 .box-stickers-file { display: flex; flex-direction: column; align-self: flex-start; color: var(--ink); }
 .box-stickers-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
 .box-stickers-problems { margin: 0; padding-left: 18px; }
+.box-stickers-title { margin: 0 0 var(--space-4); font-size: 15px; line-height: 20px; }
+.box-stickers-text { width: 100%; min-width: 320px; max-width: 720px; padding: var(--space-2) var(--space-3); font-family: var(--font-mono); font-size: 12px; line-height: 18px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); white-space: pre; overflow-x: auto; resize: vertical; }
+.box-stickers-select { max-width: 720px; padding: var(--space-2) var(--space-3); font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
 
 /* Финансовые отчёты: строки ОПиУ сверху вниз, по колонке на период или кабинет. */
 .fin-toolbar { align-items: flex-end; }

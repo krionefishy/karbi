@@ -11,7 +11,8 @@ from backend.modules.notifications.infrastructure.postgres import NotificationRe
 from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
 from backend.modules.platform.infrastructure.postgres import UserRepository
-from backend.modules.wb_box_stickers.application import BoxStickerService
+from backend.modules.wb_box_stickers.application import BoxStickerService, PackingService
+from backend.modules.wb_box_stickers.infrastructure.redis import PackingStore
 from backend.modules.wb_box_stickers.infrastructure.wb import WBSuppliesClient
 from backend.modules.wb_card_checklist.application import (
     ChecklistEnrollment,
@@ -419,9 +420,20 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
-    def box_sticker_service(self, sellers: SellerRepository, gateway: EgressGateway) -> BoxStickerService:
+    def packing_store(self, redis: RedisClient) -> PackingStore:
+        """Заполненные коробовки на месяц в Redis: между шагами одного дня, без своей схемы."""
+        return PackingStore(redis)
+
+    @provide(scope=Scope.REQUEST)
+    def box_sticker_service(
+        self, sellers: SellerRepository, gateway: EgressGateway, store: PackingStore
+    ) -> BoxStickerService:
         """Без своей базы: файлы пришли — PDF ушёл. Запросы к WB — от оператора, вне фоновой очереди."""
-        return BoxStickerService(sellers, WBSuppliesClient(gateway, priority="interactive"))
+        return BoxStickerService(sellers, WBSuppliesClient(gateway, priority="interactive"), store)
+
+    @provide(scope=Scope.REQUEST)
+    def packing_service(self, sellers: SellerRepository, gateway: EgressGateway, store: PackingStore) -> PackingService:
+        return PackingService(sellers, WBSuppliesClient(gateway, priority="interactive"), store)
 
     @provide(scope=Scope.REQUEST)
     def returns_repository(self, session: AsyncSession) -> ReturnsRepository:

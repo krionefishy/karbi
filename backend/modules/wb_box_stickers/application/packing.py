@@ -35,6 +35,9 @@ HEADER_SEARCH_ROWS = 10
 class PackingPlan:
     boxes: list[PackedBox]
     problems: list[str] = field(default_factory=list)
+    supply_id: int | None = None
+    seller_id: str | None = None
+    seller_name: str = ""
 
     @property
     def ready(self) -> bool:
@@ -59,7 +62,7 @@ def plan_packing(template: Sequence[WorkbookBox], assembly: Assembly) -> Packing
             f"В шаблоне {len(template)} коробов, а по таблице сборки нужно {needed}: {action} и скачайте шаблон заново"
         )
     if problems:
-        return PackingPlan(boxes=[], problems=problems)
+        return PackingPlan(boxes=[], problems=problems, supply_id=assembly.supply_id)
 
     boxes: list[PackedBox] = []
     slots = iter(template)
@@ -75,7 +78,7 @@ def plan_packing(template: Sequence[WorkbookBox], assembly: Assembly) -> Packing
                     quantity=quantity,
                 )
             )
-    return PackingPlan(boxes=boxes)
+    return PackingPlan(boxes=boxes, supply_id=assembly.supply_id)
 
 
 def fill_template(data: bytes, boxes: Sequence[PackedBox]) -> bytes:
@@ -137,5 +140,12 @@ def pack(template_data: bytes, assembly: Assembly) -> tuple[PackingPlan, bytes |
         if tuple((line.barcode, line.quantity) for line in written.get(shk, ())) != lines
     ]
     if wrong or list(written) != [box.shk for box in plan.boxes]:
-        return PackingPlan(boxes=plan.boxes, problems=["Записанный файл не прошёл проверку, отдавать его нельзя"]), None
+        return (
+            PackingPlan(
+                boxes=plan.boxes,
+                problems=["Записанный файл не прошёл проверку, отдавать его нельзя"],
+                supply_id=assembly.supply_id,
+            ),
+            None,
+        )
     return plan, data

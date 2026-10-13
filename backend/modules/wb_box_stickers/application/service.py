@@ -23,6 +23,7 @@ from backend.modules.wb_box_stickers.domain import (
     StickerPage,
     WorkbookBox,
 )
+from backend.modules.wb_box_stickers.infrastructure.redis import PackingStore
 from backend.modules.wb_box_stickers.infrastructure.wb import WBSuppliesClient
 from backend.modules.wb_core.domain import EGRESS_SERVABLE, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -77,10 +78,43 @@ def _same_name(left: str, right: str) -> bool:
     return bool(left and right) and norm(left) == norm(right)
 
 
+async def find_owner(
+    sellers: SellerRepository, supplies: WBSuppliesClient, supply_id: int, *, printed: str = ""
+) -> Seller | None:
+    """Кабинет поставки перебором: сначала тот, чьё имя напечатано на стикере, потом остальные.
+
+    На чужую поставку WB отвечает так же, как на ключ без категории, поэтому
+    отказ одного кабинета — нормальный ответ «не моя», а не ошибка.
+    """
+    candidates = [
+        seller
+        for seller in await sellers.list_sellers()
+        if seller.egress_status in EGRESS_SERVABLE and not seller.is_archived
+    ]
+    candidates.sort(key=lambda seller: not _same_name(seller.name, printed))
+    for seller in candidates:
+        if await supplies.owns(str(seller.id), supply_id):
+            return seller
+    return None
+
+
 class BoxStickerService:
-    def __init__(self, sellers: SellerRepository, supplies: WBSuppliesClient) -> None:
+    def __init__(
+        self, sellers: SellerRepository, supplies: WBSuppliesClient, store: PackingStore | None = None
+    ) -> None:
         self.sellers = sellers
         self.supplies = supplies
+        self.store = store
+
+    async def workbook_for(self, supply_id: int) -> bytes:
+        """Коробовка, которую мы сами заполнили для этой поставки, — чтобы не загружать её второй раз."""
+        stored = await self.store.load(supply_id) if self.store else None
+        if stored is None:
+            raise StickerInputError(
+                f"Коробовки поставки {supply_id} у нас нет: её заполняли не здесь или запись устарела — "
+                "загрузите Excel файлом"
+            )
+        return stored.workbook
 
     async def plan(self, workbook: bytes, stickers: bytes) -> StickerPlan:
         boxes = await asyncio.to_thread(read_workbook, workbook)
@@ -175,18 +209,8 @@ class BoxStickerService:
         )
 
     async def _owner(self, supply_id: int, pages: list[StickerPage]) -> Seller | None:
-        """Кабинет поставки: сначала тот, чьё имя напечатано на стикере, потом остальные."""
         printed = next((page.seller_name for page in pages if page.seller_name), "")
-        sellers = [
-            seller
-            for seller in await self.sellers.list_sellers()
-            if seller.egress_status in EGRESS_SERVABLE and not seller.is_archived
-        ]
-        sellers.sort(key=lambda seller: not _same_name(seller.name, printed))
-        for seller in sellers:
-            if await self.supplies.owns(str(seller.id), supply_id):
-                return seller
-        return None
+        return await find_owner(self.sellers, self.supplies, supply_id, printed=printed)
 
     def _check_contents(self, placed: list[tuple[WorkbookBox, StickerPage]], packages: dict[str, Package]) -> list[str]:
         problems: list[str] = []
@@ -254,4 +278,4 @@ def _describe(lines: Sequence[BoxLine]) -> str:
     return ", ".join(f"{barcode} × {quantity}" for barcode, quantity in _counts(lines).items())
 
 
-__all__ = ["BoxStickerService", "StickerBuildError", "StickerInputError", "StickerPlan"]
+__all__ = ["BoxStickerService", "StickerBuildError", "StickerInputError", "StickerPlan", "find_owner"]

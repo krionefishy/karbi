@@ -1,7 +1,7 @@
 import urllib.parse
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 
 from backend.app.http.authentication import CurrentPrincipal
 from backend.modules.wb_box_stickers.application import (
@@ -26,6 +26,18 @@ async def _read(upload: UploadFile, what: str) -> bytes:
     if not data:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{what} пустой")
     return data
+
+
+async def _workbook(service: BoxStickerService, workbook: UploadFile | None, supply_id: int | None) -> bytes:
+    """Excel файлом, как раньше, или по номеру поставки — коробовка, заполненная у нас."""
+    if workbook is not None and workbook.filename:
+        return await _read(workbook, "Excel")
+    if supply_id is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нужен Excel коробовки или номер поставки")
+    try:
+        return await service.workbook_for(supply_id)
+    except StickerInputError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
 
 
 def plan_response(plan: StickerPlan) -> PlanResponse:
@@ -62,12 +74,13 @@ def plan_response(plan: StickerPlan) -> PlanResponse:
 async def check_stickers(
     _: CurrentPrincipal,
     service: FromDishka[BoxStickerService],
-    workbook: UploadFile = File(...),
     stickers: UploadFile = File(...),
+    workbook: UploadFile | None = File(default=None),
+    supply_id: int | None = Form(default=None),
 ) -> PlanResponse:
     """Сопоставление без сборки: что куда встанет и что мешает."""
     try:
-        plan = await service.plan(await _read(workbook, "Excel"), await _read(stickers, "PDF"))
+        plan = await service.plan(await _workbook(service, workbook, supply_id), await _read(stickers, "PDF"))
     except StickerInputError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
     except WBPermanentError as error:
@@ -82,12 +95,13 @@ async def check_stickers(
 async def build_stickers(
     _: CurrentPrincipal,
     service: FromDishka[BoxStickerService],
-    workbook: UploadFile = File(...),
     stickers: UploadFile = File(...),
+    workbook: UploadFile | None = File(default=None),
+    supply_id: int | None = Form(default=None),
 ) -> Response:
     """PDF в порядке строк Excel; при любом расхождении — 422 со списком проблем."""
     try:
-        plan, data = await service.build(await _read(workbook, "Excel"), await _read(stickers, "PDF"))
+        plan, data = await service.build(await _workbook(service, workbook, supply_id), await _read(stickers, "PDF"))
     except StickerInputError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
     except StickerBuildError as error:

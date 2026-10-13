@@ -1,13 +1,26 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, ListChecks } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../api/http";
 import { Shell } from "../components/Shell";
-import { buildStickers, checkStickers } from "../features/boxStickers/api";
-import type { BoxStickerBox, BoxStickerPlan } from "../features/boxStickers/types";
+import {
+  buildPacking,
+  buildStickers,
+  checkPacking,
+  checkStickers,
+  fetchRecentPackings,
+} from "../features/boxStickers/api";
+import type {
+  BoxStickerBox,
+  BoxStickerPlan,
+  PackingPlan,
+  RecentPacking,
+  WorkbookSource,
+} from "../features/boxStickers/types";
 
 const AUTOMATION_TITLE = "Стикеры коробов";
+const MANUAL = "file";
 
 function shortShk(shk: string) {
   return shk.length === 7 ? `${shk.slice(0, 3)} ${shk.slice(3)}` : shk;
@@ -23,16 +36,212 @@ function contents(box: BoxStickerBox) {
     .join(", ");
 }
 
-export function BoxStickersPage() {
-  const [workbook, setWorkbook] = useState<File | null>(null);
+function savedWhen(iso: string) {
+  return new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function Problems({ title, problems }: { title: string; problems: string[] }) {
+  return (
+    <div className="inline-error">
+      <div>
+        <strong>{title}</strong>
+        <ul className="box-stickers-problems">
+          {problems.map((problem) => (
+            <li key={problem}>{problem}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function ErrorBanner({ error }: { error: string }) {
+  if (!error) return null;
+  return (
+    <div className="inline-error">
+      <div>
+        <strong>Не получилось</strong>
+        {error.split("\n").map((line) => (
+          <div key={line}>{line}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Шаг 1: коробовка из таблицы сборки — шаблон WB + вставленные строки → заполненный шаблон. */
+function PackingPanel({ onBuilt }: { onBuilt: (supplyId: number | null) => void }) {
+  const [template, setTemplate] = useState<File | null>(null);
+  const [assembly, setAssembly] = useState("");
+  const [plan, setPlan] = useState<PackingPlan | null>(null);
+  const [error, setError] = useState("");
+  const fail = (fallback: string) => (reason: unknown) =>
+    setError(reason instanceof ApiError ? reason.message : fallback);
+
+  const checkMutation = useMutation({
+    mutationFn: () => checkPacking(template as File, assembly),
+    onSuccess: (result) => {
+      setError("");
+      setPlan(result);
+    },
+    onError: fail("Не удалось разложить короба"),
+  });
+  const buildMutation = useMutation({
+    mutationFn: () => buildPacking(template as File, assembly),
+    onSuccess: ({ blob, filename }) => {
+      download(blob, filename ?? "packing.xlsx");
+      setError("");
+      onBuilt(plan?.supply_id ?? null);
+    },
+    onError: fail("Не удалось заполнить коробовку"),
+  });
+  const busy = checkMutation.isPending || buildMutation.isPending;
+  const filled = Boolean(template && assembly.trim());
+
+  return (
+    <section className="box-stickers-panel">
+      <h2 className="box-stickers-title">1. Заполнить коробовку из таблицы сборки</h2>
+      <ErrorBanner error={error} />
+      <ol className="returns-steps">
+        <li>
+          <span>
+            Шаблон коробовки из кабинета WB — скачанный сразу после создания коробов, с пустыми баркодами.
+          </span>
+          <label className="box-stickers-file">
+            <span className="field-label">Шаблон коробовки (.xlsx)</span>
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(event) => {
+                setTemplate(event.target.files?.[0] ?? null);
+                setPlan(null);
+                setError("");
+              }}
+              disabled={busy}
+            />
+          </label>
+        </li>
+        <li>
+          <span>
+            Строки этой поставки из таблицы сборки: выделите их в Google-таблице целиком, скопируйте и
+            вставьте сюда. Порядок строк станет порядком коробов.
+          </span>
+          <label className="box-stickers-file">
+            <span className="field-label">Строки поставки</span>
+            <textarea
+              className="box-stickers-text"
+              value={assembly}
+              onChange={(event) => {
+                setAssembly(event.target.value);
+                setPlan(null);
+                setError("");
+              }}
+              placeholder={"41498020\t1304218079\t2053998817899\t1-6\tЗарядное устройство\t290\t290\t290\t5-50+1-40"}
+              disabled={busy}
+              rows={6}
+              spellCheck={false}
+            />
+          </label>
+        </li>
+        <li>
+          <div className="box-stickers-actions">
+            <button className="secondary-button" disabled={!filled || busy} onClick={() => checkMutation.mutate()}>
+              <ListChecks size={15} />
+              {checkMutation.isPending ? "Раскладываем…" : "Проверить"}
+            </button>
+            <button
+              className="primary-button"
+              disabled={!filled || busy || (plan !== null && !plan.ready)}
+              onClick={() => buildMutation.mutate()}
+              title="Файл отдаётся, только если строки сошлись с шаблоном и с товарами поставки в WB"
+            >
+              <Download size={15} />
+              {buildMutation.isPending ? "Заполняем…" : "Скачать коробовку"}
+            </button>
+          </div>
+          <span className="muted">
+            Скачанный файл загрузите в кабинет WB и скачайте стикеры. Коробовку мы запомним: на шаге 2 её
+            загружать не нужно.
+          </span>
+        </li>
+      </ol>
+
+      {plan && (
+        <>
+          {plan.problems.length > 0 ? (
+            <Problems title="Коробовка не заполнится, пока не исправить" problems={plan.problems} />
+          ) : (
+            <div className="invite-banner">
+              <div>
+                <span className="eyebrow">Всё сходится</span>
+                Поставка {plan.supply_id}, {plan.seller_name}: {plan.boxes.length} коробов, баркоды и количество
+                совпали с поставкой в WB.
+              </div>
+            </div>
+          )}
+          {plan.boxes.length > 0 && (
+            <table className="registry-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>ШК короба</th>
+                  <th>Баркод</th>
+                  <th>Шт</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.boxes.map((box) => (
+                  <tr key={box.package_code}>
+                    <td>{box.position}</td>
+                    <td>
+                      <strong>{shortShk(box.shk)}</strong>
+                    </td>
+                    <td>{box.barcode}</td>
+                    <td>{box.quantity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** Шаг 2: стикеры по порядку — коробовка (по номеру поставки или файлом) + PDF стикеров → PDF. */
+function StickersPanel({
+  recent,
+  selected,
+  onSelect,
+}: {
+  recent: RecentPacking[];
+  selected: string;
+  onSelect: (value: string) => void;
+}) {
+  const [workbookFile, setWorkbookFile] = useState<File | null>(null);
   const [stickers, setStickers] = useState<File | null>(null);
   const [plan, setPlan] = useState<BoxStickerPlan | null>(null);
   const [error, setError] = useState("");
   const fail = (fallback: string) => (reason: unknown) =>
     setError(reason instanceof ApiError ? reason.message : fallback);
 
+  const source: WorkbookSource | null =
+    selected === MANUAL
+      ? workbookFile && { kind: "file", file: workbookFile }
+      : { kind: "supply", supplyId: Number(selected) };
+
   const checkMutation = useMutation({
-    mutationFn: () => checkStickers(workbook as File, stickers as File),
+    mutationFn: () => checkStickers(source as WorkbookSource, stickers as File),
     onSuccess: (result) => {
       setError("");
       setPlan(result);
@@ -40,26 +249,150 @@ export function BoxStickersPage() {
     onError: fail("Не удалось сверить файлы"),
   });
   const buildMutation = useMutation({
-    mutationFn: () => buildStickers(workbook as File, stickers as File),
+    mutationFn: () => buildStickers(source as WorkbookSource, stickers as File),
     onSuccess: ({ blob, filename }) => {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename ?? "box_stickers.pdf";
-      link.click();
-      URL.revokeObjectURL(url);
+      download(blob, filename ?? "box_stickers.pdf");
       setError("");
     },
     onError: fail("Не удалось собрать PDF"),
   });
-
-  const pick = (setter: (file: File | null) => void) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    setter(event.target.files?.[0] ?? null);
+  const reset = () => {
     setPlan(null);
     setError("");
   };
   const busy = checkMutation.isPending || buildMutation.isPending;
-  const bothFiles = Boolean(workbook && stickers);
+  const ready = Boolean(source && stickers);
+
+  return (
+    <section className="box-stickers-panel">
+      <h2 className="box-stickers-title">2. Разложить стикеры по порядку</h2>
+      <ErrorBanner error={error} />
+      <ol className="returns-steps">
+        <li>
+          <span>
+            Коробовка поставки: та, что заполнили на шаге 1, или Excel, который вы загрузили в WB сами.
+            Порядок её строк станет порядком стикеров.
+          </span>
+          <label className="box-stickers-file">
+            <span className="field-label">Коробовка</span>
+            <select
+              className="box-stickers-select"
+              value={selected}
+              onChange={(event) => {
+                onSelect(event.target.value);
+                reset();
+              }}
+              disabled={busy}
+            >
+              {recent.map((item) => (
+                <option key={item.supply_id} value={String(item.supply_id)}>
+                  Поставка {item.supply_id} · {item.seller_name} · {item.boxes} коробов · {savedWhen(item.saved_at)}
+                </option>
+              ))}
+              <option value={MANUAL}>Загрузить Excel файлом</option>
+            </select>
+          </label>
+          {selected === MANUAL && (
+            <label className="box-stickers-file">
+              <span className="field-label">Excel коробовки (.xlsx)</span>
+              <input
+                type="file"
+                accept=".xlsx"
+                onChange={(event) => {
+                  setWorkbookFile(event.target.files?.[0] ?? null);
+                  reset();
+                }}
+                disabled={busy}
+              />
+            </label>
+          )}
+        </li>
+        <li>
+          <span>PDF со стикерами коробов, скачанный в кабинете WB по этой же поставке.</span>
+          <label className="box-stickers-file">
+            <span className="field-label">PDF стикеров</span>
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              onChange={(event) => {
+                setStickers(event.target.files?.[0] ?? null);
+                reset();
+              }}
+              disabled={busy}
+            />
+          </label>
+        </li>
+        <li>
+          <div className="box-stickers-actions">
+            <button className="secondary-button" disabled={!ready || busy} onClick={() => checkMutation.mutate()}>
+              <ListChecks size={15} />
+              {checkMutation.isPending ? "Сверяем…" : "Проверить"}
+            </button>
+            <button
+              className="primary-button"
+              disabled={!ready || busy || (plan !== null && !plan.ready)}
+              onClick={() => buildMutation.mutate()}
+              title="Файл отдаётся, только если каждый стикер сошёлся с Excel и данными WB"
+            >
+              <Download size={15} />
+              {buildMutation.isPending ? "Собираем…" : "Скачать PDF"}
+            </button>
+          </div>
+        </li>
+      </ol>
+
+      {plan && (
+        <>
+          {plan.problems.length > 0 ? (
+            <Problems title="PDF не соберётся, пока не исправить" problems={plan.problems} />
+          ) : (
+            <div className="invite-banner">
+              <div>
+                <span className="eyebrow">Всё сходится</span>
+                Поставка {plan.supply_id}, {plan.seller_name}: {plan.boxes.length} коробов, каждый стикер совпал с
+                Excel и данными WB.
+              </div>
+            </div>
+          )}
+          {plan.boxes.length > 0 && (
+            <table className="registry-table">
+              <thead>
+                <tr>
+                  <th>№</th>
+                  <th>ШК короба</th>
+                  <th>Содержимое</th>
+                  <th>Шт</th>
+                  <th>Стр. в PDF WB</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.boxes.map((box) => (
+                  <tr key={box.package_code}>
+                    <td>{box.position}</td>
+                    <td>
+                      <strong>{shortShk(box.shk)}</strong>
+                    </td>
+                    <td>{contents(box) || "—"}</td>
+                    <td>{box.quantity}</td>
+                    <td className="muted">{box.page}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+export function BoxStickersPage() {
+  const queryClient = useQueryClient();
+  const recentQuery = useQuery({ queryKey: ["box-stickers", "recent"], queryFn: fetchRecentPackings });
+  const recent = recentQuery.data ?? [];
+  // Пока менеджер не выбрал сам, подставляется последняя заполненная коробовка.
+  const [chosen, setChosen] = useState<string | null>(null);
+  const selected = chosen ?? (recent[0] ? String(recent[0].supply_id) : MANUAL);
 
   return (
     <Shell current={AUTOMATION_TITLE}>
@@ -68,116 +401,19 @@ export function BoxStickersPage() {
           <div>
             <h1>{AUTOMATION_TITLE}</h1>
             <p className="muted">
-              Стикеры коробов FBO-поставки в порядке строк вашего Excel коробовки — чтобы клеить подряд, не
-              сверяя каждый короб.
+              Коробовка FBO-поставки заполняется из таблицы сборки, а стикеры коробов раскладываются в её
+              порядке — чтобы клеить подряд, не сверяя каждый короб.
             </p>
           </div>
         </div>
 
-        {error && (
-          <div className="inline-error">
-            <div>
-              <strong>Не получилось</strong>
-              {error.split("\n").map((line) => (
-                <div key={line}>{line}</div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <section className="box-stickers-panel">
-          <ol className="returns-steps">
-            <li>
-              <span>
-                Excel коробовки — тот, что вы заполнили и загрузили в WB. Порядок его строк станет порядком
-                стикеров.
-              </span>
-              <label className="box-stickers-file">
-                <span className="field-label">Excel коробовки (.xlsx)</span>
-                <input type="file" accept=".xlsx" onChange={pick(setWorkbook)} disabled={busy} />
-              </label>
-            </li>
-            <li>
-              <span>PDF со стикерами коробов, скачанный в кабинете WB по этой же поставке.</span>
-              <label className="box-stickers-file">
-                <span className="field-label">PDF стикеров</span>
-                <input type="file" accept=".pdf,application/pdf" onChange={pick(setStickers)} disabled={busy} />
-              </label>
-            </li>
-            <li>
-              <div className="box-stickers-actions">
-                <button
-                  className="secondary-button"
-                  disabled={!bothFiles || busy}
-                  onClick={() => checkMutation.mutate()}
-                >
-                  <ListChecks size={15} />
-                  {checkMutation.isPending ? "Сверяем…" : "Проверить"}
-                </button>
-                <button
-                  className="primary-button"
-                  disabled={!bothFiles || busy || (plan !== null && !plan.ready)}
-                  onClick={() => buildMutation.mutate()}
-                  title="Файл отдаётся, только если каждый стикер сошёлся с Excel и данными WB"
-                >
-                  <Download size={15} />
-                  {buildMutation.isPending ? "Собираем…" : "Скачать PDF"}
-                </button>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        {plan && (
-          <>
-            {plan.problems.length > 0 ? (
-              <div className="inline-error">
-                <div>
-                  <strong>PDF не соберётся, пока не исправить</strong>
-                  <ul className="box-stickers-problems">
-                    {plan.problems.map((problem) => (
-                      <li key={problem}>{problem}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            ) : (
-              <div className="invite-banner">
-                <div>
-                  <span className="eyebrow">Всё сходится</span>
-                  Поставка {plan.supply_id}, {plan.seller_name}: {plan.boxes.length} коробов, каждый стикер совпал с
-                  Excel и данными WB.
-                </div>
-              </div>
-            )}
-            {plan.boxes.length > 0 && (
-              <table className="registry-table">
-                <thead>
-                  <tr>
-                    <th>№</th>
-                    <th>ШК короба</th>
-                    <th>Содержимое</th>
-                    <th>Шт</th>
-                    <th>Стр. в PDF WB</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {plan.boxes.map((box) => (
-                    <tr key={box.package_code}>
-                      <td>{box.position}</td>
-                      <td>
-                        <strong>{shortShk(box.shk)}</strong>
-                      </td>
-                      <td>{contents(box) || "—"}</td>
-                      <td>{box.quantity}</td>
-                      <td className="muted">{box.page}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
-        )}
+        <PackingPanel
+          onBuilt={(supplyId) => {
+            void queryClient.invalidateQueries({ queryKey: ["box-stickers", "recent"] });
+            if (supplyId) setChosen(String(supplyId));
+          }}
+        />
+        <StickersPanel recent={recent} selected={selected} onSelect={setChosen} />
       </main>
     </Shell>
   );

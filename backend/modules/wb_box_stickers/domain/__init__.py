@@ -8,6 +8,8 @@ from backend.modules.wb_box_stickers.domain.entities import (
     PackedBox,
     StickerInputError,
     StickerPage,
+    StoredPacking,
+    SupplyGood,
     WorkbookBox,
 )
 
@@ -21,5 +23,7 @@ __all__ = [
     "Package",
     "StickerInputError",
     "StickerPage",
+    "StoredPacking",
+    "SupplyGood",
     "WorkbookBox",
 ]

@@ -8,6 +8,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 
 
 class StickerInputError(Exception):
@@ -109,3 +110,26 @@ class PackedBox:
     package_code: str
     barcode: str
     quantity: int
+
+
+@dataclass(frozen=True, slots=True)
+class SupplyGood:
+    """Товар поставки по данным WB: что заявлено к отгрузке и сколько."""
+
+    barcode: str
+    quantity: int
+    vendor_code: str
+    tech_size: str
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPacking:
+    """Коробовка, которую мы заполнили и отдали: помнится под номером поставки,
+    чтобы на шаге стикеров Excel не загружали второй раз."""
+
+    supply_id: int
+    seller_id: str
+    seller_name: str
+    boxes: int
+    workbook: bytes
+    saved_at: datetime

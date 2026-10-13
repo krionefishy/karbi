@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -24,3 +26,27 @@ class PlanResponse(BaseModel):
     ready: bool
     problems: list[str]
     boxes: list[BoxResponse]
+
+
+class PackedBoxResponse(BaseModel):
+    position: int
+    shk: str
+    package_code: str
+    barcode: str
+    quantity: int
+
+
+class PackingPlanResponse(BaseModel):
+    supply_id: int | None
+    seller_id: str | None
+    seller_name: str
+    ready: bool
+    problems: list[str]
+    boxes: list[PackedBoxResponse]
+
+
+class RecentPackingResponse(BaseModel):
+    supply_id: int
+    seller_name: str
+    boxes: int
+    saved_at: datetime
