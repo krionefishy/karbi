@@ -4,7 +4,7 @@
  * `exhausted` — рассылка отработала без ответа; `closed` — закрыт вручную.
  */
 export type DialogState = "no_reply" | "awaiting_us" | "awaiting_buyer" | "in_campaign" | "exhausted" | "closed";
-export type BotMode = "dry_run" | "live";
+export type BotMode = "dry_run" | "canary" | "live";
 export type DialogFlag = "no_contact" | "attention" | "excluded";
 export type SendStatus = "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";
 
@@ -25,6 +25,8 @@ export interface SupportBot {
   templates: Template[];
   mirror_error: string | null;
   mirror_read_through: string | null;
+  /** Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения. */
+  canary_percent: number;
 }
 
 export interface BotDialog {

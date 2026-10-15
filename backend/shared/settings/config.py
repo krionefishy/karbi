@@ -370,16 +370,22 @@ class SupportBotConfig:
     # Сколько дней длится рассылка по одному диалогу и сколько раз её можно запускать.
     campaign_days: int = 5
     max_campaigns: int = 1
-    # Потолок сообщений в сутки на кабинет и пауза между отправками.
-    daily_cap_per_seller: int = 400
+    # Потолок сообщений в сутки на кабинет и пауза между отправками. Лимит WB на чаты —
+    # 10 запросов за 10 секунд, то есть до 8 640 в сутки.
+    daily_cap_per_seller: int = 2500
     min_gap_seconds: int = 3
     # Как часто воркер проходит по кабинетам и сколько сообщений уходит кабинету за проход.
     tick_minutes: int = 10
-    batch_per_tick: int = 20
+    batch_per_tick: int = 40
     # Диалоги старше этого не разбираются: кампания и тишина давно закончились.
     history_days: int = 12
     # Зеркало чатов старше этого считается устаревшим, и бот не пишет.
     mirror_stale_minutes: int = 90
+    # Кампанию не начинаем, если наша сторона ответила покупателю давно: после простоя или
+    # при первом включении бот не должен писать тем, с кем разговор закончился дни назад.
+    max_idle_days: int = 2
+    # В режиме «канарейка» живая отправка идёт только по этому проценту диалогов.
+    canary_percent: int = 10
     # Шаблон ссылки на чат в кабинете WB: `{chat_id}` — uuid чата без префикса `1:`.
     # Пусто — ссылку не строим.
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
@@ -822,6 +828,10 @@ class Settings:
             or bot.min_gap_seconds < 0
         ):
             raise ValueError("support_bot.* limits must be positive")
+        if not 1 <= bot.canary_percent <= 100:
+            raise ValueError("support_bot.canary_percent must be between 1 and 100")
+        if bot.max_idle_days < 1:
+            raise ValueError("support_bot.max_idle_days must be positive")
         if bot.history_days <= bot.campaign_days:
             raise ValueError("support_bot.history_days must exceed campaign_days")
         penalties = self.fbs_penalties

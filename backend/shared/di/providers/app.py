@@ -394,10 +394,10 @@ class SessionProvider(Provider):
 
     @provide(scope=Scope.REQUEST)
     def support_bot_service(
-        self, session: AsyncSession, sellers: SellerRepository, repository: SupportBotRepository
+        self, session: AsyncSession, sellers: SellerRepository, repository: SupportBotRepository, settings: Settings
     ) -> SupportBotService:
         """Своего сбора нет: чаты берутся из зеркала wb_core, а отправляет воркер бота."""
-        return SupportBotService(session, sellers, repository)
+        return SupportBotService(session, sellers, repository, canary_percent=settings.support_bot.canary_percent)
 
     @provide(scope=Scope.REQUEST)
     def review_chats_service(

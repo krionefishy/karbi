@@ -9,6 +9,7 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_support_bot.domain import DialogState
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
+    MODE_CANARY,
     MODE_DRY_RUN,
     MODE_LIVE,
     DialogKey,
@@ -19,7 +20,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
 )
 
 MAX_TEMPLATE_LENGTH = 1000
-MODES = (MODE_DRY_RUN, MODE_LIVE)
+MODES = (MODE_DRY_RUN, MODE_CANARY, MODE_LIVE)
 
 
 class NotEnrolledError(Exception):
@@ -58,6 +59,7 @@ class SellerBotView:
     mirror_error: str | None
     mirror_read_through: datetime | None
     dry_run: bool
+    canary_percent: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +88,15 @@ class DialogPage:
 class SupportBotService:
     """Что бот показывает оператору и что оператор ему может поручить."""
 
-    def __init__(self, session: AsyncSession, sellers: SellerRepository, repository: SupportBotRepository) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        repository: SupportBotRepository,
+        *,
+        canary_percent: int = 10,
+    ) -> None:
+        self.canary_percent = canary_percent
         self.session = session
         self.sellers = sellers
         self.repository = repository
@@ -133,6 +143,7 @@ class SupportBotService:
             mirror_error=state.error if state else None,
             mirror_read_through=state.read_through if state else None,
             dry_run=tracked.mode == MODE_DRY_RUN,
+            canary_percent=self.canary_percent,
         )
 
     async def dialogs(

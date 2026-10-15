@@ -1,4 +1,5 @@
 from backend.modules.wb_support_bot.infrastructure.postgres.models import (
+    MODE_CANARY,
     MODE_DRY_RUN,
     MODE_LIVE,
     SEND_DRY_RUN,
@@ -24,6 +25,7 @@ __all__ = [
     "JOURNAL_STATUSES",
     "DialogKey",
     "SupportBotRepository",
+    "MODE_CANARY",
     "MODE_DRY_RUN",
     "MODE_LIVE",
     "SEND_DRY_RUN",

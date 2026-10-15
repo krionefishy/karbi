@@ -11,6 +11,11 @@ describe("supportBot format", () => {
     expect(statusLine({ ...base, paused_reason: "ключ", globally_paused: true })).toMatch(/общим выключателем/);
   });
 
+  it("канарейка называет долю диалогов", () => {
+    const line = statusLine({ mode: "canary", paused_reason: null, globally_paused: false, canary_percent: 10 });
+    expect(line).toMatch(/10% диалогов/);
+  });
+
   it("сумма диалогов не падает на пустой сводке", () => {
     expect(totalDialogs({ counts: {} })).toBe(0);
     expect(totalDialogs({ counts: { in_campaign: 3, awaiting_us: 2 } })).toBe(5);

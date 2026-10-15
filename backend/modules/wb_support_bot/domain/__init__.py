@@ -1,3 +1,4 @@
+from backend.modules.wb_support_bot.domain.canary import canary_bucket, in_canary
 from backend.modules.wb_support_bot.domain.dialog import (
     CampaignRules,
     DialogState,
@@ -19,8 +20,10 @@ __all__ = [
     "SendWindow",
     "SentMessage",
     "StopMatch",
+    "canary_bucket",
     "chat_url",
     "first_send_at",
+    "in_canary",
     "match",
     "next_send_at",
     "project_dialog",

@@ -11,6 +11,7 @@ class WBSupportBotBase(DeclarativeBase):
 
 
 MODE_DRY_RUN = "dry_run"
+MODE_CANARY = "canary"
 MODE_LIVE = "live"
 
 
@@ -122,6 +123,7 @@ class SendModel(WBSupportBotBase):
 
 
 __all__ = [
+    "MODE_CANARY",
     "MODE_DRY_RUN",
     "MODE_LIVE",
     "SEND_DRY_RUN",

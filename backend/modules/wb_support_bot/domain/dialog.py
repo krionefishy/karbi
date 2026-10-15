@@ -55,6 +55,8 @@ class CampaignRules:
     silence: timedelta = timedelta(hours=4)
     duration: timedelta = timedelta(days=5)
     max_campaigns: int = 1
+    # Не начинать кампанию, если нашей стороне ответили давно; None — без ограничения.
+    max_idle: timedelta | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +129,8 @@ def project_dialog(
         if now - campaign_started_at >= rules.duration:
             return result(DialogState.EXHAUSTED)
         return result(DialogState.IN_CAMPAIGN)
-    if now - our_last >= rules.silence and campaigns_count < rules.max_campaigns:
+    idle = now - our_last
+    fresh_enough = rules.max_idle is None or idle <= rules.max_idle
+    if idle >= rules.silence and fresh_enough and campaigns_count < rules.max_campaigns:
         return result(DialogState.IN_CAMPAIGN, start=True)
     return result(DialogState.AWAITING_BUYER)

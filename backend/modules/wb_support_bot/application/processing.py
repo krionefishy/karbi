@@ -25,10 +25,12 @@ from backend.modules.wb_support_bot.domain import (
     SendWindow,
     SentMessage,
     first_send_at,
+    in_canary,
     next_send_at,
     project_dialog,
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
+    MODE_CANARY,
     MODE_LIVE,
     SEND_DRY_RUN,
     SEND_FAILED,
@@ -58,6 +60,8 @@ class BotPolicy:
     batch: int = 20
     history: timedelta = timedelta(days=12)
     mirror_stale: timedelta = timedelta(minutes=90)
+    # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
+    canary_percent: int = 10
 
 
 @dataclass(slots=True)
@@ -165,7 +169,7 @@ class SupportBotProcessor:
         if not self.policy.window.contains(now):
             report.skipped = "вне окна рассылки"
             return report
-        await self._send_due(seller_id, tracked.mode == MODE_LIVE, segments, now, report)
+        await self._send_due(seller_id, tracked.mode, segments, now, report)
         return report
 
     # --- проекция ---------------------------------------------------------------
@@ -259,7 +263,7 @@ class SupportBotProcessor:
     # --- отправка ---------------------------------------------------------------
 
     async def _send_due(
-        self, seller_id: uuid.UUID, live: bool, segments: list[_Segment], now: datetime, report: SellerReport
+        self, seller_id: uuid.UUID, mode: str, segments: list[_Segment], now: datetime, report: SellerReport
     ) -> None:
         local_midnight = now.astimezone(self.policy.window.timezone).replace(hour=0, minute=0, second=0, microsecond=0)
         spent = await self.repository.sent_today(seller_id, local_midnight.astimezone(UTC))
@@ -282,6 +286,7 @@ class SupportBotProcessor:
                 if event.reply_sign:
                     signs[segment.chat_id] = event.reply_sign
         for dialog in due:
+            live = self._is_live(mode, dialog)
             text_model = self._pick_template(templates, await self._last_template(dialog))
             sends = await self.repository.dialog_sends(_key(dialog))
             seq = (max((send.seq for send in sends), default=0)) + 1
@@ -336,6 +341,14 @@ class SupportBotProcessor:
                 report.sent += 1
             await self.repository.session.commit()
             await self.sleep(self.policy.min_gap.total_seconds())
+
+    def _is_live(self, mode: str, dialog: DialogModel) -> bool:
+        """Уйдёт ли по диалогу настоящее сообщение: весь кабинет в live либо диалог попал в канарейку."""
+        if mode == MODE_LIVE:
+            return True
+        if mode == MODE_CANARY:
+            return in_canary(dialog.chat_id, dialog.prompt_at, self.policy.canary_percent)
+        return False
 
     def _mark_sent(self, dialog: DialogModel, now: datetime) -> None:
         dialog.sent_count += 1

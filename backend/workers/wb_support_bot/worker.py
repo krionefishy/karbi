@@ -34,12 +34,14 @@ def policy_from(settings: Settings) -> BotPolicy:
             silence=timedelta(hours=config.silence_hours),
             duration=timedelta(days=config.campaign_days),
             max_campaigns=config.max_campaigns,
+            max_idle=timedelta(days=config.max_idle_days),
         ),
         daily_cap=config.daily_cap_per_seller,
         min_gap=timedelta(seconds=config.min_gap_seconds),
         batch=config.batch_per_tick,
         history=timedelta(days=config.history_days),
         mirror_stale=timedelta(minutes=config.mirror_stale_minutes),
+        canary_percent=config.canary_percent,
     )
 
 

@@ -317,3 +317,65 @@ async def test_a_new_seller_starts_in_dry_run(database: Database, seller: uuid.U
     async with database.session() as session:
         tracked = await SupportBotRepository(session).tracked(seller)
         assert tracked is not None and tracked.mode == mode
+
+
+def chat_feed(count: int) -> list[ChatEvent]:
+    """`count` одинаковых диалогов в разных чатах: покупатель ответил, специалист ответил, тишина вышла."""
+    feed_events: list[ChatEvent] = []
+    for number in range(count):
+        chat = f"1:canary-{number}"
+        for minutes, kind, text in (
+            (0, "prompt", "Здравствуйте. Вы оставили отзыв с низкой оценкой"),
+            (30, "buyer", "."),
+            (60, "specialist", "Опишите проблему"),
+        ):
+            base = event(minutes, kind, text)
+            feed_events.append(
+                ChatEvent(
+                    event_id=f"{base.event_id}-{number}",
+                    chat_id=chat,
+                    sender=base.sender,
+                    source=base.source,
+                    added_at=base.added_at,
+                    is_new_chat=base.is_new_chat,
+                    review_prompt=base.review_prompt,
+                    nm_id=None,
+                    rid=None,
+                    text=base.text,
+                    has_attachments=False,
+                    reply_sign=f"1:sign-{number}",
+                )
+            )
+    return feed_events
+
+
+async def test_canary_sends_only_to_its_share_and_dry_runs_the_rest(database: Database, seller: uuid.UUID) -> None:
+    from backend.modules.wb_support_bot.domain import in_canary
+    from backend.modules.wb_support_bot.infrastructure.postgres import MODE_CANARY
+
+    async with database.session() as session:
+        await SupportBotRepository(session).set_mode(seller, MODE_CANARY)
+        await session.commit()
+    total = 60
+    await feed(database, seller, chat_feed(total), read_at=NOW)
+    sender = FakeSender()
+    async with database.session() as session:
+        processor = SupportBotProcessor(
+            SupportBotRepository(session),
+            ChatMirror(session),
+            sender,
+            BotPolicy(batch=200, canary_percent=10),
+            rng=random.Random(1),
+            sleep=no_sleep,
+        )
+        report = await processor.process_seller(seller, now=NOW)
+
+    expected = {f"1:canary-{n}" for n in range(total) if in_canary(f"1:canary-{n}", PROMPT_AT, 10)}
+    # диалог относится к канарейке по времени автосообщения: оно у всех одинаковое
+    assert report.sent == len(expected) and report.dry_run == total - len(expected)
+    assert len(sender.calls) == len(expected)
+    assert 0 < len(expected) < total // 2
+    rows = await sends(database, seller)
+    live_chats = {row.chat_id for row in rows if row.status == SEND_SENT}
+    dry_chats = {row.chat_id for row in rows if row.status == SEND_DRY_RUN}
+    assert live_chats == expected and live_chats.isdisjoint(dry_chats)

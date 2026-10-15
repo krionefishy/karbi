@@ -29,7 +29,7 @@ import {
   statusLine,
   totalDialogs,
 } from "../features/supportBot/format";
-import type { BotDialog, DialogFilter, DialogFlag, DialogState, JournalFilter } from "../features/supportBot/types";
+import type { BotDialog, BotMode, DialogFilter, DialogFlag, DialogState, JournalFilter } from "../features/supportBot/types";
 import {
   attachSeller,
   detachSeller,
@@ -44,6 +44,12 @@ const AUTOMATION_TITLE = "Бот поддержки в чатах";
 
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 const stamp = (value: string | null) => (value ? momentFormatter.format(new Date(value)) : "—");
+
+const MODE_OPTIONS: { value: BotMode; label: string }[] = [
+  { value: "dry_run", label: "Сухой прогон" },
+  { value: "canary", label: "Канарейка" },
+  { value: "live", label: "Вся рассылка" },
+];
 
 const FLAG_OPTIONS: { value: DialogFlag | ""; label: string }[] = [
   { value: "", label: "Любые флаги" },
@@ -65,7 +71,7 @@ export function SupportBotPage() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter>({ status: "", page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
-  const [liveConfirm, setLiveConfirm] = useState(false);
+  const [pendingMode, setPendingMode] = useState<"canary" | "live" | null>(null);
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -135,9 +141,9 @@ export function SupportBotPage() {
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refreshSellers });
   const modeMutation = useMutation({
-    mutationFn: (mode: "dry_run" | "live") => setMode(sellerId, mode),
+    mutationFn: (mode: BotMode) => setMode(sellerId, mode),
     onSuccess: async () => {
-      setLiveConfirm(false);
+      setPendingMode(null);
       setActionError("");
       await refresh();
     },
@@ -185,7 +191,7 @@ export function SupportBotPage() {
   const view = bot.data;
   const page = dialogs.data;
   const changeFilter = (patch: Partial<DialogFilter>) => setFilter({ ...filter, ...patch, page: 1 });
-  const live = view?.mode === "live";
+  const hasActiveText = (view?.templates ?? []).some((item) => item.active);
 
   return (
     <Shell
@@ -261,24 +267,29 @@ export function SupportBotPage() {
             <div className="checklist-notice" role="status">
               <strong>{MODE_LABEL[view.mode]}.</strong> {statusLine(view)}
               {view.mirror_read_through && <> · чаты прочитаны {stamp(view.mirror_read_through)}</>}{" "}
-              {live ? (
-                <button className="secondary-button" onClick={() => modeMutation.mutate("dry_run")}>
-                  Вернуть сухой прогон
-                </button>
-              ) : (
-                <button
-                  className="primary-button"
-                  disabled={view.templates.filter((item) => item.active).length === 0}
-                  title={
-                    view.templates.some((item) => item.active)
-                      ? undefined
-                      : "Сначала добавьте хотя бы один активный текст"
-                  }
-                  onClick={() => setLiveConfirm(true)}
-                >
-                  Включить отправку
-                </button>
-              )}
+              <span className="bot-actions" role="group" aria-label="Режим кабинета" style={{ marginLeft: 8 }}>
+                {MODE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={view.mode === option.value ? "primary-button" : "secondary-button"}
+                    aria-pressed={view.mode === option.value}
+                    disabled={
+                      view.mode !== option.value &&
+                      option.value !== "dry_run" &&
+                      view.templates.filter((item) => item.active).length === 0
+                    }
+                    title={option.value !== "dry_run" && !hasActiveText ? "Сначала добавьте активный текст" : undefined}
+                    onClick={() => {
+                      if (view.mode === option.value) return;
+                      if (option.value === "dry_run") modeMutation.mutate("dry_run");
+                      else setPendingMode(option.value);
+                    }}
+                  >
+                    {option.value === "canary" ? `Канарейка ${view.canary_percent}%` : option.label}
+                  </button>
+                ))}
+              </span>
             </div>
 
             <div className="chats-summary" aria-label="Диалоги по состояниям">
@@ -447,15 +458,19 @@ export function SupportBotPage() {
           onConfirm={() => detachMutation.mutate(detaching)}
         />
       )}
-      {liveConfirm && (
+      {pendingMode && (
         <ConfirmDialog
-          title="Включить отправку?"
-          description="Бот начнёт писать покупателям этого кабинета по расписанию: окно 9:00–22:00 по Москве, около 12 сообщений в сутки на диалог. Вернуть сухой прогон можно в любой момент."
+          title={pendingMode === "canary" ? "Включить канарейку?" : "Включить отправку по всем диалогам?"}
+          description={
+            pendingMode === "canary"
+              ? `Настоящие сообщения начнут уходить покупателям примерно ${view?.canary_percent ?? 10}% диалогов этого кабинета: окно 9:00–22:00 по Москве. По остальным диалогам останется сухой прогон. Вернуть сухой прогон можно в любой момент.`
+              : "Бот начнёт писать покупателям всех диалогов этого кабинета по расписанию: окно 9:00–22:00 по Москве, около 12 сообщений в сутки на диалог. Вернуть сухой прогон можно в любой момент."
+          }
           confirmLabel="Включить"
           pendingLabel="Включаем…"
           pending={modeMutation.isPending}
-          onClose={() => setLiveConfirm(false)}
-          onConfirm={() => modeMutation.mutate("live")}
+          onClose={() => setPendingMode(null)}
+          onConfirm={() => modeMutation.mutate(pendingMode)}
         />
       )}
     </Shell>
