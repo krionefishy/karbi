@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -109,6 +109,27 @@ class SupportBotRepository:
             select(DialogModel).where(DialogModel.seller_id == seller_id, DialogModel.prompt_at >= since)
         )
         return {(row.chat_id, row.prompt_at): row for row in rows}
+
+    async def retire_out_of_window(self, seller_id: uuid.UUID, before: datetime) -> int:
+        """Диалоги старше окна разбора больше не пересчитываются: рассылку по ним снимаем.
+
+        Без этого диалог, вышедший за окно посреди кампании, навсегда оставался бы
+        «идёт рассылка» в сводке, хотя ничего не отправляется.
+        """
+        result = await self.session.execute(
+            update(DialogModel)
+            .where(
+                DialogModel.seller_id == seller_id,
+                DialogModel.prompt_at < before,
+                DialogModel.state == "in_campaign",
+            )
+            .values(
+                state=case((DialogModel.campaign_started_at.is_not(None), "exhausted"), else_="awaiting_buyer"),
+                next_send_at=None,
+                updated_at=func.now(),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def get_dialog(self, key: DialogKey) -> DialogModel | None:
         return await self.session.get(DialogModel, (key.seller_id, key.chat_id, key.prompt_at))

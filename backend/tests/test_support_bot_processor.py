@@ -379,3 +379,34 @@ async def test_canary_sends_only_to_its_share_and_dry_runs_the_rest(database: Da
     live_chats = {row.chat_id for row in rows if row.status == SEND_SENT}
     dry_chats = {row.chat_id for row in rows if row.status == SEND_DRY_RUN}
     assert live_chats == expected and live_chats.isdisjoint(dry_chats)
+
+
+async def test_a_dialog_that_left_the_history_window_is_taken_out_of_the_campaign(
+    database: Database, seller: uuid.UUID
+) -> None:
+    old_prompt = NOW - timedelta(days=20)
+    async with database.session() as session:
+        session.add(
+            DialogModel(
+                seller_id=seller,
+                chat_id="1:old",
+                prompt_at=old_prompt,
+                state="in_campaign",
+                campaign_started_at=old_prompt + timedelta(days=1),
+                campaigns_count=1,
+                next_send_at=NOW,
+            )
+        )
+        session.add(DialogModel(seller_id=seller, chat_id="1:old2", prompt_at=old_prompt, state="in_campaign"))
+        await session.commit()
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+
+    await run(database, seller, FakeSender())
+
+    async with database.session() as session:
+        rows = {
+            row.chat_id: row
+            for row in await session.scalars(select(DialogModel).where(DialogModel.seller_id == seller))
+        }
+    assert rows["1:old"].state == "exhausted" and rows["1:old"].next_send_at is None
+    assert rows["1:old2"].state == "awaiting_buyer"

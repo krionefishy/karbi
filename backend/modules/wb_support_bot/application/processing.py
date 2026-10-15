@@ -154,6 +154,7 @@ class SupportBotProcessor:
             model = await self._project(seller_id, segment, model, record, now, report)
             models[key] = model
             report.dialogs += 1
+        await self.repository.retire_out_of_window(seller_id, since)
         await self.repository.session.commit()
 
         await self._reconcile(seller_id, segments, now)
