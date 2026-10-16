@@ -114,3 +114,7 @@ returns:
   pairing_ttl_minutes: 15
   code_alert_hour: 1
   install_silent_hours: 24
+
+support_bot:
+  # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
+  canary_percent: ${SUPPORT_BOT_CANARY_PERCENT:-30}
