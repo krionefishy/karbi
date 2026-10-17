@@ -410,3 +410,51 @@ async def test_a_dialog_that_left_the_history_window_is_taken_out_of_the_campaig
         }
     assert rows["1:old"].state == "exhausted" and rows["1:old"].next_send_at is None
     assert rows["1:old2"].state == "awaiting_buyer"
+
+
+async def test_dialogs_of_removed_products_are_not_written_to(database: Database, seller: uuid.UUID) -> None:
+    from backend.modules.wb_core.application import CatalogMirror
+    from backend.modules.wb_core.infrastructure.postgres.models import ArticleModel
+
+    async with database.session() as session:
+        for article, state in (("1304195061", "archived"), ("999", "active")):
+            session.add(ArticleModel(seller_id=seller, article=article, name="Товар", state=state))
+        await session.commit()
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    async with database.session() as session:
+        processor = SupportBotProcessor(
+            SupportBotRepository(session),
+            ChatMirror(session),
+            sender,
+            BotPolicy(),
+            catalog=CatalogMirror(session),
+            rng=random.Random(1),
+            sleep=no_sleep,
+        )
+        await processor.process_seller(seller, now=NOW)
+
+    assert sender.calls == []
+    assert (await dialog(database, seller)).state == "product_removed"
+
+
+async def test_an_empty_catalog_does_not_mean_every_product_is_removed(database: Database, seller: uuid.UUID) -> None:
+    from backend.modules.wb_core.application import CatalogMirror
+
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    async with database.session() as session:
+        processor = SupportBotProcessor(
+            SupportBotRepository(session),
+            ChatMirror(session),
+            sender,
+            BotPolicy(),
+            catalog=CatalogMirror(session),
+            rng=random.Random(1),
+            sleep=no_sleep,
+        )
+        await processor.process_seller(seller, now=NOW)
+
+    assert len(sender.calls) == 1

@@ -51,6 +51,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     AdvertCursorModel,
     AdvertNmStatModel,
     AdvertSpendModel,
+    ArticleModel,
     ChatCursorModel,
     ChatEventModel,
     FbsOrderArchiveMonthModel,
@@ -635,6 +636,28 @@ class MirrorRepository:
                 reply.sender == CHAT_SENDER_SELLER,
                 reply.source == CHAT_SOURCE_API,
             )
+        )
+
+    async def article_states(self, seller_id: uuid.UUID, articles: Iterable[str]) -> dict[str, str]:
+        """Статус только запрошенных карточек каталога; незнакомых в ответе нет."""
+        wanted = {article for article in articles if article}
+        if not wanted:
+            return {}
+        rows = await self.session.execute(
+            select(ArticleModel.article, ArticleModel.state).where(
+                ArticleModel.seller_id == seller_id, ArticleModel.article.in_(wanted)
+            )
+        )
+        return {str(article): str(state) for article, state in rows.all()}
+
+    async def active_article_count(self, seller_id: uuid.UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(ArticleModel)
+                .where(ArticleModel.seller_id == seller_id, ArticleModel.state == "active")
+            )
+            or 0
         )
 
     async def latest_reply_sign(self, seller_id: uuid.UUID, chat_id: str) -> str | None:

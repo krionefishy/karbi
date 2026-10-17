@@ -272,3 +272,37 @@ def test_a_campaign_does_not_start_for_a_conversation_that_ended_long_ago():
 
 
 PROMPT = START
+
+
+def test_a_running_campaign_stops_when_the_conversation_gets_too_old():
+    rules = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=9), max_idle=timedelta(days=5))
+    events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "Спасибо за обратную связь!")]
+    bot = [SentMessage(at(60 + 24 * 60), "напоминание")]
+    events.append(event(60 + 24 * 60, "bot", "напоминание"))
+
+    inside = project_dialog(events, bot, now=at(60 + 4 * 24 * 60), rules=rules, campaign_started_at=at(60 + 300))
+    outside = project_dialog(events, bot, now=at(60 + 6 * 24 * 60), rules=rules, campaign_started_at=at(60 + 300))
+
+    assert inside.state is DialogState.IN_CAMPAIGN
+    # сообщение самого бота давность разговора не продлевает: отсчёт идёт от последнего ответа специалиста
+    assert outside.state is DialogState.EXHAUSTED
+
+
+def test_a_removed_product_never_gets_a_campaign_and_ends_a_running_one():
+    events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "Опишите проблему")]
+
+    fresh = project_dialog(events, [], now=at(60 + 5 * 60), rules=RULES, product_removed=True)
+    running = project_dialog(
+        events, [], now=at(60 + 6 * 60), rules=RULES, campaign_started_at=at(60 + 5 * 60), product_removed=True
+    )
+
+    assert fresh.state is DialogState.PRODUCT_REMOVED and fresh.start_campaign is False
+    assert running.state is DialogState.PRODUCT_REMOVED and running.end_campaign is True
+
+
+def test_a_removed_product_does_not_hide_a_buyer_who_is_waiting_for_a_specialist():
+    events = [event(0, "prompt"), event(30, "buyer", "Товар сломался")]
+
+    result = project_dialog(events, [], now=at(60 * 24), rules=RULES, product_removed=True)
+
+    assert result.state is DialogState.AWAITING_US

@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from backend.modules.wb_core.application import ChatMirror
+from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_support_bot.application.ports import ChatSender
@@ -114,6 +114,7 @@ class SupportBotProcessor:
         sender: ChatSender,
         policy: BotPolicy,
         *,
+        catalog: CatalogMirror | None = None,
         rng: random.Random | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -121,6 +122,8 @@ class SupportBotProcessor:
         self.chats = chats
         self.sender = sender
         self.policy = policy
+        # Без каталога товары не проверяются на «снят с продажи»: нужен только тестам и ранним запускам.
+        self.catalog = catalog
         self.rng = rng or random.Random()
         self.sleep = sleep
 
@@ -141,6 +144,11 @@ class SupportBotProcessor:
 
         stored = await self.repository.dialogs_by_keys(seller_id, since)
         journal = await self.repository.sends_by_dialog(seller_id, since)
+        removed: set[str] = set()
+        if self.catalog is not None:
+            removed = await self.catalog.removed_articles(
+                seller_id, {str(segment.nm_id) for segment in segments if segment.nm_id}
+            )
         models: dict[tuple[str, datetime], DialogModel] = {}
         for segment in segments:
             key = (segment.chat_id, segment.prompt_at)
@@ -151,7 +159,8 @@ class SupportBotProcessor:
                 for send in sends
                 if send.status in (SEND_SENT, SEND_UNKNOWN)
             ]
-            model = await self._project(seller_id, segment, model, record, now, report)
+            gone = segment.nm_id is not None and str(segment.nm_id) in removed
+            model = await self._project(seller_id, segment, model, record, now, report, product_removed=gone)
             models[key] = model
             report.dialogs += 1
         await self.repository.retire_out_of_window(seller_id, since)
@@ -183,6 +192,8 @@ class SupportBotProcessor:
         record: list[SentMessage],
         now: datetime,
         report: SellerReport,
+        *,
+        product_removed: bool = False,
     ) -> DialogModel:
         created = model is None
         if model is None:
@@ -205,6 +216,7 @@ class SupportBotProcessor:
             rules=self.policy.rules,
             campaign_started_at=model.campaign_started_at,
             campaigns_count=model.campaigns_count,
+            product_removed=product_removed,
         )
         model.nm_id = segment.nm_id
         model.buyer_first_at = projection.buyer_first_at

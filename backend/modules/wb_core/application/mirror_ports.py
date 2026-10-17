@@ -177,6 +177,25 @@ class ChatMirrorState:
     error: str | None
 
 
+class CatalogMirror:
+    """Какие карточки каталога уже сняты с продажи, по зеркалу каталога."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def removed_articles(self, seller_id: uuid.UUID, articles: Iterable[str]) -> set[str]:
+        """Из запрошенных артикулов: карточка в корзине, либо её нет в каталоге вовсе.
+
+        Пустой каталог (ещё не собирался) значит «не знаем», а не «всё снято»:
+        иначе первый же сбой сбора выключил бы рассылку по всем товарам.
+        """
+        wanted = {article for article in articles if article}
+        if not wanted or await self.mirror.active_article_count(seller_id) == 0:
+            return set()
+        states = await self.mirror.article_states(seller_id, wanted)
+        return {article for article in wanted if states.get(article, "archived") != "active"}
+
+
 class ChatMirror:
     """Что автоматизации читают о чатах с покупателями: диалоги после отзыва с низкой оценкой."""
 

@@ -15,6 +15,7 @@ from backend.modules.wb_core.application.mirror import (
 )
 from backend.modules.wb_core.application.mirror_ports import (
     AdvertMirror,
+    CatalogMirror,
     ChatMirror,
     ChatMirrorState,
     MirroredSalesReport,
@@ -40,6 +41,7 @@ __all__ = [
     "AdvertsOutcome",
     "AutomationEnrollment",
     "AutomationNotFoundError",
+    "CatalogMirror",
     "CatalogOutcome",
     "ChatMirror",
     "ChatMirrorState",

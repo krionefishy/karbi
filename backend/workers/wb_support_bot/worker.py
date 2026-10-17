@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import structlog
 
-from backend.modules.wb_core.application import ChatMirror
+from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_support_bot.application import BotPolicy, ChatSender, SupportBotProcessor
@@ -116,6 +116,7 @@ class SupportBotWorker:
                         ChatMirror(session),
                         self.sender,
                         self.policy,
+                        catalog=CatalogMirror(session),
                         rng=random.Random(),
                     )
                     report = await processor.process_seller(seller_id, now=now)

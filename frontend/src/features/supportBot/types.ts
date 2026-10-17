@@ -1,9 +1,17 @@
 /**
  * Состояние диалога бота: `no_reply` — покупатель не писал; `awaiting_us` — ход за нашей
  * стороной; `awaiting_buyer` — ждём покупателя; `in_campaign` — идёт рассылка;
- * `exhausted` — рассылка отработала без ответа; `closed` — закрыт вручную.
+ * `product_removed` — товар снят с продажи, не пишем; `exhausted` — рассылка отработала без
+ * ответа или разговору больше 5 дней; `closed` — закрыт вручную.
  */
-export type DialogState = "no_reply" | "awaiting_us" | "awaiting_buyer" | "in_campaign" | "exhausted" | "closed";
+export type DialogState =
+  | "no_reply"
+  | "awaiting_us"
+  | "awaiting_buyer"
+  | "in_campaign"
+  | "product_removed"
+  | "exhausted"
+  | "closed";
 export type BotMode = "dry_run" | "canary" | "live";
 export type DialogFlag = "no_contact" | "attention" | "excluded";
 export type SendStatus = "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";

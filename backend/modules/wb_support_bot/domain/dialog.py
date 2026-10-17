@@ -12,7 +12,10 @@
 - `awaiting_buyer` — наша сторона ответила, ждём покупателя; идёт отсчёт тишины;
 - `in_campaign` — покупатель молчит дольше порога после сообщения нашей
   стороны: идёт рассылка;
-- `exhausted` — рассылка отработала положенные дни, ответа нет;
+- `product_removed` — рассылка должна была идти, но товар снят с продажи (карточка в
+  корзине или пропала из каталога): таким покупателям не пишем;
+- `exhausted` — рассылка отработала положенные дни или ответ нашей стороны стал старше
+  `max_idle`, ответа нет;
 - `closed` — закрыт вручную (хранится в записи диалога, не выводится из ленты).
 
 «Наша сторона» — любое сообщение продавца после первого сообщения покупателя:
@@ -38,6 +41,7 @@ class DialogState(StrEnum):
     AWAITING_US = "awaiting_us"
     AWAITING_BUYER = "awaiting_buyer"
     IN_CAMPAIGN = "in_campaign"
+    PRODUCT_REMOVED = "product_removed"
     EXHAUSTED = "exhausted"
     CLOSED = "closed"
 
@@ -91,6 +95,7 @@ def project_dialog(
     rules: CampaignRules,
     campaign_started_at: datetime | None = None,
     campaigns_count: int = 0,
+    product_removed: bool = False,
 ) -> Projection:
     """Состояние диалога по его событиям, журналу бота и сохранённому состоянию кампании.
 
@@ -122,15 +127,22 @@ def project_dialog(
     if our_last is None or buyer_last > our_last:
         # Ход специалиста. Если шла кампания, ответ покупателя её закончил.
         return result(DialogState.AWAITING_US, end=campaign_started_at is not None)
+    # Давность разговора считается от последнего сообщения специалиста: сообщения самого бота
+    # её не обновляют, иначе рассылка вечно продлевала бы себя.
+    anchor = human_last if human_last is not None else our_last
+    idle = now - anchor
+    stale = rules.max_idle is not None and idle > rules.max_idle
     if campaign_started_at is not None:
         if human_last is not None and human_last > campaign_started_at:
             # Специалист вмешался в ход кампании: пауза до новой тишины.
             return result(DialogState.AWAITING_BUYER, end=True)
-        if now - campaign_started_at >= rules.duration:
+        if stale or now - campaign_started_at >= rules.duration:
             return result(DialogState.EXHAUSTED)
+        if product_removed:
+            return result(DialogState.PRODUCT_REMOVED, end=True)
         return result(DialogState.IN_CAMPAIGN)
-    idle = now - our_last
-    fresh_enough = rules.max_idle is None or idle <= rules.max_idle
-    if idle >= rules.silence and fresh_enough and campaigns_count < rules.max_campaigns:
+    if idle >= rules.silence and not stale and campaigns_count < rules.max_campaigns:
+        if product_removed:
+            return result(DialogState.PRODUCT_REMOVED)
         return result(DialogState.IN_CAMPAIGN, start=True)
     return result(DialogState.AWAITING_BUYER)

@@ -5,6 +5,7 @@ export const STATE_LABEL: Record<DialogState, string> = {
   awaiting_us: "Ждёт ответа",
   awaiting_buyer: "Ждём покупателя",
   in_campaign: "Идёт рассылка",
+  product_removed: "Товар снят",
   exhausted: "Рассылка завершена",
   closed: "Закрыт",
 };
@@ -29,6 +30,7 @@ export const STATE_ORDER: DialogState[] = [
   "awaiting_us",
   "in_campaign",
   "awaiting_buyer",
+  "product_removed",
   "exhausted",
   "no_reply",
   "closed",
