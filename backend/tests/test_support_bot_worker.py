@@ -12,6 +12,9 @@ class NullSender:
     async def send(self, seller_id: str, reply_sign: str, text: str) -> None:
         raise AssertionError("отправка не ожидается")
 
+    async def reply_signs(self, seller_id: str) -> dict[str, str]:
+        return {}
+
 
 def test_policy_follows_the_config() -> None:
     policy = policy_from(SETTINGS)

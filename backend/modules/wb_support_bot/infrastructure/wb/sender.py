@@ -5,6 +5,7 @@ from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 CHAT_BUCKET = "chat"
 MESSAGE_PATH = "/api/v1/seller/message"
+CHATS_PATH = "/api/v1/seller/chats"
 # Потолок WB на текст одного сообщения.
 MAX_MESSAGE_LENGTH = 1000
 
@@ -20,6 +21,23 @@ class WBChatSender(WBJsonClient):
     bucket = CHAT_BUCKET
     api_name = "WB Buyers Chat API"
     category = "Чат с покупателями"
+
+    async def reply_signs(self, seller_id: str) -> dict[str, str]:
+        """`GET /api/v1/seller/chats`: подпись каждого чата кабинета.
+
+        Лента событий отдаёт подпись только у событий, собранных после миграции `wc017`,
+        поэтому у давнего диалога подписи в зеркале может не быть. Список тяжёлый
+        (у крупного кабинета больше мегабайта), так что вызывается редко и лишь когда без него не обойтись.
+        """
+        payload: Any = await self.request("GET", CHATS_PATH, seller_id)
+        rows = payload.get("result") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise WBPermanentError(f"{self.api_name}: список чатов пришёл в неожиданном виде")
+        return {
+            str(row["chatID"]): str(row["replySign"])
+            for row in rows
+            if isinstance(row, dict) and row.get("chatID") and row.get("replySign")
+        }
 
     async def send(self, seller_id: str, reply_sign: str, text: str) -> None:
         if not text.strip():

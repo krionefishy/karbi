@@ -293,6 +293,7 @@ class SupportBotProcessor:
         if not templates:
             report.skipped = "у кабинета нет активных текстов"
             return
+        fallback: dict[str, str] | None = None
         signs: dict[str, str] = {}
         for segment in segments:
             for event in segment.events:
@@ -321,8 +322,13 @@ class SupportBotProcessor:
                 continue
             sign = signs.get(dialog.chat_id) or await self.chats.reply_sign(seller_id, dialog.chat_id)
             if not sign:
+                # Подписи нет в ленте (давний чат): берём из списка чатов WB, один раз за проход.
+                if fallback is None:
+                    fallback = await self._chat_list_signs(seller_id)
+                sign = fallback.get(dialog.chat_id)
+            if not sign:
                 send.status = SEND_FAILED
-                send.error = "лента не отдала подпись чата"
+                send.error = "ни лента, ни список чатов не отдали подпись чата"
                 dialog.next_send_at = now + RETRY_DELAY
                 report.failed += 1
                 await self.repository.session.commit()
@@ -354,6 +360,13 @@ class SupportBotProcessor:
                 report.sent += 1
             await self.repository.session.commit()
             await self.sleep(self.policy.min_gap.total_seconds())
+
+    async def _chat_list_signs(self, seller_id: uuid.UUID) -> dict[str, str]:
+        try:
+            return await self.sender.reply_signs(str(seller_id))
+        except (WBPermanentError, WBTemporaryError):
+            # Список не прочитался: диалоги без подписи получат следующую попытку.
+            return {}
 
     def _is_live(self, mode: str, dialog: DialogModel) -> bool:
         """Уйдёт ли по диалогу настоящее сообщение: весь кабинет в live либо диалог попал в канарейку."""

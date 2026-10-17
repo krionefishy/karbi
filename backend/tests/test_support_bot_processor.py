@@ -44,6 +44,12 @@ class FakeSender:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
         self.error: Exception | None = None
+        self.list_signs: dict[str, str] = {}
+        self.list_reads = 0
+
+    async def reply_signs(self, seller_id: str) -> dict[str, str]:
+        self.list_reads += 1
+        return self.list_signs
 
     async def send(self, seller_id: str, reply_sign: str, text: str) -> None:
         if self.error is not None:
@@ -458,3 +464,34 @@ async def test_an_empty_catalog_does_not_mean_every_product_is_removed(database:
         await processor.process_seller(seller, now=NOW)
 
     assert len(sender.calls) == 1
+
+
+async def test_a_chat_without_a_stored_sign_gets_it_from_the_chat_list_once(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    from dataclasses import replace
+
+    await feed(database, seller, [replace(item, reply_sign=None) for item in BASE_FEED], read_at=NOW)
+    sender = FakeSender()
+    sender.list_signs = {CHAT: "1:from-list"}
+
+    report = await run(database, seller, sender)
+
+    assert report.sent == 1 and sender.calls == [(str(seller), "1:from-list", TEXT)]
+    assert sender.list_reads == 1
+
+
+async def test_without_any_sign_the_send_is_written_off_with_a_clear_reason(
+    database: Database, seller: uuid.UUID
+) -> None:
+    from dataclasses import replace
+
+    await go_live(database, seller)
+    await feed(database, seller, [replace(item, reply_sign=None) for item in BASE_FEED], read_at=NOW)
+    sender = FakeSender()
+
+    report = await run(database, seller, sender)
+
+    assert report.failed == 1 and sender.calls == []
+    assert (await sends(database, seller))[0].error == "ни лента, ни список чатов не отдали подпись чата"

@@ -40,3 +40,19 @@ async def test_empty_and_overlong_texts_never_reach_the_gateway() -> None:
             await sender.send(SELLER, "1:sign", "а" * 1001)
 
         assert stub.calls == []
+
+
+async def test_chat_signs_come_from_the_chat_list() -> None:
+    rows = [
+        {"chatID": "1:a", "replySign": "1:a:sig-a", "clientName": "Имя"},
+        {"chatID": "1:b", "replySign": "1:b:sig-b"},
+        {"chatID": "1:c"},
+    ]
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on("GET", "/api/v1/seller/chats", body={"result": rows, "errors": None})
+
+        signs = await WBChatSender(make_gateway()).reply_signs(SELLER)
+
+        assert signs == {"1:a": "1:a:sig-a", "1:b": "1:b:sig-b"}
+        assert stub.calls[0]["method"] == "GET" and stub.calls[0]["api"] == "chat"
