@@ -38,8 +38,6 @@ from backend.tests.test_support_bot_processor import (  # noqa: F401  (фикс�
 )
 from backend.workers.wb_support_bot.classify_consumer import ClassifyConsumer, InvalidPayloadError
 
-# --- домен ---------------------------------------------------------------------
-
 
 def test_the_tail_is_the_last_human_message_after_the_buyer_replied() -> None:
     events = [*BASE_FEED, event(90, "specialist", "Закрываем обращение")]
@@ -125,9 +123,6 @@ def test_enforce_writes_only_to_a_dialog_that_still_awaits_the_buyer(
 def test_the_model_gets_only_the_message_text() -> None:
     assert user_message("  Заявка одобрена  ") == "Сообщение продавца:\nЗаявка одобрена"
     assert user_message("   ") == "Сообщение продавца:\n(без текста)"
-
-
-# --- потребитель запросов ------------------------------------------------------
 
 
 class FakeLLM:

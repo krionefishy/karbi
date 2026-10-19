@@ -1,5 +1,3 @@
-"""Расширение через приложение целиком: DI, роуты и токен, а не сервис по отдельности."""
-
 import uuid
 from collections.abc import AsyncIterator
 
@@ -65,7 +63,6 @@ async def test_extension_pairs_reports_and_serves_qr_through_the_api(workspace) 
     assert pairing.status_code == 200, pairing.text
     code = pairing.json()["code"]
 
-    # Пара и данные идут без сотрудничьего JWT — у расширения свой токен.
     anonymous = {"Authorization": ""}
     refused = await client.post(
         f"{API}/wb/returns/extension/pair",
@@ -115,7 +112,6 @@ async def test_extension_pairs_reports_and_serves_qr_through_the_api(workspace) 
     assert body["has_code_today"] and len(body["installs"]) == 1
     assert body["installs"][0]["browser"] == "Chrome 130" and body["installs"][0]["deliveries_count"] == 1
 
-    # Картинка QR по подписанной ссылке, без входа.
     from backend.modules.wb_returns.application import qr as qr_tools
 
     signature = qr_tools.signature(

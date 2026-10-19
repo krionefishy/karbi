@@ -7,7 +7,6 @@ from backend.tests.egress_stub import EgressStub, make_gateway
 EVENTS = "/api/v1/seller/events"
 SELLER = "seller-1"
 
-# Поля и их типы взяты из настоящего ответа WB; подпись ответа укорочена.
 PROMPT_ROW = {
     "chatID": "1:93a20fa0-ab27-0ffe-302c-b0bafa29ab2c",
     "eventID": "01aba0dc-5b5b-4f0c-bfaf-7dbeed7e0d81",
@@ -81,7 +80,6 @@ async def test_the_wb_review_prompt_is_told_from_our_follow_up() -> None:
     assert prompt.added_at.isoformat() == "2026-09-17T13:35:26.866000+00:00"
     assert not follow_up.review_prompt and follow_up.source == "seller-public-api"
     assert photo.text is None and photo.has_attachments and photo.sender == "client"
-    # подпись чата сохраняется: по ней бот отвечает покупателю; её нет — поле пустое
     assert prompt.reply_sign == "1:93a20fa0" and follow_up.reply_sign == "1:93a20fa0"
     assert photo.reply_sign is None
 

@@ -1,10 +1,3 @@
-/** Функция, которая выполняется в мире страницы wildberries.ru — от её имени.
- *
- * Здесь нельзя ссылаться ни на что снаружи: функция сериализуется и запускается через
- * chrome.scripting.executeScript({ world: "MAIN" }). Со страницы берём только то, чего
- * нет у расширения: JWT сессии из localStorage, антибот-cookie и список доставок.
- * За кодом расширение ходит само — из сервис-воркера CORS не мешает.
- */
 
 export interface PageResult {
   jwt: string | null;
@@ -47,7 +40,6 @@ export async function collectFromPage(): Promise<PageResult> {
     return null;
   }
 
-  // Ключ с токеном сайт может переименовать: сначала известные, потом любой ключ с «token».
   const keys = ["wbx__tokenData", "wbx__tokenDataStage"];
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);

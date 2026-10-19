@@ -1,9 +1,3 @@
-"""Verifying tokens the relay presents when it calls back.
-
-The same shared secret signs both directions, so the audience is what keeps a
-token minted for a call *to* the relay from being replayed *at* us.
-"""
-
 import jwt
 
 from backend.shared.settings import RelayConfig

@@ -95,8 +95,6 @@ class ReviewChatsService:
             raise ReviewChatsQueryError("Незнакомый исход диалога")
         seller_name = await self._enrolled(seller_id)
         state = await self.chats.state(seller_id)
-        # Молчание — факт только до момента, докуда прочитана лента: отставший
-        # воркер не должен превращать непрочитанные ответы в «не ответил».
         moment = now or datetime.now(UTC)
         if state is not None and state.read_through is not None:
             moment = min(moment, state.read_through)
@@ -104,7 +102,6 @@ class ReviewChatsService:
         dialogs = await self._dialogs(seller_id, date_from, date_to, moment, launch_at)
         baseline = None
         if launch_at is not None:
-            # Окно до запуска — до дня запуска, не включая его: в день запуска группы уже смешаны.
             launch_day = launch_at.astimezone(self.timezone).date()
             baseline_from, baseline_to = launch_day - timedelta(days=self.baseline_days), launch_day - timedelta(days=1)
             before = await self._dialogs(seller_id, baseline_from, baseline_to, moment, launch_at)
@@ -148,8 +145,6 @@ class ReviewChatsService:
             date_to=date_to,
             content=build_workbook(view, self.timezone),
         )
-
-    # --- helpers ----------------------------------------------------------------------
 
     async def _dialogs(
         self, seller_id: uuid.UUID, date_from: date, date_to: date, now: datetime, launch_at: datetime | None

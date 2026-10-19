@@ -32,11 +32,8 @@ class TrackedSellerModel(WBReturnsBase):
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Попытка отмечается до сети: упавший процесс не должен превращаться в
-    # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Архив заявок читается реже открытых: он большой и меняется только решениями.
     claims_archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -163,18 +160,15 @@ class ExtensionInstallModel(WBReturnsBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    # Идентификатор, который расширение придумывает себе при установке.
     install_id: Mapped[str] = mapped_column(String(64), nullable=False)
     browser: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     paired_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # ok — код берётся; needs_login — сайт показал вход; error — последний запрос упал.
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
     last_code_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Снимок «готов к выдаче» из профиля покупателя — резерв на случай, если отчёт WB запаздывает.
     deliveries: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     deliveries_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

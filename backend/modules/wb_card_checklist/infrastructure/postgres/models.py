@@ -29,13 +29,8 @@ class TrackedSellerModel(WBCardChecklistBase):
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    # Последний успешный сбор. Отметка на селлере, а не на строках карточек:
-    # «карточек нет» и «ни разу не собирали» иначе не различить.
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Попытка отмечается до сети: упавший процесс не должен превращаться в
-    # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Ошибка последней попытки или предупреждение успешной (цены не прочитаны).
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
@@ -60,8 +55,6 @@ class CardFactsModel(WBCardChecklistBase):
     photo_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     description_length: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     has_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Только id заполненных характеристик: значения чек-листу не нужны, а
-    # хранить их — значит копировать карточку целиком.
     characteristic_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     card_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

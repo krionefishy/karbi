@@ -29,7 +29,6 @@ from backend.modules.wb_core.infrastructure.wb import EgressAdminError, EgressGa
 from backend.shared.kafka_streams.topics import WBCoreTopics
 from backend.shared.outbox import OutboxRepository
 
-# «Сегодня» для даты начала действия ставки — московское, как у отчётов WB.
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 
@@ -92,7 +91,6 @@ class SellerService:
             new_name = seller.name
         await self.session.commit()
         if api_key is not None:
-            # Новый ключ едет на шлюз вместе с актуальным именем одним вызовом.
             await self._deliver_key(seller_id, new_name, api_key, sync_reason="credential_updated")
         elif name is not None:
             await self._rename_on_egress(seller_id, new_name)
@@ -177,10 +175,6 @@ class SellerService:
         try:
             await self.gateway.disable_seller(seller_id=str(seller_id), event_version=self._clock_version())
         except EgressAdminError as error:
-            # Строки селлера уже нет — статус писать некуда. Громко в лог:
-            # ключ остаётся живым на шлюзе, пока его не отключит сверка
-            # (backend/commands/sync_egress_status.py), которая гасит
-            # осиротевшие записи шлюза.
             self.logger.error("seller_purge_disable_failed", extra={"seller_id": str(seller_id), "error": str(error)})
 
     async def refresh_egress(self, seller_id: uuid.UUID) -> Seller:
@@ -294,7 +288,6 @@ class SellerService:
             )
         except EgressAdminError as error:
             if error.status_code == 409:
-                # Один токен на двух селлерах означал бы один токен с двух IP.
                 await self.repository.set_egress_state(seller_id, status=EGRESS_UNDELIVERED, error=str(error))
                 await self.session.commit()
                 raise DuplicateCredentialError(str(error)) from error
@@ -331,8 +324,6 @@ class SellerService:
             )
             await self.session.commit()
             if error.status_code == 409:
-                # Один кабинет Ozon на двух селлерах означал бы один кабинет
-                # с двух исходящих адресов.
                 raise DuplicateCredentialError(str(error)) from error
             return
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=version, marketplace=MARKETPLACE_OZON)
@@ -350,8 +341,6 @@ class SellerService:
             )
             await self.session.commit()
             if error.status_code == 409:
-                # Один токен на двух селлерах означал бы один аккаунт MPStats
-                # с двух исходящих адресов.
                 raise DuplicateCredentialError(str(error)) from error
             return
         await self._apply_outcome(
@@ -389,8 +378,6 @@ class SellerService:
             await self.repository.set_egress_state(seller_id, status=EGRESS_UNSYNCED, error=str(error))
             await self.session.commit()
             return
-        # Успех возвращает актуальное состояние шлюза и снимает возможный
-        # прежний unsynced.
         await self._apply_outcome(seller_id, outcome, sync_reason=None, version=version)
 
     async def _disable_on_egress(self, seller_id: uuid.UUID) -> None:

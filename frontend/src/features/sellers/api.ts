@@ -22,11 +22,9 @@ export const createSeller = (payload: SellerInput) =>
 export const updateSeller = (sellerId: string, payload: Partial<SellerInput>) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}`, { method: "PATCH", body: JSON.stringify(payload) });
 
-/** Retire the seller: hidden from every automation until restored, everything collected stays. */
 export const archiveSeller = (sellerId: string) =>
   apiRequest<void>(`/api/v1/wb/sellers/${sellerId}`, { method: "DELETE" });
 
-/** Erase the seller together with the history of every automation. */
 export const purgeSeller = (sellerId: string) =>
   apiRequest<void>(`/api/v1/wb/sellers/${sellerId}?purge=true`, { method: "DELETE" });
 
@@ -39,36 +37,30 @@ export const restoreSeller = (sellerId: string, apiKey: string) =>
 export const retrySellerSync = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/catalog-sync`, { method: "POST" });
 
-/** Перепроверить ключ на шлюзе wb-egress (после починки прав в кабинете WB). */
 export const verifySellerEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/egress-verify`, { method: "POST" });
 
-/** Завести или обновить учётку Ozon. Ключ WB для этого вводить не нужно. */
 export const setOzonCredentials = (sellerId: string, payload: OzonCredentialsInput) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 
-/** Перепроверить учётку Ozon (после перевыпуска ключа — он живёт полгода). */
 export const verifyOzonEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/ozon-verify`, { method: "POST" });
 
-/** Новая ставка налога: действует со своей даты и прошлые периоды не меняет. */
 export const setTaxRate = (sellerId: string, payload: TaxRateInput) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/tax-rate`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 
-/** Завести или заменить токен MPStats. Ключ WB для этого вводить не нужно. */
 export const setMPStatsCredentials = (sellerId: string, payload: MPStatsCredentialsInput) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/mpstats`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 
-/** Перепроверить токен MPStats (он перевыпускается при смене пароля аккаунта). */
 export const verifyMPStatsEgress = (sellerId: string) =>
   apiRequest<Seller>(`/api/v1/wb/sellers/${sellerId}/mpstats-verify`, { method: "POST" });
 
@@ -81,6 +73,5 @@ export const attachSeller = (automationId: string, payload: { seller_id: string 
     body: JSON.stringify(payload),
   });
 
-/** Leave the automation. The seller and his data both stay. */
 export const detachSeller = (automationId: string, sellerId: string) =>
   apiRequest<void>(`/api/v1/automations/${automationId}/sellers/${sellerId}`, { method: "DELETE" });

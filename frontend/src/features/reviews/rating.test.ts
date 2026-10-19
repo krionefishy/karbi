@@ -22,16 +22,11 @@ describe("ratingDebt", () => {
 
 describe("fiveStarsToTarget", () => {
   it("matches the closed form 20·debt − total at the 4.95 threshold", () => {
-    // Real data: article 945829620, average 4.43 over 1336 reviews.
     expect(fiveStarsToTarget(counts(100, 38, 60, 123, 1015))).toBe(13804);
-    // The same article as WB counts it publicly, average 4.77 over 939.
     expect(fiveStarsToTarget(counts(18, 10, 8, 102, 801))).toBe(3461);
   });
 
   it("does not round up a value that is already exact", () => {
-    // Floating point makes debt/0.05 land just above the integer; without the
-    // slack every one of these answers would be one too high.
-    // One four-star review costs 20 fives; one one-star costs 80, less the review itself.
     expect(fiveStarsToTarget(counts(0, 0, 0, 1, 0))).toBe(19);
     expect(fiveStarsToTarget(counts(1, 0, 0, 0, 0))).toBe(79);
     expect(fiveStarsToTarget(counts(0, 0, 0, 20, 380))).toBe(0);
@@ -50,8 +45,6 @@ describe("fiveStarsToTarget", () => {
   });
 
   it("crosses the boundary exactly at 4.95", () => {
-    // 19 fives and one four average 4.95 — the first distribution that displays
-    // as 5.0 — while 18 fives and one four fall short at 4.947.
     expect(averageRating(counts(0, 0, 0, 1, 19))).toBeCloseTo(4.95, 10);
     expect(fiveStarsToTarget(counts(0, 0, 0, 1, 19))).toBe(0);
     expect(fiveStarsToTarget(counts(0, 0, 0, 1, 18))).toBe(1);

@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
-/** Сервис-воркер MV3 — один файл без динамических импортов; страница настроек — обычная страница. */
 export default defineConfig({
   publicDir: "public",
   build: {

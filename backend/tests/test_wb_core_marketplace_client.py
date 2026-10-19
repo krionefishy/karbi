@@ -45,7 +45,6 @@ async def test_orders_are_paged_by_cursor_and_split_into_30_day_windows() -> Non
             SELLER, date_from=datetime(2026, 7, 1, tzinfo=UTC), date_to=datetime(2026, 8, 15, tzinfo=UTC)
         )
 
-    # Два окна (30 дней + остаток), в каждом две страницы.
     windows = [call["query"]["dateFrom"] for call in stub.requests_to(ORDERS) if call["query"]["next"] == 0]
     assert len(windows) == 2
     assert [order.order_id for order in orders] == [1, 2, 1, 2]
@@ -132,4 +131,4 @@ async def test_a_row_without_id_is_skipped_not_fatal() -> None:
             SELLER, date_from=datetime(2026, 9, 1, tzinfo=UTC), date_to=datetime(2026, 9, 2, tzinfo=UTC)
         )
     assert [order.order_id for order in orders] == [3]
-    assert REQUEST_URL  # заглушка отвечает за шлюз, прямых вызовов WB нет
+    assert REQUEST_URL

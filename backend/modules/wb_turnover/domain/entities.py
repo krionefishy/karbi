@@ -92,7 +92,6 @@ def compute_turnover(
 
     status = STATUS_OK
     if stock is None:
-        # No snapshot at all: we do not know the stock, so we must not claim it is zero.
         status = STATUS_INSUFFICIENT
     elif total == 0:
         status = STATUS_NO_STOCK

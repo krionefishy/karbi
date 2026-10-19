@@ -256,10 +256,6 @@ export function OzonCredentialsDialog({
               </button>
             </span>
           </label>
-          {/* Пара Performance необязательна: без неё работает Seller API, а
-              рекламные методы отвечают внятным отказом. Но задаётся целиком —
-              один client_id без секрета это неработающая пара, и шлюз её
-              отклонит. */}
           <label>
             <span className="field-label">Performance client_id — необязательно</span>
             <input
@@ -346,8 +342,6 @@ export function MPStatsCredentialsDialog({
           Токен берётся в кабинете MPStats: Настройки → API. Он хранится на шлюзе и никогда не
           отображается после сохранения.
         </p>
-        {/* Токен умирает молча: MPStats перевыпускает его при смене пароля
-            аккаунта, и узнаём мы об этом только по отказу. */}
         <p className="muted">
           При смене пароля аккаунта MPStats токен перевыпускается — старый перестаёт работать, и
           новый нужно ввести здесь.
@@ -412,7 +406,6 @@ interface TaxRateProps {
   onSubmit: (value: TaxRateInput) => void;
 }
 
-/** Ставка налога селлера: версия со своей датой, прошлые периоды остаются с прежней. */
 export function TaxRateDialog({ seller, pending, error, onClose, onSubmit }: TaxRateProps) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

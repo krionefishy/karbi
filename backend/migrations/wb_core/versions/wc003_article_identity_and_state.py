@@ -23,8 +23,6 @@ def upgrade() -> None:
         sa.Column("sizes", postgresql.JSONB(), server_default=sa.text("'[]'::jsonb"), nullable=False),
         schema="wb_core",
     )
-    # A single is_active flag could not tell "seller archived it" from "we only
-    # ever saw it in feedbacks", so both syncs kept overwriting each other.
     op.add_column(
         "articles", sa.Column("state", sa.String(16), server_default="active", nullable=False), schema="wb_core"
     )

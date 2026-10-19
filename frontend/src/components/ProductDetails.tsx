@@ -6,11 +6,6 @@ interface ProductDetailsProps {
   stateLabel: Record<ArticleState, string>;
 }
 
-/**
- * Everything about the product that the row itself has to truncate: the full
- * title, the ids and the identifiers that let a person tell two look-alike
- * goods apart.
- */
 export function ProductDetails({ product, stateLabel }: ProductDetailsProps) {
   const rows: Array<{ label: string; value: React.ReactNode }> = [
     {

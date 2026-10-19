@@ -27,7 +27,6 @@ class TrackedSellerModel(WBSupportBotBase):
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     mode: Mapped[str] = mapped_column(String(16), nullable=False, server_default=MODE_DRY_RUN)
-    # Причина остановки отправки по кабинету (токен без записи и т. п.); None — всё в порядке.
     paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -82,11 +81,8 @@ class DialogModel(WBSupportBotBase):
     attention: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     excluded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     closed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
-    # Хвост диалога: последнее сообщение специалиста после ответа покупателя. Вердикт нейросети
-    # и ручная отметка менеджера действуют, пока хвост тот же.
     tail_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     tail_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
-    # `allow` / `deny`: решение менеджера для хвоста с отпечатком `manual_fingerprint`.
     manual_verdict: Mapped[str | None] = mapped_column(String(8), nullable=True)
     manual_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -130,7 +126,6 @@ class VerdictModel(WBSupportBotBase):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        # Один хвост — один вердикт на версию промпта: повторный проход не плодит запросы.
         Index(
             "uq_wb_support_bot_verdicts_tail",
             "seller_id",
@@ -169,7 +164,6 @@ class SendModel(WBSupportBotBase):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
-        # Номер отправки внутри диалога уникален: повторный тик не создаст вторую строку на тот же слот.
         Index("uq_wb_support_bot_sends_slot", "seller_id", "chat_id", "prompt_at", "seq", unique=True),
         Index("ix_wb_support_bot_sends_seller_time", "seller_id", "planned_at"),
     )

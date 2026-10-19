@@ -28,8 +28,6 @@ from backend.modules.wb_core.infrastructure.wb import CatalogCard
 
 _UPSERT_CHUNK = 500
 
-# Колонки исхода доставки по маркетплейсам. Пара без префикса — за
-# Wildberries, по истории: её читают фронтенд и сверка со шлюзом.
 _EGRESS_COLUMNS = {
     MARKETPLACE_WB: (SellerModel.egress_status, SellerModel.egress_error),
     MARKETPLACE_OZON: (SellerModel.ozon_egress_status, SellerModel.ozon_egress_error),
@@ -292,8 +290,6 @@ class SellerRepository:
         await self._upsert_cards(seller_id, active, "active")
         await self._upsert_cards(seller_id, archived, "archived")
         known = [card.article for card in active] + [card.article for card in archived]
-        # Anything the account no longer lists is not "inactive" — it is a card we
-        # can still see in feedbacks but can no longer resolve through the catalog.
         demote = update(ArticleModel).where(ArticleModel.seller_id == seller_id)
         if known:
             demote = demote.where(ArticleModel.article.not_in(known))

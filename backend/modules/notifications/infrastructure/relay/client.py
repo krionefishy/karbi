@@ -1,14 +1,3 @@
-"""Client for the messenger relay.
-
-The relay is the only host that can reach the messenger, so this is the only
-way out of the country for a notification. Nothing messenger-specific crosses
-this boundary: a bot is a code, a chat is an opaque `recipient` string, and a
-message is plain text.
-
-Failures are reported in the delivery vocabulary the dispatcher already speaks,
-so switching from direct Telegram calls to the relay changed no retry logic.
-"""
-
 import logging
 import uuid
 from dataclasses import dataclass
@@ -104,8 +93,6 @@ class RelayClient:
         response = await self._get(
             UPDATES_PATH,
             {"bot_code": bot_code, "after": after, "limit": limit, "wait": wait},
-            # The relay holds the request for `wait` seconds; the read timeout
-            # has to outlast that or every quiet poll dies of its own timeout.
             timeouts=httpx.Timeout(wait + self._config.request_timeout_seconds, connect=10.0),
         )
         body = self._body(response)
@@ -179,7 +166,6 @@ class RelayClient:
             async with httpx.AsyncClient(timeout=self._timeout, verify=self._verify) as client:
                 return await client.post(url, json=payload, headers={"Authorization": self._authorization()})
         except httpx.HTTPError as error:
-            # The relay being unreachable says nothing about the message itself.
             raise MessengerTemporaryError(f"relay unreachable: {type(error).__name__}") from error
 
     @staticmethod
@@ -197,11 +183,5 @@ class RelayClient:
             retry_after = response.headers.get("Retry-After")
             return MessengerRateLimitError(detail, retry_after=int(retry_after) if retry_after else None)
         if response.status_code == 422:
-            # The messenger refused for a reason another attempt cannot fix:
-            # unknown chat, blocked bot. The relay passes its wording through,
-            # which is what the dead-chat markers are matched against.
             return MessengerPermanentError(detail)
-        # Everything else — 401 from a clock skew, 404 for a bot nobody
-        # registered on the relay yet, 502 from the messenger — is an operator
-        # problem that retrying survives once it is fixed.
         return MessengerTemporaryError(f"relay answered {response.status_code}: {detail}")

@@ -11,7 +11,6 @@ class ColumnResponse(BaseModel):
 class GroupResponse(BaseModel):
     id: uuid.UUID
     title: str
-    # own — свои склады, fulfilment — фулфилмент, district — округ.
     kind: str
     columns: list[ColumnResponse]
 
@@ -23,9 +22,7 @@ class RowResponse(BaseModel):
     title: str
     vendor_code: str
     in_catalog: bool
-    # Остаток по складу: ключ — id склада строкой (JSON не умеет числовые ключи).
     amounts: dict[str, int]
-    # Сумма по группе: ключ — id группы.
     totals: dict[str, int]
 
 

@@ -54,7 +54,6 @@ describe("ReviewTimeline", () => {
   it("calculates the delta of the total review count from adjacent snapshots", () => {
     render(<ReviewTimeline products={[product]} />);
     expect(screen.getAllByText("+1").length).toBeGreaterThan(0);
-    // Ratings sum to 20 + index, and the window shows indexes 1..7.
     expect(screen.getByText("27")).toBeInTheDocument();
   });
 
@@ -69,7 +68,6 @@ describe("ReviewTimeline", () => {
     render(<ReviewTimeline products={[product]} latestDate={snapshots.at(-1)!.date} />);
     fireEvent.click(screen.getByRole("button", { name: /Карточка и динамика за 30 дней/ }));
 
-    // The row truncates the title and hides the склейка; the panel must not.
     expect(screen.getByRole("heading", { name: "Товар" })).toBeInTheDocument();
     expect(screen.getByText("Карточка (склейка)").nextElementSibling).toHaveTextContent("999");
     expect(screen.getByText("Артикул продавца").nextElementSibling).toHaveTextContent("SKU-123");
@@ -97,7 +95,6 @@ describe("ReviewTimeline", () => {
     fireEvent.click(screen.getByRole("button", { name: /Карточка и динамика за 30 дней/ }));
     expect(screen.getByText(/Динамика за 30 дней/)).toBeInTheDocument();
 
-    // Picking a day replaces the chart rather than stacking two panels.
     fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
     expect(screen.queryByText(/Динамика за 30 дней/)).not.toBeInTheDocument();
     expect(screen.getByText(/Всего отзывов:/)).toBeInTheDocument();
@@ -107,8 +104,6 @@ describe("ReviewTimeline", () => {
     const latest = snapshots.at(-1)!.date;
     render(<ReviewTimeline products={[product]} latestDate={latest} />);
 
-    // The fixture grows the five-star count by one each day, so the newest day
-    // sits one review above the one before it.
     expect(screen.getByText(/\+1 за сутки/)).toBeInTheDocument();
   });
 
@@ -126,8 +121,6 @@ describe("ReviewTimeline", () => {
     render(<ReviewTimeline products={[product]} />);
     fireEvent.click(screen.getAllByRole("button", { name: /Отзывы за/ })[0]);
 
-    // Which day opens depends on the Moscow date, so the arithmetic itself is
-    // covered in rating.test.ts; here we only check both rows are wired up.
     expect(screen.getByText("По артикулу")).toBeInTheDocument();
     expect(screen.getByText("По карточке")).toBeInTheDocument();
     expect(screen.getAllByText(/до 5,0 — ещё/)).toHaveLength(2);

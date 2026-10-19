@@ -4,25 +4,16 @@ from datetime import datetime, timedelta
 
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, CHAT_SOURCE_API, ChatEvent
 
-# Куда попал диалог относительно нашей рассылки. Одна группа «без нашего
-# сообщения» смешивала бы время до запуска с покупателями, ответившими раньше,
-# чем наше сообщение успело уйти, — а у вторых доля ответивших 100 % по
-# построению, и как контрольная группа они не годятся.
-GROUP_FOLLOWED = "followed"  # наше сообщение ушло следом, покупатель до него молчал
-GROUP_EARLY = "early"  # после запуска, но покупатель написал раньше нашего сообщения
-GROUP_MISSED = "missed"  # после запуска, нашего сообщения не было и покупатель молчит
-GROUP_BEFORE = "before"  # до запуска рассылки
+GROUP_FOLLOWED = "followed"
+GROUP_EARLY = "early"
+GROUP_MISSED = "missed"
+GROUP_BEFORE = "before"
 GROUPS = (GROUP_FOLLOWED, GROUP_EARLY, GROUP_MISSED, GROUP_BEFORE)
 
-# Наше сообщение уходит через 10–80 секунд после автосообщения WB. Сообщение из
-# API позже порога — менеджер, отвечающий через сторонний клиент (в ленте такие
-# есть: одиночные ответы часами позже), и нашей рассылкой оно не считается.
-# Порог задаётся настройкой `review_chats.follow_up_within_minutes`.
 DEFAULT_FOLLOW_UP_WITHIN = timedelta(minutes=15)
 
 OUTCOME_REPLIED = "replied"
 OUTCOME_SILENT = "silent"
-# Окно ответа ещё не истекло: молчание пока ничего не значит.
 OUTCOME_PENDING = "pending"
 OUTCOMES = (OUTCOME_REPLIED, OUTCOME_SILENT, OUTCOME_PENDING)
 
@@ -45,7 +36,6 @@ class Dialog:
     anchor_at: datetime
     follow_up_at: datetime | None
     follow_up_text: str | None
-    # Наше сообщение ушло уже после ответа покупателя: на ответ оно не влияло.
     follow_up_late: bool
     reply_at: datetime | None
     reply_text: str | None
@@ -106,7 +96,6 @@ def build_dialogs(
         if event.chat_id != chat_id or event.review_prompt:
             close()
             chat_id, episode = event.chat_id, []
-        # До первого автосообщения в чате — обычная переписка, к отчёту не относится.
         if episode or event.review_prompt:
             episode.append(event)
     close()
@@ -141,15 +130,11 @@ def _dialog(
         outcome = OUTCOME_PENDING
     else:
         outcome = OUTCOME_SILENT
-    # Наше сообщение делает диалог «с нашим» и на границе запуска: автосообщение
-    # WB, за которым оно ушло, всегда на десятки секунд раньше самого запуска.
     if followed:
         group = GROUP_FOLLOWED
     elif launch_at is None or prompt.added_at < launch_at:
         group = GROUP_BEFORE
     elif reply is not None:
-        # Программа рассылки не шлёт сообщение, если покупатель уже написал; сюда же
-        # попадает и пропуск рассылки, после которого покупатель всё же ответил.
         group = GROUP_EARLY
     else:
         group = GROUP_MISSED

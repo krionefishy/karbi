@@ -17,7 +17,6 @@ from backend.modules.notifications.domain import (
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
 
-# Descriptions the messenger uses when the chat will never receive anything again.
 DEAD_CHAT_MARKERS = ("bot was blocked", "chat not found", "bot was kicked", "user is deactivated")
 
 
@@ -77,9 +76,6 @@ class DispatchService:
             fresh = await self.repository.queue_message(
                 bot_id=bot.id,
                 chat_id=chat_id,
-                # Per bot and per chat, so a digest reaching two chats — or one
-                # chat through two bots — is not deduplicated into one, while a
-                # replayed event still cannot double-send.
                 dedupe_key=f"{bot.id}:{request.dedupe_key}:{chat_id}",
                 template=request.template,
                 params=request.params,
@@ -113,30 +109,21 @@ class DispatchService:
                 if message.bot_id not in codes:
                     codes[message.bot_id] = (await self.bots.by_id(message.bot_id)).code
             except BotNotFoundError as error:
-                # A message for a bot somebody deleted must not stall the queue.
                 await self.repository.mark_failed(message.id, str(error))
                 failed += 1
                 await self.session.commit()
                 continue
             if pacer is not None:
-                # Waiting before the call, not reacting to 429 after it: a 429
-                # costs the whole queue a stall, and Telegram counts it against
-                # us either way.
                 await pacer.wait_turn(message.chat_id)
             try:
-                # The chat id crosses as an opaque string: the relay decides what
-                # it means, this side only carries it back and forth.
                 message_ref = await client.send(
                     bot_code=codes[message.bot_id],
                     recipient=str(message.chat_id),
                     text=message.text,
-                    # The queue row's own id: a retry after a lost answer is
-                    # recognised by the relay instead of reaching the chat twice.
                     idempotency_key=str(message.id),
                     attachment=message.attachment,
                 )
             except MessengerPermanentError as error:
-                # Blocked bot, deleted chat: another attempt changes nothing.
                 await self.repository.mark_failed(message.id, str(error))
                 if any(marker in str(error).lower() for marker in DEAD_CHAT_MARKERS):
                     await self.repository.unsubscribe_chat(message.bot_id, message.chat_id)
@@ -156,7 +143,5 @@ class DispatchService:
             else:
                 await self.repository.mark_sent(message.id, message_ref)
                 sent += 1
-            # One commit per message: a crash mid-batch can then duplicate at
-            # most the message in flight, not the whole batch.
             await self.session.commit()
         return DeliveryReport(sent, retried, failed)

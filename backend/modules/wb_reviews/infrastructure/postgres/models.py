@@ -46,8 +46,6 @@ class DailyReviewCountModel(WBReviewsBase):
     count_rating_3: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_rating_4: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_rating_5: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Сколько из этих отзывов с фото и с видео. NULL — срез снят до того, как
-    # мы начали их считать: это «не знаем», а не «ни одного».
     count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -100,8 +98,6 @@ class ReviewSyncJobModel(WBReviewsBase):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Set only while the job waits for a retry; a dispatched job carries NULL so
-    # the reaper cannot hand the same work out twice.
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

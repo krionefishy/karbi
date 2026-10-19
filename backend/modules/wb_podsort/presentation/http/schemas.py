@@ -39,7 +39,6 @@ class WarehouseResponse(BaseModel):
 class WarehouseRegionRequest(BaseModel):
     name: str
     region: str | None = None
-    # Вернуть угадывание по городу в названии вместо ручного выбора.
     guess: bool = False
 
 

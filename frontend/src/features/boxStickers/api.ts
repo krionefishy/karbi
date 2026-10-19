@@ -14,11 +14,9 @@ function form(workbook: WorkbookSource, stickers: File): FormData {
   return body;
 }
 
-/** Сопоставление без сборки: какой стикер на каком месте и что мешает. */
 export const checkStickers = (workbook: WorkbookSource, stickers: File) =>
   apiRequest<BoxStickerPlan>(`${root}/check`, { method: "POST", body: form(workbook, stickers) });
 
-/** PDF в порядке строк Excel: страницы WB как есть, без допечаток. */
 export const buildStickers = (workbook: WorkbookSource, stickers: File) =>
   apiDownload(`${root}/build`, {
     method: "POST",
@@ -32,11 +30,9 @@ function packingForm(template: File, assembly: string): FormData {
   return body;
 }
 
-/** Раскладка строк сборки по коробам шаблона — без файла, с проблемами. */
 export const checkPacking = (template: File, assembly: string) =>
   apiRequest<PackingPlan>(`${root}/packing/check`, { method: "POST", body: packingForm(template, assembly) });
 
-/** Заполненный шаблон WB; он же запоминается под номером поставки. */
 export const buildPacking = (template: File, assembly: string) =>
   apiDownload(`${root}/packing/build`, { method: "POST", body: packingForm(template, assembly) });
 

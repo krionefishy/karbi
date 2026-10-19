@@ -1,9 +1,3 @@
-"""Снимок остатков на конец недели из зеркала wb_core.
-
-Зеркало знает только «сейчас». Лист спрашивает «на последнюю неделю», поэтому
-в начале недели остаток снимается и остаётся за закрытой неделей навсегда.
-"""
-
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -17,13 +11,10 @@ from backend.modules.wb_core.application import RemainsMirror
 from backend.modules.wb_core.domain import WarehouseRemain
 from backend.storage.pg import Database
 
-# Служебные строки отчёта «Остатки на складах»: не склады, а путь товара и итог.
 TO_CLIENT_ROW = "В пути до получателей"
 FROM_CLIENT_ROW = "В пути возвраты на склад WB"
 TOTAL_ROW = "Всего находится на складах"
 SERVICE_ROWS = {TO_CLIENT_ROW, FROM_CLIENT_ROW, TOTAL_ROW}
-# Снимок закрытой недели берётся не раньше этого часа понедельника: зеркало
-# остатков обновляется раз в шесть часов, и ночной срез уже должен лечь.
 SNAPSHOT_HOUR = 3
 
 
@@ -88,8 +79,6 @@ class StockSnapshots:
         async with self.database.session() as session:
             live = await read_live_stock(session, seller_id, now=now)
         if live.taken_at is None or live.taken_at.astimezone(self.timezone).date() <= week_end:
-            # Зеркало до кабинета ещё не доходило или стоит с прошлой недели: остаток
-            # с пятницы лёг бы как воскресный. Снимок подождёт свежего чтения.
             return None
         async with self.database.session() as session:
             await FinReportsRepository(session).save_stock_snapshot(

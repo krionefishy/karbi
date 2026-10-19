@@ -1,10 +1,3 @@
-"""Коробовка из таблицы сборки: вставленные строки → заполненный шаблон WB.
-
-Строки повторяют формы записи из живой таблицы склада: схема «3-60+1-40»,
-«1-4», которую Google показал датой, колонки, сдвинутые на одну на другом листе,
-строка «не везем» без номера поставки.
-"""
-
 import io
 
 import pytest
@@ -35,7 +28,6 @@ def pasted(*rows: str) -> str:
     return "\n".join(rows)
 
 
-# Лист «Москва_26»: номер поставки, артикул, баркод, номера коробов, название, три количества, сборка, схема.
 MOSCOW = pasted(
     f"{SUPPLY}\t1304218079\t{DRILL}\t01.06.2026\tЗарядное устройство\t290\t290\t290\t290\t5-50+1-40",
     f"{SUPPLY}\t1179385821\t{SAW}\t7-16\tТриммер\t200\t200\t200\t200\t10-20",
@@ -62,7 +54,6 @@ def test_assembly_reads_rows_by_content_not_by_column() -> None:
     ]
     assert assembly.boxes == 17
 
-    # Лист «Регионы_26» осенью: на одну колонку количества меньше, схема сразу после сборки.
     shifted = pasted(
         f"{SUPPLY}\t317874626\t{DRILL}\t01.05.2026\tФонарь\t250\t250\t250\t4-60+1-10\t\t1п",
         f"{SUPPLY}\t1304131904\t{LAMP}\t20\tОвощерезка\t10\t10\t10\t01.10.2026",
@@ -72,7 +63,6 @@ def test_assembly_reads_rows_by_content_not_by_column() -> None:
     assert [(row.quantity, row.boxes) for row in assembly.rows] == [(250, (60, 60, 60, 60, 10)), (10, (10,))]
     assert "Регионы" not in str(assembly)
 
-    # Между словами по два пробела — тоже колонки: так вставляется из некоторых браузеров.
     spaced = parse_assembly(f"{SUPPLY}  1304218079  {DRILL}  1-6  Зарядное устройство  290  290  290  5-50+1-40")
     assert spaced.problems == () and spaced.rows[0].boxes == (50, 50, 50, 50, 50, 40)
 
@@ -162,7 +152,6 @@ def test_pack_writes_only_barcode_and_quantity_into_the_same_file() -> None:
     assert sheet is not None
     rows = [[cell.value for cell in row] for row in sheet.iter_rows(min_row=1, max_row=5)]
     assert rows[0][:3] == ["Баркод товара", "Кол-во товаров", "ШК короба"]
-    # Порядок строк — порядок шаблона; товар — по порядку таблицы сборки.
     assert rows[1:] == [
         [DRILL, 25, "6180598", None, BOXES[3][1]],
         [DRILL, 25, "6180474", None, BOXES[0][1]],
@@ -171,7 +160,6 @@ def test_pack_writes_only_barcode_and_quantity_into_the_same_file() -> None:
     ]
     assert all(isinstance(row[0], str) for row in rows[1:]), "баркод строкой, иначе Excel покажет 2,05E+12"
 
-    # Заполненный файл читается тем же разбором, что и коробовка для стикеров.
     boxes = read_workbook(data)
     assert [(box.shk, box.lines[0].barcode, box.lines[0].quantity) for box in boxes] == [
         ("6180598", DRILL, 25),
@@ -184,9 +172,6 @@ def test_pack_writes_only_barcode_and_quantity_into_the_same_file() -> None:
     assert data is None and "нужно 2" in plan.problems[0]
     with pytest.raises(StickerInputError, match="не открывается"):
         pack(b"not an excel", _assembly((DRILL, 50, "2-25")))
-
-
-# --- сервис: сверка с товарами поставки и память между шагами -------------------
 
 
 class FakeStore(PackingStore):

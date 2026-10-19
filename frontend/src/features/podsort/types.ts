@@ -22,12 +22,10 @@ export interface PodsortSellerState {
   collected_at: string | null;
   collection_error: string | null;
   remains_at: string | null;
-  /** Снимок остатков давно не обновлялся — вычитается устаревший остаток. */
   remains_stale: boolean;
   remains_error: string | null;
 }
 
-/** manual — регион задал человек, guess — угадан по городу, unplaced — WB не говорит где, none — неизвестно. */
 export type WarehouseSource = "manual" | "guess" | "unplaced" | "none";
 
 export interface PodsortWarehouse {

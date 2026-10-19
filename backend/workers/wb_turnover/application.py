@@ -25,7 +25,6 @@ class TurnoverWorkerApplication:
         self.settings = settings or load_settings()
         configure_logging(self.settings.app.log_level)
         self.database = Database()
-        # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
         gateway = EgressGateway(self.settings.egress)
         self.worker = TurnoverWorker(
             self.database,

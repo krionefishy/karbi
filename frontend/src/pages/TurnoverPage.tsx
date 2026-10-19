@@ -97,8 +97,6 @@ export function TurnoverPage() {
     },
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refresh });
-  // While a collection is running the state is polled; the table refreshes by
-  // itself the moment it finishes, so nobody has to guess when to reload.
   const { data: refreshState } = useQuery({
     queryKey: ["turnover-refresh", sellerId],
     queryFn: () => getRefreshState(sellerId),

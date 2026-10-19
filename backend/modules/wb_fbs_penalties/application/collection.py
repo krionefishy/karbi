@@ -11,9 +11,6 @@ from backend.modules.wb_fbs_penalties.domain import NO_ORDER_TRACE, ReportRow, R
 from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRepository
 from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
 
-# Досводка несведённых строк: столько дней назад зеркало ещё могло застать задание,
-# и не чаще раза в столько часов — чтобы не гонять зеркало по одним и тем же
-# отменённым заказам каждый проход.
 RETRACE_DAYS = 45
 RETRACE_HOURS = 6
 TRACE_CHUNK = 5000
@@ -25,9 +22,7 @@ class CollectionResult:
     reports_loaded: int
     rows_seen: int
     rows_kept: int
-    # Отчёты ещё остались: кабинет остаётся в очереди на следующий проход.
     more: bool = False
-    # Кабинет отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
@@ -70,7 +65,6 @@ class CollectionService:
         seller_key = str(seller_id)
         tracked = await self.penalties.tracked(seller_id)
         depth = self.window_days if tracked is not None and tracked.collected_at is not None else self.backfill_days
-        # Сеть идёт до первой записи: держать транзакцию весь запрос незачем.
         await self.session.commit()
 
         headers = await self.client.reports(seller_key, today - timedelta(days=depth), today)
@@ -99,8 +93,6 @@ class CollectionService:
                     loaded += 1
                 else:
                     await self.penalties.advance_report(seller_id, report.report_id, page.cursor)
-                # Страница — отдельная транзакция: упавший на третьей странице
-                # процесс не должен перечитывать первые две.
                 await self.session.commit()
                 if page.exhausted:
                     break

@@ -110,8 +110,6 @@ class ReviewSyncRepository:
             finished_at=None if seller_ids else datetime.now(UTC),
         )
         self.session.add(run)
-        # These models deliberately have no ORM relationship, so make the FK
-        # insertion order explicit while keeping run, jobs and outbox atomic.
         await self.session.flush()
         jobs = [
             ReviewSyncJobModel(id=uuid.uuid4(), run_id=run.id, seller_id=seller_id, status="queued")
@@ -158,8 +156,6 @@ class ReviewSyncRepository:
         )
 
     async def complete_job(self, job_id: uuid.UUID, product_count: int, feedback_count: int) -> None:
-        # Only a running job may finish: a job the reaper already closed as
-        # error must not be rewritten into a success after the fact.
         await self.session.execute(
             update(ReviewSyncJobModel)
             .where(ReviewSyncJobModel.id == job_id, ReviewSyncJobModel.status == "running")
@@ -175,7 +171,6 @@ class ReviewSyncRepository:
         )
 
     async def fail_job(self, job_id: uuid.UUID, error: str) -> None:
-        # Same guard as complete_job: a job already closed keeps its verdict.
         await self.session.execute(
             update(ReviewSyncJobModel)
             .where(ReviewSyncJobModel.id == job_id, ReviewSyncJobModel.status.in_(("queued", "running")))
@@ -303,10 +298,6 @@ class ReviewSyncRepository:
         return await self.session.get(ReviewSyncRunModel, job.run_id)
 
     async def finalize_run(self, run_id: uuid.UUID) -> None:
-        # Lock the run row first. Two consumers finishing the last two jobs at
-        # the same time would otherwise both count each other's job as pending
-        # and leave the run running forever; the second finisher now waits for
-        # the first to commit and recounts against the committed statuses.
         await self.session.execute(
             select(ReviewSyncRunModel.id).where(ReviewSyncRunModel.id == run_id).with_for_update()
         )

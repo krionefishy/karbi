@@ -15,7 +15,6 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTempor
 
 router = APIRouter(prefix="/wb/box-stickers", tags=["wb-box-stickers"])
 
-# Стикеры на 126 коробов весят меньше мегабайта; потолок — с запасом, но ниже лимита nginx.
 MAX_FILE_BYTES = 20 * 1024 * 1024
 
 

@@ -13,15 +13,10 @@ class WBJsonClient:
 
     bucket = "statistics"
     api_name = "WB API"
-    # Category of the WB token this client needs. A key is issued per category,
-    # so "недействителен" is the wrong thing to tell someone whose key simply
-    # lacks one checkbox.
     category = ""
 
     def __init__(self, gateway: EgressGateway, *, priority: str = "background") -> None:
         self.gateway = gateway
-        # interactive — для действий оператора: в очереди шлюза они обгоняют
-        # фоновые автоматизации, а не стоят за ночным синком.
         self.priority = priority
         self.logger = logging.getLogger(f"wb.{self.bucket}.client")
 

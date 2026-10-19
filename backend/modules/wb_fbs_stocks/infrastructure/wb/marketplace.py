@@ -5,7 +5,6 @@ from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentE
 from backend.modules.wb_fbs_stocks.domain import SellerWarehouse
 
 MARKETPLACE_BUCKET = "marketplace"
-# WB принимает не больше тысячи позиций за запрос остатков.
 SKU_CHUNK = 1000
 
 
@@ -64,7 +63,6 @@ class WBFbsStocksClient(WBJsonClient):
             return []
         rows = payload.get("stocks") if isinstance(payload, dict) else payload
         if rows is None:
-            # `{"stocks": null}` — склад без единой записи, а не сломанный ответ.
             return []
         if not isinstance(rows, list):
             raise WBPermanentError(f"{self.api_name}: неожиданный ответ по остаткам")

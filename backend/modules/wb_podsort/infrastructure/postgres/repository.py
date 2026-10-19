@@ -38,8 +38,6 @@ class PodsortRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- membership -------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -70,8 +68,6 @@ class PodsortRepository:
             .with_for_update(read=True)
         )
         return found is not None
-
-    # --- collection -------------------------------------------------------
 
     async def record_attempt(self, seller_id: uuid.UUID, *, now: datetime) -> None:
         await self.session.execute(
@@ -190,8 +186,6 @@ class PodsortRepository:
         ).one()
         return row[0], int(row[1] or 0)
 
-    # --- reading ----------------------------------------------------------
-
     async def totals(
         self,
         seller_id: uuid.UUID,
@@ -248,8 +242,6 @@ class PodsortRepository:
             row.barcode: BarcodeInfo(row.barcode, row.nm_id, row.vendor_code, row.subject, row.tech_size)
             for row in rows
         }
-
-    # --- settings ---------------------------------------------------------
 
     async def settings(self) -> PodsortSettings:
         row = await self.session.get(SettingsModel, 1)

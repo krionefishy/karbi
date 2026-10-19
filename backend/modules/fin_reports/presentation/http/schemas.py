@@ -4,7 +4,6 @@ from pydantic import BaseModel
 class LineResponse(BaseModel):
     key: str
     title: str
-    # total — итог, subtotal — подытог, item — статья расходов, info — справочная строка.
     level: str
 
 
@@ -23,15 +22,10 @@ class PeriodResponse(BaseModel):
     label: str
     date_from: str
     date_to: str
-    # Строка отчёта -> сумма по выбранным кабинетам.
     values: dict[str, float]
-    # Кабинет -> строка отчёта -> сумма.
     by_seller: dict[str, dict[str, float]]
-    # Кабинеты, у которых отчёт WB (день начислений Ozon) за период ещё не дочитан: цифры неполные.
     pending_sellers: list[str]
-    # Период ещё идёт (его последний день не раньше сегодняшнего): цифры не итоговые.
     open: bool
-    # Выручка до СПП по артикулам без себестоимости.
     uncosted: float
 
 
@@ -46,7 +40,6 @@ class UncostedArticleResponse(BaseModel):
 class PnlResponse(BaseModel):
     year: int
     granularity: str
-    # wb — отчёты реализации WB, ozon — начисления Ozon по дням; набор строк у каждого свой.
     marketplace: str
     lines: list[LineResponse]
     sellers: list[SellerStateResponse]

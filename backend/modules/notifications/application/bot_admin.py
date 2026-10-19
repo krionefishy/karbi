@@ -1,10 +1,3 @@
-"""Registering bots from the interface.
-
-The token passes through this server and is never written down here: it goes
-straight to the relay, which stores it encrypted and answers with the bot's name
-and the template invitation links are built from.
-"""
-
 import logging
 import uuid
 

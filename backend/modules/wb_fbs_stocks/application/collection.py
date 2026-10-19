@@ -15,7 +15,6 @@ class CollectionResult:
     warehouses: int
     polled: int
     barcodes: int
-    # Кабинет отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
@@ -35,21 +34,17 @@ class CollectionService:
     async def collect(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> CollectionResult:
         """Временные ошибки WB уходят наверх: воркер повторит кабинет позже."""
         columns = await self.stocks.columns(seller_id)
-        # Скрытые строки не опрашиваются: их остаток никому не нужен, а запросы — бюджет WB.
         barcodes = [row.barcode for row in await self.stocks.barcodes(seller_id) if not row.hidden]
         await self.session.commit()
 
         warehouses = await self.client.warehouses(str(seller_id))
         if not warehouses:
-            # Кабинет без единого склада в этой автоматизации не бывает: пустой
-            # ответ — сбой, и стирать по нему столбцы оператора нельзя.
             raise WBPermanentError("WB вернул пустой список складов кабинета")
         live = {warehouse.warehouse_id for warehouse in warehouses if not warehouse.is_deleting}
         wanted = [column.warehouse_id for column in columns if column.warehouse_id in live]
         facts: list[StockFact] = []
         for warehouse_id in wanted:
             amounts = await self.client.stocks(str(seller_id), warehouse_id, barcodes)
-            # Строки нет — на этом складе остаток не заводили; для таблицы это ноль.
             facts.extend(
                 StockFact(warehouse_id=warehouse_id, barcode=barcode, amount=amounts.get(barcode, 0))
                 for barcode in barcodes

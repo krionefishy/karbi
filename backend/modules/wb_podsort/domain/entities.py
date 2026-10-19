@@ -121,7 +121,6 @@ class PodsortRow:
     orders_7: int = 0
     window_orders: int = 0
     window_fbs_orders: int = 0
-    # Заказы текущего месяца по регионам — как столбцы I…V в образце.
     month_by_region: dict[str, int] = field(default_factory=dict)
     targets: dict[str, RegionFigures] = field(default_factory=dict)
     unplaced_stock: int = 0

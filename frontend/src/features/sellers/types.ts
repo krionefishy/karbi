@@ -5,21 +5,15 @@ export interface Seller {
   catalog_sync_status: "queued" | "success" | "syncing" | "error";
   last_catalog_sync_at: string | null;
   catalog_sync_error: string | null;
-  /** Set once the seller is retired: he keeps his history and collects nothing. */
   archived_at: string | null;
-  /** Automations the seller is connected to. */
   automations: string[];
-  /** Сага доставки учётки на шлюз wb-egress. Пара без префикса — про WB. */
   egress_status: EgressStatus;
   egress_error: string | null;
   ozon_egress_status: EgressStatus;
   ozon_egress_error: string | null;
-  /** MPStats — не маркетплейс, а аналитика по ним; токен у селлера свой. */
   mpstats_egress_status: EgressStatus;
   mpstats_egress_error: string | null;
-  /** Адрес общий: у селлера он один на оба маркетплейса и на MPStats. */
   egress_ip: string | null;
-  /** Действующая сегодня ставка налога, % — и с какого дня; null — не задана. */
   tax_rate: number | null;
   tax_rate_from: string | null;
 }
@@ -53,10 +47,6 @@ export interface SellerInput {
   api_key: string;
 }
 
-/**
- * Учётка Ozon целиком. Частичного обновления нет: шлюз заменяет учётку
- * полностью, поэтому при ротации вводятся все значения заново.
- */
 export interface OzonCredentialsInput {
   client_id: string;
   api_key: string;
@@ -64,21 +54,17 @@ export interface OzonCredentialsInput {
   performance_client_secret: string;
 }
 
-/** Учётка Ozon ни разу не доезжала до шлюза — это не ошибка, а «ещё не заводили». */
 export const isOzonMissing = (seller: Seller) =>
   seller.ozon_egress_status === "undelivered" && seller.ozon_egress_error === null;
 
-/** Ставка налога в процентах; без даты действует с сегодняшнего дня. */
 export interface TaxRateInput {
   rate: string;
   effective_from: string | null;
 }
 
-/** Токен MPStats: кабинет MPStats → Настройки → API. */
 export interface MPStatsCredentialsInput {
   token: string;
 }
 
-/** Токен MPStats ни разу не доезжал до шлюза — это не ошибка, а «ещё не заводили». */
 export const isMPStatsMissing = (seller: Seller) =>
   seller.mpstats_egress_status === "undelivered" && seller.mpstats_egress_error === null;

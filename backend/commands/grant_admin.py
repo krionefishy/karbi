@@ -1,11 +1,3 @@
-"""Grant or revoke the admin flag for an account that already exists.
-
-`create_user --admin` covers the very first administrator; this covers everyone
-after, including the case where the only administrator left the company. It is
-the escape hatch for the panel locking itself: the section that hands out the
-flag is behind the flag.
-"""
-
 import argparse
 import asyncio
 

@@ -85,7 +85,6 @@ class TestFetching:
 
         await fetcher(database, bot, relay).fetch_once()
 
-        # No acknowledgement protocol: our own cursor is the whole conversation.
         assert relay.asked == [900]
 
     async def test_a_handled_update_moves_the_cursor(self, stand) -> None:
@@ -97,7 +96,6 @@ class TestFetching:
 
     async def test_a_repeated_update_is_not_handled_twice(self, stand) -> None:
         database, bot = stand
-        # The relay repeats whenever our fetch is lost mid-flight.
         relay = FakeRelay([[update(event_id=7)], [update(event_id=7)]])
         loop = fetcher(database, bot, relay)
 
@@ -115,8 +113,6 @@ class TestFetching:
         relay = FakeRelay([[update(event_id=5, recipient="not-a-number")]])
 
         assert await fetcher(database, bot, relay).fetch_once() == 0
-        # The cursor steps over it: otherwise the same update would be fetched
-        # forever and nothing behind it would ever be seen.
         assert await cursor_of(database, bot) == 5
 
     async def test_an_unreachable_relay_leaves_the_cursor_alone(self, stand) -> None:

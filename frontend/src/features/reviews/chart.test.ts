@@ -22,7 +22,6 @@ describe("buildSeries", () => {
   });
 
   it("has no delta on a day whose predecessor is missing", () => {
-    // 23rd was never collected, so the 24th's change is unknown — not a jump.
     const points = buildSeries([day("2026-08-22", 900), day("2026-08-24", 903)], "2026-08-25", 4);
     expect(points.map((point) => point.delta)).toEqual([null, null, null, null]);
   });
@@ -125,7 +124,6 @@ describe("formatSigned", () => {
     expect(formatSigned(3)).toBe("+3");
     expect(formatSigned(-13)).toBe("−13");
     expect(formatSigned(0)).toBe("0");
-    // ru-RU groups digits with a non-breaking space, so normalise before comparing.
     expect(formatSigned(13804).replace(/\s/g, " ")).toBe("+13 804");
   });
 });

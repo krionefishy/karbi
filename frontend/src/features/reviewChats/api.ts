@@ -18,6 +18,5 @@ export function getReviewChats(sellerId: string, filter: ReviewChatsFilter) {
   return apiRequest<ReviewChats>(`${base(sellerId)}?${params.toString()}`);
 }
 
-/** Книга за период целиком: сводка с днями и все диалоги, фильтры списка на неё не влияют. */
 export const downloadReviewChats = (sellerId: string, filter: ReviewChatsFilter) =>
   apiDownload(`${base(sellerId)}/export?${new URLSearchParams({ date_from: filter.dateFrom, date_to: filter.dateTo })}`);

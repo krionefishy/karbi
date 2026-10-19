@@ -24,7 +24,6 @@ from backend.shared.settings import load_settings
 
 API = "/api/v1/wb/review-chats"
 AUTOMATION = "/api/v1/automations/wb-review-chats/sellers"
-# Неделю назад: окно ответа у всех диалогов давно истекло, а период по умолчанию их ещё видит.
 DAY = (datetime.now(UTC) - timedelta(days=7)).replace(hour=9, minute=0, second=0, microsecond=0)
 
 
@@ -45,7 +44,6 @@ def event(number: int, chat: str, minutes: int, sender: str, source: str, *, pro
 
 
 FEED = [
-    # Менеджер через сторонний клиент за неделю до рассылки: не момент запуска.
     event(0, "chat-old", -7 * 24 * 60, CHAT_SENDER_SELLER, CHAT_SOURCE_PORTAL, prompt=True, text="Здравствуйте. Вы"),
     event(9, "chat-old", -7 * 24 * 60 + 300, CHAT_SENDER_SELLER, CHAT_SOURCE_API, text="Заявка одобрена"),
     event(1, "chat-a", 0, CHAT_SENDER_SELLER, CHAT_SOURCE_PORTAL, prompt=True, text="Здравствуйте. Вы оставили отзыв"),
@@ -75,7 +73,6 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
         mirror = MirrorRepository(session)
         await mirror.record_attempt(seller_id, MIRROR_CHATS, now=DAY)
         await mirror.insert_chat_events(seller_id, FEED, now=DAY)
-        # Курсор — время последнего прочитанного события: лента дочитана до сейчас.
         read_at = datetime.now(UTC)
         await mirror.save_chat_cursor(seller_id, int(read_at.timestamp() * 1000), tail_reached_at=read_at)
         await mirror.mark_collected(seller_id, MIRROR_CHATS, now=read_at)
@@ -118,12 +115,10 @@ async def test_the_report_counts_replies_with_and_without_our_message(client: As
         "silent_rate": 0.5,
         "pending_rate": 0.0,
     }
-    # Без нашего сообщения и без ответа после запуска — пропуск рассылки, не контрольная группа.
     assert (body["missed"]["total"], body["missed"]["silent"]) == (1, 1)
     assert (body["early"]["total"], body["before"]["total"]) == (0, 0)
     assert (body["after_launch"]["total"], body["after_launch"]["reply_rate"]) == (3, 1 / 3)
     assert body["launch_at"] == FEED[3].added_at.isoformat()
-    # Окно «до запуска» — две недели до дня запуска: туда попал старый диалог с ответом менеджера.
     assert (body["baseline"]["summary"]["total"], body["baseline"]["summary"]["silent"]) == (1, 1)
     assert body["baseline"]["date_to"] == (DAY - timedelta(days=1)).date().isoformat()
     assert body["reply_window_hours"] == 48

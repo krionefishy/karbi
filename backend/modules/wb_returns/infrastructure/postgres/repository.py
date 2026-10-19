@@ -27,8 +27,6 @@ class ReturnsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- membership -------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -65,8 +63,6 @@ class ReturnsRepository:
             .with_for_update(read=True)
         )
         return found is not None
-
-    # --- collection schedule ---------------------------------------------
 
     async def sellers_due(self, since: datetime, *, retry_after: datetime) -> list[uuid.UUID]:
         rows = await self.session.scalars(
@@ -120,8 +116,6 @@ class ReturnsRepository:
         ).one()
         return row[0], int(row[1] or 0)
 
-    # --- returns ----------------------------------------------------------
-
     async def upsert_returns(
         self, seller_id: uuid.UUID, items: Sequence[ReturnItem], *, now: datetime
     ) -> list[ReturnChange]:
@@ -132,8 +126,6 @@ class ReturnsRepository:
         """
         if not items:
             return []
-        # Один стикер дважды в одном отчёте — берём последнюю строку: ON CONFLICT
-        # не умеет обновлять одну строку два раза за команду.
         items = list({item.shk_id: item for item in items}.values())
         keys = [item.shk_id for item in items]
         known: dict[int, str] = {}
@@ -187,8 +179,6 @@ class ReturnsRepository:
                     },
                 )
             )
-        # Новые строки получили `status_changed_at = now` при вставке; известным
-        # его сдвигаем отдельно, и только тем, у кого статус действительно другой.
         existing_changed = [shk_id for shk_id in changed_ids if shk_id in known]
         for offset in range(0, len(existing_changed), _CHUNK):
             await self.session.execute(
@@ -250,8 +240,6 @@ class ReturnsRepository:
             .limit(limit)
         )
         return list(rows)
-
-    # --- claims -----------------------------------------------------------
 
     async def upsert_claims(self, seller_id: uuid.UUID, claims: Sequence[Claim], *, now: datetime) -> list[Claim]:
         """Записать заявки и вернуть открытые, которых раньше не было."""
@@ -359,8 +347,6 @@ class ReturnsRepository:
         )
         return list(rows)
 
-    # --- notification log --------------------------------------------------
-
     async def logged_keys(self, seller_id: uuid.UUID, kind: str, keys: Iterable[str]) -> set[str]:
         wanted = list(dict.fromkeys(keys))
         if not wanted:
@@ -385,8 +371,6 @@ class ReturnsRepository:
         for offset in range(0, len(values), _CHUNK):
             statement = insert(NotificationLogModel).values(values[offset : offset + _CHUNK])
             await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id", "kind", "key"]))
-
-    # --- extension: installs -----------------------------------------------
 
     async def add_install(
         self,
@@ -459,8 +443,6 @@ class ReturnsRepository:
             .values(revoked_at=now)
         )
 
-    # --- extension: pairing --------------------------------------------------
-
     async def add_pairing_code(
         self,
         *,
@@ -501,8 +483,6 @@ class ReturnsRepository:
             else statement.where(PairingCodeModel.chat_id.is_(None))
         )
         await self.session.execute(statement)
-
-    # --- extension: delivery codes ----------------------------------------
 
     async def upsert_delivery_codes(
         self, seller_id: uuid.UUID, rows: Sequence[dict], *, install_id: uuid.UUID, now: datetime
@@ -559,8 +539,6 @@ class ReturnsRepository:
         )
         return len(result.all())
 
-    # --- extension: tasks ---------------------------------------------------
-
     async def add_task(self, seller_id: uuid.UUID, *, kind: str, chat_id: int | None) -> ExtensionTaskModel:
         task = ExtensionTaskModel(seller_id=seller_id, kind=kind, chat_id=chat_id)
         self.session.add(task)
@@ -611,8 +589,6 @@ class ReturnsRepository:
             )
         )
         return found is not None
-
-    # --- manual refresh --------------------------------------------------
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
         """Поставить запрос или вернуть тот, что уже ждёт: уникальный индекс

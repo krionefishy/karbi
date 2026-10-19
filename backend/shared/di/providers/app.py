@@ -96,14 +96,10 @@ class AppProvider(Provider):
 
     @provide(scope=Scope.APP)
     def review_report_service(self, settings: Settings) -> ReviewReportService:
-        # Сервис строит отчёт в отдельном треде и подключается к БД сам,
-        # поэтому ему нужен URL, а не сессия запроса.
         return ReviewReportService(settings.database.url)
 
     @provide(scope=Scope.APP)
     def replenishment_report_service(self, settings: Settings) -> ReplenishmentReportService:
-        # Как и отчёт по отзывам: строится в отдельном треде со своим движком,
-        # поэтому получает URL базы, а не сессию запроса.
         return ReplenishmentReportService(
             settings.database.url,
             window_days=settings.turnover.orders_window_days,

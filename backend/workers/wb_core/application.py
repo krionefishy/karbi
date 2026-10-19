@@ -34,8 +34,6 @@ class WBCoreWorkerApplication:
     консьюмер прикрыт своим супервизором: heartbeat ловит только внешний цикл.
     """
 
-    # How long a crashed consumer waits before coming back; keeps a hard
-    # failure from turning into a busy restart loop.
     consumer_restart_delay_seconds: float = 5.0
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -43,7 +41,6 @@ class WBCoreWorkerApplication:
         configure_logging(self.settings.app.log_level)
         self.logger = logging.getLogger("wb.core.application")
         self.database = Database()
-        # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
         gateway = EgressGateway(self.settings.egress)
         self.mirror = MirrorService(
             self.database,
@@ -75,8 +72,6 @@ class WBCoreWorkerApplication:
     def _create_consumer(self) -> CatalogSyncConsumer | None:
         if not self.settings.kafka.enabled:
             return None
-        # Та же группа, что была у консьюмера в воркере отзывов: топик не
-        # перечитывается с начала после переезда.
         return CatalogSyncConsumer(
             self.database,
             self.settings.kafka.bootstrap_servers,

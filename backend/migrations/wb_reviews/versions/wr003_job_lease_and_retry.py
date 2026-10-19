@@ -29,8 +29,6 @@ def upgrade() -> None:
     op.create_index(
         "ix_wb_reviews_sync_run_sellers_lease", "sync_run_sellers", ["status", "lease_expires_at"], schema="wb_reviews"
     )
-    # Jobs left running by the old code had no lease and would block every later
-    # run forever; close them so the first deploy starts from a clean slate.
     op.execute(
         "UPDATE wb_reviews.sync_run_sellers SET status = 'error', finished_at = now(), "
         "error = COALESCE(error, 'Прервано при обновлении сервиса') "

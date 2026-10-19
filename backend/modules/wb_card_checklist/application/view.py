@@ -5,15 +5,11 @@ from datetime import datetime
 from backend.modules.wb_card_checklist.domain import ITEMS, ITEMS_BY_KEY, ItemState
 
 STOCK_OK = "ok"
-# Зеркало wb_core до селлера ещё не доходило: сразу после подключения, до
-# ближайшего оборота wb-core-worker. Ключ исторический, фронт его знает.
 STOCK_NOT_CONNECTED = "not_connected"
-# Сбор остатков стоит: последний старше двух суток либо не удаётся вовсе.
 STOCK_STALE = "stale"
 
 REVIEWS_OK = "ok"
 REVIEWS_NOT_CONNECTED = "not_connected"
-# Сбор отзывов не удаётся, либо ни у одной карточки отзывов нет.
 REVIEWS_NO_SNAPSHOT = "no_snapshot"
 
 

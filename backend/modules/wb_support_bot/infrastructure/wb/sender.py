@@ -6,7 +6,6 @@ from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 CHAT_BUCKET = "chat"
 MESSAGE_PATH = "/api/v1/seller/message"
 CHATS_PATH = "/api/v1/seller/chats"
-# Потолок WB на текст одного сообщения.
 MAX_MESSAGE_LENGTH = 1000
 
 
@@ -55,7 +54,6 @@ class WBChatSender(WBJsonClient):
         except WBPermanentError as error:
             if "доступа" not in str(error):
                 raise
-            # Чтение чатов у ключа при этом работает, поэтому дело почти наверняка в уровне доступа токена.
             raise WBPermanentError(
                 f"{self.api_name}: у ключа нет права записи или доступа к категории «{self.category}»: "
                 "для отправки нужен токен с уровнем «Чтение и запись»"

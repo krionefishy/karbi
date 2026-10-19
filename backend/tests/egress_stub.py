@@ -1,11 +1,3 @@
-"""Заглушка шлюза wb-egress для тестов.
-
-Клиенты больше не ходят в `*.wildberries.ru`: каждый вызов — это POST
-`/api/v1/wb/request` на шлюз с конвертом `{seller_id, api, method, path, ...}`.
-Заглушка разворачивает конверт и отвечает так, как ответил бы шлюз, донося
-статус WB внутри тела: `{"status": ..., "ok": ..., "body": ...}`.
-"""
-
 import json
 from collections.abc import Callable
 from typing import Any
@@ -41,11 +33,9 @@ class EgressStub:
 
     def __init__(self, router: respx.MockRouter) -> None:
         self.calls: list[dict[str, Any]] = []
-        # Маршрут каждого вызова: WB или Ozon.
         self.routes: list[str] = []
         self._rules: list[tuple[str, str, Any]] = []
         router.post(REQUEST_URL).mock(side_effect=self._handle)
-        # Ozon ходит тем же конвертом по своему маршруту — правила общие.
         router.post(OZON_REQUEST_URL).mock(side_effect=self._handle)
 
     def on(

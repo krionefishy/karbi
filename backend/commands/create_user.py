@@ -27,8 +27,6 @@ async def create_user(username: str, password: str, is_admin: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create a Marketplace Auto employee account")
     parser.add_argument("--username", required=True)
-    # The first administrator has to come from here: the panel that grants the
-    # flag is itself behind it.
     parser.add_argument("--admin", action="store_true", help="grant access to the admin section")
     args = parser.parse_args()
     password = getpass.getpass("Password: ")

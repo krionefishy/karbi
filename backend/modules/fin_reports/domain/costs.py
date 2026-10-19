@@ -1,5 +1,3 @@
-"""Себестоимость единицы товара по кабинету и артикулу, с датой начала действия."""
-
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass

@@ -5,7 +5,6 @@ from typing import Any
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 MARKETPLACE_BUCKET = "marketplace"
-# WB принимает не больше тысячи позиций за запрос остатков.
 SKU_CHUNK = 1000
 
 
@@ -26,7 +25,6 @@ class Office:
     latitude: float | None
     cargo_type: int
     delivery_type: int
-    # WB отмечает объекты, под которые у этого кабинета уже есть склад.
     selected: bool
 
 
@@ -107,7 +105,6 @@ class WBFbsMarketplaceClient(WBJsonClient):
             name=str(row.get("name") or ""),
             city=str(row.get("city") or ""),
             address=str(row.get("address") or ""),
-            # У части объектов WB округ пустой; пустая строка честнее выдуманного.
             federal_district=str(row.get("federalDistrict") or ""),
             longitude=self._coordinate(row.get("longitude")),
             latitude=self._coordinate(row.get("latitude")),

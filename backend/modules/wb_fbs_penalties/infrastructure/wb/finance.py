@@ -6,12 +6,9 @@ from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentE
 from backend.modules.wb_fbs_penalties.domain import ReportHeader, ReportRow
 
 FINANCE_BUCKET = "finance"
-# Максимум строк детализации за запрос по документации WB.
 PAGE_LIMIT = 100_000
 LIST_LIMIT = 1000
-# Основной отчёт; тип 2 — «по выкупам», он селлеру не нужен.
 MAIN_REPORT = 1
-# Поля детализации, которые нужны автоматизации: остальное WB не отдаёт, и ответ легче.
 FIELDS = [
     "rrdId",
     "reportId",
@@ -47,7 +44,6 @@ FIELDS = [
 @dataclass(frozen=True, slots=True)
 class ReportPage:
     rows: list[ReportRow]
-    # `rrdId` для следующей страницы; при `exhausted` дальше страниц нет.
     cursor: int
     exhausted: bool
 
@@ -143,7 +139,6 @@ class WBFinanceClient(WBJsonClient):
             create_dt=self._day(raw.get("createDate")),
             srid=str(raw.get("srid") or ""),
             assembly_id=self._identifier(raw.get("orderId")),
-            # Стикер МП приходит строкой; `shkId` — тот же номер числом, на случай пустого стикера.
             sticker_id=self._identifier(raw.get("stickerId")) or self._identifier(raw.get("shkId")),
             order_dt=self._moment(raw.get("orderDt")),
             sale_dt=self._moment(raw.get("saleDt")),

@@ -78,7 +78,6 @@ function ErrorBanner({ error }: { error: string }) {
   );
 }
 
-/** Шаг 1: коробовка из таблицы сборки — шаблон WB + вставленные строки → заполненный шаблон. */
 function PackingPanel({ onBuilt }: { onBuilt: (supplyId: number | null) => void }) {
   const [template, setTemplate] = useState<File | null>(null);
   const [assembly, setAssembly] = useState("");
@@ -218,7 +217,6 @@ function PackingPanel({ onBuilt }: { onBuilt: (supplyId: number | null) => void 
   );
 }
 
-/** Шаг 2: стикеры по порядку — коробовка (по номеру поставки или файлом) + PDF стикеров → PDF. */
 function StickersPanel({
   recent,
   selected,
@@ -390,7 +388,6 @@ export function BoxStickersPage() {
   const queryClient = useQueryClient();
   const recentQuery = useQuery({ queryKey: ["box-stickers", "recent"], queryFn: fetchRecentPackings });
   const recent = recentQuery.data ?? [];
-  // Пока менеджер не выбрал сам, подставляется последняя заполненная коробовка.
   const [chosen, setChosen] = useState<string | null>(null);
   const selected = chosen ?? (recent[0] ? String(recent[0].supply_id) : MANUAL);
 

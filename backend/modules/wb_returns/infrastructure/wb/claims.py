@@ -1,10 +1,3 @@
-"""Заявки покупателей на возврат: `GET /api/v1/claims` на returns-api.
-
-Открытые заявки — только за последние 14 дней и страницами по 200; лимит —
-20 запросов в минуту на кабинет. Архив за 3 месяца может быть на сотни
-заявок, поэтому его читают реже открытых.
-"""
-
 import uuid
 from typing import Any
 
@@ -15,7 +8,6 @@ from backend.modules.wb_returns.infrastructure.wb.parsing import as_float, as_in
 RETURNS_BUCKET = "returns"
 CLAIMS_PATH = "/api/v1/claims"
 PAGE_LIMIT = 200
-# Предохранитель от бесконечной пагинации, если WB перестанет отдавать `total`.
 MAX_PAGES = 50
 
 

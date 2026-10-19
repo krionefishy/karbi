@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AppRoutes } from "./App";
 
-// Страницы подменены пустышками: проверяется маршрутизация, а не их содержимое.
 vi.mock("../pages/AutomationsPage", () => ({ AutomationsPage: () => <div>каталог автоматизаций</div> }));
 vi.mock("../pages/ReviewsPage", () => ({ ReviewsPage: () => <div>отзывы</div> }));
 vi.mock("../pages/TurnoverPage", () => ({ TurnoverPage: () => <div>оборачиваемость</div> }));
@@ -56,8 +55,6 @@ describe("маршруты автоматизаций", () => {
     open(path);
 
     expect(screen.getByText(expected)).toBeInTheDocument();
-    // Без своего маршрута адрес провалился бы в общий хвост и вернул каталог —
-    // ровно так «Открыть» и уводило бы обратно на список автоматизаций.
     expect(screen.queryByText("каталог автоматизаций")).not.toBeInTheDocument();
   });
 

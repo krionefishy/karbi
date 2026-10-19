@@ -11,7 +11,6 @@ class ChecklistItemResponse(BaseModel):
 
 class ItemStateResponse(BaseModel):
     key: str
-    # Выполнено ли по данным WB; null — данных нет.
     done: bool | None
     detail: str | None
     note: str | None
@@ -30,7 +29,6 @@ class ChecklistRowResponse(BaseModel):
     done: int
     total: int
     ready: bool
-    # Чего не хватает словами — тот же текст, что в колонке «Примечание» выгрузки.
     note: str
     comment: str
 
@@ -40,9 +38,7 @@ class ChecklistResponse(BaseModel):
     seller_name: str
     collected_at: str | None
     collection_error: str | None
-    # ok / not_connected / stale: откуда взялся (или не взялся) отбор по остатку.
     stock_state: str
-    # ok / not_connected / no_snapshot: есть ли у пунктов про отзывы данные.
     reviews_state: str
     min_stock: int
     items: list[ChecklistItemResponse]

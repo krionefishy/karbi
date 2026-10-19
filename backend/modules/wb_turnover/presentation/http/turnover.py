@@ -119,7 +119,6 @@ async def replenishment_report(
         report = await service.build(seller_id)
     except SellerNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не найден") from error
-    # Имя с кириллицей уезжает в filename*, а ascii-вариант остаётся запасным.
     fallback = f"podsort_{report.day.isoformat()}.xlsx"
     encoded = urllib.parse.quote(report.filename)
     return Response(

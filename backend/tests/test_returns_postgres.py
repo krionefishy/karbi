@@ -38,7 +38,7 @@ from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 MOSCOW = ZoneInfo("Europe/Moscow")
-NOW = datetime(2026, 9, 22, 6, 0, tzinfo=UTC)  # 09:00 МСК
+NOW = datetime(2026, 9, 22, 6, 0, tzinfo=UTC)
 TODAY = NOW.date()
 BOT = "wb-returns-test"
 
@@ -223,7 +223,6 @@ async def test_first_collection_reads_month_and_archive_then_two_weeks(database:
 
     report, claims = await collect(database, seller, [item(1)], now=NOW + timedelta(hours=1))
     assert report.calls == [(TODAY - timedelta(days=14), TODAY)]
-    # Архив читали час назад — до следующего раза ещё пять часов.
     assert claims.calls == [False]
 
 
@@ -235,7 +234,6 @@ async def test_status_change_is_detected_once(database: Database, seller: uuid.U
         )
         await session.commit()
         stored = await session.get(ReturnModel, (seller, 1))
-    # Стикер дважды в одном отчёте — одно изменение, последняя строка побеждает.
     assert [(change.item.shk_id, change.previous_status_key) for change in changes] == [(1, RETURN_TRANSIT)]
     assert stored is not None and stored.status_key == RETURN_READY
     assert stored.status_changed_at == NOW + timedelta(hours=2)
@@ -262,7 +260,6 @@ async def test_digest_goes_out_once_per_slot_and_only_when_something_changed(
 ) -> None:
     ready_at = NOW - timedelta(days=3, minutes=1)
     await collect(database, seller, [item(1, ready=ready_at), item(2, "В пути в пвз")])
-    # 09:00 МСК — первый слот: готовый, едущий и залежавшийся в одном сообщении.
     async with database.session() as session:
         report = await notifications(session).notify(seller, now=NOW)
         sent = await outbox_templates(session, seller)
@@ -275,7 +272,6 @@ async def test_digest_goes_out_once_per_slot_and_only_when_something_changed(
     assert params["ready"] == [{"address": "посёлок Развилка 52к1", "count": 1}]
     assert "code" in params and params["no_install"] is True
 
-    # Тот же слот через 10 минут и следующий слот без изменений — тишина.
     async with database.session() as session:
         again = await notifications(session).notify(seller, now=NOW + timedelta(minutes=10))
     async with database.session() as session:
@@ -285,7 +281,6 @@ async def test_digest_goes_out_once_per_slot_and_only_when_something_changed(
         logged = await session.scalars(select(NotificationLogModel).where(NotificationLogModel.seller_id == seller))
     assert sorted(row.kind for row in logged) == ["overdue", "ready", "slot", "slot", "transit"]
 
-    # Новый готовый возврат — в ближайший слот, между слотами ничего.
     await collect(database, seller, [item(1, ready=ready_at), item(2, "Готов к выдаче")], now=NOW + timedelta(hours=4))
     async with database.session() as session:
         between = await notifications(session).notify(seller, now=NOW + timedelta(hours=4))
@@ -360,7 +355,6 @@ async def test_commands_answer_into_the_chat(database: Database, seller: uuid.UU
         summary = replies[0]["params"]["sellers"][0]
         assert (summary["ready_total"], summary["transit_total"]) == (1, 1)
         assert summary["ready"] == [{"address": "посёлок Развилка 52к1", "count": 1}]
-        # Расширения нет — кода нет, и бот говорит, где его взять.
         assert replies[1]["params"] == {"name": "ИП Возвраты", "date": "2026-09-22", "code": None, "no_install": True}
     finally:
         async with database.session() as session:
@@ -396,7 +390,6 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             with pytest.raises(PairingCodeInvalidError):
                 await extension(session).pair(code, install_id="chrome-abcdef12", browser="Chrome", now=NOW)
 
-        # /qr без кода на сегодня ставит задачу расширению; heartbeat её забирает.
         async with database.session() as session:
             assert await commands(session).handle(command(seller, "/qr", chat), now=NOW) == "returns.code"
             [reply] = await chat_replies(session, chat)
@@ -406,7 +399,6 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             beat = await extension(session).heartbeat(install, state="ok", error=None, now=NOW)
         assert (beat.refresh_code, beat.has_code_today, beat.seller_name) == (True, False, "ИП Возвраты")
 
-        # Код пришёл: сохранён, чат получил ответ, повторный heartbeat задачу не отдаёт.
         async with database.session() as session:
             install = await extension(session).authenticate(paired.token, now=NOW)
             result = await extension(session).ingest_codes(
@@ -427,9 +419,7 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             replies = await chat_replies(session, chat)
         assert (result.accepted, result.replied_chats) == (2, [chat])
         delivered = replies[-1]["params"]
-        # Новый формат первым: шестизначный extCode и extQr, старые — только если новых нет.
         assert (delivered["code"], delivered["legacy_code"], delivered["qr"]) == ("412", "41255", "WB|412|xyz")
-        # Возвраты ещё не собирали — адресов рядом с кодом пока нет.
         assert delivered["offices"] == []
         assert delivered["qr_url"].startswith(f"https://test.local/api/v1/wb/returns/qr/{seller}/2026-09-22/")
         async with database.session() as session:
@@ -444,7 +434,6 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
         assert view.has_code_today and len(view.installs) == 1 and view.installs[0].state == "ok"
         assert png is not None and png[:8] == b"\x89PNG\r\n\x1a\n"
 
-        # Готовый возврат теперь уходит с кодом дня, а рядом с кодом — адреса ПВЗ из отчёта.
         await collect(database, seller, [item(1)])
         async with database.session() as session:
             params = await extension(session).code_params(seller, "ИП Возвраты", date(2026, 9, 22))
@@ -459,7 +448,6 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
             digests = [row.payload for row in sent if row.payload["template"] == "returns.digest"]
         assert report.sent == 1 and digests[0]["params"]["code"] == "412" and digests[0]["params"]["qr"] == "WB|412|xyz"
 
-        # Отзыв установки: токен перестаёт работать.
         async with database.session() as session:
             assert await extension(session).revoke(seller, paired.install_id, now=NOW)
         async with database.session() as session:
@@ -483,7 +471,6 @@ async def test_extension_alerts_fire_once_a_day(database: Database, seller: uuid
     async with database.session() as session:
         install = await extension(session).authenticate(paired.token, now=NOW)
         await extension(session).heartbeat(install, state="needs_login", error="login page", now=NOW)
-    # 09:00 МСК без кода на сегодня, сессия слетела: обе строки в одном сообщении, и только раз.
     async with database.session() as session:
         first = await notifications(session).notify(seller, now=NOW)
     async with database.session() as session:
@@ -492,7 +479,6 @@ async def test_extension_alerts_fire_once_a_day(database: Database, seller: uuid
     async with database.session() as session:
         [event] = await session.scalars(select(OutboxEventModel).where(OutboxEventModel.aggregate_id == seller))
     assert len(event.payload["params"]["alerts"]) == 2
-    # Через сутки молчания — снова про код на новый день, вход и теперь про молчание.
     async with database.session() as session:
         later = await notifications(session).notify(seller, now=NOW + timedelta(days=1, hours=1))
     assert (later.sent, later.alerts) == (1, 3)
@@ -516,7 +502,6 @@ async def test_a_new_pair_replaces_the_broken_installs_but_keeps_a_working_one(
 
     working = await pair("chrome-working")
     await beat(working, "ok")
-    # Брошенная попытка: расширение переставили, вход на WB так и не выполнили.
     abandoned = await pair("chrome-abandoned")
     await beat(abandoned, "needs_login")
 

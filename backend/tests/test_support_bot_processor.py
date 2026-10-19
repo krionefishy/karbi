@@ -35,7 +35,7 @@ from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
-PROMPT_AT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)  # 09:00 МСК
+PROMPT_AT = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 CHAT = "1:chat-a"
 TEXT = "Здравствуйте! Подскажите, удалось ли решить проблему?"
 
@@ -91,7 +91,6 @@ BASE_FEED = [
     event(30, "buyer", "."),
     event(60, "specialist", "Опишите, пожалуйста, проблему"),
 ]
-# 14:10 МСК, через 4 часа 10 минут после ответа специалиста: тишина вышла, окно открыто.
 NOW = PROMPT_AT + timedelta(minutes=60 + 4 * 60 + 10)
 
 
@@ -237,14 +236,13 @@ async def test_a_stale_mirror_blocks_sending(database: Database, seller: uuid.UU
 
 async def test_outside_the_window_nothing_is_sent(database: Database, seller: uuid.UUID) -> None:
     await go_live(database, seller)
-    night = PROMPT_AT + timedelta(hours=17)  # 23:00 МСК
+    night = PROMPT_AT + timedelta(hours=17)
     await feed(database, seller, BASE_FEED, read_at=night)
     sender = FakeSender()
 
     report = await run(database, seller, sender, now=night)
 
     assert sender.calls == [] and report.skipped == "вне окна рассылки"
-    # Кампания при этом заведена, и первое сообщение назначено на открытие окна.
     state = await dialog(database, seller)
     assert state.state == "in_campaign" and state.next_send_at is not None and state.next_send_at > night
 
@@ -282,7 +280,7 @@ async def test_a_transport_failure_is_reconciled_against_the_feed(database: Data
     await run(database, seller, sender, now=later)
 
     assert [row.status for row in await sends(database, seller)] == [SEND_SENT]
-    assert sender.calls == []  # повторной отправки не было
+    assert sender.calls == []
 
 
 async def test_a_message_missing_from_the_feed_is_written_off_as_failed(database: Database, seller: uuid.UUID) -> None:
@@ -312,7 +310,6 @@ async def test_a_key_without_write_access_pauses_the_seller(database: Database, 
     async with database.session() as session:
         tracked = await SupportBotRepository(session).tracked(seller)
         assert tracked is not None and tracked.paused_reason and tracked.mode == MODE_LIVE
-    # Следующий проход ничего не отправляет, пока человек не переведёт кабинет заново.
     sender.error = None
     again = await run(database, seller, sender, now=NOW + timedelta(hours=2))
     assert sender.calls == [] and again.skipped is not None
@@ -377,7 +374,6 @@ async def test_canary_sends_only_to_its_share_and_dry_runs_the_rest(database: Da
         report = await processor.process_seller(seller, now=NOW)
 
     expected = {f"1:canary-{n}" for n in range(total) if in_canary(f"1:canary-{n}", PROMPT_AT, 10)}
-    # диалог относится к канарейке по времени автосообщения: оно у всех одинаковое
     assert report.sent == len(expected) and report.dry_run == total - len(expected)
     assert len(sender.calls) == len(expected)
     assert 0 < len(expected) < total // 2
@@ -496,8 +492,6 @@ async def test_without_any_sign_the_send_is_written_off_with_a_clear_reason(
     assert report.failed == 1 and sender.calls == []
     assert (await sends(database, seller))[0].error == "ни лента, ни список чатов не отдали подпись чата"
 
-
-# --- вердикты нейросети --------------------------------------------------------
 
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel  # noqa: E402
 from backend.modules.wb_support_bot.domain import MANUAL_ALLOW, MANUAL_DENY  # noqa: E402

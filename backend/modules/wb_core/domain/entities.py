@@ -6,29 +6,18 @@ from decimal import Decimal
 
 ARTICLE_STATES = ("active", "archived", "feedback_only")
 
-# Маркетплейсы, по которым у селлера бывает учётка. Строки те же, что в
-# путях шлюза и в ответе его /api/v1/sellers.
 MARKETPLACE_WB = "wb"
 MARKETPLACE_OZON = "ozon"
-# Не маркетплейс, а аналитика по ним: токен MPStats у селлера свой, и учётка
-# устроена так же — поэтому стоит в том же ряду и под тем же словом.
 MARKETPLACE_MPSTATS = "mpstats"
-# Все учётки, исход доставки которых реестр умеет хранить. Имя, которого здесь
-# нет, шлюз мог выучить раньше нас — такое пропускается, а не роняет сверку.
 MARKETPLACES = (MARKETPLACE_WB, MARKETPLACE_OZON, MARKETPLACE_MPSTATS)
 
-# Сага доставки учётки на шлюз wb-egress: первую группу статусов отвечает сам
-# шлюз, вторая описывает доставку с нашей стороны. Единственный словарь этих
-# строк — здесь; фронтенд повторяет его в features/sellers/types.ts.
-# Словарь общий для маркетплейсов: у Ozon те же исходы, что у Wildberries.
 EGRESS_VERIFIED = "verified"
 EGRESS_DELIVERED = "delivered"
 EGRESS_KEY_INVALID = "key_invalid"
 EGRESS_NO_FREE_IP = "no_free_ip"
 EGRESS_DISABLED = "disabled"
-EGRESS_UNDELIVERED = "undelivered"  # шлюз недоступен, ключ не доехал
-EGRESS_UNSYNCED = "unsynced"  # локальная правка есть, шлюз о ней не знает
-# Статусы, при которых по селлеру можно работать с WB.
+EGRESS_UNDELIVERED = "undelivered"
+EGRESS_UNSYNCED = "unsynced"
 EGRESS_SERVABLE = frozenset({EGRESS_VERIFIED, EGRESS_DELIVERED})
 
 

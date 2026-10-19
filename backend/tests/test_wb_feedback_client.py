@@ -66,7 +66,6 @@ async def test_feedback_client_reads_all_three_buckets_and_deduplicates() -> Non
         assert len(live_calls) == 4
         assert len(stub.requests_to(ARCHIVE)) == 2
         assert [call["query"]["isAnswered"] for call in live_calls] == ["false", "false", "true", "true"]
-        # Конверт шлюза несёт селлера, а не ключ.
         assert {call["seller_id"] for call in stub.calls} == {SELLER}
 
     assert result.counts == {"101": (1, 0, 0, 0, 2), "202": (0, 0, 0, 1, 0), "303": (0, 0, 2, 0, 0)}
@@ -132,7 +131,7 @@ async def test_feedback_client_retries_the_same_page_after_a_transport_failure(m
         stub = EgressStub(router)
         responses = iter(
             [
-                None,  # обрыв соединения до шлюза
+                None,
                 page(feedback("a", 101, 5)),
                 page(),
                 page(),
@@ -176,5 +175,4 @@ async def test_feedback_client_fails_loudly_at_the_pagination_ceiling(monkeypatc
         with pytest.raises(WBFeedbackPermanentError, match="потолок"):
             await client(page_size=1).aggregate(SELLER)
 
-        # Two full pages exhaust the ceiling of two; the third request never happens.
         assert len(stub.requests_to(FEEDBACKS)) == 2

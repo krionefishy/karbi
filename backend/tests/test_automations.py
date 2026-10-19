@@ -64,11 +64,9 @@ def test_the_stocks_card_points_at_the_most_stale_cabinet() -> None:
     stale = datetime(2026, 9, 11, 8, 30, tzinfo=UTC)
 
     spread = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=stale, uncollected=0)
-    # Самый старый сбор в 08:30 уже просрочен — следующий сбор не позже «сейчас».
     assert next_fbs_stocks_run_at(SETTINGS, spread, now) == now
     even = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=fresh, uncollected=0)
     assert next_fbs_stocks_run_at(SETTINGS, even, now) == fresh + timedelta(minutes=poll)
-    # Кабинет без единого сбора уже в очереди.
     never = BoardOverview(seller_count=2, last_success_at=fresh, failing=0, earliest_collected_at=fresh, uncollected=1)
     assert next_fbs_stocks_run_at(SETTINGS, never, now) == now
 
@@ -159,8 +157,6 @@ def test_a_run_that_never_finished_has_no_duration() -> None:
 
 
 def test_next_run_is_the_worker_schedule() -> None:
-    # 00:30 Moscow is 21:30 UTC the day before, so a moment just after it must
-    # roll the next run forward a day.
     expected = (SETTINGS.worker.review_sync_hour, SETTINGS.worker.review_sync_minute)
 
     before = next_run_at(SETTINGS, datetime(2026, 8, 18, 20, 0, tzinfo=UTC))
@@ -211,10 +207,8 @@ def test_the_catalog_lists_every_automation() -> None:
     assert (checklist_card.seller_count, checklist_card.status) == (2, "idle")
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
-    # Распределение FBS в каталог не попадает; стикеры — инструмент без селлеров и расписания.
     assert (stickers_card.id, stickers_card.kind, stickers_card.next_run_at) == ("wb-box-stickers", "tool", None)
     assert reviews_card.kind == "automation"
-    # Финансовые отчёты считаются при открытии: расписания у карточки нет.
     assert (fin_card.id, fin_card.seller_count, fin_card.status, fin_card.next_run_at) == (
         "fin-reports",
         6,
@@ -230,7 +224,6 @@ def test_the_turnover_card_points_at_its_nearest_daily_step() -> None:
     after_midnight = next_turnover_run_at(SETTINGS, datetime(2026, 8, 18, 0, 10, tzinfo=UTC))
     assert after_midnight.hour == slots[0]
 
-    # Just past the last slot of the day the next step rolls over to tomorrow.
     late = next_turnover_run_at(SETTINGS, datetime(2026, 8, 18, 21, 30, tzinfo=UTC))
     assert late.day == 19
 
@@ -257,7 +250,6 @@ def test_the_checklist_card_reports_collection_state() -> None:
     assert card.status == "active"
     assert card.last_success_at == "2026-09-10T02:00:00+00:00"
     assert failing.status == "degraded"
-    # 05:00 МСК — 02:00 UTC: сразу после сбора следующий назначен на завтра.
     after = next_checklist_run_at(SETTINGS, datetime(2026, 9, 10, 2, 30, tzinfo=UTC))
     assert (after.hour, after.minute, after.day) == (SETTINGS.card_checklist.collect_hour, 0, 11)
 

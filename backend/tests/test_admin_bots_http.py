@@ -104,7 +104,6 @@ class TestRegistration:
         async with stand.application.database.session() as session:
             row = await session.scalar(select(BotModel).where(BotModel.code == stand.code))
         assert row is not None
-        # Nothing on this row may carry the token, in any column.
         assert TOKEN not in "".join(str(value) for value in row.__dict__.values())
 
     async def test_a_rejected_token_leaves_no_bot_behind(self, stand: Stand) -> None:
@@ -121,8 +120,6 @@ class TestRegistration:
 
         response = await register(stand, Response(502, json={"detail": "relay down"}))
 
-        # Saying "bad token" here would send the operator hunting for a problem
-        # that is not theirs.
         assert response.status_code == 503
 
     async def test_a_validation_error_never_echoes_the_token(self, stand: Stand) -> None:
@@ -144,7 +141,6 @@ class TestDeletion:
             deleted = await stand.client.delete(f"{BOTS}/{stand.code}")
 
         assert deleted.status_code == 204
-        # The relay is told too: a token must not outlive the bot it belongs to.
         assert '"action":"delete"' in route.calls.last.request.content.decode().replace(" ", "")
         listed = await stand.client.get(BOTS)
         assert stand.code not in [bot["code"] for bot in listed.json()]

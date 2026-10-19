@@ -57,7 +57,6 @@ export function PodsortPage() {
   });
 
   const settings = podsort?.settings;
-  // Черновик настроек — пока его правят; сохранённое приходит с сервера.
   const form: PodsortSettingsInput | null =
     draft ?? (settings ? { window_days: settings.window_days, cover_days: settings.cover_days, regions: settings.regions } : null);
   useEffect(() => {
@@ -79,7 +78,6 @@ export function PodsortPage() {
     mutationFn: saveSettings,
     onSuccess: async (saved) => {
       setDraft(null);
-      // Открытую вкладку могли убрать из регионов: иначе страница спросила бы сервер о регионе, которого нет.
       if (region && !saved.regions.includes(region)) setRegion("");
       setActionError("");
       await refresh();

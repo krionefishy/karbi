@@ -38,10 +38,8 @@ class DialogResponse(BaseModel):
     excluded: bool
     closed: bool
     chat_url: str | None
-    # Вердикт нейросети по последнему сообщению специалиста: open / closing / unclear; None — ещё не оценено.
     verdict: str | None = None
     verdict_reason: str | None = None
-    # Решение менеджера: allow / deny; None — не принималось или потеряло силу после нового сообщения.
     manual_verdict: str | None = None
 
 
@@ -100,5 +98,4 @@ class DialogActionRequest(BaseModel):
 class ManualVerdictRequest(BaseModel):
     chat_id: str
     prompt_at: str
-    # allow — писать, deny — не писать, null — снять отметку.
     value: str | None = None

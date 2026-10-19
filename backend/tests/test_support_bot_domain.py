@@ -19,7 +19,7 @@ from backend.modules.wb_support_bot.domain import (
     project_dialog,
 )
 
-START = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)  # 09:00 МСК
+START = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
 RULES = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_campaigns=1)
 
 
@@ -54,9 +54,6 @@ def project(events, now_minutes, **kwargs):
     return project_dialog(events, kwargs.pop("sent", []), now=at(now_minutes), rules=RULES, **kwargs)
 
 
-# --- состояния -------------------------------------------------------------
-
-
 def test_no_reply_when_buyer_silent_even_after_third_party_message():
     events = [event(0, "prompt"), event(1, "third_party", "Сообщение выше автоматическое")]
     result = project(events, now_minutes=60 * 48)
@@ -70,7 +67,6 @@ def test_awaiting_us_when_buyer_wrote_and_nobody_answered():
 
 
 def test_third_party_message_is_not_our_reply():
-    # сообщение сторонней рассылки пришло раньше ответа покупателя и не считается ответом
     events = [event(0, "prompt"), event(1, "third_party"), event(30, "buyer", ".")]
     assert project(events, now_minutes=600).our_last_at is None
 
@@ -111,7 +107,7 @@ def test_campaign_continues_with_bot_messages_in_feed():
     result = project(events, now_minutes=600, sent=sent, campaign_started_at=at(300), campaigns_count=1)
     assert result.state is DialogState.IN_CAMPAIGN
     assert result.start_campaign is False
-    assert result.human_last_at == at(60)  # сообщение бота человеческим не считается
+    assert result.human_last_at == at(60)
 
 
 def test_buyer_reply_ends_campaign():
@@ -168,9 +164,6 @@ def test_second_campaign_allowed_when_limit_raised():
     assert result.start_campaign is True
 
 
-# --- стоп-слова ------------------------------------------------------------
-
-
 def test_stopwords_no_contact_and_attention():
     assert match("Не пишите мне больше!").no_contact
     assert match("ХВАТИТ").no_contact
@@ -195,31 +188,28 @@ def test_stop_flags_land_in_projection():
     assert result.no_contact and result.attention
 
 
-# --- расписание ------------------------------------------------------------
-
-
 def seeded() -> random.Random:
     return random.Random(7)
 
 
 def test_next_send_within_window_keeps_hour_plus_jitter():
     window, pace = SendWindow(), Pace()
-    last = datetime(2026, 10, 10, 7, 0, tzinfo=UTC)  # 10:00 МСК
+    last = datetime(2026, 10, 10, 7, 0, tzinfo=UTC)
     moment = next_send_at(last, window=window, pace=pace, rng=seeded())
     assert last + timedelta(hours=1, minutes=1) <= moment <= last + timedelta(hours=1, minutes=10)
 
 
 def test_next_send_after_window_moves_to_next_morning():
     window, pace = SendWindow(), Pace()
-    last = datetime(2026, 10, 10, 18, 30, tzinfo=UTC)  # 21:30 МСК, шаг упрётся в 22:30
+    last = datetime(2026, 10, 10, 18, 30, tzinfo=UTC)
     moment = next_send_at(last, window=window, pace=pace, rng=seeded())
-    opening = datetime(2026, 10, 11, 6, 0, tzinfo=UTC)  # 09:00 МСК следующего дня
+    opening = datetime(2026, 10, 11, 6, 0, tzinfo=UTC)
     assert opening <= moment <= opening + timedelta(minutes=10)
 
 
 def test_next_send_before_window_moves_to_same_morning():
     window, pace = SendWindow(), Pace()
-    last = datetime(2026, 10, 10, 1, 0, tzinfo=UTC)  # 04:00 МСК
+    last = datetime(2026, 10, 10, 1, 0, tzinfo=UTC)
     moment = next_send_at(last, window=window, pace=pace, rng=seeded())
     opening = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
     assert opening <= moment <= opening + timedelta(minutes=10)
@@ -227,10 +217,10 @@ def test_next_send_before_window_moves_to_same_morning():
 
 def test_window_boundaries():
     window = SendWindow()
-    assert window.contains(datetime(2026, 10, 10, 6, 0, tzinfo=UTC))  # 09:00
-    assert not window.contains(datetime(2026, 10, 10, 5, 59, tzinfo=UTC))  # 08:59
-    assert window.contains(datetime(2026, 10, 10, 18, 59, tzinfo=UTC))  # 21:59
-    assert not window.contains(datetime(2026, 10, 10, 19, 0, tzinfo=UTC))  # 22:00
+    assert window.contains(datetime(2026, 10, 10, 6, 0, tzinfo=UTC))
+    assert not window.contains(datetime(2026, 10, 10, 5, 59, tzinfo=UTC))
+    assert window.contains(datetime(2026, 10, 10, 18, 59, tzinfo=UTC))
+    assert not window.contains(datetime(2026, 10, 10, 19, 0, tzinfo=UTC))
 
 
 def test_chat_link_uses_the_uuid_without_the_feed_prefix():
@@ -251,9 +241,8 @@ def test_canary_membership_is_stable_and_roughly_the_requested_share():
     again = [in_canary(chat, PROMPT, 10) for chat in chats]
 
     assert first == again
-    assert 140 <= sum(first) <= 260  # около 10 % из 2000
+    assert 140 <= sum(first) <= 260
     assert all(0 <= canary_bucket(chat, PROMPT) < 100 for chat in chats)
-    # при росте процента прежние диалоги остаются в канарейке
     wider = [in_canary(chat, PROMPT, 30) for chat in chats]
     assert all(wide for narrow, wide in zip(first, wider, strict=True) if narrow)
     assert not in_canary("1:x", PROMPT, 0)
@@ -284,7 +273,6 @@ def test_a_running_campaign_stops_when_the_conversation_gets_too_old():
     outside = project_dialog(events, bot, now=at(60 + 6 * 24 * 60), rules=rules, campaign_started_at=at(60 + 300))
 
     assert inside.state is DialogState.IN_CAMPAIGN
-    # сообщение самого бота давность разговора не продлевает: отсчёт идёт от последнего ответа специалиста
     assert outside.state is DialogState.EXHAUSTED
 
 

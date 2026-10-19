@@ -1,12 +1,3 @@
-"""Реклама по артикулам за неделю из зеркала рекламы.
-
-Списание WB идёт по кампании с типом оплаты, а кампания продвигает один или
-несколько артикулов. Списание кампании делится между её артикулами по доле
-статистики (`sum` из fullstats за те же дни); без статистики — поровну между
-артикулами кампании; кампания, которой зеркало не знает, уходит в строку без
-артикула. Справочная «реклама из Продвижения» — статистика по артикулу как есть.
-"""
-
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -20,7 +11,6 @@ from backend.modules.wb_core.application import AdvertMirror
 
 ZERO = Decimal("0")
 KOPECK = Decimal("0.01")
-# Типы оплаты, как их называет WB в списаниях.
 BALANCE = "баланс"
 ACCOUNT = "счет"
 BONUS = "бонус"
@@ -57,7 +47,6 @@ class WeekAds:
 
     by_article: dict[int, AdSpend] = field(default_factory=dict)
     unallocated: AdSpend = field(default_factory=AdSpend)
-    # Последний день, который зеркало рекламы прочитало целиком; `None` — не читало.
     collected_through: date | None = None
 
     def of(self, nm_id: int) -> AdSpend:
@@ -69,7 +58,6 @@ async def week_ads(session: AsyncSession, seller_id: uuid.UUID, *, since: date, 
     spend = await mirror.spend(seller_id, since=since, until=until)
     stats = await mirror.nm_stats(seller_id, since=since, until=until)
     campaigns = await mirror.campaigns(seller_id, {item.advert_id for item in spend})
-    # Доля артикула в кампании — по статистике за неделю.
     weights: dict[int, dict[int, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
     sums: dict[int, _Sums] = defaultdict(_Sums)
     for stat in stats:

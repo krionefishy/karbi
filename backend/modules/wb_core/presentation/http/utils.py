@@ -8,7 +8,6 @@ from backend.modules.wb_core.application import SellerService
 from backend.modules.wb_core.domain import Article, Seller, TaxRate, tax_rate_on
 from backend.modules.wb_core.presentation.http.schemas import ArticleResponse, SellerResponse
 
-# Какая ставка «действует сегодня», решает московская дата — как у отчётов WB.
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 

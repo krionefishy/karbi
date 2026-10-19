@@ -3,7 +3,6 @@ import { useState } from "react";
 
 import type { Template } from "../features/supportBot/types";
 
-/** Потолок WB на текст одного сообщения. */
 const MAX_LENGTH = 1000;
 
 interface Props {
@@ -68,7 +67,6 @@ function Editor({
   );
 }
 
-/** Вариант A: каждый текст — карточка с тумблером; правка по клику прямо в карточке. */
 export function SupportBotTemplates({ templates, busy, onAdd, onSave, onToggle, onDelete }: Props) {
   const [editing, setEditing] = useState<number | "new" | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);

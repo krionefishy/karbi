@@ -1,11 +1,3 @@
-"""Liveness heartbeat for worker containers.
-
-The compose healthchecks consider a worker healthy while the mtime of
-``/tmp/heartbeat`` is younger than 15 minutes. Every worker main loop must call
-:func:`touch_heartbeat` at least that often — on each iteration is fine, the
-call is a couple of syscalls.
-"""
-
 import os
 import tempfile
 from contextlib import suppress

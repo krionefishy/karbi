@@ -8,8 +8,6 @@ class ChecklistItem:
     meaning: str
 
 
-# Только то, что видно в данных WB: таблица ничего не просит отмечать руками.
-# Названия и смысл пунктов — из инструкции к ручной таблице менеджеров.
 ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem("description", "Описание (SEO)", "Описание заполнено."),
     ChecklistItem(

@@ -35,7 +35,6 @@ from backend.storage.pg import Database
 from backend.tests.egress_stub import make_gateway
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
-# Порог «давно не пробовали»: в этих проверках попытки не мешают.
 LATER = datetime.now(UTC) + timedelta(days=1)
 
 
@@ -102,12 +101,8 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
     finally:
         async with database.session() as session:
             await FbsDistributionRepository(session).purge_seller(model.id)
-            # Справочник объектов общий, не по селлеру: без уборки он утёк бы
-            # в следующий тест и подменил бы то, что тот проверяет.
             await session.execute(delete(WBOfficeModel))
             await session.execute(delete(OfficeRegionModel))
-            # Порядок и доли направлений общие; тест, который их менял, не должен
-            # решать за следующий, с чего тот начнёт.
             for position, (code, _) in enumerate(DEFAULT_REGIONS):
                 await session.execute(
                     sa_update(RegionModel).where(RegionModel.code == code).values(position=position, share_bp=0)
@@ -359,7 +354,6 @@ async def test_purging_a_cabinet_takes_its_warehouses(seller) -> None:
     async with database.session() as session:
         distribution = FbsDistributionRepository(session)
         assert await distribution.warehouses(seller_id) == []
-        # Справочник объектов общий и переживает отключение кабинета.
         assert {row.office_id for row in await distribution.offices()} == {1}
 
 
@@ -539,11 +533,9 @@ async def test_a_cabinet_whose_sync_just_failed_is_not_asked_again_at_once(selle
 
     async with database.session() as session:
         distribution = FbsDistributionRepository(session)
-        # Попытка только что была: минуту назад спрашивать снова нечего.
         assert seller_id not in await distribution.sellers_due_for_sync(
             datetime.now(UTC), retry_after=datetime.now(UTC) - timedelta(minutes=15)
         )
-        # А когда отсрочка вышла, кабинет снова в очереди.
         assert seller_id in await distribution.sellers_due_for_sync(datetime.now(UTC), retry_after=LATER)
 
 

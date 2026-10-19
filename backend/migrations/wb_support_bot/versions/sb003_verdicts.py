@@ -1,5 +1,3 @@
-"""Вердикты нейросети по хвосту диалога и ручные отметки менеджера."""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql

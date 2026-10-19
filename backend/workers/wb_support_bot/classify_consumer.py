@@ -20,7 +20,6 @@ from backend.shared.llm import LLMClient, LLMError, mask_pii
 from backend.storage.pg import Database
 
 EVENT_TYPE = "SupportBotClassifyRequested"
-# Запас поверх таймаута модели: ребаланс посреди запроса дал бы двойной расход.
 POLL_INTERVAL_MARGIN_MS = 60_000
 POLL_INTERVAL_BASE_MS = 300_000
 
@@ -90,7 +89,6 @@ class ClassifyConsumer:
         except (KeyError, TypeError, ValueError) as bad:
             raise InvalidPayloadError(str(bad)) from bad
 
-        # Фаза 1: прочитать всё нужное и закрыть сессию до обращения к модели.
         async with self.database.session() as session:
             sellers = SellerRepository(session)
             if await sellers.inbox_processed(event_id):
@@ -115,7 +113,6 @@ class ClassifyConsumer:
             except LLMError as failure:
                 error = str(failure)
 
-        # Фаза 2: записать исход и отметить сообщение обработанным в одной транзакции.
         async with self.database.session() as session:
             sellers = SellerRepository(session)
             if await sellers.inbox_processed(event_id):

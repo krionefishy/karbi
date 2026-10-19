@@ -228,7 +228,6 @@ async def test_history_is_collected_backwards_and_resumes_where_it_stopped(selle
     assert statistics.asked_days == days[:2]
 
     assert await collect_regions(database, seller_id, statistics, days=2) == 2
-    # Третий вызов продолжает с того дня, на котором остановился второй.
     assert statistics.asked_days == days
     assert await regions(database, seller_id) == {"101": {VOLGA: 4}}
 
@@ -236,7 +235,6 @@ async def test_history_is_collected_backwards_and_resumes_where_it_stopped(selle
 async def test_the_walk_stops_at_the_horizon(seller) -> None:
     database, seller_id = seller
     statistics = FakeStatistics()
-    # Горизонт в двое суток — это вчера и позавчера, дальше ходить незачем.
     assert await collect_regions(database, seller_id, statistics, horizon=2, days=10) == 2
     assert await collect_regions(database, seller_id, statistics, horizon=2, days=10) == 0
     assert statistics.asked_days == [TODAY - timedelta(days=1), TODAY - timedelta(days=2)]
@@ -251,7 +249,6 @@ async def test_a_day_missed_while_the_worker_was_down_is_collected_later(seller)
 
     await collect_regions(database, seller_id, statistics, days=2)
 
-    # Сначала пропущенные сутки от края отрезка, и только потом вглубь.
     assert statistics.asked_days == [TODAY - timedelta(days=4), TODAY - timedelta(days=3)]
     async with database.session() as session:
         tracked = await TurnoverRepository(session).tracked(seller_id)
@@ -294,7 +291,6 @@ async def test_fbs_stock_is_kept_per_warehouse_as_well_as_summed(seller) -> None
         assert await turnover.warehouse_stocks(seller_id) == {"101": {7: 4, 8: 6}, "102": {8: 1}}
         tracked = await turnover.tracked(seller_id)
         assert tracked is not None and tracked.fbs_stocks_at is not None
-        # Метрика по-прежнему видит товар целиком, где бы он ни лежал.
         assert (await turnover.latest_stock(seller_id, TODAY))["101"].fbs == 10
 
 
@@ -381,11 +377,9 @@ async def test_the_report_carries_the_three_blocks_the_manager_assembled_by_hand
     assert first["Ср. темп 3 дн., шт/день"] == 1.5
     assert first[CENTRAL] == 1
     assert first[VOLGA] == 1
-    # Заказ из-за границы не пропадает: без него «Итого» не сходилось бы со строкой.
     assert first[OTHER_DISTRICT] == 1
     assert first["Итого"] == 3
     assert first["ФФ Казань"] == 4
-    # Метрику по второму артикулу не считали — темп пуст, а не ноль.
     assert rows["102"]["Ср. темп 3 дн., шт/день"] is None
     assert rows["102"]["ФФ Казань"] == 0
 

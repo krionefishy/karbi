@@ -1,5 +1,3 @@
-"""Консьюмер команд бота возвратов из Kafka."""
-
 import asyncio
 import json
 import logging
@@ -64,7 +62,6 @@ class CommandConsumer:
         try:
             event = CommandEvent.parse(json.loads(raw))
         except Exception as error:
-            # Кривой payload останется кривым: повтор его не починит, партицию не держим.
             self.logger.error("returns_command_rejected", extra={"error": str(error)})
             return None
         if event.bot_code != self.bot_code:

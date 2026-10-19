@@ -30,8 +30,6 @@ class TrackedSellerModel(WBFbsStocksBase):
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Попытка отмечается до сети: упавший процесс не должен превращаться в
-    # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -99,8 +97,6 @@ class BarcodeModel(WBFbsStocksBase):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     note_updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     note_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Скрытая строка не показывается и не опрашивается, но остаётся: вернуть её
-    # проще, чем вписать заново вместе с заметкой.
     hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

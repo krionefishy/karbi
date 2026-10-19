@@ -112,8 +112,6 @@ class ChecklistService:
                     comment=comments.get(card.article, ""),
                 )
             )
-        # Порядок стабильный, а не «неготовые сверху»: после каждого сбора
-        # строки иначе менялись бы местами, и искать свою пришлось бы заново.
         rows.sort(key=lambda row: (row.title.lower(), row.article))
         return ChecklistView(
             seller_id=seller_id,
@@ -136,7 +134,6 @@ class ChecklistService:
     async def export(self, seller_id: uuid.UUID) -> ChecklistReportFile:
         view = await self.view(seller_id)
         day = datetime.now(self.timezone).date()
-        # Книга собирается в треде: на тысяче строк openpyxl заметно держит event loop.
         content = await asyncio.to_thread(render_workbook, view, self.timezone)
         return ChecklistReportFile(view.seller_name, day, content)
 

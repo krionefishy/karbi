@@ -1,9 +1,3 @@
-"""Расписание рассылки: окно по Москве и шаг «час плюс случайные минуты».
-
-Часы и генератор случайных чисел передаются снаружи, чтобы поведение проверялось
-тестами без ожиданий и без случайности.
-"""
-
 import random
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta

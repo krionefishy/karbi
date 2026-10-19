@@ -16,7 +16,6 @@ function stamp(value: string | null): string {
   return value ? momentFormatter.format(new Date(value)) : "—";
 }
 
-/** Класс для срока: подсвечиваем то, что истекает сегодня или уже прошло. */
 function deadlineClass(value: string | null): string | undefined {
   if (!value) return undefined;
   const left = (new Date(value).getTime() - Date.now()) / 86_400_000;
@@ -41,7 +40,6 @@ function Product({ title, nmId, sticker }: { title: string; nmId: number; sticke
   );
 }
 
-/** Возвраты: товар, ПВЗ, статус, причина; у готовых к выдаче — сроки хранения. */
 export function ReturnsTable({ rows, empty, storage = false }: { rows: ReturnItem[]; empty: string; storage?: boolean }) {
   if (rows.length === 0) {
     return <p className="muted">{empty}</p>;
@@ -84,7 +82,6 @@ export function ReturnsTable({ rows, empty, storage = false }: { rows: ReturnIte
   );
 }
 
-/** Заявки покупателей: товар, цена, комментарий и фото, срок ответа. */
 export function ReturnsClaims({ claims, empty }: { claims: Claim[]; empty: string }) {
   if (claims.length === 0) {
     return empty ? <p className="muted">{empty}</p> : null;

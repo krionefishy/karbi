@@ -1,12 +1,3 @@
-"""ОПиУ Ozon из начислений по дням.
-
-Строки — как в листе «ОПиУ_август Озон» старого отчёта. Начисление Ozon
-несёт тип из справочника начислений; статья отчёта — по типу. Выручка и
-вознаграждение — поля продажи. Проверено на неделе 21–27.09 Шелестюковой:
-продажи с баллами, выручка, баллы, программы партнёров, вознаграждение,
-продвижение и доставка сошлись с «Экономикой магазина» кабинета до рубля.
-"""
-
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date
@@ -51,28 +42,25 @@ OZON_LINES: tuple[Line, ...] = (
 OZON_LINE_KEYS = tuple(line.key for line in OZON_LINES)
 OZON_EXPENSE_KEYS = tuple(line.key for line in OZON_LINES if line.level == LEVEL_ITEM)
 
-# Тип начисления Ozon -> статья. Что не названо, идёт в «Дополнительные услуги».
-# Номера — из справочника /v1/finance/accrual/types; имена рядом для чтения.
 ACCRUAL_TYPE_LINES: dict[int, str] = {
-    # Логистика и обработка отправлений.
-    2: DELIVERY,  # BackwardShipment
-    12: DELIVERY,  # CrossDock
-    13: DELIVERY,  # CrossDockPickUpCourierDelivery
-    16: DELIVERY,  # Drop-Off
-    17: DELIVERY,  # Drop-Off Agent
-    21: DELIVERY,  # Fulfillment
-    28: DELIVERY,  # LastMile
-    29: DELIVERY,  # LastMileCourier
-    30: DELIVERY,  # LastMilePickUpPoint
-    32: DELIVERY,  # Logistic
-    42: DELIVERY,  # Pick-Up
-    43: DELIVERY,  # PickUpCourierArrangement
-    44: DELIVERY,  # PickUpCourierDelivery
-    56: DELIVERY,  # QuantProcessingDrop
-    73: DELIVERY,  # Shipment
-    77: DELIVERY,  # SupplyInbound
-    97: DELIVERY,  # PackageUnitProcessing
-    98: DELIVERY,  # DeliveryToHandoverPlaceByOzon
+    2: DELIVERY,
+    12: DELIVERY,
+    13: DELIVERY,
+    16: DELIVERY,
+    17: DELIVERY,
+    21: DELIVERY,
+    28: DELIVERY,
+    29: DELIVERY,
+    30: DELIVERY,
+    32: DELIVERY,
+    42: DELIVERY,
+    43: DELIVERY,
+    44: DELIVERY,
+    56: DELIVERY,
+    73: DELIVERY,
+    77: DELIVERY,
+    97: DELIVERY,
+    98: DELIVERY,
     110: DELIVERY,
     111: DELIVERY,
     112: DELIVERY,
@@ -82,54 +70,49 @@ ACCRUAL_TYPE_LINES: dict[int, str] = {
     133: DELIVERY,
     134: DELIVERY,
     135: DELIVERY,
-    # Возвраты, отмены и невыкупы.
-    6: RETURNS,  # Cancellation
-    9: RETURNS,  # ClientReturn
-    40: RETURNS,  # PartialReturn
-    45: RETURNS,  # PickUpPointReturnAcceptance
-    53: RETURNS,  # PreparingToReturn
-    59: RETURNS,  # ReturnFlowLogistic
-    60: RETURNS,  # ReturnStorageInTheWarehouse
-    65: RETURNS,  # RfbsEasyReturn
-    78: RETURNS,  # TemporaryPlacement
+    6: RETURNS,
+    9: RETURNS,
+    40: RETURNS,
+    45: RETURNS,
+    53: RETURNS,
+    59: RETURNS,
+    60: RETURNS,
+    65: RETURNS,
+    78: RETURNS,
     102: RETURNS,
     103: RETURNS,
     113: RETURNS,
     115: RETURNS,
-    # Продвижение внутри Ozon.
-    3: ADVERTISING,  # BrandCommission
-    4: ADVERTISING,  # BrandPromotion
-    5: ADVERTISING,  # BrandShelf
-    33: ADVERTISING,  # Marketing
-    36: ADVERTISING,  # OrdersBooking
-    41: ADVERTISING,  # PayPerClick
-    47: ADVERTISING,  # PointsForReviews
-    49: ADVERTISING,  # PremiumCashbackPromotion
-    54: ADVERTISING,  # Promotion
-    55: ADVERTISING,  # PushCampaign
-    61: ADVERTISING,  # ReviewsPin
-    70: ADVERTISING,  # SaleReview
-    75: ADVERTISING,  # Stencil
-    96: ADVERTISING,  # AcceleratedReviewCollection
-    116: ADVERTISING,  # FirstCustomerReview
-    130: ADVERTISING,  # DisplayAdvertisingPlacement
-    # Внешнее продвижение.
-    19: EXTERNAL_MARKETING,  # ExternalPromotion
-    23: EXTERNAL_MARKETING,  # InternetSiteAdvertising
-    31: EXTERNAL_MARKETING,  # LeadGeneration
-    87: EXTERNAL_MARKETING,  # SocialMediaAdvertising
-    # Компенсации, претензии и корректировки взаиморасчётов.
-    8: COMPENSATIONS,  # ClaimCommission
-    10: COMPENSATIONS,  # Compensation
-    11: COMPENSATIONS,  # CorrectionCommission
-    25: COMPENSATIONS,  # ItemCompensation
-    57: COMPENSATIONS,  # RealizationReportCorrection
-    72: COMPENSATIONS,  # SetOff
-    81: COMPENSATIONS,  # VolumeObligationReward
-    104: COMPENSATIONS,  # B2CInsuranceCompensation
-    129: COMPENSATIONS,  # AnalyticsCorrection
-    # Трансграничные продажи и ЕАЭС.
-    26: EAEU_SERVICES,  # KazakhstanBuyerInstallment
+    3: ADVERTISING,
+    4: ADVERTISING,
+    5: ADVERTISING,
+    33: ADVERTISING,
+    36: ADVERTISING,
+    41: ADVERTISING,
+    47: ADVERTISING,
+    49: ADVERTISING,
+    54: ADVERTISING,
+    55: ADVERTISING,
+    61: ADVERTISING,
+    70: ADVERTISING,
+    75: ADVERTISING,
+    96: ADVERTISING,
+    116: ADVERTISING,
+    130: ADVERTISING,
+    19: EXTERNAL_MARKETING,
+    23: EXTERNAL_MARKETING,
+    31: EXTERNAL_MARKETING,
+    87: EXTERNAL_MARKETING,
+    8: COMPENSATIONS,
+    10: COMPENSATIONS,
+    11: COMPENSATIONS,
+    25: COMPENSATIONS,
+    57: COMPENSATIONS,
+    72: COMPENSATIONS,
+    81: COMPENSATIONS,
+    104: COMPENSATIONS,
+    129: COMPENSATIONS,
+    26: EAEU_SERVICES,
     62: EAEU_SERVICES,
     63: EAEU_SERVICES,
     64: EAEU_SERVICES,
@@ -137,7 +120,7 @@ ACCRUAL_TYPE_LINES: dict[int, str] = {
     67: EAEU_SERVICES,
     68: EAEU_SERVICES,
     86: EAEU_SERVICES,
-    99: EAEU_SERVICES,  # InternationalLogisticDelta
+    99: EAEU_SERVICES,
     100: EAEU_SERVICES,
     122: EAEU_SERVICES,
     123: EAEU_SERVICES,
@@ -164,7 +147,6 @@ class OzonStatement:
     def close(self) -> "OzonStatement":
         values = self.values
         values[DIRECT_EXPENSES] = sum((values[key] for key in OZON_EXPENSE_KEYS), ZERO)
-        # Вознаграждение Ozon берётся с цены с баллами — маржа тоже считается от неё.
         values[GROSS_MARGIN] = values[REVENUE_WITH_POINTS] + values[DIRECT_EXPENSES]
         return self
 
@@ -209,7 +191,6 @@ def ozon_statement(
                     if on_uncosted is not None:
                         on_uncosted(fact.sku, sale)
                 else:
-                    # Возврат приходит отрицательной продажей: себестоимость возвращается тем же знаком.
                     sign = -1 if sale < 0 else 1
                     values[COST] -= sign * fact.quantity * unit_cost
         else:

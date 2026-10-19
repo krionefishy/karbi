@@ -1,10 +1,3 @@
-"""Отчёт «Возвраты и перемещения» из аналитического API WB.
-
-Один метод, окно не больше 31 дня, лимит — запрос в минуту на кабинет (его
-держит шлюз). Отчёт отдаёт всё за окно целиком, без страниц: отсюда окно в две
-недели вместо месяца при обычном проходе.
-"""
-
 from datetime import date
 from typing import Any
 
@@ -13,7 +6,6 @@ from backend.modules.wb_returns.domain import ReturnItem
 from backend.modules.wb_returns.infrastructure.wb.parsing import as_date, as_int, as_moment, as_text
 
 REPORT_PATH = "/api/v1/analytics/goods-return"
-# По документации WB — максимум за один запрос.
 MAX_WINDOW_DAYS = 31
 
 
@@ -38,7 +30,6 @@ class WBReturnsReportClient(WBJsonClient):
     def _item(row: dict[str, Any]) -> ReturnItem | None:
         shk_id = as_int(row.get("shkId"))
         if not shk_id:
-            # Без стикера строку не к чему привязать: повторный сбор задвоил бы её.
             return None
         return ReturnItem(
             shk_id=shk_id,

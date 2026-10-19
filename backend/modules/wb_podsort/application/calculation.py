@@ -21,8 +21,6 @@ class WarehousePlace:
 
     name: str
     region: str | None
-    # manual — задал человек, guess — по городу в названии, unplaced — WB сам
-    # не говорит, где остаток («Склад WB РФ»), none — не знаем, решает человек.
     source: str
 
 

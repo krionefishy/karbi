@@ -1,9 +1,3 @@
-/**
- * Состояние диалога бота: `no_reply` — покупатель не писал; `awaiting_us` — ход за нашей
- * стороной; `awaiting_buyer` — ждём покупателя; `in_campaign` — идёт рассылка;
- * `product_removed` — товар снят с продажи, не пишем; `exhausted` — рассылка отработала без
- * ответа или разговору больше 5 дней; `closed` — закрыт вручную.
- */
 export type DialogState =
   | "no_reply"
   | "awaiting_us"
@@ -27,23 +21,18 @@ export interface SupportBot {
   seller_id: string;
   seller_name: string;
   mode: BotMode;
-  /** Причина, по которой бот сам остановил отправку по кабинету (например, ключ без права записи). */
   paused_reason: string | null;
   globally_paused: boolean;
   counts: Partial<Record<DialogState, number>>;
   templates: Template[];
   mirror_error: string | null;
   mirror_read_through: string | null;
-  /** Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения. */
   canary_percent: number;
-  /** Как вердикт нейросети влияет на отправку: off, shadow (только запись) или enforce. */
   classifier_mode: ClassifierMode;
 }
 
 export type ClassifierMode = "off" | "shadow" | "enforce";
-/** Вердикт нейросети по последнему сообщению специалиста: ждёт ответа, завершает диалог, неясно. */
 export type Verdict = "open" | "closing" | "unclear";
-/** Решение менеджера: писать или не писать; действует, пока специалист не написал ещё раз. */
 export type ManualVerdict = "allow" | "deny";
 
 export interface BotDialog {
@@ -89,7 +78,6 @@ export interface BotSend {
   error: string | null;
 }
 
-/** Статусы, видимые в журнале: «запланировано» и «отправляется» живут доли секунды. */
 export type JournalStatus = "sent" | "dry_run" | "failed" | "unknown";
 
 export interface SendPage {

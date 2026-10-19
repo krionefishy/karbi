@@ -33,8 +33,6 @@ async def test_review_sync_is_persisted_through_postgres_and_outbox() -> None:
             await session.execute(delete(ReviewSyncRunModel))
             session.add(seller)
             await session.flush()
-            # The run covers whoever is enrolled, so the seller has to join the
-            # automation before he can appear in one.
             session.add(TrackedSellerModel(seller_id=seller.id))
             await session.commit()
 

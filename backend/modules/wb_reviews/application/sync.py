@@ -28,8 +28,6 @@ class ProductHistory:
     photo_url: str
     state: str
     snapshots: list[dict]
-    # Same dates, but summed across every article of the склейка — this is the
-    # number a seller sees on the WB card itself.
     card_snapshots: list[dict]
 
 

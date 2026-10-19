@@ -1,10 +1,3 @@
-"""Отпечаток дня Ozon на сложенных суммах и отметка снятой недели остатков.
-
-Зеркало Ozon перечитывает последние дни и переносит начисления между днями —
-сложенный день должен складываться заново, когда его отпечаток в зеркале сменился.
-Снимок остатков с нулём строк раньше не считался снятым и повторялся всю неделю.
-"""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
@@ -33,7 +26,6 @@ def upgrade() -> None:
         sa.Column("rows", sa.Integer(), nullable=False, server_default="0"),
         schema=SCHEMA,
     )
-    # Недели, снятые до отметок: их строки уже есть, отметка — по ним.
     op.execute(
         f"""
         INSERT INTO {SCHEMA}.wb_stock_weeks (seller_id, week_end, collected_at, taken_at, rows)

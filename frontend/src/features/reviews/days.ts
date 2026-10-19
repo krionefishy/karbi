@@ -1,10 +1,3 @@
-/**
- * Calendar arithmetic for the review series.
- *
- * Snapshot dates are plain `YYYY-MM-DD` strings stamped in Moscow time, so
- * every step here works in UTC — a local-time cursor would skip or repeat a
- * day whenever the browser sits in a different zone.
- */
 
 export function previousDay(date: string): string {
   return shiftDay(date, -1);
@@ -16,7 +9,6 @@ export function shiftDay(date: string, days: number): string {
   return cursor.toISOString().slice(0, 10);
 }
 
-/** Every date from `from` to `to`, inclusive. */
 export function daysBetween(from: string, to: string): string[] {
   const dates: string[] = [];
   const cursor = new Date(`${from}T00:00:00Z`);
@@ -28,12 +20,10 @@ export function daysBetween(from: string, to: string): string[] {
   return dates;
 }
 
-/** The last `count` days, ending on `end`. */
 export function daysEndingAt(end: string, count: number): string[] {
   return daysBetween(shiftDay(end, -(count - 1)), end);
 }
 
-/** Today's date in Moscow, which is the day the snapshots are stamped with. */
 export function moscowToday(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",

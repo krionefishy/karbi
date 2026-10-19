@@ -17,7 +17,6 @@ API = "/api/v1"
 
 @pytest_asyncio.fixture
 async def registry(monkeypatch) -> AsyncIterator[tuple[Application, AsyncClient]]:
-    # Ключи живут на шлюзе wb-egress; здесь его управляющие вызовы всегда рады.
     async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict:
         return {
             "seller_id": seller_id,
@@ -123,12 +122,8 @@ async def test_archiving_releases_the_key_and_hides_the_seller(registry) -> None
     assert (await client.get(f"{API}/wb/sellers")).json() == []
     archived = (await client.get(f"{API}/wb/sellers", params={"include_archived": True})).json()
     assert archived[0]["archived_at"] is not None
-    # Подключение остаётся за селлером: восстановят — вернётся в автоматизацию сам.
     assert archived[0]["automations"] == ["wb-reviews"]
     assert (await client.get(f"{API}/automations/wb-reviews/sellers")).json() == []
-    # The archived seller may not be collected for, and the same key can be
-    # handed to a new one: it never lived in this base, and the gateway was
-    # told to disable the archived seller.
     assert (await client.post(f"{API}/wb/sellers/{seller_id}/catalog-sync")).status_code == 409
     assert (
         await client.post(f"{API}/automations/wb-reviews/sellers", json={"seller_id": str(seller_id)})
@@ -217,7 +212,6 @@ async def test_a_token_pasted_in_pieces_never_reaches_the_gateway(registry) -> N
     refused = await client.put(f"{API}/wb/sellers/{seller['id']}/mpstats", json={"token": "aaaa1111 bbbb2222"})
 
     assert refused.status_code == 422
-    # Отвергнутое значение не должно вернуться в тексте ошибки.
     assert "aaaa1111" not in refused.text
 
 
@@ -233,7 +227,6 @@ async def test_a_tax_rate_takes_effect_on_its_date_and_keeps_the_previous_one(re
 
     assert first.status_code == 200, first.text
     assert (first.json()["tax_rate"], first.json()["tax_rate_from"]) == (8.0, "2026-01-01")
-    # Ставка с будущей даты записана, но сегодня действует прежняя.
     assert (planned.json()["tax_rate"], planned.json()["tax_rate_from"]) == (8.0, "2026-01-01")
     corrected = await client.put(path, json={"rate": "12", "effective_from": "2026-01-01"})
     assert corrected.json()["tax_rate"] == 12.0

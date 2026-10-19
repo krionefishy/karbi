@@ -1,8 +1,6 @@
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-# Доли хранятся в сотых долях процента: расчёт остаётся целочисленным, и сумма
-# долей проверяется точно, без накопленной ошибки float.
 BASIS_POINTS = 10_000
 
 MOSCOW = "moscow"
@@ -12,8 +10,6 @@ URAL = "ural"
 NORTHWEST = "northwest"
 NOVOSIBIRSK = "novosibirsk"
 
-# Порядок подтверждён бизнесом: Москва, Приволжье, Краснодар, Урал,
-# Северо-Запад, Новосибирск закрывающий.
 DEFAULT_REGIONS: tuple[tuple[str, str], ...] = (
     (MOSCOW, "Москва"),
     (VOLGA, "Приволжье"),

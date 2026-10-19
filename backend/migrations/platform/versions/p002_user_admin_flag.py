@@ -8,10 +8,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # The admin section lives in the same API, and the flag is read from the
-    # database on every admin request instead of riding in the access token:
-    # revoking rights then takes effect at once rather than when the token
-    # expires a day later.
     op.add_column(
         "users",
         sa.Column("is_admin", sa.Boolean(), server_default=sa.false(), nullable=False),

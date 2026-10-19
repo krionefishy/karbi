@@ -1,1 +1,0 @@
-"""WB core presentation adapters."""

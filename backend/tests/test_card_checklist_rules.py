@@ -42,8 +42,6 @@ def charc(charc_id: int, *, named: bool = False) -> SubjectCharacteristic:
     return SubjectCharacteristic(charc_id, f"Поле {charc_id}", False, False, named)
 
 
-# Пять содержательных полей, плюс то, что считать нельзя: «Описание» живёт
-# отдельным полем карточки, ИКПУ — учётный код.
 DIRECTORY = (charc(1), charc(2), charc(3), charc(4), charc(5), charc(14177452, named=True), charc(15001650))
 
 
@@ -115,7 +113,6 @@ def test_empty_characteristics_are_shown_but_not_an_error() -> None:
     """Заполнять все характеристики не требуется: пункт зелёный, пустые поля — в подсказке."""
     state = states(facts(card=card(characteristic_ids=frozenset({1, 2, 3, 4}))))["characteristics"]
 
-    # ИКПУ и «Описание» в справочнике есть, но в счёт не входят.
     assert characteristics_fill(card(), DIRECTORY) == CharacteristicsFill(filled=5, total=5, missing=())
     assert (states(facts())["characteristics"].done, states(facts())["characteristics"].detail) == (True, "5/5")
     assert (state.done, state.detail, state.note) == (True, "4/5", "Не заполнены: Поле 5")
@@ -141,7 +138,6 @@ def test_missing_data_reads_as_unknown_not_as_failed() -> None:
     ):
         assert result[key].done is None, key
     assert result["characteristics"].detail == "справочник не прочитан"
-    # Отзывы до первого подсчёта медиа: всего знаем, с фото — ещё нет.
     counted = states(facts(reviews=ReviewFacts(total=4, with_photo=None, with_video=None)))
     assert counted["reviews_present"].done
     assert (counted["reviews_with_photo"].done, counted["reviews_with_photo"].detail) == (None, "ещё не считали")
@@ -158,7 +154,6 @@ def test_discount_shows_the_seller_discount_and_the_price_after_it() -> None:
 def test_club_discount_shows_the_club_price() -> None:
     club = states(facts())["club_discount"]
     no_club = states(facts(price=PriceFacts("100", 1000, 900, 10, 0)))["club_discount"]
-    # Клубную цену WB не прислал — показываем обычную цену со скидкой.
     without_price = states(facts(price=PriceFacts("100", 1000, 900, 10, 3)))["club_discount"]
 
     assert (club.done, club.detail) == (True, "−4% · 8 640 ₽")

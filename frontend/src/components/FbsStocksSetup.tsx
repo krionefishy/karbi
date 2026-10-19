@@ -20,10 +20,6 @@ interface Props {
 const HIDDEN = "";
 const FBS = 1;
 
-/**
- * Столбцы таблицы: группы в её порядке и склады кабинета, разложенные по группам.
- * DBS и EDBS спрятаны по умолчанию — в таблице остатков они селлеру не нужны.
- */
 export function FbsStocksSetup({ sellerId }: Props) {
   const queryClient = useQueryClient();
   const { data: setup, isLoading } = useQuery({ queryKey: ["fbs-stocks-setup", sellerId], queryFn: () => getSetup(sellerId) });
@@ -74,8 +70,6 @@ export function FbsStocksSetup({ sellerId }: Props) {
 
   if (isLoading || !setup) return <div className="loading-block">Загружаем склады кабинета…</div>;
 
-  // Состав группы уезжает на сервер целиком и строится из кэша: пока правка не
-  // записана и список не перечитан, вторая правка собрала бы его из старых данных.
   const busy =
     columnsMutation.isPending || orderMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
   const groups = setup.groups;

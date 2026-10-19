@@ -52,7 +52,6 @@ describe("checklist table", () => {
   it("colours a cell by what WB shows", () => {
     expect(cellTone(state({ done: true }))).toBe("done");
     expect(cellTone(state({ done: false }))).toBe("missing");
-    // Нет данных — это «не знаем», а не «не выполнено».
     expect(cellTone(state({ done: null }))).toBe("neutral");
   });
 

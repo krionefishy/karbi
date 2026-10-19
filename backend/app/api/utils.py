@@ -286,8 +286,6 @@ def automation_catalog(
             description=WB_CHECKLIST_DESCRIPTION,
             status=card_checklist.status,
             seller_count=card_checklist.seller_count,
-            # Сбор идёт по селлеру, а не прогоном: журнала прогонов у модуля нет,
-            # и выдумывать его ради карточки незачем.
             runs_last_24h=0,
             last_run=None,
             last_success_at=card_checklist.last_success_at.isoformat() if card_checklist.last_success_at else None,
@@ -357,15 +355,12 @@ def automation_catalog(
             runs_last_24h=0,
             last_run=None,
             last_success_at=fin_reports.last_success_at.isoformat() if fin_reports.last_success_at else None,
-            # Своего расписания нет: отчёт считается при открытии из зеркала отчётов реализации.
             next_run_at=None,
         ),
         AutomationResponse(
             id=WB_BOX_STICKERS_ID,
             title=WB_BOX_STICKERS_TITLE,
             description=WB_BOX_STICKERS_DESCRIPTION,
-            # Инструмент: файл собирает человек по кнопке, поэтому ни селлеров,
-            # ни запусков по расписанию у карточки нет.
             kind="tool",
             status="active",
             seller_count=0,
@@ -376,7 +371,6 @@ def automation_catalog(
         ),
     ]
     if support_bot is not None:
-        # Новая карточка идёт перед инструментом, чтобы автоматизации стояли подряд.
         catalog.insert(
             -1,
             AutomationResponse(

@@ -1,30 +1,3 @@
-"""Состояние диалога и решение «пора ли начинать рассылку».
-
-Диалог — отрезок чата от автосообщения WB об отзыве до следующего такого же.
-Чат у покупателя один на всё время, поэтому состояние вешается на диалог.
-
-Состояния:
-
-- `no_reply` — покупатель не писал. Бот молчит: отзыв у такого покупателя не
-  публикуется, это лучший исход;
-- `awaiting_us` — покупатель написал, наша сторона ему ещё не ответила или он
-  написал снова после нашего ответа. Бот молчит, ход за специалистом;
-- `awaiting_buyer` — наша сторона ответила, ждём покупателя; идёт отсчёт тишины;
-- `in_campaign` — покупатель молчит дольше порога после сообщения нашей
-  стороны: идёт рассылка;
-- `product_removed` — рассылка должна была идти, но товар снят с продажи (карточка в
-  корзине или пропала из каталога): таким покупателям не пишем;
-- `exhausted` — рассылка отработала положенные дни или ответ нашей стороны стал старше
-  `max_idle`, ответа нет;
-- `closed` — закрыт вручную (хранится в записи диалога, не выводится из ленты).
-
-«Наша сторона» — любое сообщение продавца после первого сообщения покупателя:
-от специалиста из кабинета, от стороннего клиента или от бота. Автосообщение WB
-и сообщение сторонней рассылки идут раньше первого ответа покупателя и в счёт
-не попадают. Сообщения бота отличаются от человеческих только по журналу
-отправок: в ленте бот, сторонняя программа и менеджер через API неразличимы.
-"""
-
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -32,7 +5,6 @@ from enum import StrEnum
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_support_bot.domain import stopwords
 
-# Насколько может разойтись время отправки в журнале с временем события в ленте.
 JOURNAL_MATCH_TOLERANCE = timedelta(minutes=15)
 
 
@@ -59,16 +31,13 @@ class CampaignRules:
     silence: timedelta = timedelta(hours=4)
     duration: timedelta = timedelta(days=5)
     max_campaigns: int = 1
-    # Не начинать кампанию, если нашей стороне ответили давно; None — без ограничения.
     max_idle: timedelta | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class Projection:
     state: DialogState
-    # Кампания началась именно сейчас: вызывающий записывает campaign_started_at.
     start_campaign: bool
-    # Идущая кампания закончилась: покупатель написал или вмешался специалист.
     end_campaign: bool
     buyer_first_at: datetime | None
     buyer_last_at: datetime | None
@@ -125,16 +94,12 @@ def project_dialog(
         return Projection(state, start, end, buyer_first, buyer_last, our_last, human_last, no_contact, attention)
 
     if our_last is None or buyer_last > our_last:
-        # Ход специалиста. Если шла кампания, ответ покупателя её закончил.
         return result(DialogState.AWAITING_US, end=campaign_started_at is not None)
-    # Давность разговора считается от последнего сообщения специалиста: сообщения самого бота
-    # её не обновляют, иначе рассылка вечно продлевала бы себя.
     anchor = human_last if human_last is not None else our_last
     idle = now - anchor
     stale = rules.max_idle is not None and idle > rules.max_idle
     if campaign_started_at is not None:
         if human_last is not None and human_last > campaign_started_at:
-            # Специалист вмешался в ход кампании: пауза до новой тишины.
             return result(DialogState.AWAITING_BUYER, end=True)
         if stale or now - campaign_started_at >= rules.duration:
             return result(DialogState.EXHAUSTED)

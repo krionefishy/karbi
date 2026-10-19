@@ -1,15 +1,6 @@
-"""Возвраты товаров продавцу и заявки покупателей на возврат — как их отдаёт WB.
-
-Два разных потока с разными ключами: физический возврат живёт под стикером
-(`shk_id`) и меняет статус по дороге в ПВЗ, заявка — под своим UUID и меняет
-статус по решению продавца.
-"""
-
 from dataclasses import dataclass
 from datetime import date, datetime
 
-# Ключи статусов возврата. WB отдаёт статус словами и в разном регистре
-# («В пути в пвз», «Готов к выдаче»), словарь сводит их к коду.
 RETURN_READY = "ready"
 RETURN_TRANSIT = "transit"
 RETURN_ISSUED = "issued"
@@ -42,15 +33,11 @@ RETURN_STATUS_TITLES = {
     RETURN_UNKNOWN: "Статус не определён",
 }
 
-# По инструкции WB: в ПВЗ возврат хранится 7 дней, первые 3 — бесплатно,
-# с 4-го по 7-й — 10 ₽ в день за штуку, на 8-й день товар уезжает на утилизацию.
 FREE_STORAGE_DAYS = 3
 STORAGE_DAYS = 7
 STORAGE_FEE_PER_DAY = 10
 
-# Заявку покупателя нужно рассмотреть за 5 дней, иначе она одобрится сама.
 CLAIM_REVIEW_DAYS = 5
-# `status` заявки в API: 0 — на рассмотрении, дальше — решение принято.
 CLAIM_OPEN = 0
 
 
@@ -127,7 +114,6 @@ class Claim:
 
     @property
     def photo_urls(self) -> tuple[str, ...]:
-        # WB отдаёт ссылки без схемы («//claim-basket-01.wbbasket.ru/…»).
         return tuple(f"https:{url}" if url.startswith("//") else url for url in self.photos)
 
 

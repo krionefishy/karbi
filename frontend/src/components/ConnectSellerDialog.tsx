@@ -5,7 +5,6 @@ import type { Seller, SellerInput } from "../features/sellers/types";
 
 interface Props {
   automationTitle: string;
-  /** Registry sellers that are not connected to this automation yet. */
   available: Seller[];
   pending: boolean;
   error: string;

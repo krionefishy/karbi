@@ -20,8 +20,6 @@ interface ReviewChartProps {
 
 type Scope = "article" | "card";
 
-// One viewBox, scaled by CSS. The totals line lives above LINE_BOTTOM, the
-// daily change hangs off ZERO_Y below it.
 const VIEW = { width: 1000, height: 300 };
 const LEFT = 52;
 const RIGHT = 990;
@@ -65,8 +63,6 @@ export function ReviewChart({ snapshots, cardSnapshots, endDate }: ReviewChartPr
       return `${head} L${x(run[run.length - 1].index).toFixed(1)} ${LINE_BOTTOM} L${x(run[0].index).toFixed(1)} ${LINE_BOTTOM} Z`;
     })
     .join(" ");
-  // A dashed bridge over a gap: it connects the eye without claiming we know
-  // what happened in between.
   const gapPath = runs
     .slice(0, -1)
     .map((run, at) => {

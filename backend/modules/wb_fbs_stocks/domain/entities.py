@@ -2,15 +2,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-# Роли групп столбцов. Порядок в таблице задаёт селлер, роль нужна листу
-# «Сравнение»: там «наш склад» раскрыт по складам, а округа стоят суммами.
 GROUP_OWN = "own"
 GROUP_FULFILMENT = "fulfilment"
 GROUP_DISTRICT = "district"
 GROUP_KINDS = (GROUP_OWN, GROUP_FULFILMENT, GROUP_DISTRICT)
 
-# Склад продавца, куда FBS-заказ везёт сам продавец. DBS и EDBS — другие
-# схемы доставки, их в таблице остатков селлер не смотрит.
 DELIVERY_FBS = 1
 
 

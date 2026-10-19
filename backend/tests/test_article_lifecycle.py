@@ -90,8 +90,6 @@ async def test_an_unreadable_trash_never_demotes_archived_cards(seller_repositor
         await session.commit()
 
     async with database.session() as session:
-        # WB refused the trash endpoint: we cannot tell archived from gone, so
-        # the archived card must keep its state.
         await SellerRepository(session).upsert_catalog(
             seller.id, active=[card("1")], archived=[], archived_available=False
         )
@@ -110,8 +108,6 @@ async def test_feedback_articles_never_overwrite_catalog_state(seller_repository
         await session.commit()
 
     async with database.session() as session:
-        # The review sync sees all three in feedbacks. It may register the new
-        # one, but must not resurrect the archived card as active.
         await SellerRepository(session).ensure_feedback_articles(seller.id, [card("1"), card("2"), card("3")])
         await session.commit()
 
@@ -150,5 +146,4 @@ async def test_catalog_upsert_stores_the_identity_fields(seller_repository) -> N
     assert article.brand == "Karbi"
     assert article.subject_name == "Шуруповерты"
     assert article.photo_url == "https://basket.wb.ru/9.jpg"
-    # По этому числу оборачиваемость решает, считать ли карточку вообще.
     assert article.photo_count == 4

@@ -1,5 +1,3 @@
-"""Расширение для кода получения: установки, коды пары, коды дня, задачи расширению."""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID

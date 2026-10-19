@@ -20,7 +20,6 @@ RETURNS_EXTENSION = "returns.extension"
 RETURNS_NO_SUBSCRIPTION = "returns.no_subscription"
 RETURNS_UNKNOWN = "returns.unknown"
 
-# Telegram accepts 4096 characters; a longer list is unreadable anyway.
 _DIGEST_LIMIT = 25
 
 
@@ -70,13 +69,9 @@ def _digest_line(item: dict[str, Any]) -> str:
     days = item.get("days")
     stock = int(item.get("stock") or 0)
     fbo, fbs = int(item.get("stock_fbo") or 0), int(item.get("stock_fbs") or 0)
-    # Where the stock lies decides how long replenishment takes, so the split is
-    # shown whenever the seller works both ways.
     where = f" (склад WB {fbo} + свой {fbs})" if fbo and fbs else ""
     previous = item.get("previous_days")
     trend = ""
-    # Дни целые, поэтому дельта видна и без округления: разошлись цифры —
-    # значит запас за сутки действительно сдвинулся на день.
     if isinstance(previous, int | float) and isinstance(days, int | float):
         if previous > days:
             trend = f", вчера было {previous:.0f}"
@@ -102,8 +97,6 @@ def _turnover_digest(params: dict[str, Any]) -> str:
         lines.append(f"\n…и ещё {hidden} {tail} — весь список в Marketplace Auto.")
     return "\n".join(lines)
 
-
-# --- возвраты WB -----------------------------------------------------------
 
 _MONTHS = ("янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек.")
 
@@ -271,8 +264,6 @@ def _returns_unknown(params: dict[str, Any]) -> str:
     return f"Команду {params.get('command') or ''} не знаю.\n\nЧто умею:\n{_RETURNS_COMMANDS}"
 
 
-# Producers send a template id and parameters, never ready-made text: wording
-# changes then need no republished events, and the outgoing log keeps both.
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_CONFIRMED: _confirmed,
     SUBSCRIPTION_INVALID_LINK: _invalid_link,
@@ -297,9 +288,6 @@ def render(template: str, params: dict[str, Any]) -> str:
     return TEMPLATES[template](params)
 
 
-# --- вложения ----------------------------------------------------------------
-
-
 def _qr_photo(qr: Any, caption: str) -> dict[str, Any] | None:
     if not isinstance(qr, str) or not qr:
         return None
@@ -316,8 +304,6 @@ def _returns_code_photo(params: dict[str, Any]) -> dict[str, Any] | None:
     return _qr_photo(params.get("qr"), _code_line(str(params.get("name") or ""), params).strip(" —"))
 
 
-# Картинка рядом с текстом. Рисуется при постановке в очередь, чтобы доставка
-# не зависела от библиотеки; строка QR — секрет дня, картинка живёт в нашей базе.
 ATTACHMENTS: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
     RETURNS_DIGEST: _returns_digest_photo,
     RETURNS_CODE: _returns_code_photo,

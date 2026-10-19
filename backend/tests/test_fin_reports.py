@@ -1,5 +1,3 @@
-"""Финансовые отчёты: ОПиУ из зеркала отчётов реализации, себестоимость и выгрузка."""
-
 import io
 import uuid
 from collections.abc import AsyncIterator
@@ -83,9 +81,6 @@ def totals(**values: Any) -> SalesReportTotals:
     return SalesReportTotals(**base)
 
 
-# --- расчёт -----------------------------------------------------------------------
-
-
 def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     """Байбурин, неделя 21–27.09.2026: итоги WB на входе, строки отчёта финансиста на выходе."""
     figures = statement(
@@ -118,13 +113,11 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
                 bonus_type_name='Возврат неиспользованного остатка аванса за услугу "Баллы за отзывы"',
                 deduction=money("-520364.16"),
             ),
-            # Живые строки недели: у двух возвратов лояльность положительная, WB её вычитает.
             totals(
                 doc_type_name="Продажа", cashback_amount=money("199482"), cashback_commission_change=money("10761.16")
             ),
             totals(doc_type_name="Возврат", cashback_amount=money("942"), cashback_commission_change=money("94.2")),
         ],
-        # 1260 проданных за вычетом возвратов по 1532,45 ₽ дают себестоимость недели из отчёта.
         lambda nm_id: money("1532.45"),
     )
 
@@ -139,7 +132,6 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     assert values["storage"] == money("-291.10")
     assert values["acceptance"] == money("-480")
     assert values["advertising"] == money("-1436770")
-    # Возврат аванса за отзывы больше нового аванса — строка положительная.
     assert values["reviews"] == money("520364.16")
     assert values["loyalty_points"] == money("-198540")
     assert values["loyalty_program"] == money("-10666.96")
@@ -194,7 +186,6 @@ def test_a_week_split_by_the_month_end_is_one_week_and_two_months() -> None:
     assert period_of(last_august, GRANULARITY_WEEK).key == "2026-W36"
     assert period_of(last_august, GRANULARITY_MONTH).key == "2026-M08"
     assert period_of(first_september, GRANULARITY_MONTH).key == "2026-M09"
-    # Неделя с 29 декабря — уже первая неделя следующего года.
     assert period_of(date(2025, 12, 29), GRANULARITY_WEEK) == Period(2026, 1, GRANULARITY_WEEK)
     assert parse_period("2026-W39") == Period(2026, 39, GRANULARITY_WEEK)
     week = Period(2026, 39, GRANULARITY_WEEK)
@@ -214,14 +205,10 @@ def test_a_new_cost_price_starts_on_its_date_and_the_first_one_covers_the_past()
         ]
     )
 
-    # До первой загрузки файла — по ней же: иначе вся история осталась бы без себестоимости.
     assert book.cost("1", date(2026, 3, 1)) == money(900)
     assert book.cost("1", date(2026, 10, 31)) == money(900)
     assert book.cost("1", date(2026, 11, 1)) == money(1000)
     assert book.cost("2", date(2026, 11, 1)) is None
-
-
-# --- файл себестоимости ---------------------------------------------------------------
 
 
 def cost_workbook(header: list[str], rows: list[list[Any]]) -> bytes:
@@ -298,12 +285,7 @@ def test_cabinets_are_matched_to_sellers_by_surname() -> None:
         ["Ип Байбурин", "Ип Саниев", "Ип Иванов", "Ип Неизвестный", "ООО Бета", "ооо альфа", "ИП"], sellers
     )
 
-    # Фамилия у двух селлеров сразу — кабинет не угадывается, как и незнакомый. Общего
-    # первого слова мало: себестоимость «ООО Бета» не должна лечь на «ООО Альфа».
     assert matched == {"Ип Байбурин": baiburin, "Ип Саниев": saniev, "ооо альфа": alpha}
-
-
-# --- через API, на зеркале ------------------------------------------------------------
 
 
 def report(report_id: int, date_from: date, date_to: date, report_type: int = 1) -> SalesReport:
@@ -364,7 +346,6 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
         await mirror.upsert_sales_reports(
             seller_id,
             [
-                # Неделю на стыке июля и августа WB не поделил: один отчёт, операции в двух месяцах.
                 report(JUL_AUG, date(2026, 7, 27), date(2026, 8, 2)),
                 report(AUG31, date(2026, 8, 31), date(2026, 8, 31)),
                 report(SEP01, date(2026, 9, 1), date(2026, 9, 6)),
@@ -410,7 +391,6 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
         for report_id in (JUL_AUG, AUG31, SEP01, W38, W39_MAIN, W39_BUYOUT):
             await mirror.advance_sales_report(seller_id, report_id, cursor=10, loaded_at=stamp)
         await session.commit()
-    # Отчёт на странице — из сумм, которые складывает воркер; здесь его проход сделан руками.
     outcome = await FactsBuilder(application.database).build(seller_id, limit=100, now=stamp)
     assert (outcome.built, outcome.left) == (6, 0)
     try:
@@ -461,15 +441,12 @@ async def test_weeks_add_both_report_types_and_show_what_is_not_loaded_yet(
     body = response.json()
     assert [item["key"] for item in body["periods"]] == ["2026-W40", "2026-W39", "2026-W38", "2026-W36", "2026-W31"]
     week = own(body, seller, "2026-W39")
-    # Основной отчёт и отчёт «по выкупам» за неделю складываются; возврат вычитается.
     assert (week["revenue_before_spp"], week["revenue_after_spp"], week["for_pay"]) == (5500.0, 4400.0, 4460.0)
     assert (week["planned_commission"], week["commission"]) == (-1040.0, 60.0)
     assert (week["logistics"], week["advertising"]) == (-300.0, -500.0)
     assert week["gross_margin"] == 4400.0 + 60.0 - 300.0 - 500.0
-    # Неделя на стыке месяцев — два отчёта WB, одна колонка.
     split = next(item for item in body["periods"] if item["key"] == "2026-W36")
     assert (split["label"], split["by_seller"][str(seller)]["revenue_before_spp"]) == ("36 (31.08-06.09)", 3000.0)
-    # Отчёт недели 40 зеркало ещё не дочитало: денег нет, и это сказано.
     pending = next(item for item in body["periods"] if item["key"] == "2026-W40")
     assert pending["pending_sellers"] == [str(seller)] and str(seller) not in pending["by_seller"]
     [state] = body["sellers"]
@@ -496,10 +473,8 @@ async def test_months_split_a_week_by_the_date_wb_booked_each_row(client: AsyncC
         ("2026-M07", "июль"),
     ]
     assert own(body, seller, "2026-M07")["revenue_before_spp"] == 400.0
-    # Август: 1 августа из недели 27.07–02.08 и отдельный отчёт WB за 31 августа.
     assert own(body, seller, "2026-M08")["revenue_before_spp"] == 700.0 + 1000.0
     assert own(body, seller, "2026-M09")["revenue_before_spp"] == 2000.0 + 3000.0 + 5500.0
-    # Недочитанный отчёт 28.09–04.10 делает неполными оба месяца, которых касается.
     pending = {item["key"] for item in body["periods"] if item["pending_sellers"]}
     assert pending == {"2026-M09", "2026-M10"}
     august = next(item for item in body["periods"] if item["key"] == "2026-M08")
@@ -530,13 +505,11 @@ async def test_a_cost_file_fills_the_cost_line_and_lists_what_has_no_cost(
     assert result["unknown_cabinets"] == ["Ип Чужой"]
     after = (await client.get(API, params=params)).json()
     week = own(after, seller, "2026-W39")
-    # Две продажи шуруповёрта (основной отчёт и «по выкупам») минус возврат; пила без себестоимости.
     assert week["cost"] == -1500.0
     assert week["gross_margin"] == own(before, seller, "2026-W39")["gross_margin"] - 1500.0
     assert [(item["nm_id"], item["vendor_code"], item["revenue"]) for item in after["uncosted"]] == [
         (SAW, "KARBI - Пила", 900.0)
     ]
-    # Тот же файл ещё раз — версий не прибавилось; новая цена — новая версия, прошлое не тронуто.
     again = (await upload(client, [["Ип Финтест", DRILL, "KARBI - Шуруповерт", "1", "2", "6147", 1500, "50"]])).json()
     assert (again["added"], again["changed"], again["unchanged"]) == (0, 0, 1)
     async with application.database.session() as session:
@@ -550,7 +523,6 @@ async def test_a_cost_file_fills_the_cost_line_and_lists_what_has_no_cost(
                 cost=money(2000),
             )
         )
-        # Первая версия задним числом: до 21 сентября действует она.
         await session.execute(
             update(CostPriceModel)
             .where(CostPriceModel.seller_id == seller, CostPriceModel.cost == money(1500))
@@ -570,7 +542,6 @@ async def test_a_wrong_first_price_is_corrected_by_a_back_dated_upload(client: A
     await upload(client, [[*line, 9000, "50"]])
     assert own((await client.get(API, params=params)).json(), seller, "2026-W38")["cost"] == -9000.0
 
-    # Тот же кабинет записан двумя способами — это один селлер и одна версия, а не отказ базы.
     fixed = await upload(
         client,
         [["ИП Финтест Ф.Ф.", DRILL, "x", "1", "2", "1", 1, "50"], [*line, 900, "50"]],
@@ -620,7 +591,6 @@ async def test_the_export_has_the_period_by_cabinet_weeks_months_and_missing_cos
     )
     own_articles = [row for row in articles.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Финтест Ф.Ф."]
     drill = next(row for row in own_articles if row[1] == str(DRILL))
-    # Две продажи шуруповёрта минус возврат; выручка до СПП 5000 + 600 − 1000.
     assert (drill[7], drill[13], drill[header.index("Вся стоимость реализованного товара до СПП")]) == (2, 1, 4600)
     assert any("Остатки — из зеркала" in str(row[0]) for row in articles.iter_rows(min_row=2, values_only=True))
     period = workbook.worksheets[0]
@@ -660,7 +630,6 @@ async def test_a_report_shows_up_only_after_the_worker_has_folded_it(
 
     worker = FinReportsWorker(application.database, SETTINGS, now=lambda: stamp)
     assert await worker.tick() >= 1
-    # Сложено — и до следующего интервала воркер зеркало не трогает; сложенное не пересобирается.
     assert await worker.tick() == 0
     interval = timedelta(minutes=SETTINGS.fin_reports.build_interval_minutes)
     later = FinReportsWorker(application.database, SETTINGS, now=lambda: stamp + interval)
@@ -712,7 +681,6 @@ async def test_a_long_backlog_is_folded_in_portions_without_waiting_for_the_inte
     second = await builder.build(seller, limit=4, now=stamp)
     third = await builder.build(seller, limit=4, now=stamp)
 
-    # Старшие отчёты первыми; остаток добирается следующим проходом, сложенное не трогается.
     assert [(first.built, first.left), (second.built, second.left), (third.built, third.left)] == [
         (4, 2),
         (2, 0),
@@ -720,9 +688,6 @@ async def test_a_long_backlog_is_folded_in_portions_without_waiting_for_the_inte
     ]
     async with application.database.session() as session:
         assert len(await FinReportsRepository(session).built_reports(seller)) == 6
-
-
-# --- реклама по артикулам из зеркала ----------------------------------------------------
 
 
 async def test_campaign_spend_is_split_between_articles_by_their_stats(
@@ -768,7 +733,6 @@ async def test_campaign_spend_is_split_between_articles_by_their_stats(
         ads = await week_ads(session, seller, since=week[0], until=week[1])
 
     drill, saw = ads.of(DRILL), ads.of(SAW)
-    # Кампания 1: 400 ₽ делятся 3:1 по статистике; кампания 2 без статистики — поровну; кампания 3 неизвестна.
     assert (drill.balance, drill.account, drill.bonus, drill.promotion_info) == (
         Decimal("225.00"),
         Decimal("75.00"),
@@ -803,7 +767,6 @@ async def test_campaign_spend_splits_to_the_kopeck_and_stats_of_a_vanished_campa
             now=stamp,
         )
         await session.commit()
-        # Перечитывание окна: списание кампании 6 пропало — статистика уходит вместе с ним.
         await mirror.replace_advert_spend(
             seller, *week, [AdvertSpend(5, date(2026, 9, 22), "Баланс", Decimal("10"))], now=stamp
         )
@@ -820,8 +783,6 @@ async def test_campaign_spend_splits_to_the_kopeck_and_stats_of_a_vanished_campa
     ]
     assert ads.of(DRILL).promotion_info == Decimal(0)
 
-
-# --- Ozon -----------------------------------------------------------------------------
 
 SPEAKER, BRUSH = 2468858781, 5365042812
 
@@ -912,7 +873,6 @@ def test_the_ozon_statement_takes_revenue_from_the_sale_and_the_rest_by_accrual_
         "revenue_with_points": money(2008),
         "revenue": money("953.52"),
         "points": money("1365.90"),
-        # Две колонки ушли, одна вернулась: себестоимость — за одну.
         "cost": money(-100),
         "commission": money("-1044.16"),
         "delivery": money("-84.99"),
@@ -958,11 +918,9 @@ async def ozon_seller(application: Application) -> AsyncIterator[uuid.UUID]:
         for offset in range(8):
             day = date(2026, 9, 21) + timedelta(days=offset)
             await mirror.replace_ozon_accruals(seller_id, day, by_day.get(day, []), now=stamp)
-        # Зеркало дочитало неделю 39 целиком и первый день недели 40.
         await mirror.save_ozon_cursor(seller_id, date(2026, 9, 28))
         await session.commit()
     try:
-        # Складываются дни с первого начисления: пустые дни до него суммам не нужны.
         outcome = await FactsBuilder(application.database).build_ozon(seller_id, limit=100, now=stamp)
         assert (outcome.built, outcome.left) == (5, 0)
         yield seller_id
@@ -995,7 +953,6 @@ async def test_ozon_weeks_come_from_folded_days_and_a_week_with_unread_days_is_p
     assert week39["pending_sellers"] == []
     assert own(body, ozon_seller, "2026-W39")["gross_margin"] == pytest.approx(-27675.12)
     assert own(body, ozon_seller, "2026-W39")["cost"] == -100
-    # Неделя 40 начата, но дни после 28.09 зеркало ещё не читало.
     week40 = next(item for item in body["periods"] if item["key"] == "2026-W40")
     assert week40["pending_sellers"] == [str(ozon_seller)]
     state = next(item for item in body["sellers"] if item["seller_id"] == str(ozon_seller))
@@ -1035,7 +992,6 @@ async def test_an_ozon_day_is_folded_again_when_the_mirror_re_reads_or_moves_its
     sale_day, next_day = date(2026, 9, 24), date(2026, 9, 25)
     async with application.database.session() as session:
         mirror = MirrorRepository(session)
-        # Зеркало перечитало 24.09: Ozon дописал услугу, а рекламное начисление 4 перенёс на 25.09.
         kept = [line for line in ozon_week() if line.day == sale_day and line.accrual_id != 4]
         extra = ozon_line(9, 0, sale_day, OZON_LINE_ITEM, sku=BRUSH, type_id=1, quantity=1, amount=money("-10.00"))
         await mirror.replace_ozon_accruals(ozon_seller, sale_day, [*kept, extra], now=later)
@@ -1050,10 +1006,8 @@ async def test_an_ozon_day_is_folded_again_when_the_mirror_re_reads_or_moves_its
     assert (outcome.built, outcome.left) == (2, 0)
     response = await client.get(API, params={"year": 2026, "marketplace": "ozon", "seller_id": str(ozon_seller)})
     figures = own(response.json(), ozon_seller, "2026-W39")
-    # Реклама не задвоилась, услуга добавилась: −20,63 − 10,00.
     assert figures["advertising"] == pytest.approx(-28433.34)
     assert figures["additional_services"] == pytest.approx(-30.63)
-    # Без изменений в зеркале складывать нечего.
     again = await FactsBuilder(application.database).build_ozon(ozon_seller, limit=100, now=later)
     assert (again.built, again.left) == (0, 0)
 
@@ -1088,7 +1042,6 @@ async def test_a_sale_and_a_return_of_one_sku_on_one_day_keep_their_pieces(
     row = next(
         r for r in skus.iter_rows(min_row=2, values_only=True) if r[0] == "ИП Озонтест О.О." and r[1] == str(SPEAKER)
     )
-    # Продажи 2 + 5, возвраты 1 + 1; себестоимость — за пять проданных, а не за семь.
     assert (row[2], row[3]) == (7, 2)
     assert row[header.index("Себестоимость реализованного")] == 500
 
@@ -1097,9 +1050,6 @@ async def test_the_ozon_report_refuses_an_unknown_marketplace(client: AsyncClien
     response = await client.get(API, params={"marketplace": "yandex"})
 
     assert response.status_code == 422
-
-
-# --- снимки остатков --------------------------------------------------------------------
 
 
 async def test_the_week_snapshot_waits_for_a_fresh_mirror_and_counts_an_empty_stock_as_taken(
@@ -1117,14 +1067,12 @@ async def test_the_week_snapshot_waits_for_a_fresh_mirror_and_counts_an_empty_st
         await mirror.mark_collected(seller, MIRROR_REMAINS, now=monday - timedelta(days=3))
         await session.commit()
 
-    # Зеркало стоит с пятницы: пятничный остаток воскресным не считается.
     assert await snapshots.take(seller, now=monday) is None
 
     async with application.database.session() as session:
         await MirrorRepository(session).mark_collected(seller, MIRROR_REMAINS, now=monday - timedelta(minutes=10))
         await session.commit()
 
-    # Свежее чтение с нулём строк — тоже снимок: неделя снята, повторять нечего.
     assert await snapshots.take(seller, now=monday) == date(2026, 10, 4)
     assert await snapshots.take(seller, now=monday + timedelta(hours=1)) is None
     async with application.database.session() as session:

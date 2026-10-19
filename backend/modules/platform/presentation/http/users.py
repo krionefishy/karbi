@@ -45,8 +45,6 @@ async def create_employee(
         user, password = await service.create(payload.username, payload.is_admin)
     except UsernameTakenError as error:
         raise username_taken(payload.username.strip()) from error
-    # The password is in this body and nowhere else; caching it would put it in
-    # a proxy or a browser history.
     response.headers["Cache-Control"] = "no-store"
     return IssuedPasswordResponse(user=employee_response(user), password=password)
 

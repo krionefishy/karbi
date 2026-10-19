@@ -26,9 +26,6 @@ export function setAccessToken(token: string | null) {
 async function send(path: string, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  // JSON по умолчанию, но не поверх явно заданного: выгрузка 1С уезжает
-  // текстом, и подменять ей тип нельзя.
-  // Файлы (FormData) — без типа: границу multipart браузер подставит сам.
   if (init?.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
@@ -50,9 +47,6 @@ export function refreshAccessToken(): Promise<AuthRefreshPayload> {
       headers: { Accept: "application/json" },
     })
       .then(async (response) => {
-        // Сессию хоронит только отказ в правах. Лимитер (429), сетевой сбой или
-        // 5xx — это «сейчас не получилось»: разлогинивать из-за них значит
-        // выбрасывать человека из интерфейса каждый раз, когда сервер занят.
         if (response.status === 401 || response.status === 403) {
           throw new ApiError(response.status, "Сессия истекла");
         }

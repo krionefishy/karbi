@@ -45,7 +45,6 @@ class WBReviewsWorker:
         while not self._stop.is_set():
             touch_heartbeat()
             if self._enabled:
-                # A transient database error must cost one poll, not the process.
                 try:
                     await self._recover()
                     await self._schedule_if_due()

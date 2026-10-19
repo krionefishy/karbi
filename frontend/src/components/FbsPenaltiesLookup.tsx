@@ -10,7 +10,6 @@ interface Props {
   onLookup: (text: string) => void;
 }
 
-/** Вставила номера из своей таблицы — получила склад и поставку по каждому. */
 export function FbsPenaltiesLookup({ result, pending, onLookup }: Props) {
   const [draft, setDraft] = useState("");
   return (

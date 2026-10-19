@@ -1,18 +1,3 @@
-"""Первичное наполнение таблицы остатков FBS из книги селлера (Пример.xlsx).
-
-Лист → кабинет по имени (подстрока названия листа в имени селлера), столбцы →
-склады по имени из живого списка кабинета, группы → по «плюсикам» книги
-(сводный столбец слева от группы), баркоды → колонка B. Порядок групп
-переставляется по ТЗ: свои склады, фулфилмент, округа.
-
-Без --apply только показывает, что нашлось и что нет. Кабинет, у которого уже
-есть группы, пропускается: команда для первого заполнения, а не для сверки.
-
-Запуск на проде:
-  docker compose cp Пример.xlsx api:/tmp/board.xlsx
-  docker compose exec api python -m backend.commands.import_fbs_stock_board /tmp/board.xlsx --apply
-"""
-
 import argparse
 import asyncio
 import re
@@ -121,7 +106,6 @@ async def run(path: str, apply: bool) -> int:
                             print(f"  MISS  «{name}» нет в кабинете")
                             failures += 1
                             continue
-                        # Два одноимённых склада (два «FulFast МОСКВА») — берём по очереди.
                         ids.append(candidates.pop(0))
                     resolved.append((group, ids))
                     print(f"  {group.kind:<10} {group.title}: {len(ids)}/{len(group.members)} складов")

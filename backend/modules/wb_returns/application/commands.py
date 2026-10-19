@@ -1,10 +1,3 @@
-"""Ответы бота возвратов на команды из чата.
-
-Команда приходит событием из модуля уведомлений вместе с селлерами чата;
-ответ уходит обычным событием сообщения с аудиторией «чат». Ключ
-дедупликации — id события: повтор из Kafka не отвечает дважды.
-"""
-
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -63,7 +56,6 @@ class CommandService:
         elif command == "returns":
             template, params = TEMPLATE_LIST, {"sellers": await self._sellers_summary(event, stamp)}
         elif command == "qr":
-            # Картинка QR — одна на сообщение, поэтому по сообщению на магазин.
             for seller_id, name in event.sellers:
                 params = await self.extension.request_code(seller_id, name, chat_id=event.chat_id, now=stamp)
                 self._reply(event, TEMPLATE_CODE, params, suffix=str(seller_id))

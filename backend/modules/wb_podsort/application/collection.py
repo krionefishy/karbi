@@ -17,9 +17,7 @@ from backend.modules.wb_podsort.infrastructure.wb import WBPodsortStatisticsClie
 class CollectionResult:
     days_loaded: int
     orders: int
-    # Сутки, которые ещё ждут: кабинет остаётся в очереди на следующий проход.
     remaining: int
-    # Кабинет отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
@@ -102,7 +100,6 @@ class CollectionService:
         seller_key = str(seller_id)
         due = await self.pending(seller_id, now=stamp)
         batch = due[: self.days_per_run]
-        # Сеть идёт до первой записи: держать транзакцию весь запрос незачем.
         await self.session.commit()
 
         loaded = orders = 0
@@ -115,8 +112,6 @@ class CollectionService:
                 return CollectionResult(loaded, orders, len(due) - loaded, skipped=True)
             counts, barcodes = summarize(lines)
             await self.podsort.replace_day(seller_id, day, counts, barcodes, now=stamp)
-            # Сутки — отдельная транзакция: упавший на пятом дне проход не
-            # должен перечитывать первые четыре.
             await self.session.commit()
             loaded += 1
             orders += len(lines)

@@ -15,10 +15,8 @@ from backend.modules.wb_fbs_stocks.domain import GROUP_FULFILMENT, GROUP_OWN
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 COMPARISON_SHEET = "Сравнение"
-# Тот же лист глазами фулфилмента: его склады раскрыты, свои и округа — суммами.
 COMPARISON_FF_SHEET = "Сравнение ФФ"
 
-# Первые две колонки как в таблице селлера: её заметка и баркод.
 NOTE_COLUMN = 1
 BARCODE_COLUMN = 2
 FIRST_DATA_COLUMN = 3
@@ -28,8 +26,6 @@ COLUMN_FILL = PatternFill("solid", fgColor="2E5F8A")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
 HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 CENTERED = Alignment(horizontal="center", vertical="center")
-# Ноль — красным, по ТЗ. Условным форматом, а не заливкой: если она поправит
-# число руками, цвет уйдёт сам.
 ZERO_FILL = PatternFill("solid", fgColor="FFC7CE")
 ZERO_FONT = Font(color="9C0006")
 NOTE_FONT = Font(color="404040")
@@ -69,7 +65,7 @@ def _seller_sheet(sheet, view: BoardView) -> None:
     sheet.cell(row=1, column=NOTE_COLUMN, value=view.seller_name)
     sheet.cell(row=1, column=BARCODE_COLUMN, value="Баркод")
     column = FIRST_DATA_COLUMN
-    spans: list[tuple[int, int, int]] = []  # (сводный столбец, первый склад, последний склад)
+    spans: list[tuple[int, int, int]] = []
     for group in view.groups:
         sheet.cell(row=1, column=column, value=group.title)
         first = column + 1
@@ -145,12 +141,9 @@ def _comparison_sheet(sheet, views: Sequence[BoardView], kind: str, fallback_tit
                 cell = sheet.cell(row=row_index, column=district_start + offset, value=row.group_total(group))
                 cell.alignment = CENTERED
         if view.rows:
-            # Красятся только записанные ячейки: пустая клетка для Excel равна нулю,
-            # и разрыв между блоками стал бы красным.
             _paint_zeroes(sheet, first_row, row_index, FIRST_DATA_COLUMN, FIRST_DATA_COLUMN + len(own_columns))
             if districts:
                 _paint_zeroes(sheet, first_row, row_index, district_start, district_start + len(districts) - 1)
-        # Пустая строка между кабинетами, как в её примере.
         row_index += 2
     if own_width:
         sheet.column_dimensions.group(

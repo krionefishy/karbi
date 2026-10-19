@@ -102,7 +102,6 @@ class SupportBotWorker:
         self._last_tick = now
         async with self.database.session() as session:
             tracked = await SupportBotRepository(session).tracked_seller_ids()
-            # Архивный кабинет остаётся подключённым, но ключа у шлюза уже нет.
             servable = {
                 seller.id
                 for seller in await SellerRepository(session).list_sellers()

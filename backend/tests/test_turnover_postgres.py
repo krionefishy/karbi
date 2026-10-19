@@ -149,8 +149,6 @@ async def seller() -> AsyncIterator[tuple[Database, uuid.UUID]]:
         async with database.session() as session:
             await session.execute(delete(RefreshRequestModel).where(RefreshRequestModel.seller_id == model.id))
             await TurnoverRepository(session).purge_seller(model.id)
-            # Runs are not per seller, and their slot key is unique, so leaving
-            # one behind would make the next test run see the slot as taken.
             await session.execute(delete(CollectionRunModel))
             await session.execute(delete(OutboxEventModel).where(OutboxEventModel.aggregate_id == model.id))
             await session.execute(delete(SellerModel).where(SellerModel.id == model.id))
@@ -311,7 +309,6 @@ async def test_the_orders_watermark_moves_forward_and_is_reused(seller) -> None:
     second = FakeStatistics(order_rows=[])
     await collect_orders(database, seller_id, second)
 
-    # The next pull starts a day before the watermark, not from the backfill window.
     assert second.requested_from is not None
     assert second.requested_from.date() == date(2026, 8, 18)
 
@@ -339,7 +336,6 @@ async def test_the_metric_is_computed_from_what_was_collected(seller) -> None:
     rows = {row.article: row for row in await calculate(database, seller_id)}
 
     assert rows["101"].status == STATUS_OK
-    # 28 orders on one day of sale is 42 / 28 = 1.5 дня — то есть один день.
     assert rows["101"].days_of_cover == 1
     assert rows["102"].status == STATUS_NO_STOCK
 
@@ -360,8 +356,6 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
 
     first, second = await send(), await send()
 
-    # Only 101: it is about to run out. 102 sits at zero as well, but nobody
-    # ordered it inside the window — that is the assortment tail, not an alert.
     assert (first.sent, first.articles) == (True, 1)
     assert second.sent is False
     async with database.session() as session:
@@ -384,7 +378,6 @@ async def test_the_digest_goes_out_once_a_day_and_only_when_something_is_low(sel
 
 async def test_a_seller_with_nothing_low_gets_no_message(seller, digest_bot) -> None:
     database, seller_id = seller
-    # Both articles well stocked: nothing low, and nothing at zero either.
     await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 400), stock("102", 400)]), FakeMarketplace())
     await collect_orders(
         database,
@@ -420,8 +413,6 @@ async def test_a_crashed_slot_can_be_claimed_again_once_it_goes_stale(seller) ->
         claimed = await TurnoverRepository(session).start_run("stocks", TODAY, 1)
         await session.commit()
     assert claimed is not None
-    # Pretend the process died right after claiming: the run is still "running"
-    # and older than the reclaim window.
     async with database.session() as session:
         await session.execute(
             sa_update(CollectionRunModel)
@@ -471,13 +462,12 @@ async def test_the_current_stock_never_mixes_two_collection_points(seller) -> No
         slot=0,
         day=yesterday,
     )
-    # Today only FBO is collected — the seller dropped his own warehouse.
     await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 10)]), FakeMarketplace(), slot=0)
 
     async with database.session() as session:
         current = await TurnoverRepository(session).latest_stock(seller_id, TODAY - timedelta(days=7))
 
-    assert current["101"].total == 10  # not 17
+    assert current["101"].total == 10
 
 
 async def test_orders_are_read_page_by_page_until_nothing_new_arrives() -> None:
@@ -511,12 +501,11 @@ async def test_orders_are_read_page_by_page_until_nothing_new_arrives() -> None:
     rows = await client.orders("key", datetime(2026, 8, 18, tzinfo=UTC))
 
     assert {row.srid for row in rows} == {"a0", "a1", "a2", "b0", "b1", "b2"}
-    assert len(client.cursors) == 3  # two pages of data, one empty page to stop
+    assert len(client.cursors) == 3
 
 
 async def test_a_repeated_srid_inside_one_pull_does_not_break_the_batch(seller) -> None:
     database, seller_id = seller
-    # The same order twice in one response: pages overlap on their boundary row.
     await collect_orders(
         database,
         seller_id,
@@ -532,12 +521,11 @@ async def test_a_repeated_srid_inside_one_pull_does_not_break_the_batch(seller) 
         rows = list(await session.scalars(select(OrderModel).where(OrderModel.seller_id == seller_id)))
 
     assert len(rows) == 1
-    assert rows[0].is_cancel is True  # the last row wins
+    assert rows[0].is_cancel is True
 
 
 async def test_a_purge_mid_flight_is_not_overwritten_by_the_write_phase(seller) -> None:
     database, seller_id = seller
-    # The seller leaves the automation while the pull is in the air.
     async with database.session() as session:
         await session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
         await session.commit()
@@ -594,7 +582,6 @@ async def test_a_marketplace_outage_keeps_the_wb_stock_and_the_previous_fbs(sell
             select(StockSnapshotModel).where(StockSnapshotModel.seller_id == seller_id, StockSnapshotModel.slot == 1)
         )
         by_model = {row.delivery_model: row.quantity for row in rows if row.article == "101"}
-    # The new slot holds the fresh FBO figure and no FBS row at all.
     assert by_model == {"fbo": 12}
 
 
@@ -624,7 +611,6 @@ async def test_goods_in_transit_stay_out_of_the_stock_that_is_counted(seller) ->
         )
     assert current["101"].total == 3
     assert row is not None and row.in_way_to_client == 400
-    # quantity_full is derived now that WB stopped sending it.
     assert row.quantity_full == 403
 
 
@@ -632,7 +618,6 @@ async def test_an_empty_shelf_is_reported_only_for_a_товар_that_was_selling
     """«Кончился то, что продавалось» is the alert. «Нет остатка и не заказывали»
     is the assortment tail — for one live seller it was 927 rows against 28."""
     database, seller_id = seller
-    # Both articles are at zero; only 102 has been selling.
     await collect_stocks(database, seller_id, FakeAnalytics([stock("101", 0), stock("102", 0)]), FakeMarketplace())
     await collect_orders(
         database,
@@ -760,7 +745,6 @@ async def test_a_refresh_that_failed_says_so_instead_of_hanging(seller) -> None:
         assert latest is not None
         assert latest.status == "error"
         assert latest.finished_at is not None
-        # And the seller can ask again.
         assert await repository.active_refresh(seller_id) is None
 
 

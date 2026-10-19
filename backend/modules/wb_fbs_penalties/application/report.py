@@ -22,7 +22,6 @@ HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=T
 TOTAL_FONT = Font(bold=True)
 MUTED_FONT = Font(color="808080")
 
-# Её колонки — первыми и в её порядке; дальше то, что она заполняла руками.
 COLUMNS: tuple[tuple[str, int], ...] = (
     ("Кабинет", 16),
     ("Неделя отчёта", 22),
@@ -125,7 +124,6 @@ class WorkbookWriter:
             for column, value in enumerate(values, start=1):
                 cell = self._cell(value)
                 if column in TEXT_COLUMNS:
-                    # Стикер и номера — текстом: иначе Excel покажет 5,74E+10.
                     cell.number_format = "@"
                 if column == 8:
                     cell.number_format = "#,##0.00"

@@ -24,7 +24,6 @@ const MARKETPLACES: { value: Marketplace; label: string }[] = [
   { value: "wb", label: "Wildberries" },
   { value: "ozon", label: "Ozon" },
 ];
-/** Что дочитывает зеркало: у WB — отчёты реализации, у Ozon — начисления по дням. */
 const SOURCE: Record<
   Marketplace,
   { title: string; unit: (count: number) => string; tag: string; failing: string; partial: string; article: string }
@@ -55,15 +54,11 @@ interface Column {
   key: string;
   title: string;
   values: PnlValues | undefined;
-  /** Отчёт WB (день Ozon) по колонке дочитан не весь: цифры неполные. */
   partial?: boolean;
-  /** Период ещё идёт: цифры не итоговые. */
   open?: boolean;
-  /** Итог года: колонка не период, выбрать её нельзя. */
   fixed?: boolean;
 }
 
-/** Строки ОПиУ сверху вниз, по колонке на период или кабинет. */
 function PnlTable({
   lines,
   columns,
@@ -79,7 +74,6 @@ function PnlTable({
   onSelect?: (key: string) => void;
   label: string;
   partialHint: string;
-  /** Показаны прежние цифры, новые ещё грузятся. */
   stale?: boolean;
 }) {
   const template = `minmax(280px, 340px) repeat(${columns.length}, minmax(150px, 1fr))`;
@@ -163,7 +157,6 @@ export function FinReportsPage() {
     placeholderData: (previous) => previous,
   });
 
-  // Выбранный кабинет могли отключить, а период — сменить вместе с разрезом.
   useEffect(() => {
     if (sellerId && !sellers.some((item) => item.id === sellerId)) setSellerId("");
   }, [sellerId, sellers]);
@@ -204,7 +197,6 @@ export function FinReportsPage() {
     },
     onError: fail("Не удалось загрузить себестоимость"),
     onSettled: () => {
-      // Тот же файл можно выбрать снова — иначе повторная загрузка не сработает.
       if (fileInput.current) fileInput.current.value = "";
     },
   });
@@ -230,7 +222,6 @@ export function FinReportsPage() {
   const failing = (pnl?.sellers ?? []).filter((state) => state.error);
   const uncostedRevenue = (pnl?.uncosted ?? []).reduce((sum, item) => sum + item.revenue, 0);
   const years = Array.from({ length: currentYear - FIRST_YEAR + 1 }, (_, index) => currentYear - index);
-  // Подписи — по данным на экране, а не по переключателю: пока грузится Ozon, в таблице ещё WB.
   const shown = pnl?.marketplace ?? marketplace;
   const source = SOURCE[shown];
 
@@ -308,8 +299,6 @@ export function FinReportsPage() {
           )
         ) : (
           <>
-            {/* Переключатели живут независимо от данных: после ошибки по новому запросу
-                нужно иметь возможность вернуться к прежнему году или кабинету. */}
             <div className="checklist-toolbar fin-toolbar">
               <div className="mode-switch" role="tablist" aria-label="Маркетплейс">
                 {MARKETPLACES.map((item) => (
@@ -361,7 +350,6 @@ export function FinReportsPage() {
             </div>
 
             {!pnl ? (
-              // Ошибка первой загрузки уже показана выше: «Загружаем…» рядом с ней висело бы вечно.
               isLoading && <div className="loading-block">Загружаем данные…</div>
             ) : pnl.periods.length === 0 ? (
               <div className="empty-state">
@@ -503,7 +491,6 @@ export function FinReportsPage() {
                         pnl && shown === "ozon" && !sellerId && <em className="muted"> · без учётки Ozon</em>
                       )}
                     </span>
-                    {/* При фильтре по одному кабинету про остальные сервер не рассказывает — молчим. */}
                     <span className="muted">
                       {state ? `${source.title}: ${stamp(state.collected_at)} · собрано: ${stamp(state.built_at)}` : ""}
                     </span>

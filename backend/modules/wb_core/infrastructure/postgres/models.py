@@ -32,8 +32,6 @@ class SellerModel(WBCoreBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Archiving replaces deletion: the seller disappears from every automation
-    # until restored, and both the history and the enrollments stay where they are.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -42,25 +40,13 @@ class SellerModel(WBCoreBase):
     catalog_sync_status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     last_catalog_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     catalog_sync_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Сага доставки ключа на шлюз wb-egress: статус отвечает шлюз
-    # (delivered/verified/key_invalid/no_free_ip/disabled), либо доставка не
-    # прошла с нашей стороны (undelivered/unsynced). Ключа в этой базе нет.
     egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
     egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # То же самое для Ozon. Пара отдельная, потому что учётки независимы: ключ
-    # WB может быть проверен, пока ключ Ozon отозван. Колонки без префикса
-    # остались за Wildberries по истории — их читают фронтенд и сверка.
     ozon_egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
     ozon_egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # И для MPStats: это не маркетплейс, а аналитика по ним, но токен у селлера
-    # свой и доставляется на шлюз той же сагой.
     mpstats_egress_status: Mapped[str] = mapped_column(String(16), nullable=False, default="undelivered")
     mpstats_egress_error: Mapped[str | None] = mapped_column(String, nullable=True)
-    # Адрес общий: у селлера он один на оба маркетплейса.
     egress_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
-    # Монотонная версия для идемпотентных upsert'ов шлюза: очередная версия —
-    # max(wall-clock мс, предыдущая + 1), поэтому ни скачок NTP назад, ни две
-    # правки в одну миллисекунду не дадут шлюзу принять позднее за раннее.
     egress_version: Mapped[int] = mapped_column(BigInteger, default=0)
 
     __table_args__ = (
@@ -89,11 +75,8 @@ class ArticleModel(WBCoreBase):
     subject_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     subject_name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     photo_url: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
-    # NULL — карточку ещё не читали каталогом; ноль — читали, и фото в ней нет.
     photo_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sizes: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    # active — в продаже, archived — в корзине WB, feedback_only — карточки нет
-    # ни в каталоге, ни в корзине, но по ней приходят отзывы.
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -369,7 +352,6 @@ class ChatEventModel(WBCoreBase):
             "ix_wb_core_chat_events_prompts",
             "seller_id",
             "added_at",
-            # `text` в теле класса — колонка сообщения, поэтому функция под другим именем.
             postgresql_where=sql_text("review_prompt"),
         ),
     )
@@ -392,9 +374,7 @@ class ChatCursorModel(WBCoreBase):
     tail_reached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-# Деньги отчёта реализации: рубли с копейками, как их отдаёт WB.
 MONEY = Numeric(14, 2)
-# Проценты и коэффициенты WB бывают длиннее копеек.
 RATIO = Numeric(14, 4)
 
 

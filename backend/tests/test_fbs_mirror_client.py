@@ -9,7 +9,6 @@ OFFICES = "/api/v3/offices"
 WAREHOUSES = "/api/v3/warehouses"
 SELLER = "seller-1"
 
-# Ответы урезаны до одной строки, но поля и их типы взяты из настоящего ответа WB.
 OFFICE_ROW = {
     "federalDistrict": "Сибирский федеральный округ",
     "address": "РФ, Республика Хакасия, г. Абакан, ул. Складская 11",
@@ -45,7 +44,6 @@ async def test_offices_are_read_with_the_fields_the_plan_needs() -> None:
 
         [office] = await client().offices(SELLER)
 
-        # Конверт шлюза несёт селлера и раздел WB — ключа в нём нет.
         envelope = stub.calls[0]
         assert envelope["seller_id"] == SELLER and envelope["api"] == "marketplace"
 

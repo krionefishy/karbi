@@ -5,9 +5,6 @@ from typing import Any
 from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentError
 
 STATISTICS_BUCKET = "statistics"
-# WB truncates a large orders response instead of failing it, so the method is
-# read in pages. The ceiling only guards against a page that never stops
-# bringing something new; a normal pull ends on the first repeated page.
 ORDERS_MAX_PAGES = 30
 
 
@@ -106,8 +103,6 @@ class WBStatisticsClient(WBJsonClient):
         srid = str(raw.get("srid") or "")
         ordered = cls._moment(raw.get("date"))
         changed = cls._moment(raw.get("lastChangeDate"))
-        # Without srid the same order cannot be recognised on the next pull, and
-        # counting it twice is worse than not counting it at all.
         if not isinstance(article, int) or not srid or ordered is None or changed is None:
             return None
         return OrderRow(

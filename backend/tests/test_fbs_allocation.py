@@ -13,7 +13,6 @@ from backend.modules.wb_fbs_distribution.domain import (
 from backend.modules.wb_fbs_distribution.domain.regions import DEFAULT_REGIONS, Region, WarehouseSlot
 
 CODES = [code for code, _ in DEFAULT_REGIONS]
-# Москва 40, Приволжье 20, Краснодар 12, Урал 13, Северо-Запад 10, Новосибирск 5.
 SHARES = dict(zip(CODES, (4000, 2000, 1200, 1300, 1000, 500), strict=True))
 REGIONS = [Region(code=code, title=code, position=index, share_bp=SHARES[code]) for index, code in enumerate(CODES)]
 

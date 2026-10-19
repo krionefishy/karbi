@@ -13,7 +13,6 @@ interface Props {
   adding: boolean;
 }
 
-/** Таблица кабинета: заметка, баркод, товар и столбцы по группам. Группы сворачиваются, нули красные. */
 export function FbsStocksBoard({ board, onNote, onHide, onRemove, onAdd, adding }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -149,7 +148,6 @@ function BoardRow({ row, board, collapsed, onNote, onHide }: RowProps) {
     <div className="stocks-row">
       <div className="checklist-comment checklist-sticky">
         <input
-          // Ключ с текстом: после ответа сервера поле берёт сохранённое значение.
           key={`${row.barcode}:${row.note}`}
           aria-label={`Заметка к ${row.barcode}`}
           defaultValue={row.note}
@@ -202,7 +200,6 @@ interface HiddenProps {
   onRemove: (barcode: string) => void;
 }
 
-/** Свёрнутый список скрытых строк: вернуть в таблицу или стереть насовсем. */
 function HiddenRows({ rows, onShow, onRemove }: HiddenProps) {
   if (rows.length === 0) return null;
   return (

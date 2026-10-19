@@ -41,8 +41,6 @@ describe("ArticleFilters", () => {
         onChange={onChange}
       />,
     );
-    // The menu stays open while subjects are picked, so the trigger — now
-    // reading "Предметов: 2" — must not be clicked again here.
     expect(screen.getByRole("button", { name: /Предметов: 2/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: /Пылесосы/ }));
     expect(onChange).toHaveBeenLastCalledWith({ query: "", subjects: ["Перфораторы"] });

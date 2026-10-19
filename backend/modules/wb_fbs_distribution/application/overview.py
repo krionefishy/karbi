@@ -18,8 +18,6 @@ class DistributionCatalogOverview:
 
     @property
     def status(self) -> str:
-        # Пока модуль ничего не запускает, состояние честнее показывать как
-        # «подключено, но не работало», а не выдумывать успех.
         return "idle"
 
 

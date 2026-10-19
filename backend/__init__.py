@@ -1,1 +1,0 @@
-"""Marketplace Auto backend package."""

@@ -79,11 +79,9 @@ class FinReportsWorker:
             built += outcome[0]
             left += outcome[1]
             await self.snapshot(seller.id, now)
-            # Начисления, которые зеркало уже прочитало, складываются и у кабинета с отозванным ключом.
             outcome = await self.build_ozon(seller.id, now)
             built += outcome[0]
             left += outcome[1]
-        # Потолок за проход не дал дойти до конца — следующий проход сразу, без интервала.
         self._built_at = None if left else now
         if built:
             self.logger.info("fin_reports_built", reports=built, left=left)

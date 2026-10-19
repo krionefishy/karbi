@@ -1,5 +1,3 @@
-# Клиенты остатков переехали в wb_core: их же вызывает зеркало WB. Имена
-# оставлены здесь, пока оборачиваемость собирает остатки сама.
 from backend.modules.wb_core.infrastructure.wb import (
     ANALYTICS_BUCKET,
     CHRT_CHUNK,

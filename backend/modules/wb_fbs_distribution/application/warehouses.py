@@ -59,8 +59,6 @@ class WarehouseAdminService:
         seller_key = await self._writable_seller(seller_id)
         existing = {warehouse.office_id for warehouse in await self.distribution.warehouses(seller_id)}
         if office_id in existing:
-            # WB не даёт привязать один объект к двум складам кабинета, и его
-            # отказ ничего не объяснит оператору.
             raise WarehouseConflictError("Под этот объект у кабинета уже есть склад")
         if not name.strip():
             raise WarehouseConflictError("У склада должно быть название")
@@ -112,5 +110,4 @@ class WarehouseAdminService:
             raise SellerNotFoundError(str(seller_id))
         if not enrollment.write_enabled:
             raise WriteNotAllowedError("Кабинету не разрешена запись в Wildberries")
-        # Ключа здесь больше нет: шлюз подставит его сам по seller_id.
         return str(seller_id)

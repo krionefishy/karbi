@@ -1,16 +1,13 @@
 export type DeductionGroup = "penalties" | "deductions" | "logistics" | "storage";
 
-/** Как строка отчёта сошлась с заданием: есть поставка, задание без поставки, задания нет. */
 export type TraceState = "found" | "no_supply" | "no_order";
 
 export interface PenaltyRow {
   rrd_id: number;
-  /** «2026-09-01/2026-09-07» — неделя отчёта, из которой строка. */
   report_period: string;
   barcode: string;
   nm_id: number;
   title: string;
-  /** Вид удержания словами WB. */
   kind: string;
   group: DeductionGroup | "";
   group_title: string;
@@ -47,7 +44,6 @@ export interface Penalties {
   date_to: string;
   collected_at: string | null;
   collection_error: string | null;
-  /** Одна страница строк; итоги — за весь период. */
   rows: PenaltyRow[];
   totals: GroupTotal[];
   warehouses: WarehouseOption[];

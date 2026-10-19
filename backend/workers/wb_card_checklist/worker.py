@@ -15,9 +15,6 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# Сбор одного селлера — это страницы карточек, цены и справочники, каждый
-# запрос шлюз может держать до пары минут. Запрос «в работе» дольше часа
-# живым быть не может: его бросил упавший процесс.
 STALE_REFRESH = timedelta(hours=1)
 
 
@@ -88,8 +85,6 @@ class CardChecklistWorker:
         retry_after = now.astimezone(UTC) - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
             due = await ChecklistRepository(session).sellers_due(since, retry_after=retry_after)
-            # Архивный селлер остаётся подключённым до отключения, но ключа его
-            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
             active = {seller.id for seller in await SellerRepository(session).list_sellers()}
         collected = 0
         for seller_id in due:
@@ -117,8 +112,6 @@ class CardChecklistWorker:
 
     async def collect(self, seller_id: uuid.UUID) -> str | None:
         """One seller's collection. Returns the error text, or None when it went through."""
-        # Попытка отмечается до сети: упавший процесс не должен превращаться в
-        # кабинет, который спрашивают снова и снова.
         async with self.database.session() as session:
             await ChecklistRepository(session).record_attempt(seller_id)
             await session.commit()

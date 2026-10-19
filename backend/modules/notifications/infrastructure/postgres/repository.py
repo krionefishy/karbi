@@ -75,8 +75,6 @@ class NotificationRepository:
         return await self.session.get(BotModel, bot_id)
 
     async def delete_bot(self, bot_id: uuid.UUID) -> None:
-        # Cascades take the cursor, invites and subscriptions with it: a bot that
-        # is gone cannot deliver to the chats that pressed START on it anyway.
         await self.session.execute(delete(BotModel).where(BotModel.id == bot_id))
 
     def add_bot(self, *, code: str, title: str, invite_link_template: str) -> BotModel:
@@ -94,7 +92,6 @@ class NotificationRepository:
             statement.on_conflict_do_update(
                 index_elements=["bot_id"],
                 set_={"last_update_id": statement.excluded.last_update_id, "updated_at": datetime.now(UTC)},
-                # Updates arrive in order; an out-of-order write would replay /start.
                 where=BotCursorModel.last_update_id < statement.excluded.last_update_id,
             )
         )
@@ -253,9 +250,6 @@ class NotificationRepository:
         """
         conditions = [
             OutgoingMessageModel.status == "queued",
-            # Both sides on the database clock: next_attempt_at is written
-            # by it too, and even milliseconds of skew would hide a row
-            # that is due right now.
             OutgoingMessageModel.next_attempt_at <= func.now(),
         ]
         if bot_id is not None:

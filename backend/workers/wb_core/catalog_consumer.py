@@ -11,8 +11,6 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.shared.kafka_streams.topics import WBCoreTopics
 from backend.storage.pg import Database
 
-# A throttled catalog fetch legitimately outlives Kafka's default 300s poll
-# interval; a rebalance in the middle of one just doubles the WB traffic.
 DEFAULT_MAX_POLL_INTERVAL_MS = 1_800_000 + 60_000
 EVENT_TYPE = "WBCatalogSyncRequested"
 
@@ -57,9 +55,6 @@ class CatalogSyncConsumer:
         try:
             while True:
                 message = await consumer.getone()
-                # Decoded here rather than by a value_deserializer: a deserializer
-                # raises inside getone(), outside every guard below, which kills
-                # the task and leaves the restart re-reading the same message.
                 try:
                     payload = json.loads(message.value)
                 except (TypeError, ValueError):
@@ -82,7 +77,6 @@ class CatalogSyncConsumer:
             await consumer.stop()
 
     async def process(self, payload: dict) -> None:
-        # A malformed message stays malformed forever: skip it, don't retry it.
         try:
             event_id = uuid.UUID(payload["event_id"])
             seller_id = uuid.UUID(payload["seller_id"])
@@ -94,11 +88,8 @@ class CatalogSyncConsumer:
         try:
             await self.mirror.sync_catalog(seller_id)
         except SellerGoneError:
-            # Событие, опубликованное до архивации, доживает в Kafka дольше
-            # селлера: обрабатывать его — значит дёргать шлюз за отключённого.
             self.logger.info("catalog_sync_seller_gone", extra={"seller_id": str(seller_id)})
         except WBPermanentError:
-            # Причина уже записана в статус синка; повтор того же события её не изменит.
             pass
         async with self.database.session() as session:
             SellerRepository(session).mark_inbox(event_id, EVENT_TYPE)

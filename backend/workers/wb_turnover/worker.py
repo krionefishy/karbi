@@ -21,11 +21,7 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# A step that never finished cannot be claimed again, so anything still marked
-# running after this long is closed on the next sweep.
 STALE_RUN = timedelta(hours=6)
-# The metric and the digest log are kept far longer than their raw inputs: they
-# are what an alert is explained with months later, but not forever.
 TURNOVER_RETENTION_DAYS = 180
 NOTIFICATION_RETENTION_DAYS = 90
 
@@ -66,8 +62,6 @@ class TurnoverWorker:
         while not self._stop.is_set():
             touch_heartbeat()
             try:
-                # Every cycle, not only at start: the worker that crashed and
-                # the worker that sweeps up after it are rarely the same process.
                 await self._close_stale_runs()
                 await self.tick()
             except Exception:
@@ -82,10 +76,6 @@ class TurnoverWorker:
         now = self._now(self.timezone)
         due = [slot for slot, hour in enumerate(self.turnover.stock_slot_hours) if self.is_due(now, hour, 0)]
         if due:
-            # Only the freshest due slot. After a long pause the older ones
-            # would be four identical snapshots taken minutes apart — four
-            # times the API budget for no extra information — so they are
-            # simply left unclaimed.
             await self.collect_stocks(now.date(), due[-1])
         if self.is_due(now, self.turnover.orders_hour, self.turnover.orders_minute):
             await self.collect_orders(now)
@@ -207,8 +197,6 @@ class TurnoverWorker:
         async def collect(seller_id: uuid.UUID, service: CollectionService) -> None:
             result = await service.collect_stocks(seller_id, day, slot)
             if result.fbs_failed:
-                # The WB half is in; only the seller's own warehouses are missing.
-                # Worth recording, but not worth failing the slot over.
                 degraded.append(seller_id)
 
         await self._for_each_seller("stocks", day, slot, collect, note=lambda: self._fbs_note(degraded))
@@ -298,8 +286,6 @@ class TurnoverWorker:
                     )
                     await action(seller_id, service)
             except (WBPermanentError, WBTemporaryError) as failure:
-                # One seller's key or one rate limit must not cost the others
-                # their slot; the next slot is a few hours away.
                 failed += 1
                 error = str(failure)
                 self.logger.warning("turnover_collection_failed", seller_id=str(seller_id), error=str(failure))
@@ -308,8 +294,6 @@ class TurnoverWorker:
                 error = str(failure)
                 self.logger.exception("turnover_collection_crashed", seller_id=str(seller_id))
         self.logger.info("turnover_collected", kind=kind, sellers=len(seller_ids), failed=failed)
-        # A partial slot has to say so: «собрали ноль товаров» and «остатки не
-        # получили» look the same in the numbers and mean opposite things.
         remark = note() if note is not None else None
         if remark:
             self.logger.warning("turnover_collection_degraded", kind=kind, detail=remark)
@@ -339,9 +323,6 @@ class TurnoverWorker:
                 orders_before=day - timedelta(days=self.turnover.order_retention_days),
                 turnover_before=day - timedelta(days=TURNOVER_RETENTION_DAYS),
                 notifications_before=day - timedelta(days=NOTIFICATION_RETENTION_DAYS),
-                # На день шире окна отчёта: обрезать ровно по границе значит
-                # терять самые старые сутки раньше, чем отчёт перестанет их
-                # спрашивать.
                 regions_before=day - timedelta(days=self.turnover.region_history_days + 1),
             )
             await session.commit()

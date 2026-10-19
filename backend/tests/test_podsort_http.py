@@ -178,7 +178,6 @@ async def test_podsort_counts_orders_minus_regional_stock(
     statistics = FakeStatistics()
     worker = PodsortWorker(application.database, statistics, SETTINGS)
 
-    # Первый проход — пять свежих суток, второй — ещё пять: окно в семь дней уже полное.
     assert await worker.collect(seller, datetime.now(UTC)) is None
     assert await worker.collect(seller, datetime.now(UTC)) is None
     yesterday = datetime.now(UTC).astimezone(worker.timezone).date() - timedelta(days=1)
@@ -190,7 +189,6 @@ async def test_podsort_counts_orders_minus_regional_stock(
     [state] = [item for item in body["sellers"] if item["seller_id"] == str(seller)]
     assert state["window_days_loaded"] == 7 and state["history_days_loaded"] == 10
     assert state["remains_at"] is not None
-    # 63 за неделю на неделю вперёд минус Коледино и Тула; «Склад WB РФ», в пути и неведомый склад не вычитаются.
     [row] = own(body)
     assert (row["barcode"], row["vendor_code"], row["window_orders"], row["stock"], row["need"]) == (
         DRILL,
@@ -206,12 +204,10 @@ async def test_podsort_counts_orders_minus_regional_stock(
     assert body["warehouses"][0]["source"] == "none"
     assert "В пути до получателей" not in warehouses
 
-    # Человек отнёс неведомый склад к ЦФО — его остаток тоже вычитается.
     response = await client.put(f"{API}/warehouses", json={"name": "Неведомый склад", "region": CENTRAL})
     assert response.status_code == 204
     [row] = own((await client.get(API)).json())
     assert (row["stock"], row["need"]) == (27, 36)
-    # Коледино не относится ни к какому региону — и вернуть угадывание.
     await client.put(f"{API}/warehouses", json={"name": "Коледино", "region": None})
     assert own((await client.get(API)).json())[0]["stock"] == 12
     await client.put(f"{API}/warehouses", json={"name": "Коледино", "guess": True})
@@ -225,7 +221,6 @@ async def test_podsort_counts_orders_minus_regional_stock(
         f"{API}/settings", json={"window_days": 14, "cover_days": 14, "regions": [CENTRAL, "Казахстан"]}
     )
     assert saved.status_code == 200 and saved.json()["regions"] == [CENTRAL, "Казахстан"]
-    # Окно 14 дней, загружено 10: 90 заказов / 14 × 14 − 27.
     [row] = own((await client.get(API)).json())
     assert (row["window_orders"], row["need"]) == (90, 63)
     kazakhstan = own((await client.get(API, params={"region": "Казахстан"})).json())
@@ -258,7 +253,6 @@ async def test_disconnecting_keeps_the_loaded_days(
         counts = await session.scalar(
             select(func.count()).select_from(OrderCountModel).where(OrderCountModel.seller_id == seller)
         )
-    # Отключение — не удаление: подключили снова — догрузка продолжается, а не начинается заново.
     assert tracked is None
     assert counts == 10
     assert (await client.post(AUTOMATION, json={"seller_id": str(seller)})).status_code == 201
@@ -283,7 +277,6 @@ async def test_a_failing_cabinet_waits_before_the_next_attempt(
     await worker.tick()
     assert str(seller) not in statistics.sellers
 
-    # Пауза прошла — кабинет снова в очереди, удачный проход снимает ошибку.
     later = PodsortWorker(
         application.database,
         statistics,

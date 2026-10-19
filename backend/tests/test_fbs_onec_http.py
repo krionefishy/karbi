@@ -14,8 +14,6 @@ API = "/api/v1/onec"
 TOKEN = "test-onec-token-0000000000"
 
 
-# Свежий момент формирования: снимок со вчерашней датой честно считался бы
-# устаревшим, а тест проверяет приём, а не устаревание.
 def fresh() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -82,7 +80,6 @@ async def test_without_a_configured_token_the_exchange_is_off(unconfigured) -> N
 async def test_a_wrong_or_missing_token_is_refused(client) -> None:
     assert (await client.get(f"{API}/ping")).status_code == 401
     assert (await client.post(f"{API}/stocks", json=SNAPSHOT, headers=bearer("wrong"))).status_code == 401
-    # Сотрудничий JWT здесь тоже не пропуск: у обмена свой токен.
     assert (await client.post(f"{API}/stocks", json=SNAPSHOT, headers=bearer("not-the-token"))).status_code == 401
 
 
@@ -103,8 +100,6 @@ async def test_a_snapshot_becomes_pools_and_is_signed_by_the_exchange(client) ->
     assert body["stale"] is False
 
     pools = (await client.get(f"{API.replace('/onec', '/wb/fbs')}/stock/pools")).status_code
-    # Экраны оператора живут под сотрудничьим JWT; без него 401 — обмен и
-    # интерфейс не делят аутентификацию.
     assert pools == 401
 
 

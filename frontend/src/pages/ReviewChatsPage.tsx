@@ -50,7 +50,6 @@ const OUTCOME_OPTIONS: { value: DialogOutcome | ""; label: string }[] = [
   { value: "pending", label: "Ждём ответа" },
 ];
 
-/** Проценты — от всех диалогов группы: пока есть «ждём», доля ответивших может только вырасти. */
 function SummaryCard({
   title,
   summary,
@@ -87,7 +86,6 @@ function SummaryCard({
   );
 }
 
-/** Почему цифрам пока нельзя верить: лента не читалась, история догоняется или сбор падает. */
 function collectionNotice(chats: ReviewChats): string | null {
   if (chats.collection_error) return `Лента чатов не читается: ${chats.collection_error}`;
   if (chats.synced_through) return null;
@@ -102,7 +100,6 @@ export function ReviewChatsPage() {
   const queryClient = useQueryClient();
   const [sellerId, setSellerId] = useState("");
   const [filter, setFilter] = useState<ReviewChatsFilter>({ ...defaultPeriod(), group: "", outcome: "", page: 1 });
-  /** Любая смена фильтра возвращает на первую страницу: нумерация старого списка к новому не относится. */
   const changeFilter = (patch: Partial<ReviewChatsFilter>) => setFilter({ ...filter, ...patch, page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
@@ -128,7 +125,6 @@ export function ReviewChatsPage() {
     queryKey: ["review-chats", sellerId, filter],
     queryFn: () => getReviewChats(sellerId, filter),
     enabled: Boolean(sellerId) && !invalidRange,
-    // Смена страницы и фильтра списка не должна схлопывать сводку над ним.
     placeholderData: (previous) => (previous?.seller_id === sellerId ? previous : undefined),
   });
 
@@ -179,7 +175,6 @@ export function ReviewChatsPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const notice = chats ? collectionNotice(chats) : null;
-  // Честное сравнение — по времени: все диалоги после запуска против всех за две недели до него.
   const shift = chats?.baseline ? rateShift(chats.after_launch, chats.baseline.summary) : null;
 
   return (
@@ -282,7 +277,6 @@ export function ReviewChatsPage() {
               ) : chatsLoading || !chats ? (
                 !chatsError && <div className="loading-block">Загружаем данные…</div>
               ) : (
-                // Пока грузится новый период, прежние цифры остаются на экране, но приглушёнными.
                 <div className={chatsStale ? "chats-stale" : undefined} aria-busy={chatsStale}>
                   <div className="chats-summary" aria-label="Сводка за период">
                     <SummaryCard

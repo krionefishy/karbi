@@ -25,8 +25,6 @@ class FbsStocksRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- membership -------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -59,8 +57,6 @@ class FbsStocksRepository:
             .with_for_update(read=True)
         )
         return found is not None
-
-    # --- collection schedule ---------------------------------------------
 
     async def sellers_due(self, since: datetime, *, retry_after: datetime) -> list[uuid.UUID]:
         """Кабинеты, не собранные с `since` и не пробованные с `retry_after`."""
@@ -112,8 +108,6 @@ class FbsStocksRepository:
         ).one()
         return row[0], int(row[1] or 0), row[2], int(row[3] or 0)
 
-    # --- warehouses --------------------------------------------------------
-
     async def replace_warehouses(self, seller_id: uuid.UUID, warehouses: Sequence[SellerWarehouse]) -> None:
         """Зеркало складов целиком. Столбец склада, пропавшего из кабинета или удаляемого, снимается.
 
@@ -122,8 +116,6 @@ class FbsStocksRepository:
         нулём выглядел бы как измеренный ноль.
         """
         if not warehouses:
-            # Пустой список — не «складов нет», а неответ: снять по нему все столбцы
-            # значило бы стереть настройку оператора из-за одного сбоя шлюза.
             raise ValueError("Пустой список складов не принимается")
         await self.session.execute(delete(WarehouseModel).where(WarehouseModel.seller_id == seller_id))
         now = datetime.now(UTC)
@@ -163,8 +155,6 @@ class FbsStocksRepository:
             for row in rows
         ]
 
-    # --- groups and columns --------------------------------------------------
-
     async def groups(self, seller_id: uuid.UUID) -> list[ColumnGroup]:
         rows = await self.session.scalars(
             select(GroupModel).where(GroupModel.seller_id == seller_id).order_by(GroupModel.position, GroupModel.title)
@@ -176,7 +166,6 @@ class FbsStocksRepository:
         return row if row is not None and row.seller_id == seller_id else None
 
     async def add_group(self, seller_id: uuid.UUID, title: str, kind: str) -> ColumnGroup:
-        # coalesce отдаёт ровно одно число: -1 на пустой таблице, иначе последнюю позицию.
         last = (
             await self.session.execute(
                 select(func.coalesce(func.max(GroupModel.position), -1)).where(GroupModel.seller_id == seller_id)
@@ -241,8 +230,6 @@ class FbsStocksRepository:
         ]
         if rows:
             await self.session.execute(insert(ColumnModel).values(rows))
-
-    # --- barcodes ------------------------------------------------------------
 
     async def barcodes(self, seller_id: uuid.UUID) -> list[BoardBarcode]:
         rows = await self.session.scalars(
@@ -316,8 +303,6 @@ class FbsStocksRepository:
         )
         return bool(result.all())
 
-    # --- stock facts ---------------------------------------------------------
-
     async def replace_facts(self, seller_id: uuid.UUID, facts: Sequence[StockFact], *, now: datetime) -> None:
         await self.session.execute(delete(StockFactModel).where(StockFactModel.seller_id == seller_id))
         unique = {(fact.warehouse_id, fact.barcode): fact for fact in facts}
@@ -341,8 +326,6 @@ class FbsStocksRepository:
             )
         )
         return {(int(warehouse_id), str(barcode)): int(amount) for warehouse_id, barcode, amount in rows.all()}
-
-    # --- manual refresh --------------------------------------------------
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
         """Поставить запрос или вернуть тот, что уже ждёт.

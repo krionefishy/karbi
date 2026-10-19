@@ -1,5 +1,3 @@
-"""Листы «По артикулам» и «Остатки»: формулы старого отчёта на его же цифрах и снимки остатков."""
-
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
@@ -121,7 +119,6 @@ def test_deductions_without_an_article_make_their_own_row_and_a_loss_shows_no_pr
 
     assert [row.nm_id for row in rows] == [DRILL, 0]
     sale, rest = rows
-    # Убыток: к оплате 700 без налога 64 меньше себестоимости 950 — доли прибыли нули, а не минус.
     assert sale.operating_profit == money("-314") and sale.profit_rate_gross == 0
     assert (rest.reviews, rest.ads.promotion_info) == (money(-500), money(900))
     assert COLUMN["Артикул ВБ"](rest) == "(пусто)"
@@ -139,7 +136,6 @@ def test_stock_rows_use_the_week_price_or_the_last_known_one() -> None:
         tax_rate=Decimal("0.12"),
     )
 
-    # Меньший остаток первым, как в старом листе.
     saw, drill = stock_rows(rows, last_price_of={SAW: money(1200)}.get)
 
     assert (drill.quantity, drill.stock_cost, drill.stock_price) == (10, money(10000), money(35000))
@@ -163,7 +159,6 @@ def test_remains_fold_into_stock_per_size() -> None:
 
     stocks = fold_remains(rows)
 
-    # Итог отчёта не прибавляется к складам; «всего» — склады плюс путь туда и обратно.
     assert stocks[(DRILL, "S")] == Stock(in_warehouse=7, to_client=4, from_client=0, total=11)
     assert stocks[(DRILL, "M")] == Stock(in_warehouse=9, to_client=0, from_client=1, total=10)
     assert (SAW, "") not in stocks
@@ -174,7 +169,6 @@ def test_the_closed_week_is_snapshotted_from_monday_morning() -> None:
     assert last_closed_week_end(datetime(2026, 10, 5, 2, 59, tzinfo=MOSCOW), MOSCOW) is None
     assert last_closed_week_end(datetime(2026, 10, 5, 3, 0, tzinfo=MOSCOW), MOSCOW) == sunday
     assert last_closed_week_end(datetime(2026, 10, 8, 12, 0, tzinfo=MOSCOW), MOSCOW) == sunday
-    # UTC-полночь понедельника — ещё воскресенье 23:00 по Москве? Нет: 03:00 МСК, снимок пора снимать.
     assert last_closed_week_end(datetime(2026, 10, 5, 0, 0, tzinfo=UTC), MOSCOW) == sunday
 
 
@@ -204,11 +198,9 @@ def test_a_stocked_article_without_movement_and_unknown_campaign_spend_get_their
         unallocated_ads=AdSpend(balance=money(7)),
     )
 
-    # Пила не продавалась, но лежит на складе — строка есть; артикул без остатка — нет.
     assert [(row.nm_id, row.tech_size) for row in rows] == [(DRILL, ""), (SAW, "L"), (0, "")]
     saw = rows[1]
     assert (saw.sales, saw.stock_in_warehouse, saw.unit_cost) == (0, 30, money(400))
     stocks = stock_rows(rows, last_price_of=lambda nm_id: money(3600))
     assert [(row.nm_id, row.quantity, row.stock_cost) for row in stocks] == [(SAW, 30, money(12000))]
-    # Списания неизвестных кампаний — в строке «(пусто)», даже если удержаний по документам не было.
     assert rows[-1].ads.balance == money(7)

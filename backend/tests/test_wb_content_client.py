@@ -44,7 +44,6 @@ async def test_content_client_maps_every_identity_field() -> None:
             sizes=[{"chrt_id": 7, "tech_size": "0", "skus": ["2000000000001"]}],
         )
     ]
-    # Конверт шлюза несёт селлера и раздел WB — ключа в нём нет.
     envelope = stub.calls[0]
     assert envelope["seller_id"] == "seller-1" and envelope["api"] == "content"
 
@@ -92,8 +91,6 @@ async def test_content_client_keeps_the_catalog_when_the_trash_is_unavailable() 
 
     assert [item.article for item in catalog.active] == ["1"]
     assert catalog.archived == []
-    # Without the trash we cannot tell "archived" from "gone", and the caller
-    # must know that before it demotes anything.
     assert not catalog.archived_available
 
 

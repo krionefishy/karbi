@@ -91,7 +91,6 @@ async def set_ozon_credentials(
     except SellerArchivedError as error:
         raise archived_conflict() from error
     except DuplicateCredentialError as error:
-        # Текст шлюза называет селлера, за которым кабинет уже закреплён.
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return await one_seller_response(service, seller)
 
@@ -137,7 +136,6 @@ async def set_mpstats_credentials(
     except SellerArchivedError as error:
         raise archived_conflict() from error
     except DuplicateCredentialError as error:
-        # Текст шлюза называет селлера, за которым токен уже закреплён.
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return await one_seller_response(service, seller)
 

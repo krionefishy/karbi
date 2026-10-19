@@ -10,9 +10,6 @@ SCHEMA = "wb_fbs_distribution"
 
 
 def upgrade() -> None:
-    # Время последней попытки, а не последнего успеха. Без него кабинет с
-    # отозванным ключом оставался «просроченным» и переспрашивал WB каждый
-    # оборот воркера, выедая общий бюджет запросов.
     op.add_column(
         "tracked_sellers",
         sa.Column("warehouses_sync_attempted_at", sa.DateTime(timezone=True), nullable=True),

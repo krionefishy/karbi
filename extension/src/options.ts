@@ -46,7 +46,6 @@ $("pair").addEventListener("click", async () => {
     const backendUrl = normalizeBackendUrl($<HTMLInputElement>("backend").value);
     $<HTMLInputElement>("backend").value = backendUrl;
     if (!/^\d{6}$/.test(code)) throw new Error("Код — шесть цифр из бота (/extension) или со страницы «Возвраты WB»");
-    // Доступ к адресу сервиса просим здесь, по клику: сервис-воркер не может.
     const origin = backendUrl;
     const granted = await chrome.permissions.request({ origins: [`${origin}/*`] });
     if (!granted) throw new Error("Без доступа к адресу сервиса расширение не сможет отправлять код");

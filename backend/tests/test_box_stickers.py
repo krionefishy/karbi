@@ -1,10 +1,3 @@
-"""Стикеры коробов FBO: Excel коробовки + PDF стикеров WB → PDF в порядке Excel.
-
-Файлы здесь синтетические, но повторяют то, что отдаёт кабинет WB: стикер
-75×120 мм с коротким номером текстом и двумя одинаковыми QR с полным кодом,
-Excel с колонками коробовки и размером листа «A1» в разметке.
-"""
-
 import io
 import re
 import uuid
@@ -41,7 +34,6 @@ SELLER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 OTHER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 DRILL, SAW = "2050000000011", "2050000000028"
 
-# Короб: короткий номер, полный код, содержимое.
 BOXES: list[tuple[str, str, list[tuple[str, int]]]] = [
     ("6180474", "$Ts;AAA;0001;1;Xk00001;TAS", [(DRILL, 20)]),
     ("6180488", "$Ts;BBB;0002;1;Xk00002;TAS", [(SAW, 36)]),
@@ -51,7 +43,6 @@ BOXES: list[tuple[str, str, list[tuple[str, int]]]] = [
 
 
 FONT = "WbStickerTest"
-# Кириллица на стикере: без неё не выйдет «Кол-во товаров» и «№ поставки» текстом.
 FONT_PATH = Path(__file__).resolve().parent / "fixtures" / "DejaVuSans-Bold.ttf"
 
 
@@ -97,7 +88,6 @@ def workbook_xlsx(rows: Sequence[tuple[str, int, str, str]], *, broken_dimension
     book.save(buffer)
     if not broken_dimension:
         return buffer.getvalue()
-    # Как у WB: размер листа «A1» — read_only без сброса видит одну ячейку.
     source = zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
@@ -210,7 +200,6 @@ async def test_build_follows_excel_order_and_passes_own_check() -> None:
     supplies = FakeSupplies()
     order = [3, 1, 0, 2]
     plan, data = await service(supplies).build(workbook_xlsx(excel_rows(order)), sticker_pdf(BOXES))
-    # Кабинет с именем со стикера спрашивают первым — чужим поставку не показывали.
     assert supplies.asked == [str(SELLER_ID)]
     assert (plan.supply_id, plan.seller_id, plan.problems) == (SUPPLY, SELLER_ID, [])
     assert [box.shk for box in plan.boxes] == [BOXES[index][0] for index in order]
@@ -218,7 +207,6 @@ async def test_build_follows_excel_order_and_passes_own_check() -> None:
 
     pages = read_stickers(data)
     assert [page.package_code for page in pages] == [BOXES[index][1] for index in order]
-    # На стикер ничего не допечатывается: страница — ровно та, что выдал WB.
     source = PdfReader(io.BytesIO(sticker_pdf(BOXES))).pages
     built = PdfReader(io.BytesIO(data)).pages
     assert [page.extract_text() for page in built] == [source[index].extract_text() for index in order]

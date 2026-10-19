@@ -25,8 +25,6 @@ def upgrade() -> None:
     op.create_index(
         "ix_wb_turnover_refresh_seller", "refresh_requests", ["seller_id", "requested_at"], schema="wb_turnover"
     )
-    # One outstanding request per seller: the button may be pressed twice, but
-    # Wildberries must not be asked twice for it.
     op.create_index(
         "uq_wb_turnover_refresh_active",
         "refresh_requests",

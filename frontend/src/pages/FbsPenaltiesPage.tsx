@@ -43,7 +43,6 @@ const GROUP_OPTIONS: { value: DeductionGroup | ""; label: string }[] = [
   { value: "storage", label: "Хранение и приёмка" },
 ];
 
-/** Строк в группе за период; пустая группа — все вместе. */
 function groupCount(totals: GroupTotal[], group: DeductionGroup | ""): number {
   return totals.filter((item) => !group || item.group === group).reduce((sum, item) => sum + item.count, 0);
 }
@@ -53,7 +52,6 @@ export function FbsPenaltiesPage() {
   const [sellerId, setSellerId] = useState("");
   const [tab, setTab] = useState<Tab>("table");
   const [filter, setFilter] = useState<PenaltiesFilter>({ ...defaultPeriod(), group: "", warehouseId: null, page: 1 });
-  /** Любая смена фильтра возвращает на первую страницу: нумерация старого списка к новому не относится. */
   const changeFilter = (patch: Partial<PenaltiesFilter>) => setFilter({ ...filter, ...patch, page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
@@ -116,7 +114,6 @@ export function FbsPenaltiesPage() {
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refreshSellers });
 
-  // Пока идёт сбор отчёта, состояние опрашивается; таблица обновится сама, как только он закончится.
   const { data: refreshState } = useQuery({
     queryKey: ["fbs-penalties-refresh", sellerId],
     queryFn: () => getRefreshState(sellerId),

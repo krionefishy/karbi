@@ -6,9 +6,7 @@ export interface ChecklistItem {
 
 export interface ItemState {
   key: string;
-  /** Выполнено ли по данным WB; null — данных нет. */
   done: boolean | null;
-  /** Что видит WB: «22/25», «8 с фото». */
   detail: string | null;
   note: string | null;
 }
@@ -26,7 +24,6 @@ export interface ChecklistRow {
   done: number;
   total: number;
   ready: boolean;
-  /** Чего не хватает словами — тот же текст, что в колонке «Примечание» выгрузки. */
   note: string;
   comment: string;
 }

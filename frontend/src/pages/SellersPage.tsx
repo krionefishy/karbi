@@ -93,8 +93,6 @@ export function SellersPage() {
   });
   const { data: automations = [] } = useQuery({ queryKey: ["automations"], queryFn: getAutomations });
   const automationTitles = new Map(automations.map((item) => [item.id, item.title]));
-  // Подключение к автоматизации, убранной из каталога, в реестре не показывается;
-  // пока каталог не пришёл, отсеивать нечем — показываем как есть.
   const shownAutomations = (ids: string[]) =>
     automations.length === 0 ? ids : ids.filter((id) => automationTitles.has(id));
 
@@ -153,8 +151,6 @@ export function SellersPage() {
   });
   const ozonVerifyMutation = useMutation({
     mutationFn: () => verifyOzonEgress((ozonSeller as Seller).id),
-    // Диалог остаётся открытым: менеджер должен увидеть новый вердикт там же,
-    // где нажал «Перепроверить».
     onSuccess: async (seller) => {
       setOzonSeller(seller);
       await refresh();

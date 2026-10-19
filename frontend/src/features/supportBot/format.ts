@@ -25,7 +25,6 @@ export const MODE_LABEL: Record<BotMode, string> = {
   live: "Отправка включена",
 };
 
-/** Порядок карточек сводки: сначала то, что требует человека. */
 export const STATE_ORDER: DialogState[] = [
   "awaiting_us",
   "in_campaign",
@@ -40,10 +39,6 @@ export function totalDialogs(bot: Pick<SupportBot, "counts">): number {
   return Object.values(bot.counts).reduce((sum, value) => sum + (value ?? 0), 0);
 }
 
-/**
- * Что сейчас делает бот по кабинету, одной фразой: от самого важного к обычному.
- * Остановка по причине или общим выключателем перекрывает режим.
- */
 export function statusLine(
   bot: Pick<SupportBot, "mode" | "paused_reason" | "globally_paused"> & { canary_percent?: number },
 ): string {
@@ -67,10 +62,6 @@ export const MANUAL_LABEL: Record<ManualVerdict, string> = {
   deny: "вручную: не писать",
 };
 
-/**
- * Что по диалогу решила нейросеть и менеджер, для подписи в таблице. Решение менеджера
- * важнее вердикта; пусто, пока вердикта нет и никто ничего не отмечал.
- */
 export function verdictNote(dialog: Pick<BotDialog, "verdict" | "verdict_reason" | "manual_verdict">): string | null {
   if (dialog.manual_verdict) return MANUAL_LABEL[dialog.manual_verdict];
   if (!dialog.verdict) return null;
@@ -78,7 +69,6 @@ export function verdictNote(dialog: Pick<BotDialog, "verdict" | "verdict_reason"
   return dialog.verdict_reason ? `${label} (${dialog.verdict_reason})` : label;
 }
 
-/** Нужна ли менеджеру отметка «писать / не писать»: рассылка идёт, а нейросеть не подтвердила, что покупателя ждут. */
 export function needsDecision(
   dialog: Pick<BotDialog, "state" | "verdict" | "manual_verdict">,
   mode: SupportBot["classifier_mode"],

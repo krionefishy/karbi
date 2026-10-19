@@ -1,5 +1,3 @@
-"""Вложение к исходящему сообщению: картинка QR рядом с текстом."""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB

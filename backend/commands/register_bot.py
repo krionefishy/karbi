@@ -14,9 +14,6 @@ async def register_bot(code: str, title: str, token: str) -> None:
     settings = load_settings()
     relay = RelayClient(settings.relay)
 
-    # The token goes straight through to the relay and is never written down on
-    # this side: the relay stores it encrypted and answers with the bot's name
-    # and the template invitation links are built from.
     identity = await relay.register_bot(bot_code=code, token=token)
     if not identity.invite_link_template:
         raise SystemExit("The relay returned no invite link template for this bot")
@@ -41,7 +38,6 @@ def main() -> None:
     parser.add_argument("--code", required=True, help="stable id producers address, e.g. turnover-alerts")
     parser.add_argument("--title", default="", help="what subscribers see in the greeting")
     args = parser.parse_args()
-    # getpass keeps the token out of the shell history and off the process list.
     token = getpass.getpass("Bot token: ").strip()
     if not token:
         parser.error("bot token is required")

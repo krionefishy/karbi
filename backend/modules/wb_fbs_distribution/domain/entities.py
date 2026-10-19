@@ -2,9 +2,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-# Пока автоматизация не пишет в WB, она считает план и показывает его оператору.
-# Режим хранится на селлере, а не в конфигурации: пилот идёт на одном кабинете,
-# пока остальные ещё считают вхолостую.
 MODE_DRY_RUN = "dry_run"
 MODE_WRITE = "write"
 

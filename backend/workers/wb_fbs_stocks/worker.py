@@ -13,8 +13,6 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# Сбор кабинета — запрос на склад, каждый шлюз может держать до пары минут.
-# Запрос «в работе» дольше часа живым быть не может: его бросил упавший процесс.
 STALE_REFRESH = timedelta(hours=1)
 
 
@@ -60,8 +58,6 @@ class FbsStocksWorker:
         retry_after = now - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
             due = await FbsStocksRepository(session).sellers_due(since, retry_after=retry_after)
-            # Архивный кабинет остаётся подключённым до отключения, но ключа его
-            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
             active = {seller.id for seller in await SellerRepository(session).list_sellers()}
         collected = 0
         for seller_id in due:

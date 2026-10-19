@@ -8,8 +8,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # At most one live link per (bot, seller): concurrent create_invite calls
-    # race past each other's revoke, and only the database can arbitrate.
     op.create_index(
         "uq_notifications_invite_links_live",
         "invite_links",

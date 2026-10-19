@@ -16,11 +16,9 @@ export const PAGE_SIZE = 200;
 export const getPenalties = (sellerId: string, filter: PenaltiesFilter) =>
   apiRequest<Penalties>(`${base(sellerId)}?${query(filter)}&page=${filter.page}&page_size=${PAGE_SIZE}`);
 
-/** Вставленный текст: стикеры или номера заказов — по одному в строке, через запятую или пробел. */
 export const lookupPenalties = (sellerId: string, text: string) =>
   apiRequest<Lookup>(`${base(sellerId)}/lookup`, { method: "POST", body: JSON.stringify({ keys: [text] }) });
 
-/** Книга с тем, что открыто на экране: период, вкладка группы и склад, все страницы разом. */
 export const downloadPenalties = (sellerId: string, filter: PenaltiesFilter) =>
   apiDownload(`${base(sellerId)}/export?${query(filter)}`);
 

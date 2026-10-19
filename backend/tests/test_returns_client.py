@@ -88,7 +88,6 @@ async def test_report_parses_rows_and_moscow_dates() -> None:
     assert items[0].status_key == RETURN_READY
     assert items[1].status_key == RETURN_TRANSIT
     assert items[2].status_key == RETURN_UNKNOWN and not items[2].is_active
-    # Дата без зоны — московская: 11:19 МСК = 08:19 UTC.
     assert items[0].ready_to_return_dt == datetime(2026, 9, 17, 8, 19, 17, tzinfo=UTC)
     assert items[0].order_dt == date(2026, 9, 14)
     assert items[0].title == "Шуруповерты · KARBI"

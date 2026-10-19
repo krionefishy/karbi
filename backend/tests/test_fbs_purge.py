@@ -92,8 +92,6 @@ async def test_the_module_leaves_nothing_behind_after_a_purge(database) -> None:
                     select(func.count()).select_from(table).where(table.c.seller_id == seller_id)
                 )
                 assert left == 0, f"{table.name} пережила очистку кабинета"
-            # Строки плана привязаны к нему, а не к селлеру: их метаданный
-            # обход выше не увидит, поэтому проверяются отдельно.
             for model in (AllocationItemModel, AllocationSkipModel):
                 left = await session.scalar(select(func.count()).select_from(model).where(model.plan_id == other_plan))
                 assert left == 0, f"{model.__tablename__} пережила очистку кабинета"

@@ -9,11 +9,7 @@ from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 FINANCE_BUCKET = "finance"
-# WB отдаёт до ста тысяч строк за запрос, но страница целиком разбирается в памяти
-# воркера, а память у него ограничена: двадцать тысяч строк с этими полями — пик больше 400 МБ,
-# пять тысяч — около 175. Больший отчёт просто читается в несколько страниц.
 PAGE_LIMIT = 5_000
-# Отчётов в списке за запрос — потолок WB.
 LIST_LIMIT = 1000
 
 ZERO = Decimal("0.00")
@@ -84,8 +80,6 @@ def _moment(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-# Поле WB -> (поле строки зеркала, разбор). Список запрашивается у WB как есть:
-# полей в ответе больше, и без `fields` страница в сто тысяч строк тяжелее вдвое.
 ROW_FIELDS: dict[str, tuple[str, Callable[[Any], Any]]] = {
     "rrdId": ("rrd_id", _count),
     "reportId": ("report_id", _count),
@@ -171,7 +165,6 @@ ROW_REQUEST_FIELDS = list(ROW_FIELDS)
 @dataclass(frozen=True, slots=True)
 class SalesReportPage:
     rows: list[SalesReportRow]
-    # `rrdId` для следующей страницы; при `exhausted` дальше страниц нет.
     cursor: int
     exhausted: bool
 
@@ -224,7 +217,6 @@ class WBSalesReportsClient(WBJsonClient):
         raw = self._rows(payload, "детализация отчёта")
         rows = [row for item in raw if (row := self._row(item, report_id)) is not None]
         exhausted = len(raw) < PAGE_LIMIT or not rows
-        # Курсор — наибольший номер строки, а не последний: порядок строк WB не обещает.
         newest = max((row.rrd_id for row in rows), default=cursor)
         return SalesReportPage(rows=rows, cursor=newest, exhausted=exhausted)
 
@@ -269,6 +261,5 @@ class WBSalesReportsClient(WBJsonClient):
             self.logger.warning("wb_sales_report_row_unusable", extra={"row": str(raw)[:200]})
             return None
         values = {name: parse(raw.get(key)) for key, (name, parse) in ROW_FIELDS.items()}
-        # Отчёт спрашивали по номеру: строка без него (или с чужим) всё равно его.
         values["report_id"] = report_id
         return SalesReportRow(**values)

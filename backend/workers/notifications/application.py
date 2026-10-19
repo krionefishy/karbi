@@ -121,9 +121,6 @@ class NotificationsWorkerApplication:
 
     async def run(self) -> None:
         self.settings.validate_runtime_secrets()
-        # A delivery loop and a fetch loop per bot, plus the Kafka consumer, all
-        # want a session at once; two connections were sized for a single
-        # delivery loop and would hand out pool timeouts instead.
         await self.database.connect(self.settings.database.url, pool_size=5, max_overflow=10)
         try:
             if self.settings.kafka.enabled:
@@ -132,8 +129,6 @@ class NotificationsWorkerApplication:
                     partitions=self.settings.kafka.topic_partitions,
                     replication_factor=self.settings.kafka.topic_replication_factor,
                 )
-            # Both the Kafka consumer and the per-bot delivery loops are started
-            # (and restarted) by supervise_bots.
             await self.supervise_bots()
         finally:
             sender_tasks = [self._sender_task] if self._sender_task is not None else []

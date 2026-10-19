@@ -1,10 +1,3 @@
-"""Расширение в браузере владельца: пара, коды дня, heartbeat и задачи.
-
-Сервер не может достучаться до браузера, поэтому всё идёт от расширения:
-оно обменивает код пары на токен, присылает коды на несколько дней вперёд,
-раз в десять минут сообщает, что живо, и забирает задачи «обнови код».
-"""
-
 import hashlib
 import secrets
 import uuid
@@ -35,7 +28,6 @@ STATE_NEEDS_LOGIN = "needs_login"
 STATE_ERROR = "error"
 STATES = (STATE_OK, STATE_NEEDS_LOGIN, STATE_ERROR)
 TOKEN_PREFIX = "mar_"
-# Задачу, которую расширение забрало, но за четверть часа не выполнило, отдаём снова.
 RETAKE_AFTER = timedelta(minutes=15)
 
 
@@ -121,8 +113,6 @@ class ExtensionService:
         self.pairing_ttl = timedelta(minutes=pairing_ttl_minutes)
         self.qr_secret = qr_secret
 
-    # --- links ------------------------------------------------------------
-
     @property
     def download_url(self) -> str:
         return f"{self.public_base_url}{self.download_path}"
@@ -136,8 +126,6 @@ class ExtensionService:
 
     def today(self, now: datetime) -> date:
         return now.astimezone(self.timezone).date()
-
-    # --- pairing ----------------------------------------------------------
 
     async def create_pairing_code(
         self,
@@ -195,8 +183,6 @@ class ExtensionService:
             raise ExtensionUnauthorizedError
         install.last_seen_at = now or datetime.now(UTC)
         return install
-
-    # --- data from the extension ---------------------------------------
 
     async def ingest_codes(
         self, install: ExtensionInstallModel, rows: list[dict[str, Any]], *, now: datetime | None = None
@@ -256,8 +242,6 @@ class ExtensionService:
             has_code_today=has_code,
             refresh_code=any(task.kind == TASK_REFRESH_CODE for task in tasks),
         )
-
-    # --- for the bot and the page ------------------------------------------
 
     async def code_params(self, seller_id: uuid.UUID, seller_name: str, day: date) -> dict[str, Any]:
         """Код на день в виде параметров шаблона; без кода — почему его нет."""

@@ -10,9 +10,7 @@ from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 ANALYTICS_BUCKET = "analytics"
-# WB accepts this page size; every seller we have fits in a single page.
 PAGE_LIMIT = 250_000
-# A runaway-pagination backstop, not a real expectation.
 MAX_PAGES = 100
 
 
@@ -87,7 +85,6 @@ class WBAnalyticsClient(WBJsonClient):
     def _row(self, raw: dict) -> FBOStockRow | None:
         article = raw.get("nmId")
         if not isinstance(article, int):
-            # A line we cannot attribute to a товар is worse than no line.
             self.logger.warning("wb_analytics_row_without_nmid", extra={"row": str(raw)[:200]})
             return None
         return FBOStockRow(
@@ -141,8 +138,6 @@ class WBWarehouseRemainsClient(WBJsonClient):
             params={"groupByBarcode": "true", "groupBySize": "true", "groupByNm": "true", "groupBySa": "true"},
         )
         task_id = self._task_id(created)
-        # Ждём по часам, а не по сумме пауз: шлюз разводит запросы аналитики на
-        # десятки секунд, и опрос статуса сам по себе идёт дольше паузы.
         started = self._clock()
         while True:
             status = await self.request("GET", f"{self.path}/tasks/{task_id}/status", seller_id)
@@ -179,7 +174,6 @@ class WBWarehouseRemainsClient(WBJsonClient):
         barcode = str(raw.get("barcode") or "")
         article = raw.get("nmId")
         if not barcode or not isinstance(article, int):
-            # Строку без баркода не к чему привязать ни в заказах, ни в каталоге.
             self.logger.warning("wb_remains_row_without_barcode", extra={"row": str(raw)[:200]})
             return []
         warehouses = raw.get("warehouses")

@@ -193,9 +193,7 @@ async def test_review_consumer_counts_every_known_article_including_archived(mon
 
     assert reviews.saved_counts["123"] == (1, 2, 3, 4, 5)
     assert reviews.saved_counts["456"] == (0, 0, 0, 1, 2)
-    # An archived card keeps its row, otherwise its series would look like a gap.
     assert reviews.saved_counts["789"] == (0, 0, 0, 0, 0)
-    # Only the article missing from the catalog is registered as feedback-only.
     assert [card.article for card in sellers.feedback_only] == ["456"]
     assert sellers.feedback_only[0].imt_id == 88
 
@@ -214,7 +212,6 @@ async def test_review_consumer_reschedules_a_rate_limited_job(monkeypatch) -> No
     assert "HTTP 429" in reviews.rescheduled_error
     assert reviews.failed_error is None
     assert reviews.job.status == "queued"
-    # The offset is still committed; the retry arrives as a fresh event.
     assert sellers.inbox_events == [event_id]
 
 
@@ -246,7 +243,6 @@ async def test_review_consumer_skips_a_job_it_could_not_claim(monkeypatch) -> No
 
     assert not reviews.completed
     assert reviews.failed_error is None
-    # The offset is still committed: the message is spent, not poisoned.
     assert sellers.inbox_events == [event_id]
 
 
@@ -262,7 +258,6 @@ async def test_review_consumer_does_not_write_counts_for_a_detached_seller(monke
     await build_consumer(database, FakeFeedbackClient(database)).process(payload(job_id, seller_id, event_id))
 
     assert reviews.saved_counts == {}
-    # The job still closes cleanly so the run can finish.
     assert reviews.completed
     assert reviews.failed_error is None
     assert sellers.inbox_events == [event_id]
@@ -336,7 +331,6 @@ async def test_a_non_json_message_does_not_kill_the_review_consumer(monkeypatch)
         await build_consumer(database, FakeFeedbackClient(database)).run()
 
     consumer = stub["consumer"]
-    # Both messages were committed: the poison one skipped, the good one worked.
     assert consumer.committed == 2
     assert consumer.seeks == []
     assert reviews.completed

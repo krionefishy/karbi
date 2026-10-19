@@ -18,11 +18,6 @@ function count(value: number, muted = false) {
   return <span className={muted ? "stocks-cell chats-muted" : "stocks-cell"}>{value || "—"}</span>;
 }
 
-/**
- * День — по дате автосообщения WB: ответ следующим утром относится ко дню обращения.
- * Первый блок — все диалоги дня, это итог для покупателя; дальше — с нашим сообщением
- * и два счётчика, куда ушли остальные диалоги после запуска.
- */
 export function ReviewChatsDays({ days }: { days: DaySummary[] }) {
   return (
     <section className="checklist-scroll chats-days" style={{ "--stocks-template": TEMPLATE } as React.CSSProperties}>

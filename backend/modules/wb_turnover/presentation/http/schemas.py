@@ -23,8 +23,6 @@ class TurnoverArticlesResponse(BaseModel):
     seller_id: uuid.UUID
     date: str | None
     threshold_days: int
-    # За сколько дней считался темп продаж: интерфейс подписывает этим числом
-    # колонки, чтобы окно можно было менять настройкой, а не правкой вёрстки.
     window_days: int
     articles: list[ArticleTurnoverResponse]
 

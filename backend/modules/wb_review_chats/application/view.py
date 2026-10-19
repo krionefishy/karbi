@@ -41,23 +41,18 @@ class ReviewChatsView:
     date_from: date
     date_to: date
     reply_window_hours: int
-    # Момент запуска рассылки по кабинету — первое наше сообщение за всю историю; `None` — не уходило.
     launch_at: datetime | None
-    # Группы по периоду.
     followed: GroupSummary
     early: GroupSummary
     missed: GroupSummary
     before: GroupSummary
-    # Все диалоги периода после запуска, в какую бы группу они ни попали: итог для покупателя.
     after_launch: GroupSummary
-    # Окно до запуска — от периода не зависит; `None`, пока рассылки не было.
     baseline: Baseline | None
     days: tuple[DaySummary, ...]
     dialogs: tuple[DialogView, ...]
     page: int
     page_size: int
     total_dialogs: int
-    # Состояние зеркала чатов: с какого момента есть история, докуда дочитано, текст ошибки.
     history_from: datetime | None
     synced_through: datetime | None
     collection_error: str | None

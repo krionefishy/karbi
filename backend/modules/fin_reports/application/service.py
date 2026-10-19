@@ -56,7 +56,6 @@ from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMi
 from backend.modules.wb_core.domain import EGRESS_SERVABLE, SalesReport, SalesReportTotals, Seller, tax_rate_on
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
-# Отчёт недели на стыке лет начинается в соседнем году: окно чтения — с запасом в неделю.
 YEAR_MARGIN = timedelta(days=7)
 FIRST_YEAR = 2024
 
@@ -107,8 +106,6 @@ class FinReportsService:
             if state is not None and state.error:
                 failing += 1
         return FinReportsOverview(len(sellers), max(collected) if collected else None, failing)
-
-    # --- отчёт ------------------------------------------------------------------
 
     async def view(
         self,
@@ -185,14 +182,11 @@ class FinReportsService:
         since, until = date(year, 1, 1) - YEAR_MARGIN, date(year, 12, 31) + YEAR_MARGIN
         mirrored = await self.mirror.reports(seller.id, since=since, until=until)
         built = await self.repository.built_reports(seller.id)
-        # Год периода считается по неделе, а не по дате: неделя с 29 декабря — уже следующий год.
-        # У месяцев отчёт на стыке лет нужен обоим годам — его строки делятся по дате операции.
         in_year = [
             item
             for item in mirrored
             if year in {period_of(day, granularity).year for day in (item.report.date_from, item.report.date_to)}
         ]
-        # В цифры идёт отчёт, который зеркало дочитало, а воркер уже сложил; остальные — «неполные».
         loaded = {
             item.report.report_id: item.report
             for item in in_year
@@ -203,8 +197,6 @@ class FinReportsService:
             if totals.report_id not in loaded:
                 continue
             report = loaded[totals.report_id]
-            # Неделя — отчёт целиком. Месяц — по дате операции WB: отчёт недели на стыке
-            # месяцев WB делит не всегда, и его строки расходятся по двум месяцам.
             day = report.date_from if granularity == GRANULARITY_WEEK else (totals.month or report.date_from)
             by_period[(totals.report_id, period_of(day, granularity))].append(totals)
 
@@ -228,7 +220,6 @@ class FinReportsService:
             report = item.report
             if report.report_id in loaded:
                 continue
-            # Недочитанный отчёт делает неполным каждый период, которого касается.
             for day in (report.date_from, report.date_to):
                 column = column_of(period_of(day, granularity), report)
                 if column is not None:
@@ -238,8 +229,6 @@ class FinReportsService:
             column = column_of(period, report)
             if column is None:
                 continue
-            # Себестоимость на конец периода: у месяца строки отчёта на стыке считаются по цене
-            # своего месяца, а не по цене, вступившей в силу первого числа следующего.
             figures = statement(items, self._cost_on(book, min(report.date_to, column.date_to)), on_uncosted=remember)
             column.by_seller.setdefault(seller.id, Statement()).add(figures)
             column.by_seller[seller.id].close()
@@ -345,8 +334,6 @@ class FinReportsService:
             prices[price.seller_id].append(price)
         return {seller_id: CostBook(items) for seller_id, items in prices.items()}
 
-    # --- выгрузка ---------------------------------------------------------------
-
     async def export(self, *, year: int | None, period: str | None, marketplace: str = MARKETPLACE_WB) -> FinReportFile:
         """Книга за год: выбранный период в разрезе кабинетов, недели, месяцы и артикулы без себестоимости."""
         weeks = await self.view(year=year, granularity=GRANULARITY_WEEK, marketplace=marketplace)
@@ -362,7 +349,6 @@ class FinReportsService:
             if chosen is None:
                 raise FinReportsQueryError("За этот период отчётов нет")
         elif weeks.periods:
-            # Без выбора — последняя закрытая неделя, по которой дочитаны все кабинеты.
             chosen = next(
                 (column for column in weeks.periods if not column.pending and not column.open), weeks.periods[0]
             )
@@ -373,8 +359,6 @@ class FinReportsService:
             else:
                 skus = await self.ozon_skus(chosen.period, chosen.date_from, chosen.date_to)
         return await asyncio.to_thread(build_workbook, weeks, months, chosen, articles, self.today(), skus=skus)
-
-    # --- артикулы и остатки ---------------------------------------------------------
 
     async def articles(self, period: Period, date_from: date, date_to: date) -> ArticlesView:
         """Листы «По артикулам» и «Остатки» за неделю по всем подключённым кабинетам."""
@@ -465,8 +449,6 @@ class FinReportsService:
 
         return stock
 
-    # --- себестоимость -----------------------------------------------------------
-
     async def upload_costs(
         self,
         content: bytes,
@@ -492,8 +474,6 @@ class FinReportsService:
         owners = set(cabinets.values())
         known = await self.repository.cost_prices(owners, parsed.marketplace)
         books = {owner: CostBook(price for price in known if price.seller_id == owner) for owner in owners}
-        # Кабинет, записанный в файле двумя способами, сводится к одному селлеру:
-        # артикул остаётся один, побеждает последняя строка.
         fresh: dict[tuple[uuid.UUID, str], CostPrice] = {}
         outcome: dict[tuple[uuid.UUID, str], str] = {}
         for row in parsed.rows:

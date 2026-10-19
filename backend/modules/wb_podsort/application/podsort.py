@@ -80,8 +80,6 @@ class PodsortService:
         last_success_at, failing = await self.podsort.collection_summary(enrolled)
         return PodsortOverview(seller_count=len(enrolled), last_success_at=last_success_at, failing=failing)
 
-    # --- reading ---------------------------------------------------------------
-
     async def view(self, region: str | None = None, *, now: datetime | None = None) -> PodsortView:
         computed = await self._compute(now)
         chosen = region or (computed.settings.regions[0] if computed.settings.regions else TARGET_REGIONS[0])
@@ -123,8 +121,6 @@ class PodsortService:
         content = await asyncio.to_thread(PodsortWorkbook(context, computed.sections).build)
         return PodsortReportFile(day=periods.today, content=content)
 
-    # --- settings ---------------------------------------------------------------
-
     async def settings(self) -> PodsortSettings:
         return await self.podsort.settings()
 
@@ -163,8 +159,6 @@ class PodsortService:
                 raise PodsortQueryError(f"Нет такого региона: {region}")
             await self.podsort.set_warehouse_region(name, region)
         await self.session.commit()
-
-    # --- расчёт -----------------------------------------------------------------
 
     async def _compute(self, now: datetime | None) -> _Computed:
         stamp = now or datetime.now(UTC)
@@ -229,7 +223,6 @@ class PodsortService:
         for name, quantity in stock_by_warehouse.items():
             place = place_warehouse(name, overrides)
             warehouses.append(WarehouseView(name, place.region, place.source, quantity))
-        # Сначала то, что требует решения человека: склады, про которые не знаем ничего.
         warehouses.sort(key=lambda item: (item.source != "none", item.region or "", -item.quantity, item.name))
         return _Computed(periods, settings, tuple(sections), tuple(states), tuple(warehouses))
 

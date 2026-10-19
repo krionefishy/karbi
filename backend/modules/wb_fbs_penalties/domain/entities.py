@@ -1,9 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime
 
-# Группы удержаний фин. отчёта. Одна строка — одна группа: первая, у которой
-# есть ненулевая сумма. Штрафы отдельно от остального, потому что оспаривают
-# именно их; остальное — чтобы видеть разницу, а не смешивать в одну сумму.
 GROUP_PENALTIES = "penalties"
 GROUP_DEDUCTIONS = "deductions"
 GROUP_LOGISTICS = "logistics"
@@ -16,11 +13,9 @@ GROUP_TITLES = {
     GROUP_STORAGE: "Хранение и приёмка",
 }
 
-# Как строка отчёта сошлась с заданием из зеркала. Считается один раз при сборе и
-# хранится на строке: страница, фильтр по складу и выгрузка — один SELECT.
-TRACE_FOUND = "found"  # задание и поставка есть
-TRACE_NO_SUPPLY = "no_supply"  # задание есть, в поставку не попало
-TRACE_NO_ORDER = "no_order"  # задания в зеркале нет (или ещё не искали)
+TRACE_FOUND = "found"
+TRACE_NO_SUPPLY = "no_supply"
+TRACE_NO_ORDER = "no_order"
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,7 +15,6 @@ export interface ReturnItem {
   order_id: number;
   nm_id: number;
   barcode: string;
-  /** Предмет · бренд · размер — как в сообщении бота. */
   title: string;
   brand: string;
   subject_name: string;
@@ -29,7 +28,6 @@ export interface ReturnItem {
   dst_office_address: string;
   order_dt: string | null;
   status_changed_at: string;
-  /** От какого момента считается хранение в ПВЗ; только у готовых к выдаче. */
   ready_at: string | null;
   free_until: string | null;
   pickup_deadline: string | null;

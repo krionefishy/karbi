@@ -98,8 +98,6 @@ export function ReviewsPage() {
   }, [sellerId, sellers]);
 
   useEffect(() => {
-    // Subjects differ from seller to seller, so a chosen one stops meaning
-    // anything after switching; the typed query still does.
     if (!sellerId) return;
     setSearchParams(
       (params) => {
@@ -150,7 +148,6 @@ export function ReviewsPage() {
     await queryClient.invalidateQueries({ queryKey: ["automation-sellers", AUTOMATION_ID] });
     await queryClient.invalidateQueries({ queryKey: ["wb-sellers"] });
   };
-  // Only sellers the automation does not collect for yet can be connected.
   const { data: registry = [] } = useQuery({
     queryKey: ["wb-sellers", false],
     queryFn: () => getSellers(),

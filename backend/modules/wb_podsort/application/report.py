@@ -39,7 +39,6 @@ MONTHS = (
     "декабрь",
 )
 
-# Столбцы сводного листа — как в «Подсорт 23.09.2026» образца; ручные остаются пустыми.
 SUMMARY_COLUMNS: tuple[tuple[str, int], ...] = (
     ("Кабинет", 20),
     ("Артикул ВБ", 13),
@@ -73,7 +72,6 @@ class SellerSection:
     rows: Sequence[PodsortRow]
     window_days_loaded: int
     remains_at: datetime | None
-    # Первые сутки, которые удалось загрузить: месяц раньше них в книге неполный.
     history_from: date | None = None
     remains_stale: bool = False
     remains_error: str | None = None
@@ -133,8 +131,6 @@ class PodsortWorkbook:
         buffer = io.BytesIO()
         self.workbook.save(buffer)
         return buffer.getvalue()
-
-    # --- сводный лист ---------------------------------------------------------
 
     def notes(self) -> list[str]:
         """Пометки над сводным листом: как посчитано и где цифрам нельзя верить."""
@@ -238,8 +234,6 @@ class PodsortWorkbook:
         if header_row:
             sheet.freeze_panes = sheet.cell(header_row + 1, 3)
 
-    # --- лист кабинета ---------------------------------------------------------
-
     def _seller(self, sheet: Worksheet, section: SellerSection) -> None:
         context, settings = self.context, self.context.settings
         current = month_title(context.months[-1])
@@ -310,8 +304,6 @@ class PodsortWorkbook:
         sheet.freeze_panes = "F3"
         if section.rows:
             sheet.auto_filter.ref = f"A2:{get_column_letter(len(columns))}{len(section.rows) + 2}"
-
-    # --- как читать -------------------------------------------------------------
 
     def _how_to_read(self, sheet: Worksheet) -> None:
         settings = self.context.settings

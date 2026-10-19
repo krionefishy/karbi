@@ -22,7 +22,6 @@ class SupportBotWorkerApplication:
     консьюмер спрашивает нейросеть и пишет ответ в таблицу вердиктов.
     """
 
-    # Упавший консьюмер возвращается не сразу: жёсткий сбой не должен стать цикличным перезапуском.
     consumer_restart_delay_seconds: float = 5.0
 
     def __init__(self, settings: Settings | None = None) -> None:

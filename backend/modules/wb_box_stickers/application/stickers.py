@@ -1,11 +1,3 @@
-"""PDF со стикерами коробов: прочитать, переставить и перепроверить.
-
-Страницы WB не перерисовываются и ничем не дополняются — переставляются
-целиком, поэтому стикер остаётся ровно тем, что выдал WB. Готовый файл
-читается заново тем же разбором, что и исходный: не сошёлся хоть один
-стикер — файл не отдаётся.
-"""
-
 import io
 import re
 from collections.abc import Sequence
@@ -19,7 +11,6 @@ from pypdf.errors import PdfReadError
 from backend.modules.wb_box_stickers.domain import MatchedBox, StickerInputError, StickerPage
 
 MAX_PAGES = 2000
-# QR на стикере крупный: 150 dpi читаются без промахов и вдвое быстрее 300.
 RENDER_SCALE = 150 / 72
 
 SHK_LINE = re.compile(r"^[\d ]{5,}$")
@@ -44,7 +35,6 @@ def _open(data: bytes) -> PdfReader:
 def _qr_codes(document: pdfium.PdfDocument, index: int) -> set[str]:
     page = document[index]
     try:
-        # to_pil тянет Pillow лениво; явный тип держит её в зависимостях сервиса.
         image: Image.Image = page.render(scale=RENDER_SCALE, grayscale=True).to_pil()
     finally:
         page.close()
@@ -63,7 +53,6 @@ def read_stickers(data: bytes) -> list[StickerPage]:
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             shk = next((line.replace(" ", "") for line in lines[:3] if SHK_LINE.match(line)), "")
             codes = _qr_codes(document, index)
-            # На стикере два QR с одним и тем же кодом; разные — это уже не стикер короба.
             if len(codes) > 1:
                 raise StickerInputError(f"На странице {index + 1} PDF разные QR-коды — это не стикер короба WB")
             quantity = QUANTITY.search(text)

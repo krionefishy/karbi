@@ -1,5 +1,3 @@
-"""Лист «Остатки»: остаток артикула на конец недели, его себестоимость, цена и оборачиваемость."""
-
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -9,7 +7,6 @@ from backend.modules.fin_reports.domain.articles import ArticleRow
 ZERO = Decimal("0")
 DAYS_IN_WEEK = 7
 NO_SALES = "Нет продаж!"
-# Границы категорий оборачиваемости в днях — как в старом листе.
 TURNOVER_BUCKETS: tuple[tuple[int, str], ...] = ((30, "0-30"), (60, "30-60"), (90, "60-90"), (120, "90-120"))
 TURNOVER_BEYOND = "более 120"
 
@@ -21,9 +18,7 @@ class StockRow:
     tech_size: str
     quantity: int
     unit_cost: Decimal
-    # Цена единицы до СПП — средний чек недели; без продаж на неделе — последний известный.
     unit_price: Decimal
-    # Реализация до СПП за неделю, в день.
     daily_sales: Decimal
 
     @property

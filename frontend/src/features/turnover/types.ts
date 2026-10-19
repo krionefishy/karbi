@@ -10,9 +10,7 @@ export interface ArticleTurnover {
   avg_stock: number;
   orders_count: number;
   avg_daily_orders: number;
-  /** Days the current stock lasts at the current rate. What the alert watches. */
   days_of_cover: number | null;
-  /** Classic turnover over the window; only as honest as stock_days. */
   turnover_days: number | null;
   stock_days: number;
   status: TurnoverStatus;
@@ -22,7 +20,6 @@ export interface TurnoverArticles {
   seller_id: string;
   date: string | null;
   threshold_days: number;
-  /** Окно, за которое считался темп продаж. Подписывает колонки таблицы. */
   window_days: number;
   articles: ArticleTurnover[];
 }

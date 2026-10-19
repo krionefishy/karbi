@@ -18,7 +18,6 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# Запрос «в работе» дольше получаса живым быть не может: его бросил упавший процесс.
 STALE_REFRESH = timedelta(minutes=30)
 
 
@@ -79,8 +78,6 @@ class ReturnsWorker:
     async def _active_tracked(self) -> list[uuid.UUID]:
         async with self.database.session() as session:
             tracked = await ReturnsRepository(session).tracked_seller_ids()
-            # Архивный кабинет остаётся подключённым до отключения, но ключа его
-            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
             active = {seller.id for seller in await SellerRepository(session).list_sellers()}
         return sorted(tracked & active, key=str)
 
@@ -149,7 +146,6 @@ class ReturnsWorker:
         active = set(await self._active_tracked()) if requests else set()
         for request_id, seller_id in requests:
             touch_heartbeat()
-            # Кабинет могли заархивировать после нажатия: ключа у шлюза уже нет.
             error = await self.collect(seller_id) if seller_id in active else "Кабинет отключён или в архиве"
             async with self.database.session() as session:
                 await ReturnsRepository(session).finish_refresh(request_id, error)

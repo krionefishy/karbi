@@ -59,7 +59,6 @@ async def test_the_orders_window_is_sent_the_way_wb_expects_it() -> None:
 
     envelope = stub.requests_to(ORDERS)[-1]
     assert envelope["query"] == {"dateFrom": "2026-08-06T07:30:00", "flag": 0}
-    # Ключа в конверте нет — шлюз подставит его сам по селлеру.
     assert envelope["seller_id"] == SELLER
     assert envelope["api"] == "statistics"
 
@@ -103,8 +102,6 @@ async def test_a_day_of_history_is_asked_by_the_order_date() -> None:
                     "lastChangeDate": "2026-09-03T12:00:00",
                     "oblastOkrugName": "Приволжский федеральный округ",
                 },
-                # Так выглядел бы ответ, если бы WB понял флаг иначе: чужие
-                # сутки в дне истории — это раздутый день, а не бонус.
                 {
                     "srid": "s2",
                     "nmId": 101,
@@ -270,7 +267,6 @@ async def test_a_wb_rate_limit_delivered_by_the_gateway_is_final(monkeypatch) ->
 
 
 async def test_a_transport_failure_is_retried_before_giving_up(monkeypatch) -> None:
-    # The retry backoff is the point of the loop, not of this test.
     monkeypatch.setattr("backend.modules.wb_core.infrastructure.wb.egress.asyncio.sleep", AsyncMock())
     with respx.mock as router:
         stub = EgressStub(router)
@@ -292,7 +288,6 @@ async def test_a_rejected_key_is_permanent_while_an_outage_is_temporary() -> Non
         with pytest.raises(WBPermanentError, match="Статистика"):
             await WBStatisticsClient(make_gateway()).orders(SELLER, datetime(2026, 8, 6))
 
-        # 5xx от WB тоже доносится шлюзом как окончательный: без локальных повторов.
         stub.on("GET", WAREHOUSES, status=503)
         with pytest.raises(WBTemporaryError):
             await WBMarketplaceClient(make_gateway()).warehouses(SELLER)

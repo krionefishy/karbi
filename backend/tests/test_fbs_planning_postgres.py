@@ -50,7 +50,6 @@ SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 NOW = datetime(2026, 8, 26, 9, 0, tzinfo=UTC)
 CODES = [code for code, _ in DEFAULT_REGIONS]
 SHARES = dict(zip(CODES, (4000, 2000, 1200, 1300, 1000, 500), strict=True))
-# Один склад в каждом из шести направлений: очередь короткая и порог низкий.
 CITIES = {"moscow": 101, "volga": 102, "krasnodar": 103, "ural": 104, "northwest": 105, "novosibirsk": 106}
 
 
@@ -88,8 +87,6 @@ async def cabinet() -> AsyncIterator[tuple[Database, uuid.UUID]]:
         )
         await session.commit()
 
-    # Всё, что дальше, — тоже подготовка, но она уже может упасть. Держим её
-    # внутри try, иначе падение setup оставит селлера следующему тесту.
     try:
         yield database, seller.id
     finally:
@@ -211,7 +208,6 @@ async def test_a_plan_never_promises_more_than_is_available(cabinet) -> None:
 async def test_a_small_stock_reaches_only_the_first_directions(cabinet) -> None:
     database, seller_id = cabinet
     await prepare(database, seller_id)
-    # На остатке не больше резерва он не берётся вовсе: доступно все 4.
     await stock(database, 4)
     await match(database, seller_id)
 
@@ -302,7 +298,6 @@ async def test_a_pool_shared_without_a_rule_is_skipped(cabinet) -> None:
     await prepare(database, seller_id)
     await stock(database, 100)
     await match(database, seller_id)
-    # Второй кабинет расходует тот же пул, правила деления нет.
     async with database.session() as session:
         session.add(
             ProductMappingModel(
@@ -347,7 +342,6 @@ async def test_a_shared_pool_with_a_rule_gets_only_its_share(cabinet) -> None:
 
     plan = await build(database, seller_id)
 
-    # 100 - 20 = 80 доступно на пул, кабинету достаётся 60% = 48.
     [item] = plan.items
     assert item.available == 48
     assert sum(item.amounts.values()) == 48

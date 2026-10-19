@@ -1,10 +1,3 @@
-"""Admin contract for bots.
-
-The token is the one secret that legitimately passes through this server: it
-arrives from the browser and leaves for the relay in the same request, and is
-never stored on this side.
-"""
-
 from datetime import datetime
 from typing import Annotated
 
@@ -18,8 +11,6 @@ class BotCreate(BaseModel):
 
     code: BotCode
     title: Annotated[str, Field(max_length=255)] = ""
-    # SecretStr keeps the token out of tracebacks and repr; the validation
-    # handler in app/http keeps it out of 422 bodies.
     token: SecretStr
 
 

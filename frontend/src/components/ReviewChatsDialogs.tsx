@@ -48,7 +48,6 @@ export function ReviewChatsDialogs({ dialogs, empty }: { dialogs: Dialog[]; empt
                   {dialog.nm_id}
                 </a>
               ) : (
-                // В уже существующем чате WB карточку товара к автосообщению не прикладывает.
                 "артикул не передан"
               )}
             </em>

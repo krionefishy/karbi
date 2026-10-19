@@ -73,7 +73,6 @@ async def test_an_accepted_snapshot_becomes_pools(database) -> None:
         )
 
     assert (state.pools, state.on_hand_total) == (2, 158)
-    # 150 - 20 и 8 без резерва: на малом остатке резерв не берётся.
     assert state.available_total == 138
     assert state.stale is False
 

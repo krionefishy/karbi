@@ -7,9 +7,6 @@ from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
 from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 
 FEEDBACKS_BUCKET = "feedbacks"
-# WB stops serving feedback pages somewhere around this offset. Failing loudly
-# is deliberate: a snapshot silently cut off at the ceiling would be written to
-# the database as if it were complete.
 MAX_PAGINATION_DEPTH = 200_000
 
 
@@ -26,9 +23,6 @@ class FeedbackAggregation:
     counts: dict[str, tuple[int, int, int, int, int]]
     products: dict[str, FeedbackProduct]
     feedback_count: int
-    # Сколько отзывов артикула пришли с фото и с видео. Считается тем же
-    # проходом: отдельный обход ради двух чисел стоил бы ещё одного полного
-    # сканирования отзывов селлера.
     media: dict[str, tuple[int, int]] = field(default_factory=dict)
 
 
@@ -134,9 +128,6 @@ class WBFeedbackClient:
         seen.add(digest)
         article = str(article_value)
         counts.setdefault(article, [0, 0, 0, 0, 0])[rating_value - 1] += 1
-        # Пустой список фото и `video: null` WB присылает у отзывов без медиа;
-        # непустое значение другого вида считаем медиа — пропустить фото-отзыв
-        # хуже, чем посчитать странный.
         photos = feedback.get("photoLinks")
         video = feedback.get("video")
         tally = media.setdefault(article, [0, 0])

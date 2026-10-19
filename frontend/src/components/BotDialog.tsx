@@ -10,9 +10,6 @@ interface Props {
   onSubmit: (value: BotCreate) => void;
 }
 
-/** Registering a bot is the one place a messenger token is typed into this
- * interface. It goes to the relay outside Russia and is not stored here, so
- * there is nothing to show back afterwards and nothing to edit later. */
 export function BotDialog({ pending, error, onClose, onSubmit }: Props) {
   const [visible, setVisible] = useState(false);
 

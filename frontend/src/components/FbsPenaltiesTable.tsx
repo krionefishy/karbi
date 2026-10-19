@@ -22,7 +22,6 @@ function stamp(value: string | null): string {
   return value ? momentFormatter.format(new Date(value)) : "—";
 }
 
-/** Таблица удержаний: те же столбцы, что в её Google-таблице, плюс то, что она заполняла руками. */
 export function FbsPenaltiesTable({ rows, empty }: { rows: PenaltyRow[]; empty: string }) {
   return (
     <section className="checklist-scroll stocks-scroll" style={{ "--stocks-template": TEMPLATE } as React.CSSProperties}>

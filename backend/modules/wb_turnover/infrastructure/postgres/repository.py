@@ -21,16 +21,12 @@ from backend.modules.wb_turnover.infrastructure.postgres.models import (
 )
 
 _CHUNK = 1000
-# A run still marked running after this long has crashed mid-flight; its slot
-# may be claimed again instead of staying burnt for the rest of the day.
 RECLAIM_RUNNING_AFTER = timedelta(minutes=60)
 
 
 class TurnoverRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    # --- membership -------------------------------------------------------
 
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
@@ -79,8 +75,6 @@ class TurnoverRepository:
             update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(orders_watermark=moment)
         )
 
-    # --- warehouses -------------------------------------------------------
-
     async def replace_warehouses(self, seller_id: uuid.UUID, warehouses: Sequence[tuple[int, str]]) -> None:
         await self.session.execute(delete(SellerWarehouseModel).where(SellerWarehouseModel.seller_id == seller_id))
         for warehouse_id, name in warehouses:
@@ -98,8 +92,6 @@ class TurnoverRepository:
             )
         )
         return [(row[0], row[1]) for row in rows.all()]
-
-    # --- stock ------------------------------------------------------------
 
     async def upsert_snapshots(
         self,
@@ -201,13 +193,7 @@ class TurnoverRepository:
         )
         return {row[0]: (float(row[1] or 0), int(row[2] or 0)) for row in rows.all()}
 
-    # --- orders -----------------------------------------------------------
-
     async def upsert_orders(self, seller_id: uuid.UUID, orders: Sequence[dict]) -> None:
-        # One srid may arrive several times in a pull — pages overlap on their
-        # boundary row, and an order can change twice inside the window. The last
-        # row wins here, because "ON CONFLICT DO UPDATE cannot affect row a
-        # second time" would otherwise fail the whole batch.
         deduplicated = {order["srid"]: order for order in orders}
         rows = [{**order, "seller_id": seller_id, "collected_at": datetime.now(UTC)} for order in deduplicated.values()]
         for offset in range(0, len(rows), _CHUNK):
@@ -216,8 +202,6 @@ class TurnoverRepository:
                 statement.on_conflict_do_update(
                     index_elements=["srid"],
                     set_={
-                        # seller_id too: the same cabinet reconnected under a new
-                        # seller gets its orders moved over instead of split.
                         "seller_id": statement.excluded.seller_id,
                         "article": statement.excluded.article,
                         "order_date": statement.excluded.order_date,
@@ -251,8 +235,6 @@ class TurnoverRepository:
             row[0]: ArticleOrders(article=row[0], orders=int(row[1]), cancelled=int(row[2]), first_order=row[3])
             for row in rows.all()
         }
-
-    # --- спрос по округам --------------------------------------------------
 
     async def replace_region_day(
         self, seller_id: uuid.UUID, day: date, counts: dict[tuple[str, str], tuple[int, int]]
@@ -315,8 +297,6 @@ class TurnoverRepository:
             )
         )
 
-    # --- остатки по складам продавца ---------------------------------------
-
     async def replace_warehouse_stocks(self, seller_id: uuid.UUID, amounts: dict[tuple[str, int], int]) -> None:
         """Переписать слой остатков FBS целиком и отметить, когда это вышло.
 
@@ -377,8 +357,6 @@ class TurnoverRepository:
         await self.session.execute(delete(TurnoverDailyModel).where(TurnoverDailyModel.date < turnover_before))
         await self.session.execute(delete(NotificationLogModel).where(NotificationLogModel.date < notifications_before))
         await self.session.execute(delete(RegionOrdersModel).where(RegionOrdersModel.date < regions_before))
-
-    # --- metric -----------------------------------------------------------
 
     async def upsert_turnover(self, rows: Sequence[TurnoverRow]) -> None:
         if not rows:
@@ -458,8 +436,6 @@ class TurnoverRepository:
         return await self.session.scalar(
             select(func.max(TurnoverDailyModel.date)).where(TurnoverDailyModel.seller_id == seller_id)
         )
-
-    # --- runs and notifications ------------------------------------------
 
     async def start_run(
         self, kind: str, run_date: date, slot: int, trigger: str = "scheduled"
@@ -542,8 +518,6 @@ class TurnoverRepository:
             )
             or 0
         )
-
-    # --- manual refresh --------------------------------------------------
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
         """Ask for an out-of-schedule collection, or hand back the one already waiting."""

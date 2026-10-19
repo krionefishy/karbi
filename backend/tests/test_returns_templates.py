@@ -32,7 +32,6 @@ def test_digest_is_code_and_addresses_with_counts_only() -> None:
         "Слетел вход на wildberries.ru (Chrome): войдите заново под телефоном владельца"
     )
     assert "http" not in text and "стикер" not in text
-    # Без кода — одна строка почему, без расширения — куда идти.
     assert (
         templates.render(templates.RETURNS_DIGEST, {"seller_name": "М", "ready_total": 0}) == "М — кода на сегодня нет"
     )

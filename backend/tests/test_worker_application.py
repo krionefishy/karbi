@@ -34,8 +34,6 @@ def moment(hour: int, minute: int) -> datetime:
 
 
 def test_a_midnight_schedule_waits_for_its_minute() -> None:
-    # An hour-only comparison never held for hour 0, so a 00:30 run either
-    # fired at midnight or, with the old guard, on every single poll.
     half_past_midnight = worker(0, 30)
 
     assert half_past_midnight.is_due(moment(0, 30)) is True
@@ -89,7 +87,6 @@ def test_a_transient_database_error_does_not_kill_the_worker_loop() -> None:
 
     failing_worker._recover = failing_recover  # type: ignore[method-assign]
 
-    # The loop swallows the error and lives on to the next poll instead of dying.
     asyncio.run(failing_worker.run())
     assert attempts == [1]
 
@@ -101,6 +98,5 @@ def test_the_turnover_worker_runs_each_step_after_its_moment_of_the_day() -> Non
 
     assert worker.is_due(moment(3, 0), 3, 0) is True
     assert worker.is_due(moment(2, 59), 3, 0) is False
-    # The digest waits for its own hour even though the maths ran at dawn.
     assert worker.is_due(moment(4, 0), settings.turnover.digest_hour, settings.turnover.digest_minute) is False
     assert worker.is_due(moment(10, 0), settings.turnover.digest_hour, settings.turnover.digest_minute) is True

@@ -1,11 +1,3 @@
-"""Проход бота по кабинету: разобрать диалоги из зеркала и отправить то, что пора.
-
-Тик идёт так: проверить, что отправлять можно (общий выключатель, свежесть
-зеркала); спроецировать состояние каждого диалога; запустить кампании, у
-которых вышла тишина; сверить «неизвестные» отправки с лентой; отправить
-положенное. Часы, генератор случайных чисел и пауза передаются снаружи.
-"""
-
 import asyncio
 import random
 import uuid
@@ -54,11 +46,8 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
 from backend.shared.kafka_streams.topics import SupportBotTopics
 from backend.shared.outbox.repository import OutboxRepository
 
-# «Неизвестную» отправку признаём неудавшейся, если лента за это время её не показала.
 UNKNOWN_RESOLVE_AFTER = timedelta(minutes=45)
-# После неудачи, которая не лечится повтором в ту же минуту, диалог ждёт столько.
 RETRY_DELAY = timedelta(minutes=30)
-# Диалог, которому ещё нет вердикта «ждём покупателя», проверяется заново через столько.
 VERDICT_RECHECK = timedelta(minutes=10)
 
 
@@ -72,9 +61,7 @@ class BotPolicy:
     batch: int = 20
     history: timedelta = timedelta(days=12)
     mirror_stale: timedelta = timedelta(minutes=90)
-    # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
     canary_percent: int = 10
-    # Как вердикт нейросети влияет на отправку: off, shadow (только запись) или enforce.
     classifier_mode: str = MODE_OFF
     classifier_prompt_version: str = "v2"
     classifier_retry: timedelta = timedelta(minutes=15)
@@ -90,7 +77,6 @@ class SellerReport:
     sent: int = 0
     dry_run: int = 0
     failed: int = 0
-    # Диалоги, которым пора писать, но вердикта «ждём покупателя» ещё нет: ждут.
     held: int = 0
     verdicts_requested: int = 0
     skipped: str | None = None
@@ -142,7 +128,6 @@ class SupportBotProcessor:
         self.chats = chats
         self.sender = sender
         self.policy = policy
-        # Без каталога товары не проверяются на «снят с продажи»: нужен только тестам и ранним запускам.
         self.catalog = catalog
         self.rng = rng or random.Random()
         self.sleep = sleep
@@ -184,7 +169,6 @@ class SupportBotProcessor:
             models[key] = model
             report.dialogs += 1
         await self.repository.retire_out_of_window(seller_id, since)
-        # Запросы вердикта кладём в outbox в той же транзакции, что и состояние диалогов.
         await self._request_verdicts(seller_id, models, now, report)
         await self.repository.session.commit()
 
@@ -203,8 +187,6 @@ class SupportBotProcessor:
             return report
         await self._send_due(seller_id, tracked.mode, segments, now, report)
         return report
-
-    # --- проекция ---------------------------------------------------------------
 
     async def _project(
         self,
@@ -244,7 +226,6 @@ class SupportBotProcessor:
         model.tail_event_id = tail.event_id if tail else None
         model.tail_fingerprint = tail_fingerprint(tail) if tail else None
         if model.manual_verdict is not None and model.manual_fingerprint != model.tail_fingerprint:
-            # Написали ещё раз: прежнее решение менеджера относилось к другому сообщению.
             model.manual_verdict = None
             model.manual_fingerprint = None
         model.nm_id = segment.nm_id
@@ -265,14 +246,11 @@ class SupportBotProcessor:
         elif projection.state is not DialogState.IN_CAMPAIGN:
             model.next_send_at = None
         elif model.next_send_at is None:
-            # Кампания идёт, а расписания нет (первый проход после сбоя): ставим первое сообщение.
             model.next_send_at = first_send_at(now, window=self.policy.window, pace=self.policy.pace, rng=self.rng)
         model.updated_at = now
         if created:
             await self.repository.add_dialog(model)
         return model
-
-    # --- вердикты нейросети -----------------------------------------------------
 
     async def _request_verdicts(
         self, seller_id: uuid.UUID, models: dict[tuple[str, datetime], DialogModel], now: datetime, report: SellerReport
@@ -331,8 +309,6 @@ class SupportBotProcessor:
         verdict = row.verdict if row is not None and row.status == VERDICT_DONE else None
         return may_send(self.policy.classifier_mode, verdict, manual)
 
-    # --- сверка «неизвестных» отправок ------------------------------------------
-
     async def _reconcile(self, seller_id: uuid.UUID, segments: list[_Segment], now: datetime) -> None:
         unresolved = await self.repository.unresolved_sends(seller_id)
         if not unresolved:
@@ -360,8 +336,6 @@ class SupportBotProcessor:
                 send.status = SEND_FAILED
                 send.error = "в ленте чата сообщения нет: считаем, что не ушло"
         await self.repository.session.commit()
-
-    # --- отправка ---------------------------------------------------------------
 
     async def _send_due(
         self, seller_id: uuid.UUID, mode: str, segments: list[_Segment], now: datetime, report: SellerReport
@@ -392,7 +366,6 @@ class SupportBotProcessor:
             verdicts = await self.repository.verdicts_by_tail(seller_id, self.policy.classifier_prompt_version)
         for dialog in due:
             if not self._cleared(dialog, verdicts):
-                # Вердикта «ждём покупателя» нет: лучше промолчать. Срок сдвигаем, иначе они займут всю пачку.
                 dialog.next_send_at = now + VERDICT_RECHECK
                 report.held += 1
                 await self.repository.session.commit()
@@ -419,7 +392,6 @@ class SupportBotProcessor:
                 continue
             sign = signs.get(dialog.chat_id) or await self.chats.reply_sign(seller_id, dialog.chat_id)
             if not sign:
-                # Подписи нет в ленте (давний чат): берём из списка чатов WB, один раз за проход.
                 if fallback is None:
                     fallback = await self._chat_list_signs(seller_id)
                 sign = fallback.get(dialog.chat_id)
@@ -430,7 +402,6 @@ class SupportBotProcessor:
                 report.failed += 1
                 await self.repository.session.commit()
                 continue
-            # Строка со статусом sending зафиксирована до обращения к WB: после сбоя видно, что попытка была.
             await self.repository.session.commit()
             try:
                 await self.sender.send(str(seller_id), sign, text_model.text)
@@ -445,7 +416,6 @@ class SupportBotProcessor:
                     report.skipped = f"кабинет остановлен: {error}"
                     return
             except WBTemporaryError as error:
-                # Мог ли WB принять сообщение — неизвестно: сверка по ленте решит, повторять ли.
                 send.status = SEND_UNKNOWN
                 send.error = str(error)
                 dialog.next_send_at = now + UNKNOWN_RESOLVE_AFTER
@@ -462,7 +432,6 @@ class SupportBotProcessor:
         try:
             return await self.sender.reply_signs(str(seller_id))
         except (WBPermanentError, WBTemporaryError):
-            # Список не прочитался: диалоги без подписи получат следующую попытку.
             return {}
 
     def _is_live(self, mode: str, dialog: DialogModel) -> bool:

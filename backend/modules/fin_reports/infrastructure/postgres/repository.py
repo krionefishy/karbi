@@ -24,7 +24,6 @@ from backend.modules.fin_reports.infrastructure.postgres.models import (
 from backend.modules.wb_core.domain import OzonAccrualLine, SalesReport, SalesReportTotals
 
 _INSERT_CHUNK = 1000
-# Предел asyncpg на число параметров запроса: порция широкой таблицы считается от колонок.
 _MAX_QUERY_PARAMETERS = 32_767
 
 
@@ -40,8 +39,6 @@ class OzonDayMark:
 class FinReportsRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    # --- подключения ------------------------------------------------------------
 
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
@@ -62,8 +59,6 @@ class FinReportsRepository:
         await self.session.execute(delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id))
         await self.session.execute(delete(OzonDayModel).where(OzonDayModel.seller_id == seller_id))
         await self.untrack(seller_id)
-
-    # --- себестоимость -----------------------------------------------------------
 
     async def cost_prices(self, seller_ids: Iterable[uuid.UUID], marketplace: str) -> list[CostPrice]:
         wanted = list(seller_ids)
@@ -114,8 +109,6 @@ class FinReportsRepository:
                     },
                 )
             )
-
-    # --- сложенные отчёты WB ---------------------------------------------------------
 
     async def built_reports(self, seller_id: uuid.UUID) -> dict[int, int]:
         """Отчёт -> версия правила, по которой он сложен."""
@@ -204,8 +197,6 @@ class FinReportsRepository:
         )
         return {int(nm_id): Decimal(gross) / quantity for nm_id, gross, quantity in rows if quantity}
 
-    # --- снимки остатков ---------------------------------------------------------------
-
     async def snapshot_weeks(self, seller_id: uuid.UUID) -> set[date]:
         """Недели, снимок которых снят, — по отметке, а не по строкам: пустой остаток тоже снимок."""
         rows = await self.session.scalars(
@@ -280,8 +271,6 @@ class FinReportsRepository:
             for row in rows
         }
 
-    # --- сложенные начисления Ozon ---------------------------------------------------------
-
     async def built_ozon_days(self, seller_id: uuid.UUID) -> dict[date, OzonDayMark]:
         rows = await self.session.execute(
             select(
@@ -311,8 +300,6 @@ class FinReportsRepository:
         await self.session.execute(
             delete(OzonFactModel).where(OzonFactModel.seller_id == seller_id, OzonFactModel.day == day)
         )
-        # Возврат — продажа с минусом: складывается отдельно от продаж того же SKU,
-        # иначе штуки продаж и возврата слились бы в одну, и знак потерялся.
         folded: dict[tuple[int, str, int, bool], list[Any]] = {}
         for line in lines:
             key = (line.sku, line.line, line.type_id, line.sale_amount < 0)

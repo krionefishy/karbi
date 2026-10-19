@@ -30,10 +30,8 @@ async def test_report_builds_snapshot_matrix_from_postgres() -> None:
             await session.flush()
             session.add(ArticleModel(seller_id=seller.id, article="111", name="Коврик XL"))
             reviews = ReviewSyncRepository(session)
-            # 2 августа снапшота нет — в отчёте должна остаться пустая ячейка.
             await reviews.upsert_daily_counts(seller.id, date(2026, 8, 1), {"111": (1, 0, 0, 0, 4)})
             await reviews.upsert_daily_counts(seller.id, date(2026, 8, 3), {"111": (1, 0, 0, 1, 5)})
-            # Соседние даты за пределами периода в отчёт попадать не должны.
             await reviews.upsert_daily_counts(seller.id, date(2026, 8, 4), {"111": (9, 9, 9, 9, 9)})
             await session.commit()
 

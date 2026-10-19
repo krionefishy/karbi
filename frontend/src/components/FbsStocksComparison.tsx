@@ -5,16 +5,11 @@ import { getBoards } from "../features/fbsStocks/api";
 import type { GroupKind, StocksBoard } from "../features/fbsStocks/types";
 
 interface Props {
-  /** Какую группу раскрывать по складам: свои склады на «Сравнении», фулфилмент на «Сравнении ФФ». */
   expand: GroupKind;
 }
 
 const FALLBACK_TITLE: Record<GroupKind, string> = { own: "Наш склад", fulfilment: "Фулфилмент", district: "Округ" };
 
-/**
- * Листы сравнения: все кабинеты друг под другом. Одна группа раскрыта по складам, остальные
- * стоят суммами — чтобы увидеть, где товар лежит и чего не хватает в регионе.
- */
 export function FbsStocksComparison({ expand }: Props) {
   const { data: boards = [], isLoading } = useQuery({ queryKey: ["fbs-stocks-boards"], queryFn: getBoards });
   if (isLoading) return <div className="loading-block">Собираем кабинеты…</div>;

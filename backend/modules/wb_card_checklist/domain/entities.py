@@ -29,8 +29,6 @@ class SubjectCharacteristic:
     name: str
     required: bool
     popular: bool
-    # Заполняется отдельным полем карточки (бренд, описание, габариты), а не
-    # в списке характеристик, поэтому в «заполнено из …» не считается.
     named_field: bool
 
 
@@ -41,8 +39,6 @@ class PriceFacts:
     discounted_price: float
     discount: int
     club_discount: int
-    # Цена для подписчиков WB Клуба. None — WB её не прислал, тогда клубной
-    # скидки нет и покупатель видит обычную цену со скидкой.
     club_discounted_price: float | None = None
 
 

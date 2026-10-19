@@ -1,5 +1,3 @@
-"""Зеркало рекламы: клиент рекламного API и сбор окнами от курсора."""
-
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
@@ -79,7 +77,6 @@ async def test_spend_is_folded_by_moscow_day_and_payment_type() -> None:
         )
         spend = await WBAdvertClient(make_gateway()).spend(SELLER, date(2026, 9, 21), date(2026, 9, 27))
 
-    # Две строки одного дня складываются; 01:30 UTC — уже 22-е по Москве.
     assert sorted((item.day.isoformat(), item.payment_type, item.amount) for item in spend) == [
         ("2026-09-21", "Баланс", Decimal("5.00")),
         ("2026-09-22", "Баланс", Decimal("7.00")),
@@ -138,14 +135,10 @@ async def test_campaigns_and_stats_are_read_in_chunks_of_fifty() -> None:
         "cpm",
         11,
     )
-    # Площадки одного дня складываются по артикулу.
     assert sorted((item.day.isoformat(), item.nm_id, item.amount, item.views) for item in stats[:2]) == [
         ("2026-09-23", BRUSH, Decimal("82.17"), 40),
         ("2026-09-24", DRILL, Decimal("1.40"), 7),
     ]
-
-
-# --- сбор ------------------------------------------------------------------------------
 
 
 class FakeAdverts(WBAdvertClient):
@@ -245,11 +238,9 @@ async def test_adverts_are_collected_in_windows_from_the_history_start_and_resum
 
     first = await service.collect_adverts(seller, now=at(7))
 
-    # Два окна по 31 дню от начала истории; курсор — конец второго окна.
     assert client.windows == [(date(2026, 8, 1), date(2026, 8, 31)), (date(2026, 9, 1), date(2026, 10, 1))]
     assert (first.windows, first.spend_rows, first.stat_rows, first.collected_through) == (2, 3, 3, date(2026, 10, 1))
     second = await service.collect_adverts(seller, now=at(7))
-    # Следующий проход — с перекрытием в три дня до сегодняшнего дня, курсор не заходит за вчера.
     assert client.windows[-1] == (date(2026, 9, 28), date(2026, 10, 7))
     assert (second.windows, second.collected_through) == (1, date(2026, 10, 6))
     async with database.session() as session:

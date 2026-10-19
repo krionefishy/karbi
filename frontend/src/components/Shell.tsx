@@ -21,13 +21,9 @@ import { automationNav } from "../features/automations/nav";
 import { useTheme } from "../features/theme";
 
 interface ShellProps {
-  /** Текущая страница в хлебных крошках; без неё крошки показывают только раздел. */
   current?: string;
-  /** Переключатель селлера, если страница работает с одним селлером. */
   seller?: ReactNode;
-  /** Действия страницы в верхней панели — не больше двух. */
   actions?: ReactNode;
-  /** Админка: своя навигация и ссылка обратно в рабочий интерфейс. */
   admin?: boolean;
   children: ReactNode;
 }
@@ -42,9 +38,6 @@ function readCollapsed(): boolean {
   }
 }
 
-/** Каркас рабочей страницы: левая навигация, верхняя панель, контент.
- * Селлер выбирается в верхней панели, а не в отдельной колонке — широким
- * таблицам нужна вся ширина. */
 export function Shell({ current, seller, actions, admin = false, children }: ShellProps) {
   const { user, clearSession } = useAuth();
   const navigate = useNavigate();

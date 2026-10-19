@@ -41,8 +41,6 @@ from backend.workers.wb_card_checklist.worker import CardChecklistWorker
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 MOSCOW = ZoneInfo("Europe/Moscow")
-# Предмет, которого нет в настоящем справочнике WB: таблица предметов общая,
-# и тест не должен задеть чужие строки.
 SUBJECT = 990_001
 DIRECTORY = [
     SubjectCharacteristic(1, "Цвет", required=False, popular=True, named_field=False),
@@ -191,26 +189,21 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
         view = await service(session).view(seller)
 
     assert (view.stock_state, view.reviews_state, view.min_stock) == (STOCK_OK, REVIEWS_OK, 10)
-    # B лежит ниже порога в 10 штук и в таблицу не попадает; порядок — по названию.
     assert [row.article for row in view.rows] == ["C", "A"]
     alpha, beta = view.rows
     items = {state.key: state for state in beta.items}
     assert beta.stock == 15
     assert items["photos"].done
     assert (items["characteristics"].done, items["characteristics"].detail) == (True, "3/3")
-    # Отзывы у склейки общие: 3 у A и 2 у C — на карточке покупатель видит 5.
     assert items["reviews_present"].detail == "5 отз."
     assert (items["reviews_with_photo"].done, items["reviews_with_photo"].detail) == (True, "1 с фото")
     assert (items["reviews_with_video"].done, items["reviews_with_video"].detail) == (False, "0 с видео")
     assert (items["discount"].done, items["discount"].detail) == (True, "−50% · 500 ₽")
-    # Клубной скидки у A нет, видео-отзывов тоже: 7 из 9.
     assert (items["club_discount"].done, items["club_discount"].detail) == (False, "без скидки")
     assert (beta.done, beta.total, beta.ready) == (7, 9, False)
     assert beta.note == "Не хватает: Скидка WB Клуба, Отзывы с видео"
     alpha_items = {state.key: state for state in alpha.items}
-    # Цены у C нет: «нет данных» названо отдельно от «не хватает».
     assert alpha.note == "Не хватает: Отзывы с видео. Нет данных: Скидка / СПП, Скидка WB Клуба"
-    # Одного фото по инструкции хватает.
     assert (alpha_items["photos"].done, alpha_items["photos"].detail) == (True, "1 фото")
     assert alpha_items["discount"].done is None
 
@@ -284,7 +277,6 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     assert header[15:] == ["Готово из 9", "Примечание", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
-    # В ячейке — то, что видит WB, результат — цветом.
     assert second[6:15] == [
         "1500 симв.",
         "3/3",
@@ -299,7 +291,6 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     green, red = "C6EFCE", "FFC7CE"
     fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 16)]
     assert fills == [green] * 5 + [red] + [green] * 2 + [red]
-    # Вместо «ГОТОВ/НЕ ГОТОВ» — сколько закрыто и словами, чего не хватает.
     assert second[15:18] == [7, "Не хватает: Скидка WB Клуба, Отзывы с видео", "Проверить рич"]
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
@@ -331,7 +322,6 @@ async def test_collection_rewrites_cards_and_keeps_prices_a_key_cannot_read(
             subject_ttl=timedelta(days=7),
         ).collect(seller)
 
-    # Справочник свежий — второй раз его не спрашивают.
     assert cards.subjects_asked == [SUBJECT]
     assert second.subjects == 0
     assert second.warning is not None and second.warning.startswith("Цены не прочитаны")
@@ -358,12 +348,10 @@ async def test_a_seller_detached_mid_collection_is_not_written(database: Databas
 
 
 async def test_worker_collects_once_a_day_and_serves_the_button(database: Database, seller: uuid.UUID) -> None:
-    # 06:00 МСК — после суточного сбора в 05:00.
     moment = datetime(2026, 9, 10, 6, 0, tzinfo=MOSCOW)
     worker = CardChecklistWorker(database, FakeCards(CARDS), FakePrices(), SETTINGS, now=lambda timezone: moment)
 
     assert worker.due_since(moment) == datetime(2026, 9, 10, 2, 0, tzinfo=UTC)
-    # До пяти утра срок ещё вчерашний.
     assert worker.due_since(moment.replace(hour=4)) == datetime(2026, 9, 9, 2, 0, tzinfo=UTC)
 
     await worker.collect_due(moment)
@@ -407,7 +395,6 @@ async def test_the_mirror_hands_over_stock_and_reviews_once_it_has_collected_the
         await mirror.replace_stocks(seller, [StockFact("A", 99, 99, 0)], {}, now=moment - timedelta(days=5))
         await mirror.mark_collected(seller, MIRROR_STOCKS, now=moment - timedelta(days=5))
         await session.commit()
-        # Сбор пятидневной давности — это не «текущий остаток».
         assert await stock.stock(seller, today) == {}
 
         await mirror.record_attempt(seller, MIRROR_STOCKS, now=moment)
@@ -420,7 +407,6 @@ async def test_the_mirror_hands_over_stock_and_reviews_once_it_has_collected_the
 
         assert await stock.stock(seller, today) == {"A": 12}
         latest = (await totals.totals(seller) or {})["A"]
-    # Медиа не считали: «не знаем», а не ноль.
     assert (latest.total, latest.with_photo, latest.with_video) == (4, None, None)
 
 
@@ -440,6 +426,5 @@ async def test_a_refresh_left_running_by_a_dead_worker_is_closed(database: Datab
     async with database.session() as session:
         state = await service(session).refresh_state(seller)
         assert state is not None and (state.status, state.in_progress) == ("error", False)
-        # Место освободилось: новое нажатие создаёт новый запрос.
         fresh = await service(session).request_refresh(seller, None)
     assert fresh.status == "queued"

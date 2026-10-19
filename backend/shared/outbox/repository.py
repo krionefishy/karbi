@@ -27,9 +27,6 @@ class OutboxRepository:
         )
         return event_id
 
-    # The lock must outlive the slowest publish attempt: send_and_wait against a
-    # degraded broker can block for its full delivery timeout, and a lock that
-    # expires mid-send lets a second publisher emit the same event again.
     DEFAULT_LOCK_SECONDS = 120
 
     async def claim(

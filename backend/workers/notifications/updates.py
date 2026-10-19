@@ -1,14 +1,3 @@
-"""Fetching inbound messages from the relay.
-
-The relay cannot reach this server — its hosting refuses foreign addresses on
-every port — so the direction is inverted: one loop per bot asks the relay for
-everything past our cursor and holds the request while the channel is quiet.
-
-The cursor in Postgres is the only bookkeeping. There is no acknowledgement to
-lose: a crash between "handled" and "answered" costs a repeated fetch, and the
-repeat is dropped by the same cursor.
-"""
-
 import asyncio
 import logging
 
@@ -48,7 +37,6 @@ class UpdateFetcher:
             except asyncio.CancelledError:
                 raise
             except MessengerTemporaryError as error:
-                # The relay being down is normal weather: it keeps the updates.
                 self.logger.warning("update_fetch_retry", extra={"bot": self.bot.code, "error": str(error)})
                 await asyncio.sleep(RETRY_SECONDS)
             except Exception:
@@ -72,9 +60,6 @@ class UpdateFetcher:
 
     async def handle(self, update: RelayUpdate) -> bool:
         if not _is_number(update.recipient):
-            # Subscriptions key chats by a numeric id. Skipping without moving
-            # the cursor would ask the relay for this same update forever, so
-            # the cursor steps over it and the loop keeps going.
             self.logger.error(
                 "update_recipient_not_addressable",
                 extra={"bot": self.bot.code, "event": update.event_id},

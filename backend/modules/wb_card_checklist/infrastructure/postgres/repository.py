@@ -24,8 +24,6 @@ class ChecklistRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- membership -------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -61,8 +59,6 @@ class ChecklistRepository:
             .with_for_update(read=True)
         )
         return found is not None
-
-    # --- collection schedule ---------------------------------------------
 
     async def sellers_due(self, since: datetime, *, retry_after: datetime) -> list[uuid.UUID]:
         """Enrolled sellers not collected since `since` and not tried since `retry_after`."""
@@ -112,13 +108,9 @@ class ChecklistRepository:
         ).one()
         return row[0], int(row[1] or 0)
 
-    # --- card facts -------------------------------------------------------
-
     async def replace_cards(self, seller_id: uuid.UUID, cards: Sequence[CardFacts]) -> None:
         await self.session.execute(delete(CardFactsModel).where(CardFactsModel.seller_id == seller_id))
         now = datetime.now(UTC)
-        # WB не повторяет nmID в выдаче, но если повторит — поздняя строка
-        # выиграет, а не уронит вставку конфликтом первичного ключа.
         unique = {card.article: card for card in cards}
         rows = [self._card_row(seller_id, card, now) for card in unique.values()]
         for offset in range(0, len(rows), _CHUNK):
@@ -165,8 +157,6 @@ class ChecklistRepository:
             )
             for row in rows
         }
-
-    # --- subject directory -----------------------------------------------
 
     async def stale_subjects(self, subject_ids: Iterable[int], fresh_after: datetime) -> set[int]:
         wanted = set(subject_ids)
@@ -226,8 +216,6 @@ class ChecklistRepository:
             for row in rows
         }
 
-    # --- comments --------------------------------------------------------
-
     async def comments(self, seller_id: uuid.UUID) -> dict[str, str]:
         rows = await self.session.scalars(select(CommentModel).where(CommentModel.seller_id == seller_id))
         return {row.article: row.text for row in rows}
@@ -251,8 +239,6 @@ class ChecklistRepository:
                 },
             )
         )
-
-    # --- manual refresh --------------------------------------------------
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
         """Ask for an out-of-schedule collection, or hand back the one already waiting."""
@@ -323,8 +309,6 @@ class ChecklistRepository:
                 finished_at=datetime.now(UTC),
             )
         )
-
-    # --- mapping ----------------------------------------------------------
 
     @staticmethod
     def _card_row(seller_id: uuid.UUID, card: CardFacts, now: datetime) -> dict[str, Any]:

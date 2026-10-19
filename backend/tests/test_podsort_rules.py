@@ -37,12 +37,10 @@ def remain(barcode: str, warehouse: str, quantity: int) -> WarehouseRemain:
 
 def test_orders_fall_into_wb_regions() -> None:
     assert order_region("Россия", "Центральный федеральный округ") == CENTRAL
-    # Округа склеены как в отчёте WB.
     assert order_region("Россия", "Северо-Кавказский федеральный округ") == "Южный и Северо-Кавказский"
     assert order_region("Россия", "Сибирский федеральный округ") == "Дальневосточный и Сибирский"
     assert order_region("Беларусь", "") == "Беларусь"
     assert order_region("Россия", "") == "Россия"
-    # Страну, которой нет в списке, не прячем в «Россию».
     assert order_region("Монголия", "") == "Монголия"
 
 
@@ -54,18 +52,15 @@ def test_warehouses_are_placed_by_city() -> None:
     assert guess_warehouse_region("Нижний Новгород") == "Приволжский"
     assert guess_warehouse_region("Екатеринбург - Перспективный 12") == "Уральский"
     assert guess_warehouse_region("СК Ереван") == "Армения"
-    # Не склад и склад без места — не угадываются.
     assert guess_warehouse_region("В пути до получателей") is None
     assert guess_warehouse_region("Склад WB РФ") is None
     assert guess_warehouse_region("Неведомый склад") is None
 
 
 def test_need_subtracts_the_stock_already_in_the_region() -> None:
-    # Шуруповёрт из книги 23.09: 61 шт. за неделю, а в ЦФО уже лежит 580.
     assert RegionFigures(window_orders=61, stock=580).need(7, 7) == 0
     assert RegionFigures(window_orders=61, stock=0).need(7, 7) == 61
     assert RegionFigures(window_orders=61, stock=20).need(7, 7) == 41
-    # Две недели продаж на неделю вперёд — половина, половина вверх как в Excel.
     assert RegionFigures(window_orders=15, stock=0).need(14, 7) == 8
     assert RegionFigures(window_orders=0, stock=10).cover(7) is None
     assert RegionFigures(window_orders=14, stock=10).cover(7) == 5.0
@@ -79,7 +74,6 @@ def test_periods_are_full_days_up_to_yesterday() -> None:
     assert periods.months == (date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1))
     assert periods.month_end(date(2026, 8, 1)) == date(2026, 8, 31)
     assert periods.month_end(date(2026, 9, 1)) == date(2026, 9, 23)
-    # Первое число: вчерашний день — прошлый месяц, он и последний в книге.
     assert Periods(date(2026, 10, 1)).months == (date(2026, 7, 1), date(2026, 8, 1), date(2026, 9, 1))
 
 
@@ -155,7 +149,6 @@ async def test_days_of_one_cabinet_are_spaced_by_the_statistics_limit() -> None:
 
     result = await service.collect(uuid.uuid4(), now=datetime(2026, 9, 24, 10, 0, tzinfo=MOSCOW))
 
-    # Между сутками — пауза, перед первыми — нет: первый запрос кабинета не ждёт зря.
     assert (result.days_loaded, result.remaining, pauses) == (3, 7, [61, 61])
 
 
@@ -163,16 +156,13 @@ def test_missing_days_come_newest_first_and_unsettled_days_are_reread() -> None:
     now = datetime(2026, 9, 24, 10, 0, tzinfo=MOSCOW)
     service = collection()
     loaded = {
-        # Вчера прочитали в 01:00 — WB ещё дописывал заказы; перечитать можно, прошёл час.
         date(2026, 9, 23): datetime(2026, 9, 24, 1, 0, tzinfo=MOSCOW),
-        # Позавчера прочитали после 06:00 следующего дня — сутки устоялись.
         date(2026, 9, 22): datetime(2026, 9, 23, 7, 0, tzinfo=MOSCOW),
         date(2026, 9, 20): datetime(2026, 9, 21, 7, 0, tzinfo=MOSCOW),
     }
 
     assert service.due_days(loaded, now=now) == [date(2026, 9, 23), date(2026, 9, 21), date(2026, 9, 19)]
 
-    # Только что перечитанный неустоявшийся день ждёт `refresh_minutes`.
     loaded[date(2026, 9, 23)] = datetime(2026, 9, 24, 9, 30, tzinfo=MOSCOW)
     assert service.due_days(loaded, now=now) == [date(2026, 9, 21), date(2026, 9, 19)]
 
@@ -204,15 +194,12 @@ def test_rows_subtract_regional_stock_and_keep_unplaced_stock_aside() -> None:
     assert drill.targets[CENTRAL].need(7, 7) == 0
     assert drill.targets["Приволжский"].stock == 5
     assert drill.targets["Приволжский"].need(7, 7) == 9
-    # «Склад WB РФ» — остаток без места; «в пути» и итог отчёта не считаются вовсе.
     assert drill.unplaced_stock == 300
     assert drill.window_orders == 75 and drill.window_fbs_orders == 40
     assert drill.month_by_region == {CENTRAL: 61, "Приволжский": 14}
-    # Склад, которому регион задал человек, вычитается как любой другой.
     assert by_barcode[BINOCULARS].targets[CENTRAL].stock == 60
     assert by_barcode[BINOCULARS].targets[CENTRAL].need(7, 7) == 0
     assert by_barcode[SAW].targets[CENTRAL].need(7, 7) == 53
-    # Сначала то, что продаётся быстрее.
     assert [row.info.barcode for row in rows] == [DRILL, SAW, BINOCULARS]
 
 
@@ -272,11 +259,9 @@ def test_the_workbook_explains_the_subtraction_next_to_the_numbers() -> None:
     header = next(row for row in values if row[0] == "Кабинет")
     assert header[5] == "Расчёт системы"
     body = [row for row in values if row[0] == "Байбурин"]
-    # Шуруповёрт не везём — в ЦФО его на месяцы вперёд; пилу — везём.
     assert [(row[2], row[5], row[12]) for row in body] == [(SAW, 53, 0)]
     assert summary.cell(values.index(header) + 1, 6).comment is not None
     seller = book["Подсорт Байбурин"]
-    # Начало июля WB уже не отдаёт — месяц подписан, с какого числа он посчитан.
     assert (seller.cell(2, 6).value, seller.cell(2, 7).value) == ("июль 2026 (с 26.07)", "август 2026")
     assert book["Подсорт Саниев"].cell(2, 6).value == "июль 2026"
     assert seller.cell(3, 3).value == DRILL

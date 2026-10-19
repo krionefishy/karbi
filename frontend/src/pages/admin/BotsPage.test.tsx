@@ -47,7 +47,6 @@ describe("BotsPage", () => {
   it("shows the invite template without pretending it is a usable link", async () => {
     renderPage();
 
-    // The token placeholder is what makes it a template, not a link to click.
     expect(await screen.findByText("https://t.me/mplace_auto_bot?start=…")).toBeInTheDocument();
     expect(screen.getByText("turnover-alerts")).toBeInTheDocument();
   });
@@ -88,7 +87,6 @@ describe("BotsPage", () => {
     await user.type(screen.getByPlaceholderText("123456789:AA..."), "1234:secret");
     await user.click(screen.getByRole("button", { name: "Подключить" }));
 
-    // Only the first argument matters: react-query adds its own second one.
     await waitFor(() => expect(createBot).toHaveBeenCalled());
     expect(createBot.mock.calls[0][0]).toEqual({ code: "reviews-alerts", title: "", token: "1234:secret" });
   });

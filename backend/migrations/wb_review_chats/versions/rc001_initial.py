@@ -1,10 +1,3 @@
-"""Чаты после отзыва: подключённые кабинеты.
-
-Больше таблиц нет нарочно: события чатов лежат в зеркале `wb_core`, а отчёт
-считается из них при чтении — окно ответа и правила можно менять, не
-пересобирая историю.
-"""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID

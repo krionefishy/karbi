@@ -1,13 +1,3 @@
-"""Конфиг внешнего мониторинга (application.json) из маршрутов API.
-
-Мониторинг читает лог хостового nginx и сам ничего не знает о приложении:
-какой путь к какому разделу относится и где в пути идентификатор, ему говорит
-этот файл. В репозитории его нет: он печатается из работающего API при каждой
-выкладке (deploy/monitoring/sync-config.sh), поэтому отстать от маршрутов не может.
-
-    uv run python -m backend.commands.monitoring_config   # напечатать
-"""
-
 import json
 import re
 import sys
@@ -20,16 +10,12 @@ from backend.app.application import create_app
 BASE_PATH = "/api/v1"
 LOG_PATH = "/var/log/nginx/marketplace-auto-monitoring.json"
 
-# Чем заменяется параметр пути в регулярном выражении. Узкий шаблон важен для
-# uuid и чисел: `groups/order` не должен попасть в `groups/{group_id}`.
 PARAM_PATTERNS = {
     "uuid": "[0-9a-fA-F-]{36}",
     "integer": "[0-9]+",
 }
 ANY_SEGMENT = "[^/]+"
 
-# Раздел — это префикс пути после /api/v1. Первый сегмент у нас почти всегда
-# `wb`, группировка мониторинга по нему бесполезна, поэтому делим на сервисы.
 SERVICE_NAMES = {
     "/admin": "Админка",
     "/auth": "Вход",
@@ -99,15 +85,11 @@ def build_config(app: FastAPI | None = None) -> dict[str, Any]:
     excluded = sorted(path for path in paths if path.startswith("/health/"))
     routed = {path: params for path, params in paths.items() if path not in excluded}
 
-    # Сначала маршруты с меньшим числом «любых» сегментов: точное совпадение
-    # должно выигрывать у строкового параметра на том же месте.
     ordered = sorted(
         routed.items(),
         key=lambda item: (sum(kind == "string" for kind in item[1].values()), item[0]),
     )
     rules = [_rule(path, params) for path, params in ordered]
-    # Всё, чего в приложении нет, — сканеры и опечатки. Без этого правила каждый
-    # такой путь стал бы отдельной строкой в отчётах и съел лимит max_routes.
     rules.append({"pattern": ".*", "route": "/[unknown]"})
 
     prefixes = sorted({_service_prefix(path) for path in routed})
@@ -115,8 +97,6 @@ def build_config(app: FastAPI | None = None) -> dict[str, Any]:
     if missing:
         raise SystemExit(f"нет названия раздела в SERVICE_NAMES: {', '.join(missing)}")
 
-    # Имена контейнеров, а не сервисов compose: в сети мониторинга есть свой
-    # `api` на том же порту, и короткое имя резолвилось бы в оба.
     api_health: dict[str, Any] = {
         "health_url": f"http://karbi-api-1:8000{BASE_PATH}/health/ready",
         "health_body": {"database": True, "redis": True},
@@ -124,17 +104,12 @@ def build_config(app: FastAPI | None = None) -> dict[str, Any]:
     services: list[dict[str, Any]] = [
         {"id": "api", "name": "API", "prefix": "/", **api_health},
         {
-            # Запросы фронта лежат вне /api/v1 и в отчёты не попадают; раздел
-            # нужен только ради проверки доступности, префикс ни с чем не совпадает.
             "id": "frontend",
             "name": "Фронтенд",
             "prefix": "/-/frontend",
             "health_url": "http://karbi-frontend-1/health",
         },
     ]
-    # Разделы — части одного процесса API, отдельного health у них нет. Проверка
-    # у всех та же, что у API: без неё страница статусов показывала бы по каждому
-    # разделу «не настроено», хотя он работает.
     services += [
         {
             "id": prefix.strip("/").replace("/", "-"),

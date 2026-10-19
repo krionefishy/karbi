@@ -1,5 +1,3 @@
-"""Разбор полей WB: даты без зоны — московские, числа приходят и строками."""
-
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo

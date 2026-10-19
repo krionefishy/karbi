@@ -5,7 +5,6 @@ from backend.modules.wb_core.infrastructure.wb import WBJsonClient, WBPermanentE
 from backend.modules.wb_podsort.domain import OrderLine, order_region
 
 STATISTICS_BUCKET = "statistics"
-# Так WB помечает заказ со склада продавца (FBS/DBS); FBO — «Склад WB».
 SELLER_WAREHOUSE = "Склад продавца"
 
 
@@ -35,7 +34,6 @@ class WBPodsortStatisticsClient(WBJsonClient):
         for raw in payload:
             if not isinstance(raw, dict):
                 continue
-            # WB решает, что значит флаг: чужой день в ответе раздул бы наш.
             if self._day(raw.get("date")) != day:
                 continue
             srid = str(raw.get("srid") or "")

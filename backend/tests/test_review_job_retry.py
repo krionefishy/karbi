@@ -66,9 +66,7 @@ async def test_a_throttled_job_is_requeued_with_backoff_and_redispatched(sync_ru
         assert stored.status == "queued"
         assert stored.attempts == 1
         assert stored.next_attempt_at is not None
-        # The run stays open, so the day is not lost to one 429.
         assert (await session.get(ReviewSyncRunModel, run.id)).finished_at is None
-        # Backoff has not elapsed yet, so nothing is dispatched.
         assert await ReviewSyncRepository(session).claim_due_jobs() == []
 
     async with database.session() as session:
@@ -91,8 +89,6 @@ async def test_a_throttled_job_is_requeued_with_backoff_and_redispatched(sync_ru
                 )
             )
         )
-    # The fixture creates the run directly, so this is the retry dispatch itself:
-    # a fresh event id, which is what keeps the inbox from swallowing the retry.
     assert len(events) == 1
     assert events[0].payload["job_id"] == str(job.id)
     assert events[0].payload["event_id"] == str(events[0].id)
@@ -105,7 +101,6 @@ async def test_a_job_fails_for_good_once_attempts_run_out(sync_run) -> None:
 
     async with database.session() as session:
         reviews = ReviewSyncRepository(session)
-        # First attempt earns a retry, the second exhausts the allowance of two.
         await reviews.mark_job_running(job.id, lease_seconds=600)
         assert await reviews.reschedule_job(job.id, RATE_LIMITED, max_attempts=2, backoff_seconds=1)
         await reviews.mark_job_running(job.id, lease_seconds=600)
@@ -160,7 +155,6 @@ async def test_a_stale_run_is_closed_so_a_new_one_can_start(sync_run) -> None:
     async with database.session() as session:
         assert (await session.get(ReviewSyncRunModel, run.id)).status == "error"
         assert (await session.get(ReviewSyncJobModel, job.id)).status == "error"
-        # A closed run no longer counts as active, so the next sync is allowed.
         assert await ReviewSyncRepository(session).active_run() is None
 
 
@@ -194,7 +188,6 @@ async def test_two_workers_finishing_the_last_jobs_still_close_the_run(sync_run)
 
             second = asyncio.create_task(finish_second())
             await asyncio.sleep(0.3)
-            # The second finisher waits on the run row until the first commits.
             assert not second.done()
             await session_a.commit()
             await asyncio.wait_for(second, timeout=5)
@@ -219,7 +212,6 @@ async def test_a_job_closed_by_the_reaper_keeps_its_verdict(sync_run) -> None:
         reviews = ReviewSyncRepository(session)
         await reviews.mark_job_running(job.id, lease_seconds=600)
         await reviews.fail_job(job.id, "Прогон закрыт по таймауту")
-        # The worker that actually held the job comes back after the reaper.
         await reviews.complete_job(job.id, 5, 100)
         await session.commit()
 
@@ -245,8 +237,6 @@ async def test_a_failed_scheduled_run_does_not_eat_the_date(sync_run) -> None:
 
     async with database.session() as session:
         reviews = ReviewSyncRepository(session)
-        # The errored run no longer claims the date...
         assert await reviews.run_for_date(today) is None
-        # ...so the scheduler is allowed to try the day again.
         retry = await ReviewSyncService(session, SellerRepository(session), reviews).request("scheduled", today)
         assert retry.id != run.id

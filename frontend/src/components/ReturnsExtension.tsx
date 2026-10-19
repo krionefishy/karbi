@@ -19,7 +19,6 @@ function stamp(value: string | null): string {
   return value ? momentFormatter.format(new Date(value)) : "—";
 }
 
-/** Вкладка «Расширение»: скачать, получить код пары, следить за установками и кодом дня. */
 export function ReturnsExtension({ sellerId }: { sellerId: string }) {
   const queryClient = useQueryClient();
   const [error, setError] = useState("");

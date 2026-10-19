@@ -1,11 +1,3 @@
-"""ОПиУ кабинета Wildberries из отчёта реализации.
-
-Строки и формулы повторяют отчёт, которым финансист пользовался раньше, и
-сверены с ним на живых отчётах до копейки: выручка, к перечислению,
-логистика, штрафы, хранение, приёмка и лояльность — итоги WB как есть, а
-удержания раскладываются по названию, которое им даёт WB.
-"""
-
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -14,7 +6,6 @@ from backend.modules.wb_core.domain import SALES_RETURN_DOC_TYPE, SalesReportTot
 
 ZERO = Decimal("0.00")
 
-# Строки отчёта в порядке показа. Доходы положительные, расходы отрицательные.
 REVENUE_BEFORE_SPP = "revenue_before_spp"
 PLANNED_COMMISSION = "planned_commission"
 REVENUE_AFTER_SPP = "revenue_after_spp"
@@ -38,7 +29,6 @@ PAYOUT_TERM = "payout_term"
 OTHER_DEDUCTIONS = "other_deductions"
 GROSS_MARGIN = "gross_margin"
 
-# Уровень строки: итог, подытог или статья расходов внутри «Прямых расходов».
 LEVEL_TOTAL = "total"
 LEVEL_SUBTOTAL = "subtotal"
 LEVEL_ITEM = "item"
@@ -77,12 +67,8 @@ LINES: tuple[Line, ...] = (
     Line(GROSS_MARGIN, "Валовая маржа", LEVEL_TOTAL),
 )
 LINE_KEYS = tuple(line.key for line in LINES)
-# Что складывается в «Прямые расходы». Кредит — справочная строка: погашение
-# займа не расход периода, и в маржу оно не входит.
 EXPENSE_KEYS = tuple(line.key for line in LINES if line.level == LEVEL_ITEM)
 
-# Удержания WB различаются только названием; к нему дописан номер документа.
-# Сверяется нижний регистр, порядок важен: первое совпадение побеждает.
 DEDUCTION_KINDS: tuple[tuple[str, str], ...] = (
     ("wb продвижение", ADVERTISING),
     ("баллы за отзывы", REVIEWS),
@@ -146,7 +132,6 @@ def statement(
     result = Statement()
     values = result.values
     for item in totals:
-        # Возврат WB отдаёт положительной строкой, а в итогах вычитает.
         sign = -1 if item.doc_type_name == SALES_RETURN_DOC_TYPE else 1
         gross = sign * money(item.gross)
         values[REVENUE_BEFORE_SPP] += gross
@@ -165,7 +150,6 @@ def statement(
         values[SURCHARGES] += money(item.additional_payment)
         values[STORAGE] -= money(item.paid_storage)
         values[ACCEPTANCE] -= money(item.paid_acceptance)
-        # Лояльность у возврата WB тоже отдаёт положительной и в итогах вычитает — как выручку.
         values[LOYALTY_POINTS] -= sign * money(item.cashback_amount)
         values[LOYALTY_PROGRAM] -= sign * money(item.cashback_commission_change)
         if item.deduction:

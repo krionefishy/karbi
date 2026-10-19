@@ -1,10 +1,3 @@
-"""Сопоставить Excel коробовки, PDF стикеров и упаковку поставки в WB.
-
-Порядок берётся из Excel, страницы — из PDF, содержимое коробов — из WB.
-Любое расхождение — проблема, при которой PDF не собирается: стикер,
-наклеенный не на тот короб, хуже, чем стикеры, которые пришлось перепроверить.
-"""
-
 import asyncio
 import re
 import uuid
@@ -28,7 +21,6 @@ from backend.modules.wb_box_stickers.infrastructure.wb import WBSuppliesClient
 from backend.modules.wb_core.domain import EGRESS_SERVABLE, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
-# Сколько имён коробов показывать в одной проблеме: дальше список никто не читает.
 NAMES_LIMIT = 10
 
 AUTOMATION_ID = "wb-box-stickers"
@@ -155,7 +147,6 @@ class BoxStickerService:
             problems.append(f"Один и тот же короб в PDF дважды: {_names(twice)}")
         by_shk = {page.shk: page for page in pages if page.shk}
 
-        # Страница короба: по полному коду из Excel, а без колонки кода — по номеру на стикере.
         placed: list[tuple[WorkbookBox, StickerPage]] = []
         missing: list[str] = []
         for box in boxes:

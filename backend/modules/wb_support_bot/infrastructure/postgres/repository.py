@@ -21,7 +21,6 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     VerdictModel,
 )
 
-# Статусы, которые видны в журнале: «запланировано» и «отправляется» живут доли секунды.
 JOURNAL_STATUSES = (SEND_SENT, SEND_UNKNOWN, SEND_FAILED, SEND_DRY_RUN)
 
 
@@ -35,8 +34,6 @@ class DialogKey:
 class SupportBotRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    # --- подключения и режим --------------------------------------------------
 
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
@@ -67,8 +64,6 @@ class SupportBotRepository:
             update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(paused_reason=reason)
         )
 
-    # --- общий выключатель ----------------------------------------------------
-
     async def is_paused(self) -> bool:
         return bool(await self.session.scalar(select(ControlModel.paused).where(ControlModel.id == 1)))
 
@@ -77,8 +72,6 @@ class SupportBotRepository:
         await self.session.execute(
             statement.on_conflict_do_update(index_elements=["id"], set_={"paused": paused, "updated_at": func.now()})
         )
-
-    # --- тексты ---------------------------------------------------------------
 
     async def templates(self, seller_id: uuid.UUID, *, active_only: bool = False) -> list[TemplateModel]:
         query = select(TemplateModel).where(TemplateModel.seller_id == seller_id).order_by(TemplateModel.id)
@@ -102,8 +95,6 @@ class SupportBotRepository:
             delete(TemplateModel).where(TemplateModel.seller_id == seller_id, TemplateModel.id == template_id)
         )
         return bool(getattr(result, "rowcount", 0))
-
-    # --- диалоги --------------------------------------------------------------
 
     async def dialogs_by_keys(self, seller_id: uuid.UUID, since: datetime) -> dict[tuple[str, datetime], DialogModel]:
         rows = await self.session.scalars(
@@ -214,8 +205,6 @@ class SupportBotRepository:
         )
         return bool(getattr(result, "rowcount", 0))
 
-    # --- журнал отправок ------------------------------------------------------
-
     async def dialog_sends(self, key: DialogKey) -> list[SendModel]:
         rows = await self.session.scalars(
             select(SendModel)
@@ -301,8 +290,6 @@ class SupportBotRepository:
 
     async def last_activity(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(select(func.max(SendModel.planned_at)).where(SendModel.seller_id == seller_id))
-
-    # --- вердикты нейросети ---------------------------------------------------
 
     async def verdicts_by_tail(self, seller_id: uuid.UUID, prompt_version: str) -> dict[tuple[str, str], VerdictModel]:
         """Все вердикты кабинета для версии промпта, по паре (чат, отпечаток хвоста)."""

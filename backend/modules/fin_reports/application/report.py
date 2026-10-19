@@ -36,7 +36,6 @@ MUTED = Font(italic=True, color="7F7F7F")
 MONEY_FORMAT = "#,##0.00;-#,##0.00;-"
 TITLE_WIDTH = 46
 MONEY_WIDTH = 18
-# Excel не принимает в имени листа больше 31 знака и эти символы.
 SHEET_FORBIDDEN = str.maketrans({char: " " for char in "[]:*?/\\"})
 
 

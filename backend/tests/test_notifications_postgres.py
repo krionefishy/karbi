@@ -174,7 +174,6 @@ async def test_stop_unsubscribes_the_chat(notifications) -> None:
     async with database.session() as session:
         assert await NotificationRepository(session).subscribers(bot.id, SELLER_ID) == []
         row = await session.scalar(select(SubscriptionModel).where(SubscriptionModel.bot_id == bot.id))
-        # The row stays: who was subscribed and when is worth keeping.
         assert row is not None and row.is_active is False
 
 
@@ -204,7 +203,6 @@ async def test_an_unknown_slash_command_goes_to_the_bots_automation(notification
 
     await handle(database, bot, update("/returns@test_bot сегодня"))
 
-    # Модуль уведомлений сам не отвечает: ответ — забота автоматизации бота.
     assert await queued_texts(database, bot) == []
     [event] = await command_events(database, bot)
     assert (event["bot"], event["chat_id"], event["command"], event["argument"]) == (
@@ -300,7 +298,6 @@ async def test_delivery_sends_what_was_queued(notifications) -> None:
 
     report = await deliver(database, client)
 
-    # The greeting from /start goes through the very same queue.
     assert report.sent == 1
     assert client.sent[0][0] == "555"
     assert (await deliver(database, client)).sent == 0
@@ -316,7 +313,6 @@ async def test_a_blocked_chat_is_not_retried_forever(notifications) -> None:
     async with database.session() as session:
         row = await session.scalar(select(OutgoingMessageModel).where(OutgoingMessageModel.bot_id == bot.id))
         assert row is not None and row.status == "failed"
-        # The chat is gone for good, so the subscription goes with it.
         subscription = await session.scalar(select(SubscriptionModel).where(SubscriptionModel.bot_id == bot.id))
         assert subscription is not None and subscription.is_active is False
 
@@ -347,7 +343,6 @@ async def test_a_rate_limit_waits_out_retry_after_without_burning_attempts(notif
         assert row is not None and row.status == "queued"
         assert row.attempts == 0
         assert row.next_attempt_at >= datetime.now(UTC) + timedelta(seconds=25)
-    # Not due until Telegram's pause is over.
     assert (await deliver(database, FakeRelay())).sent == 0
 
 
@@ -433,8 +428,6 @@ async def test_racing_invite_requests_leave_exactly_one_live_link(notifications)
         service = SubscriptionService(session, repository)
         first = await service.create_invite(bot, seller_id=SELLER_ID, seller_name="ООО Ромашка")
 
-        # A concurrent request whose revoke ran before `first` was committed:
-        # it sees nothing to revoke, and its insert hits the partial unique index.
         original_revoke = repository.revoke_invites
         calls = 0
 
@@ -448,7 +441,7 @@ async def test_racing_invite_requests_leave_exactly_one_live_link(notifications)
         repository.revoke_invites = racy_revoke  # type: ignore[method-assign]
         second = await service.create_invite(bot, seller_id=SELLER_ID, seller_name="ООО Ромашка")
 
-    assert calls == 2  # the conflict really happened and was retried
+    assert calls == 2
     assert second.token != first.token
     async with database.session() as session:
         live = list(
@@ -538,7 +531,6 @@ async def test_delivery_only_touches_the_bot_it_was_asked_for(notifications) -> 
         async with database.session() as session:
             rows = list(await session.scalars(select(OutgoingMessageModel).where(OutgoingMessageModel.chat_id == 555)))
         statuses = {bot_id: {row.status for row in rows if row.bot_id == bot_id} for bot_id in (bot.id, other.id)}
-        # Everything of the bot we asked for went out; nothing of the other bot moved.
         assert statuses[other.id] == {"sent"}
         assert statuses[bot.id] == {"queued"}
         assert report.sent == len([row for row in rows if row.bot_id == other.id])
@@ -563,7 +555,6 @@ async def test_delivery_state_counts_only_what_failed_after_the_last_success(not
     healthy = await state()
     assert healthy is not None and healthy.last_sent_at is not None and healthy.failed_count == 0
 
-    # Канал до релея сломан: сообщения исчерпывают попытки и после последней доставки копятся отказы.
     await dispatch_queue(database, request(bot.code, dedupe_key="turnover:2026-08-20"))
     await dispatch_queue(database, request(bot.code, dedupe_key="turnover:2026-08-21"))
     async with database.session() as session:

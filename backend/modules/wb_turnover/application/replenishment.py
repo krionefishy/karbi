@@ -19,9 +19,6 @@ from backend.modules.wb_turnover.infrastructure.postgres import TurnoverReposito
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MOSCOW = ZoneInfo("Europe/Moscow")
 
-# Восемь округов в том же порядке, в каком их держит у себя менеджер. Список
-# зашит намеренно: колонка, которая появляется и исчезает вместе с заказами,
-# ломает формулы в таблице, куда отчёт вставляют.
 DISTRICTS = (
     "Дальневосточный федеральный округ",
     "Приволжский федеральный округ",
@@ -32,9 +29,6 @@ DISTRICTS = (
     "Центральный федеральный округ",
     "Южный федеральный округ",
 )
-# Куда попадает всё остальное: заказы из-за границы и строки, у которых WB округ
-# не назвал. Без этой колонки «Итого» не сходилось бы с суммой по строке, и
-# расхождение списывали бы на ошибку выгрузки.
 OTHER_DISTRICT = "Прочее"
 
 _LEAD_COLUMNS = ("Баркод", "Артикул WB", "Артикул продавца", "Наименование")
@@ -60,7 +54,6 @@ class _Row:
     article: str
     vendor_code: str
     name: str
-    # None — метрику по этому артикулу не считали. Ноль сказал бы «не заказывают».
     rate: float | None
     regions: dict[str, int]
     stocks: dict[int, int]
@@ -99,8 +92,6 @@ class ReplenishmentReportService:
         return await asyncio.to_thread(self._build, seller_id, day or datetime.now(MOSCOW).date())
 
     def _build(self, seller_id: uuid.UUID, day: date) -> ReplenishmentReportFile:
-        # Как и отчёт по отзывам: чтение и сборка книги живут в этом треде, а
-        # соединения общего движка привязаны к event loop приложения.
         data = asyncio.run(self._load(seller_id, day))
         return ReplenishmentReportFile(data.seller_name, day, self._render(data))
 
@@ -114,8 +105,6 @@ class ReplenishmentReportService:
                     raise SellerNotFoundError
                 turnover = TurnoverRepository(session)
                 tracked = await turnover.tracked(seller_id)
-                # Окно заканчивается вчера — база собирается прожитыми сутками,
-                # и сегодняшние три часа в ней не лежат.
                 region_to = day - timedelta(days=1)
                 region_from = region_to - timedelta(days=self._region_history_days - 1)
                 articles = [item for item in await sellers.list_articles(seller_id) if item.state == "active"]
@@ -140,8 +129,6 @@ class ReplenishmentReportService:
                     )
                     for item in articles
                 ]
-                # Сверху то, что уходит быстрее всего: разговор о подсорте
-                # начинается с него, а не с алфавита.
                 rows.sort(key=lambda row: (-(row.rate or 0.0), row.name, row.article))
                 return _Data(
                     seller_name=seller.name,
@@ -190,8 +177,6 @@ class ReplenishmentReportService:
         for row in data.rows:
             counts = [row.regions.get(district, 0) for district in DISTRICTS]
             counts.append(sum(count for name, count in row.regions.items() if name not in DISTRICTS))
-            # Пустой слой остатков — это «не собирали», и нули на его месте
-            # прочли бы как пустые склады по всему кабинету.
             stocks = [
                 row.stocks.get(warehouse_id, 0) if data.fbs_stocks_at else None for warehouse_id, _ in data.warehouses
             ]

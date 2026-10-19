@@ -14,14 +14,9 @@ from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 MARKETPLACE_BUCKET = "marketplace"
-# WB accepts at most a thousand identifiers per stock request.
 CHRT_CHUNK = 1000
-# Страница списков заданий и поставок; больше WB не отдаёт.
 PAGE_LIMIT = 1000
-# Живой список заданий принимает окно не больше 30 дней за запрос.
 ORDERS_WINDOW = timedelta(days=30)
-# Страховка от зацикленного курсора, а не ожидание: самый крупный кабинет
-# делает ~1000 заданий в день, месяц — это ~30 страниц.
 MAX_PAGES = 200
 
 
@@ -94,8 +89,6 @@ class WBMarketplaceClient(WBJsonClient):
                 if isinstance(chrt_id, int):
                     collected[chrt_id] = int(row.get("amount") or 0)
         return collected
-
-    # --- сборочные задания и поставки --------------------------------------------
 
     async def orders(self, seller_id: str, *, date_from: datetime, date_to: datetime) -> list[FbsOrder]:
         """Задания, созданные в окне. Окно длиннее 30 дней режется на куски: таков лимит WB.

@@ -11,9 +11,6 @@ SCHEMA = "wb_fbs_distribution"
 
 
 def upgrade() -> None:
-    # «Последний план» до сих пор определялся по времени создания. Двух расчётов
-    # в одну отметку хватает, чтобы порядок стал произвольным, а публиковать
-    # произвольный из двух планов нельзя.
     op.add_column(
         "allocation_plans",
         sa.Column("sequence", sa.BigInteger(), sa.Identity(always=False), nullable=False),

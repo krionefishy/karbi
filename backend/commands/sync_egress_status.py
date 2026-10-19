@@ -1,17 +1,3 @@
-"""Сверка селлеров со шлюзом wb-egress — и статусов, и самого состояния.
-
-Команда закрывает три вида расхождений:
-
-- копирует статусы шлюза в колонки `egress_*` реестра (бэкфил после выкатки),
-  по каждому маркетплейсу отдельно;
-- гасит на шлюзе то, что должно быть погашено: архивный селлер, чей disable в
-  момент архивации не доехал, и осиротевшие записи шлюза, чей селлер уже
-  выкорчеван из реестра (purge при недоступном шлюзе);
-- доносит переименование, застрявшее в статусе `unsynced`.
-
-Запуск на проде: docker compose exec api python -m backend.commands.sync_egress_status
-"""
-
 import asyncio
 import sys
 import time
@@ -51,9 +37,6 @@ async def sync() -> int:
                     continue
                 for marketplace, state in _states(row).items():
                     if marketplace not in MARKETPLACES:
-                        # Шлюз обновлён раньше и знает учётку, под которую здесь
-                        # ещё нет колонок: записать её некуда, а ронять из-за
-                        # неё сверку остальных незачем.
                         continue
                     await repository.set_egress_state(
                         uuid.UUID(str(seller.id)),
@@ -65,8 +48,6 @@ async def sync() -> int:
                 shown = " ".join(f"{name}={state[0] or '-'}" for name, state in sorted(_states(row).items()))
                 print(f"{shown:<40} {row.get('egress_ip') or '-':<16} {seller.id}  {seller.name}")
             await session.commit()
-        # Осиротевшие записи шлюза: селлер выкорчеван из реестра, а его ключ на
-        # шлюзе остался живым (purge при недоступном шлюзе). Гасим.
         for seller_id, row in remote.items():
             if _all_disabled(row):
                 continue
@@ -87,11 +68,8 @@ async def _repair(gateway: EgressGateway, seller, row: dict) -> dict | None:
     """Донести локальное намерение до шлюза; вернуть его свежее состояние."""
     try:
         if seller.archived_at is not None and not _all_disabled(row):
-            # Архивация прошла локально, disable не доехал — ключ всё ещё жив.
-            # Хватает одной живой учётки: гасить надо все.
             return await gateway.disable_seller(seller_id=str(seller.id), event_version=_version())
         if seller.archived_at is None and row.get("name") != seller.name:
-            # Переименование, застрявшее в unsynced.
             return await gateway.rename_seller(seller_id=str(seller.id), name=seller.name, event_version=_version())
     except EgressAdminError as error:
         print(f"FAIL  не удалось выровнять {seller.id}  {seller.name}: {error}")

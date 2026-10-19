@@ -17,7 +17,6 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBStatisticsClient,
 )
 
-# Wildberries reports and accepts statistics dates in Moscow time without a zone.
 MOSCOW = ZoneInfo("Europe/Moscow")
 WAREHOUSE_REFRESH = timedelta(days=1)
 
@@ -87,9 +86,6 @@ class CollectionService:
         seller_key = str(seller_id)
         known = await self._known_articles(seller_id)
         article_of = await self.sellers.list_chrt_articles(seller_id)
-        # The reads are done. The requests below can take minutes on a large
-        # catalog, and a transaction left open across them would hold its locks
-        # for the whole walk.
         await self.session.commit()
 
         fbo: dict[str, list[int]] = {article: [0, 0, 0, 0] for article in known}
@@ -99,16 +95,10 @@ class CollectionService:
             values[2] += row.in_way_to_client
             values[3] += row.in_way_from_client
         for values in fbo.values():
-            # The report no longer carries quantityFull. The column keeps its
-            # meaning as a total including goods in transit, but it is now our
-            # own derived number and the metric never reads it.
             values[1] = values[0] + values[2] + values[3]
 
         if not await self._still_ours(seller_id):
             return StockResult(0, FBS_ABSENT)
-        # Zero rows for everything we know: WB lists a товар only while it has
-        # stock or goods in transit, and without them the last non-zero snapshot
-        # would pass for the current stock forever.
         await self.turnover.upsert_snapshots(
             seller_id,
             snapshot_date,
@@ -183,7 +173,6 @@ class CollectionService:
                 if article is not None:
                     amounts[article] += amount
                     per_warehouse[(article, warehouse_id)] += amount
-        # A size WB stayed silent about holds nothing at that warehouse.
         return FbsStock(
             totals={
                 article: (amounts.get(article, 0), amounts.get(article, 0), 0, 0)
@@ -214,21 +203,15 @@ class CollectionService:
         tracked = await self.turnover.tracked(seller_id)
         watermark = tracked.orders_watermark if tracked else None
         if watermark is None:
-            # A seller connected today still gets a full window: unlike stock,
-            # order history is served on request.
             date_from = now - timedelta(days=backfill_days)
         else:
             date_from = watermark - timedelta(hours=overlap_hours)
-        # Close the read transaction before the network walk; the write below
-        # opens its own short one.
         await self.session.commit()
 
         rows = await self.statistics.orders(seller_key, date_from.astimezone(MOSCOW))
         if not rows:
             return 0
         if not await self.turnover.still_tracked(seller_id):
-            # A purge landed while we were talking to WB; writing now would
-            # resurrect the very rows it deleted.
             self.logger.warning("turnover_seller_untracked_write_skipped", extra={"seller_id": str(seller_id)})
             await self.session.rollback()
             return 0
@@ -311,7 +294,6 @@ class CollectionService:
         старых, а горизонт всё равно никуда не уедет.
         """
         if filled_from is None or filled_to is None:
-            # Отрезка ещё нет — начинаем его от вчера и растим назад.
             deepest = [yesterday - timedelta(days=offset) for offset in range(limit)]
             return [day for day in deepest if day >= floor]
         forward = [filled_to + timedelta(days=offset) for offset in range(1, limit + 1)]

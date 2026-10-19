@@ -1,10 +1,3 @@
-"""Сложенные начисления Ozon по дням — основа ОПиУ Ozon и листа по SKU.
-
-Та же идея, что у отчётов WB: день начислений, дочитанный зеркалом,
-складывается один раз по SKU, виду строки и типу начисления; страница читает
-готовые суммы.
-"""
-
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import UUID

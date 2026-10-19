@@ -20,7 +20,6 @@ from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTempor
 
 router = APIRouter(prefix="/wb/box-stickers/packing", tags=["wb-box-stickers"])
 
-# Вставка из таблицы: поставка на сотню строк — пара десятков килобайт.
 MAX_TEXT_CHARS = 200_000
 
 

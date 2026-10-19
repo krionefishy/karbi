@@ -13,10 +13,7 @@ from backend.modules.wb_core.infrastructure.wb import (
 CONTENT_BUCKET = "content"
 PRICES_BUCKET = "prices"
 PRICES_PAGE_LIMIT = 1000
-# Страховка от курсора, который WB вдруг перестал сдвигать: миллион товаров —
-# больше, чем бывает в кабинете, а бесконечный цикл съел бы весь бюджет.
 PRICES_MAX_PAGES = 1000
-# Размеры фото в порядке предпочтения: миниатюра для таблицы, потом крупнее.
 PHOTO_SIZES = ("c246x328", "square", "tm", "c516x688", "big")
 
 
@@ -98,7 +95,6 @@ def parse_card(raw: dict[str, Any]) -> CardFacts:
         photo_url=_photo_url(photos),
         photo_count=len(photos) if isinstance(photos, list) else 0,
         description_length=len(str(raw.get("description") or "").strip()),
-        # Поле есть только у карточек с видео; пустая строка — тоже «нет».
         has_video=bool(raw.get("video")),
         characteristic_ids=frozenset(_filled_characteristics(raw.get("characteristics"))),
         card_created_at=_moment(raw.get("createdAt")),
@@ -124,8 +120,6 @@ def parse_price(raw: Any) -> PriceFacts | None:
     club = [float(size["clubDiscountedPrice"]) for size in sizes if size.get("clubDiscountedPrice") is not None]
     return PriceFacts(
         article=str(raw["nmID"]),
-        # Цены по размерам обычно одинаковы; если нет — на витрине покупатель
-        # первым видит самую низкую цену со скидкой.
         price=max(prices, default=0.0),
         discounted_price=min(discounted, default=0.0),
         discount=int(raw.get("discount") or 0),
@@ -178,7 +172,6 @@ def _photo_url(photos: Any) -> str:
 def _moment(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
-    # WB бывает присылает наносекунды; fromisoformat понимает не больше микро.
     normalized = re.sub(r"(\.\d{6})\d+", r"\1", value.strip()).replace("Z", "+00:00")
     try:
         moment = datetime.fromisoformat(normalized)

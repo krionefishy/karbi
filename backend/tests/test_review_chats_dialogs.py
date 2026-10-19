@@ -47,7 +47,6 @@ def event(chat: str, minutes: float, kind: str, text: str = "") -> ChatEvent:
     )
 
 
-# Рассылка запущена до начала периода; `launch_at=None` — не запускалась вовсе.
 LAUNCH = SINCE
 
 
@@ -82,7 +81,6 @@ def test_a_prompt_without_our_message_after_launch_is_an_early_reply_or_a_miss()
         event("a", 0, "prompt"),
         event("a", 5, "client"),
         event("b", -10, "prompt"),
-        # Менеджер из кабинета — не наша рассылка.
         event("b", -5, "manager", "Здравствуйте! Мы готовы предложить"),
     )
 
@@ -99,7 +97,6 @@ def test_before_the_launch_every_dialog_is_the_baseline() -> None:
         launch_at=launch,
     )
     never = dialogs(event("c", 0, "prompt"), launch_at=None)
-    # Диалог, открывший рассылку: его автосообщение WB раньше момента запуска на секунды.
     [first] = dialogs(event("d", 299, "prompt"), event("d", 300, "ours"), launch_at=launch)
 
     assert (answered.group, quiet.group, never[0].group) == (GROUP_BEFORE, GROUP_BEFORE, GROUP_BEFORE)

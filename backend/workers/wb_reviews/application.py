@@ -14,8 +14,6 @@ from backend.workers.wb_reviews.worker import WBReviewsWorker
 
 
 class WBReviewsWorkerApplication:
-    # How long a crashed consumer waits before coming back; keeps a hard
-    # failure from turning into a busy restart loop.
     consumer_restart_delay_seconds: float = 5.0
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -40,7 +38,6 @@ class WBReviewsWorkerApplication:
         if not self.settings.kafka.enabled:
             return None
         worker = self.settings.worker
-        # Троттлинг и ключи живут на шлюзе wb-egress; воркер знает только seller_id.
         gateway = EgressGateway(self.settings.egress)
         return ReviewSyncConsumer(
             self.database,

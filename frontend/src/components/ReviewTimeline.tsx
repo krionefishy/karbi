@@ -12,7 +12,6 @@ import { ReviewChart } from "./ReviewChart";
 
 interface ReviewTimelineProps { products: ProductReviewHistory[]; latestDate?: string | null; }
 
-/** One panel is open at a time: either a day's breakdown or the product's chart. */
 type Selection =
   | { kind: "day"; productId: string; date: string }
   | { kind: "chart"; productId: string };
@@ -185,8 +184,6 @@ export function ReviewTimeline({ products, latestDate = null }: ReviewTimelinePr
                 if (!snapshot) return <div className={`day-cell day-empty ${date === today ? "today-cell" : ""}`} key={date}>Нет данных</div>;
                 const previous = snapshots.get(previousDay(date));
                 const total = totalOf(snapshot.ratings);
-                // A missing previous day is not a zero — leave the delta blank
-                // so a gap in the series never reads as "reviews disappeared".
                 const delta = previous ? total - totalOf(previous.ratings) : null;
                 const selected = openHere?.kind === "day" && openHere.date === snapshot.date;
                 return <button className={`day-cell ${date === today ? "today-cell" : ""} ${selected ? "day-selected" : ""}`} onClick={() => setSelection(selected ? null : { kind: "day", productId: product.id, date: snapshot.date })} key={snapshot.date} aria-expanded={selected} aria-label={`Отзывы за ${dateFormatter.format(new Date(`${date}T00:00:00Z`))}`}>

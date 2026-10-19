@@ -102,7 +102,6 @@ export function FbsStocksPage() {
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refreshSellers });
 
-  // Пока идёт сбор, состояние опрашивается; таблица обновится сама, как только он закончится.
   const { data: refreshState } = useQuery({
     queryKey: ["fbs-stocks-refresh", sellerId],
     queryFn: () => getRefreshState(sellerId),
@@ -158,7 +157,6 @@ export function FbsStocksPage() {
     onSuccess: async ({ added }) => {
       setActionError("");
       await invalidateBoards();
-      // Остаток по новым строкам появится только после опроса WB — ставим его сразу.
       if (added > 0) refreshMutation.mutate();
     },
     onError: fail("Не удалось добавить баркоды"),

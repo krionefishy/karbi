@@ -2,12 +2,8 @@ import asyncio
 import time
 from collections import OrderedDict
 
-# Telegram enforces two separate budgets on a bot: roughly 30 messages a second
-# overall, and one a second into any single chat. The second one is the tighter
-# constraint for a digest, which fans one event out across many chats.
 DEFAULT_BOT_MESSAGES_PER_SECOND = 30.0
 DEFAULT_CHAT_MESSAGES_PER_SECOND = 1.0
-# Chats seen longer ago than this cannot be limiting anything any more.
 _CHAT_MEMORY = 300.0
 _MAX_REMEMBERED_CHATS = 10_000
 
@@ -33,8 +29,6 @@ class SendPacer:
         self._chat_interval = 1.0 / chat_messages_per_second if chat_messages_per_second > 0 else 0.0
         self._clock = clock
         self._sleep = sleep
-        # Not 0.0: a fresh pacer must not hold the first send back, whatever
-        # origin the clock happens to have.
         self._last_send = float("-inf")
         self._last_by_chat: OrderedDict[int, float] = OrderedDict()
 

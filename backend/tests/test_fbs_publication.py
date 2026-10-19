@@ -136,7 +136,6 @@ async def test_the_stock_is_written_by_barcode_not_by_size_id(cabinet, stub) -> 
 
     [write] = writes(stub)
     assert write["body"] == {"stocks": [{"sku": SKU, "amount": 10}]}
-    # Конверт несёт селлера — ключ подставляет шлюз.
     assert write["seller_id"] == str(seller_id)
     assert [outcome.status for outcome in result.outcomes] == [VERIFIED]
 
@@ -172,7 +171,6 @@ async def test_a_pair_dropped_from_the_plan_goes_out_as_zero(cabinet, stub) -> N
     async with database.session() as session:
         await publisher(session).publish(seller_id, now=NOW)
 
-    # Новый план без этой пары вовсе.
     async with database.session() as session:
         await FbsDistributionRepository(session).save_plan(
             seller_id=seller_id,
@@ -208,7 +206,6 @@ async def test_a_successful_answer_is_not_taken_as_a_published_number(cabinet, s
     assert result.drift == 1
     async with database.session() as session:
         stored = await FbsDistributionRepository(session).published(seller_id)
-    # Запоминается то, что WB подтвердил, а не то, что мы отправили.
     assert stored == {(WAREHOUSE, SKU): 3}
 
 

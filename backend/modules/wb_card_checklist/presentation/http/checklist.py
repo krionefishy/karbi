@@ -141,7 +141,6 @@ async def export_checklist(
         report = await service.export(seller_id)
     except SellerNotFoundError as error:
         raise not_enrolled() from error
-    # Имя с кириллицей уезжает в filename*, а ascii-вариант остаётся запасным.
     fallback = f"checklist_{report.day.isoformat()}.xlsx"
     encoded = urllib.parse.quote(report.filename)
     return Response(

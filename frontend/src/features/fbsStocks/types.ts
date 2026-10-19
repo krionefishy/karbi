@@ -18,11 +18,8 @@ export interface StocksRow {
   article: string;
   title: string;
   vendor_code: string;
-  /** Баркода нет в каталоге кабинета — подсказать, что за товар, нечем. */
   in_catalog: boolean;
-  /** Остаток по складу: ключ — id склада строкой. */
   amounts: Record<string, number>;
-  /** Сумма по группе: ключ — id группы. */
   totals: Record<string, number>;
 }
 
@@ -33,7 +30,6 @@ export interface StocksBoard {
   collection_error: string | null;
   groups: StocksGroup[];
   rows: StocksRow[];
-  /** Скрытые строки: не в таблице и не в опросе, но возвращаются одним нажатием. */
   hidden: StocksHiddenRow[];
 }
 

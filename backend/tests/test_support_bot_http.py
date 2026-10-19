@@ -150,7 +150,7 @@ async def test_the_journal_is_filtered_counted_and_linked(
     failed = (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "failed"})).json()
 
     assert everything["total"] == 3 and everything["counts"] == {"dry_run": 2, "failed": 1}
-    assert everything["sends"][0]["text"] == "текст 3"  # новые сверху
+    assert everything["sends"][0]["text"] == "текст 3"
     assert everything["sends"][0]["nm_id"] == 1304195061
     assert everything["sends"][0]["chat_url"].endswith("chatId=aaaa-bbbb")
     assert failed["total"] == 1 and failed["sends"][0]["error"] == "нет подписи"

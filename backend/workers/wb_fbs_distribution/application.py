@@ -25,8 +25,6 @@ class FbsDistributionWorkerApplication:
         self.worker = FbsDistributionWorker(
             self.database,
             WBFbsMarketplaceClient(gateway),
-            # «Тянущего» адаптера 1С пока нет; пуш-обмен идёт через HTTP-эндпоинт
-            # и в этом шаге не нуждается. Появится адаптер — встанет сюда.
             DisconnectedSource(),
             self.settings,
         )

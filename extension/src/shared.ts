@@ -1,4 +1,3 @@
-/** Общие типы и хранилище расширения. Всё лежит в chrome.storage.local, кроме кода дня: он у бота. */
 
 export interface Settings {
   backendUrl: string;
@@ -13,7 +12,6 @@ export interface Settings {
   nextRunAt: string | null;
 }
 
-/** Адрес сервиса, под который собран архив (`VITE_BACKEND_URL` из PUBLIC_DOMAIN при сборке образа). */
 export const DEFAULT_BACKEND_URL: string = import.meta.env.VITE_BACKEND_URL ?? "";
 
 export const DEFAULTS: Settings = {
@@ -59,7 +57,6 @@ export type Message =
   | { type: "unpair" }
   | { type: "pair"; backendUrl: string; code: string };
 
-/** Адрес из поля настроек: без схемы подставляем https, пустой и кривой — понятная ошибка. */
 export function normalizeBackendUrl(raw: string): string {
   const value = raw.trim().replace(/\/+$/, "");
   if (!value) throw new Error("Укажите адрес Marketplace Auto — тот, на котором открыта страница «Возвраты WB»");

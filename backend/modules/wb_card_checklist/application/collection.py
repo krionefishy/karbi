@@ -17,7 +17,6 @@ class CollectionResult:
     prices: int | None
     subjects: int
     warning: str | None
-    # Селлера отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
@@ -52,8 +51,6 @@ class CollectionService:
         try:
             prices = await self.prices.prices(str(seller_id))
         except WBPermanentError as error:
-            # Ключ без категории «Цены и скидки» — не повод оставить чек-лист
-            # без карточек: пункт скидки просто останется без данных.
             prices = None
             warnings.append(f"Цены не прочитаны: {error}")
 
@@ -77,8 +74,6 @@ class CollectionService:
         if prices is not None:
             await self.checklist.replace_prices(seller_id, prices)
         for subject_id, characteristics in directory.items():
-            # Пустой справочник — скорее сбой WB, чем предмет без характеристик:
-            # сохранить его значило бы на неделю объявить все карточки полными.
             if characteristics:
                 await self.checklist.save_subject(subject_id, characteristics)
         warning = "; ".join(warnings) or None

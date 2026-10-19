@@ -1,9 +1,3 @@
-"""Bots in the admin section.
-
-Registering a bot is the one place a messenger token crosses this server. It is
-passed straight to the relay and never written down here — see BotAdminService.
-"""
-
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Response, status
 
@@ -54,8 +48,6 @@ async def register_bot(
     except BotRejectedError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Мессенджер отклонил токен: {error}") from error
     except MessengerTemporaryError as error:
-        # The relay is the only way to check a token, so without it we cannot
-        # honestly say whether the bot is good.
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Сервис доставки недоступен, попробуйте позже"
         ) from error

@@ -15,13 +15,10 @@ import {
 
 export interface AutomationNavItem {
   id: string;
-  /** Короткое имя для навигации; полное живёт на странице автоматизации. */
   title: string;
   icon: LucideIcon;
 }
 
-/** Порядок — как в левой навигации. Каталог на главной приходит с сервера,
- * навигация же должна рисоваться до любого запроса, поэтому список статичен. */
 export const automationNav: AutomationNavItem[] = [
   { id: "wb-reviews", title: "Мониторинг отзывов", icon: MessageSquareText },
   { id: "wb-turnover", title: "Оборачиваемость", icon: Gauge },

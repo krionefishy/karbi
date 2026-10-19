@@ -137,10 +137,8 @@ async def test_creating_a_warehouse_mirrors_it_at_once(cabinet, stub) -> None:
         created = await admin(session).create(seller_id, 242, "  Москва Вешки  ")
 
     assert created.warehouse_id == 777
-    # Название уходит подчищенным от лишних пробелов, объект — числом.
     [create] = creations(stub)
     assert create["body"] == {"name": "Москва Вешки", "officeId": 242}
-    # Конверт несёт селлера — ключ подставляет шлюз.
     assert create["seller_id"] == str(seller_id)
     async with database.session() as session:
         rows = await FbsDistributionRepository(session).warehouses(seller_id)
@@ -162,7 +160,6 @@ async def test_a_second_warehouse_on_the_same_office_is_refused_before_wb_sees_i
         with pytest.raises(WarehouseConflictError):
             await admin(session).create(seller_id, 242, "Второй")
 
-    # Второй запрос до WB не дошёл: отказ выдан по зеркалу, до сети.
     assert len(creations(stub)) == posts_before
 
 

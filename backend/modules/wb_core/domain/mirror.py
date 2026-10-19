@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 
-# Виды зеркала: по каждому у селлера своя отметка сбора.
 MIRROR_CATALOG = "catalog"
 MIRROR_STOCKS = "stocks"
 MIRROR_REVIEWS = "reviews"
@@ -26,30 +25,19 @@ MIRROR_KINDS = (
     MIRROR_OZON_ACCRUALS,
 )
 
-# Периодичность отчётов реализации: WB формирует и недельные, и суточные из
-# одних и тех же строк. Зеркало хранит недельные — по ним считают деньги.
 SALES_REPORT_WEEKLY = "weekly"
 SALES_REPORT_DAILY = "daily"
-# Тип отчёта: 1 — основной, 2 — «по выкупам» (продажи с отложенной оплатой).
-# За неделю у кабинета выходят оба, и суммы недели — их сумма.
 SALES_REPORT_MAIN = 1
 SALES_REPORT_BUYOUT = 2
-# Возврат приходит положительной строкой с этим типом документа: знак ставит читающий.
 SALES_RETURN_DOC_TYPE = "Возврат"
 
-# Откуда пришло сборочное задание: живой список отдаёт только последние три
-# месяца, старше — архив с другим набором полей.
 ORDER_SOURCE_LIVE = "live"
 ORDER_SOURCE_ARCHIVE = "archive"
 
-# Кто написал в чат. Автосообщения WB тоже приходят от имени продавца.
 CHAT_SENDER_CLIENT = "client"
 CHAT_SENDER_SELLER = "seller"
-# Откуда ушло сообщение продавца: кабинет (люди и сам WB) или публичный API (программы).
 CHAT_SOURCE_PORTAL = "seller-portal"
 CHAT_SOURCE_API = "seller-public-api"
-# Так WB от имени продавца открывает диалог после отзыва с низкой оценкой. Текст
-# у всех кабинетов один и продавцом не меняется; сверяется начало — хвост WB правит.
 REVIEW_PROMPT_PREFIX = "Здравствуйте. Вы оставили отзыв с низкой оценкой"
 
 
@@ -184,8 +172,6 @@ class ChatEvent:
     rid: str | None
     text: str | None
     has_attachments: bool
-    # Подпись чата для ответа покупателю (`POST /seller/message`). Лента отдаёт её
-    # в каждом событии, но нужна она только отправке; None у событий, собранных до wc017.
     reply_sign: str | None = None
 
 
@@ -320,7 +306,6 @@ class SalesReportTotals:
     """
 
     report_id: int
-    # Первый день месяца, в котором WB провёл операцию (`rrDate`); `None` — строка без даты.
     month: date | None
     nm_id: int
     vendor_code: str
@@ -393,8 +378,6 @@ class AdvertNmStat:
     orders_amount: Decimal
 
 
-# Откуда в начислении Ozon строка: услуга по отправлению, товарная услуга, услуга без
-# товара, по грузоместу, доставка в составе отправления или сама продажа.
 OZON_LINE_ITEM = "item"
 OZON_LINE_NON_ITEM = "non_item"
 OZON_LINE_CONTAINER = "container"

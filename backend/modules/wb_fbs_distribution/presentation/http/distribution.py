@@ -469,8 +469,6 @@ async def plan_response(plan: Plan, placement: PlacementService) -> PlanResponse
                         region_code=queue[warehouse_id].region_code if warehouse_id in queue else None,
                         amount=amount,
                     )
-                    # В порядке очереди распределения, а не по номеру склада:
-                    # оператор читает план сверху вниз как приоритет.
                     for warehouse_id, amount in sorted(
                         item.amounts.items(), key=lambda pair: order.get(pair[0], len(order))
                     )

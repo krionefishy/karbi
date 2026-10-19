@@ -1,11 +1,3 @@
-"""Employee management for the admin section.
-
-The generated password is the only moment a password exists in the clear: it is
-returned once to the administrator who created or reset it and is never stored
-anywhere but as an argon2 hash. Letting an operator type one in a form instead
-would put `qwerty12` in the database on the first day.
-"""
-
 import secrets
 import string
 import uuid
@@ -17,7 +9,6 @@ from backend.modules.platform.domain import User
 from backend.modules.platform.infrastructure.postgres import UserRepository
 
 GENERATED_PASSWORD_LENGTH = 24
-# Ambiguous glyphs are left out: the password is read off a screen and retyped.
 _ALPHABET = "".join(sorted(set(string.ascii_letters + string.digits) - set("0OoIl1")))
 
 
@@ -55,8 +46,6 @@ class UserAdminService:
         try:
             user = await self._users.create(name, self._passwords.hash(password), is_admin=is_admin)
         except IntegrityError as error:
-            # Two administrators creating the same name at once: the unique
-            # index decides, and the loser gets the same answer as the check above.
             raise UsernameTakenError(name) from error
         return user, password
 

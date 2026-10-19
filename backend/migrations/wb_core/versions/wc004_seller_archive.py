@@ -8,9 +8,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Deleting a seller used to be the only way to take him out of an automation,
-    # which destroyed the review history with him. Archiving keeps the history and
-    # is reversible; the flag alone could not say when he left.
     op.add_column("sellers", sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True), schema="wb_core")
     op.execute("UPDATE wb_core.sellers SET archived_at = now() WHERE NOT is_active")
     op.drop_index("ix_wb_core_sellers_active", table_name="sellers", schema="wb_core")

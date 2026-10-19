@@ -9,7 +9,6 @@ interface Props {
   onSelect: (id: string) => void;
   onAdd: () => void;
   onEdit?: (seller: Seller) => void;
-  /** Leaving the automation, not leaving the registry. */
   onDetach: (seller: Seller) => void;
   onRetry: (seller: Seller) => void;
 }
@@ -22,7 +21,6 @@ function productLabel(count: number) {
   return `${count} товаров`;
 }
 
-/** Закрывает выпадающий блок по клику снаружи и по Esc. */
 function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     if (!open) return;
@@ -41,8 +39,6 @@ function useDismiss(open: boolean, close: () => void, ref: React.RefObject<HTMLE
   }, [open, close, ref]);
 }
 
-/** Переключатель селлера в верхней панели: список с поиском и статусами,
- * действия над выбранным — в меню рядом. Заменяет боковую колонку. */
 export function SellerSwitcher({ sellers, selectedId, onSelect, onAdd, onEdit, onDetach, onRetry }: Props) {
   const [open, setOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);

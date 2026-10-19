@@ -2,14 +2,11 @@ import { daysEndingAt, previousDay } from "./days";
 import { totalReviews } from "./rating";
 import type { DailyReviewSnapshot } from "./types";
 
-/** The chart covers the last month from the current date. */
 export const CHART_DAYS = 30;
 
 export interface ChartPoint {
   date: string;
-  /** null when the sync collected nothing that day — never a zero. */
   total: number | null;
-  /** null when the day before is missing, so a gap never reads as a drop. */
   delta: number | null;
 }
 
@@ -18,10 +15,6 @@ export interface Scale {
   ceiling: number;
 }
 
-/**
- * One continuous run of collected days. The line is drawn per run so that a
- * missing day breaks it instead of being interpolated over silently.
- */
 export type Run = Array<ChartPoint & { total: number; index: number }>;
 
 export function buildSeries(
@@ -38,24 +31,15 @@ export function buildSeries(
   });
 }
 
-/**
- * Vertical bounds for the totals line.
- *
- * Deliberately not anchored at zero: a month that moves a product from 1289
- * reviews to 1336 is a flat line on a zero-based axis. The axis labels carry
- * the real numbers so the zoom stays visible.
- */
 export function verticalScale(points: readonly ChartPoint[]): Scale {
   const totals = points.map((point) => point.total).filter((total): total is number => total !== null);
   if (totals.length === 0) return { floor: 0, ceiling: 1 };
   const low = Math.min(...totals);
   const high = Math.max(...totals);
-  // A product that never moved would otherwise divide by a zero-height range.
   const padding = Math.max(1, Math.round((high - low) * 0.18));
   return { floor: low - padding, ceiling: high + padding };
 }
 
-/** Evenly spaced axis values, always whole reviews. */
 export function ticksFor(scale: Scale, count = 4): number[] {
   const span = scale.ceiling - scale.floor;
   const seen = new Set<number>();
@@ -65,7 +49,6 @@ export function ticksFor(scale: Scale, count = 4): number[] {
   return [...seen];
 }
 
-/** Split the series into runs of consecutive collected days. */
 export function runsOf(points: readonly ChartPoint[]): Run[] {
   const runs: Run[] = [];
   let current: Run = [];

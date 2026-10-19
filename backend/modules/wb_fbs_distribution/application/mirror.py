@@ -44,8 +44,6 @@ class MirrorService:
         ключом: сверка кабинета попутно освежает общий каталог.
         """
         seller_key = str(seller_id)
-        # Сеть впереди: держать транзакцию открытой через два запроса к WB
-        # значит держать и её блокировки.
         await self.session.commit()
 
         offices = await self.marketplace.offices(seller_key)
@@ -53,8 +51,6 @@ class MirrorService:
 
         stamp = now or datetime.now(UTC)
         if not await self.distribution.tracked(seller_id):
-            # Пока шли запросы, кабинет отключили: запись сейчас воскресила бы
-            # то, что удалило отключение.
             return MirrorResult(offices=0, warehouses=0)
         await self.distribution.replace_offices(offices, now=stamp)
         await self.distribution.replace_warehouses(seller_id, warehouses, now=stamp)

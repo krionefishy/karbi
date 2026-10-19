@@ -66,8 +66,6 @@ class PodsortWorker:
         retry_after = now - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
             tracked = await PodsortRepository(session).tracked_rows()
-            # Архивный кабинет или кабинет без ключа на шлюзе WB отвергнет, и
-            # ошибка подсорта заслонила бы настоящую причину.
             servable = {
                 seller.id
                 for seller in await SellerRepository(session).list_sellers()

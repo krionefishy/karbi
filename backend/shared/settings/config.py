@@ -119,10 +119,6 @@ class AuthConfig:
 @dataclass(frozen=True, slots=True)
 class RateLimitConfig:
     enabled: bool = True
-    # Весь офис приходит с одного адреса, а интерфейс опрашивает сервер каждые
-    # несколько секунд, пока идёт синхронизация: 30 запросов в минуту такой
-    # интерфейс выбирает вдвоём в двух вкладках. Это заслон от злоупотребления,
-    # а не от обычной работы.
     requests: int = 120
     window_seconds: int = 60
 
@@ -145,8 +141,6 @@ class TurnoverConfig:
     """Когда собираем остатки и заказы и когда шлём дайджест. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Четыре среза в сутки: одна точка в день не отличает «лежал полный склад»
-    # от «утром распродали и вечером пополнили».
     stock_slot_hours: tuple[int, ...] = (3, 9, 15, 21)
     orders_hour: int = 3
     orders_minute: int = 20
@@ -154,25 +148,14 @@ class TurnoverConfig:
     calculation_minute: int = 40
     digest_hour: int = 10
     digest_minute: int = 0
-    # Трёхдневное окно: свежий темп продаж вместо усреднённого за две недели.
     orders_window_days: int = 3
     orders_backfill_days: int = 3
-    # Перекрытие при инкрементальной догрузке: отменённый заказ приезжает заново
-    # с новым lastChangeDate, но запас лишних суток дешевле пропущенной отмены.
     orders_overlap_hours: int = 24
     threshold_days: int = 10
-    # Карточка беднее трёх фото в выдаче WB почти не показывается, поэтому её
-    # оборачиваемость никого не спасает: в расчёт и в дайджест такие не идут.
     min_photos: int = 3
     snapshot_retention_days: int = 60
     order_retention_days: int = 45
-    # Глубина региональной базы для подсорта: доля округа в спросе считается по
-    # этому окну, и на столько же назад догружается история при подключении.
-    # Полгода — то, за что менеджер и раньше собирал отчёт руками.
     region_history_days: int = 180
-    # Сколько суток истории догружается за один цикл воркера. Каждые сутки —
-    # это запрос в «Статистику», и её бюджет делится с обычной догрузкой
-    # заказов: догрузка полугода растянута намеренно, она разовая.
     region_backfill_step_days: int = 2
     notification_bot: str = "turnover-alerts"
 
@@ -182,18 +165,10 @@ class FbsDistributionConfig:
     """Когда автоматизация распределения сверяет склады. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Справочник объектов и склады кабинета меняются редко: раз в сутки хватает,
-    # а внеплановую сверку оператор запускает кнопкой.
     mirror_hour: int = 4
     mirror_minute: int = 30
-    # Сколько снимок 1С считается пригодным для расчёта. Обмен планируется раз
-    # в 15 минут, час даёт запас на несколько пропущенных циклов.
     snapshot_max_age_minutes: int = 60
-    # Через сколько повторять сверку кабинета после неудачной попытки.
     mirror_retry_minutes: int = 15
-    # Токен, которым 1С подписывает входящие снимки остатков. Пустой токен
-    # значит «обмен не настроен»: приёмный эндпоинт отвечает 503, а не пускает
-    # всех подряд.
     onec_token: str = field(default="", repr=False)
 
 
@@ -202,19 +177,11 @@ class CardChecklistConfig:
     """Чек-лист карточки: когда перечитывать карточки и два порога, согласованных с селлером. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # После утреннего снимка остатков (03:00) и ночного прогона отзывов: к
-    # рабочему дню таблица собрана из свежих чисел.
     collect_hour: int = 5
     collect_minute: int = 0
-    # Через сколько повторять сбор после неудачи. Ответ 4XX стоит WB десяти
-    # запросов, поэтому чаще раза в час долбить сломанный ключ незачем.
     retry_minutes: int = 60
-    # Какие товары попадают в таблицу: только с остатком от стольких штук.
     min_stock: int = 10
-    # По инструкции чек-листа «фото-контент установлен» — хватает одного.
     min_photos: int = 1
-    # Справочник характеристик предмета меняется редко; неделя — компромисс
-    # между свежестью и запросами на каждый предмет каждого селлера.
     subject_ttl_hours: int = 168
 
 
@@ -229,18 +196,12 @@ class RelayConfig:
     base_url: str = ""
     jwt_secret: str = field(default="", repr=False)
     issuer: str = "marketplace-auto"
-    # Two audiences on one secret: what we mint going out, what we accept coming
-    # back. Equal values would let a token be replayed in the other direction.
     audience: str = "relay"
     inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
-    # Релей умеет присылать картинку рядом с текстом; выключено, пока релей не обновлён.
     photos_enabled: bool = False
     jwt_leeway_seconds: int = 30
-    # Сколько релей держит наш запрос за апдейтами, если сказать нечего.
     updates_wait_seconds: int = 25
-    # "true"/"false", or a path to the relay certificate to pin. Never disable
-    # verification in production: the JWT rides on this connection.
     verify: str = "true"
     request_timeout_seconds: int = 60
 
@@ -272,11 +233,7 @@ class EgressConfig:
     jwt_secret: str = field(default="", repr=False)
     audience: str = "wb-egress:karbi"
     jwt_ttl_seconds: int = 300
-    # "true"/"false", or a path to the gateway certificate to pin. Never disable
-    # verification in production: the JWT rides on this connection.
     verify: str = "true"
-    # The gateway may hold a background call in its queue for up to ~120s and
-    # then spend up to 60s talking to WB — the client outlives both.
     request_timeout_seconds: int = 200
 
 
@@ -285,11 +242,7 @@ class FbsStocksConfig:
     """Таблица остатков FBS: как часто опрашивать склады кабинетов."""
 
     timezone: str = "Europe/Moscow"
-    # Селлер правит кабинет днём и хочет видеть результат в тот же день, а
-    # каждый опрос — запрос на склад: раз в час на ~35 складов кабинета терпимо.
     poll_minutes: int = 60
-    # Пауза перед повтором после неудачи: не чаще четверти часа долбить ключ,
-    # который отвечает ошибкой.
     retry_minutes: int = 15
 
 
@@ -298,56 +251,29 @@ class CoreMirrorConfig:
     """Зеркало WB в wb_core: когда воркер обходит всех активных селлеров. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Те же четыре среза, что у оборачиваемости: когда она перейдёт на зеркало,
-    # её ряд снимков не сдвинется.
     stock_slot_hours: tuple[int, ...] = (3, 9, 15, 21)
-    # Каталог по расписанию, а не только по событию: новая карточка селлера
-    # иначе не появится, пока кто-то не нажмёт «обновить».
     catalog_hour: int = 2
     catalog_minute: int = 30
-    # Отзывы — три полных прохода по фидбэкам селлера, раз в сутки достаточно.
     reviews_hour: int = 4
     reviews_minute: int = 0
-    # Пауза перед повтором после неудачи: ключ, отвечающий ошибкой, не долбим.
     retry_minutes: int = 30
-    # Сколько дней остаток считается пригодным для потребителей зеркала.
     stock_fresh_days: int = 2
-    # Сборочные задания FBS: свежие перечитываются каждый час, пока не лягут в
-    # поставку; живой список WB помнит три месяца, дальше архив помесячно.
     orders_interval_minutes: int = 60
     orders_history_months: int = 6
     orders_retention_days: int = 400
-    # Поставки, склады продавца и объекты WB — раз в сутки, до сбора штрафов.
     supplies_hour: int = 5
     supplies_minute: int = 0
-    # Чаты с покупателями: лента дочитывается от курсора, один запрос на селлера,
-    # если нового нет. Первый сбор берёт историю на `chats_history_days` порциями
-    # по `chats_pages_per_run` страниц (в странице 50 событий).
     chats_interval_minutes: int = 30
     chats_history_days: int = 90
     chats_pages_per_run: int = 100
     chats_retention_days: int = 180
-    # Остатки по складам WB для подсорта: асинхронный отчёт, создание и
-    # скачивание — раз в минуту на ключ. Раз в шесть часов хватает, чтобы
-    # логист утром видел остаток после ночных отгрузок.
     remains_interval_minutes: int = 360
-    # Отчёты реализации: шапки с начала истории и строки по отчёту, не больше
-    # `sales_reports_per_run` отчётов за проход — каждая страница строк стоит
-    # минуту лимита WB. Недельный отчёт выходит в понедельник, к вечеру
-    # вторника он дочитан при любом интервале короче суток.
     sales_reports_interval_minutes: int = 30
     sales_reports_per_run: int = 4
     sales_reports_history_from: str = "2026-01-01"
-    # Реклама: списания, состав кампаний и статистика по артикулам окнами по 31 дню.
-    # Статистика — три запроса в минуту, поэтому за проход не больше трёх окон;
-    # история с той же даты, что у отчётов реализации. Вчерашние списания WB
-    # дописывает с задержкой — последние дни перечитываются.
     adverts_interval_minutes: int = 360
     adverts_windows_per_run: int = 3
     adverts_overlap_days: int = 3
-    # Начисления Ozon по дням: за проход не больше `ozon_days_per_run` дней (день —
-    # до нескольких страниц по 300 начислений, лимиты Ozon это не задевает), последние
-    # дни перечитываются. Год истории при таких порциях дочитывается за полсуток.
     ozon_interval_minutes: int = 120
     ozon_days_per_run: int = 45
     ozon_overlap_days: int = 3
@@ -374,46 +300,26 @@ class SupportBotConfig:
     """Бот поддержки в чатах WB: когда и как часто писать покупателю, который замолчал."""
 
     timezone: str = "Europe/Moscow"
-    # Окно рассылки по местному времени: вне него бот не пишет ничего.
     window_start_hour: int = 9
     window_end_hour: int = 22
-    # Шаг между сообщениями одному покупателю: интервал плюс случайная добавка.
     interval_minutes: int = 60
     jitter_min_minutes: int = 1
     jitter_max_minutes: int = 10
-    # Сколько покупатель должен молчать после ответа нашей стороны, чтобы началась рассылка.
     silence_hours: int = 4
-    # Сколько дней длится рассылка по одному диалогу и сколько раз её можно запускать.
     campaign_days: int = 5
     max_campaigns: int = 1
-    # Потолок сообщений в сутки на кабинет и пауза между отправками. Лимит WB на чаты —
-    # 10 запросов за 10 секунд, то есть до 8 640 в сутки.
     daily_cap_per_seller: int = 2500
     min_gap_seconds: int = 3
-    # Как часто воркер проходит по кабинетам и сколько сообщений уходит кабинету за проход.
     tick_minutes: int = 10
     batch_per_tick: int = 40
-    # Диалоги старше этого не разбираются: кампания и тишина давно закончились.
     history_days: int = 12
-    # Зеркало чатов старше этого считается устаревшим, и бот не пишет.
     mirror_stale_minutes: int = 90
-    # Диалог не трогаем, если специалист писал последний раз больше стольких дней назад: часто
-    # разговор давно закончился вежливым прощанием, и тишина покупателя ничего не значит.
-    # Правило действует и на старт кампании, и на уже идущую.
     max_idle_days: int = 5
-    # В режиме «канарейка» живая отправка идёт только по этому проценту диалогов.
     canary_percent: int = 10
-    # Определение «диалог завершён нашей стороной» нейросетью по последнему сообщению специалиста:
-    # off — не спрашиваем; shadow — спрашиваем и пишем вердикт, на отправку он не влияет;
-    # enforce — пишем, только если свежий вердикт «ждём покупателя» (или менеджер разрешил вручную).
     classifier_mode: str = "shadow"
-    # Версия промпта: смена версии заново классифицирует диалоги и позволяет сравнить модели.
     classifier_prompt_version: str = "v2"
-    # Сколько ждать ответа модели, прежде чем поставить запрос заново, и сколько раз пробуем.
     classifier_retry_minutes: int = 15
     classifier_max_attempts: int = 3
-    # Шаблон ссылки на чат в кабинете WB: `{chat_id}` — uuid чата без префикса `1:`.
-    # Пусто — ссылку не строим.
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
 
 
@@ -422,17 +328,9 @@ class ReviewChatsConfig:
     """Чаты после отзыва: как считать ответ покупателя. Своего сбора нет — читает зеркало чатов."""
 
     timezone: str = "Europe/Moscow"
-    # Сколько ждём ответа. Чат у покупателя с продавцом один: без окна вопрос про
-    # другой заказ через две недели засчитался бы как ответ на наше сообщение.
     reply_window_hours: int = 48
-    # Отчёт считается при чтении, потолок периода держит запрос в разумных пределах.
     max_period_days: int = 92
-    # Сколько дней до запуска рассылки берётся за «как было»: одно и то же окно
-    # при любом выбранном периоде, чтобы сравнение не плыло вместе с датами.
     baseline_days: int = 14
-    # Не позже скольки минут после автосообщения WB сообщение из API — наше. Рассылка
-    # укладывается в полторы минуты; позже отвечают менеджеры через сторонний клиент.
-    # Если программа рассылки начнёт задерживаться, поднять порог здесь.
     follow_up_within_minutes: int = 15
 
 
@@ -441,17 +339,10 @@ class FbsPenaltiesConfig:
     """Штрафы FBS: когда перечитывать фин. отчёт и на какую глубину. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Суточный отчёт за день появляется на следующий день, час неизвестен: список
-    # спрашивается каждые `poll_hours` — это один запрос, а читаются только новые.
     poll_hours: int = 2
-    # Лимит детализации — запрос в минуту, его держит шлюз; пауза нужна только
-    # после настоящей ошибки и чтобы дочитать оставшиеся отчёты следующим проходом.
     retry_minutes: int = 10
-    # Список отчётов смотрится на две недели назад — новые появляются по понедельникам;
-    # первый сбор кабинета — три месяца, за штрафами она приходит спустя недели.
     report_window_days: int = 14
     report_backfill_days: int = 90
-    # Сколько отчётов дочитывать за проход: по минуте на страницу, heartbeat раз в 15.
     reports_per_run: int = 6
 
 
@@ -460,25 +351,17 @@ class ReturnsConfig:
     """Возвраты WB: как часто перечитывать отчёт и заявки, когда слать дайджест. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Отчёт о возвратах — запрос в минуту на кабинет (держит шлюз), заявки — 20 в минуту.
-    # Раз в десять минут хватает: возврат едет в ПВЗ днями, а не минутами.
     poll_minutes: int = 10
     retry_minutes: int = 5
-    # Отчёт отдаётся целиком за окно, без страниц; больше 31 дня WB не даёт.
     report_window_days: int = 14
     report_backfill_days: int = 31
-    # Архив заявок большой и меняется только решениями продавца.
     claims_archive_hours: int = 6
-    # Слоты, в которые уходит накопившееся: не чаще четырёх раз в день, и только если есть что сказать.
     notify_hours: tuple[int, ...] = (9, 12, 15, 18)
     notification_bot: str = "wb-returns"
-    # Сколько закрытых возвратов и заявок показывать в истории на странице.
     history_limit: int = 300
-    # Откуда менеджер скачивает расширение и куда ведут ссылки на картинку QR.
     public_base_url: str = "http://localhost:5173"
     extension_download_path: str = "/extension/marketplace-auto-returns.zip"
     pairing_ttl_minutes: int = 15
-    # Во сколько считать, что код на сегодня так и не пришёл; молчание установки дольше — тревога.
     code_alert_hour: int = 1
     install_silent_hours: int = 24
 
@@ -488,14 +371,8 @@ class FinReportsConfig:
     """Финансовые отчёты: как часто складывать дочитанные зеркалом отчёты реализации. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Зеркало читает список отчётов раз в полчаса; сборка втрое чаще — новый
-    # отчёт появляется на странице не позже чем через десять минут после него.
-    # Проход без новых отчётов — два коротких запроса на кабинет.
     build_interval_minutes: int = 10
-    # Потолок отчётов на кабинет за проход: первая сборка года не должна
-    # держать остальные кабинеты, остаток доберёт следующий проход.
     reports_per_run: int = 40
-    # Дней начислений Ozon на кабинет за проход.
     ozon_days_per_run: int = 60
 
 
@@ -504,19 +381,10 @@ class PodsortConfig:
     """Подсорт WB: сколько дней заказов держать и как быстро их догружать. Часы московские."""
 
     timezone: str = "Europe/Moscow"
-    # Столько WB хранит заказы: дальше сутки пришли бы пустыми и легли бы в
-    # книгу нулями, неотличимыми от настоящих.
     history_days: int = 90
-    # Сутки — запрос в минуту на ключ (лимит «Статистики», общий с
-    # оборачиваемостью): столько дней за проход, потом следующий кабинет.
     days_per_run: int = 5
-    # Пауза между сутками одного кабинета. Шлюз повторяет 429, но WB считает
-    # ответ 4xx за десять запросов — лучше не дойти до него.
     request_interval_seconds: int = 61
-    # Снимок остатков по складам старше этого — в книге и на странице предупреждение.
     remains_stale_hours: int = 24
-    # WB дописывает заказы с опозданием: сутки перечитываются, пока их не
-    # прочитали через столько часов после полуночи, и не чаще раза в refresh.
     settle_hours: int = 6
     refresh_minutes: int = 60
     retry_minutes: int = 15
@@ -948,7 +816,6 @@ class Settings:
         if self.turnover.region_backfill_step_days < 1:
             raise ValueError("turnover.region_backfill_step_days must be positive")
         if self.turnover.order_retention_days <= self.turnover.orders_window_days:
-            # Pruning inside the window would erase the very orders the metric divides by.
             raise ValueError("turnover.order_retention_days must exceed turnover.orders_window_days")
         if self.turnover.snapshot_retention_days <= self.turnover.orders_window_days:
             raise ValueError("turnover.snapshot_retention_days must exceed turnover.orders_window_days")
@@ -965,15 +832,10 @@ class Settings:
         except ZoneInfoNotFoundError as error:
             raise ValueError("fbs_distribution.timezone must be a known timezone") from error
         if self.turnover.timezone != "Europe/Moscow":
-            # WB statistics serve every date in Moscow time with no zone attached;
-            # scheduling this automation on any other clock would silently shift
-            # its day boundaries against the data.
             raise ValueError("turnover.timezone must be Europe/Moscow: WB statistics dates are always Moscow time")
         if self.telegram.poll_timeout_seconds < 1:
             raise ValueError("telegram.poll_timeout_seconds must be positive")
         if self.telegram.request_timeout_seconds <= self.telegram.poll_timeout_seconds:
-            # Long polling holds the connection for the whole poll timeout, so a
-            # request timeout below it would cancel every idle poll.
             raise ValueError("telegram.request_timeout_seconds must exceed telegram.poll_timeout_seconds")
         if self.telegram.send_max_attempts < 1:
             raise ValueError("telegram.send_max_attempts must be positive")

@@ -75,7 +75,6 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
         await session.flush()
         seller_id = model.id
         await FbsStocksRepository(session).track(seller_id)
-        # Каталог кабинета: по нему строка получает название и артикул.
         await SellerRepository(session).upsert_catalog(
             seller_id,
             active=[
@@ -128,7 +127,6 @@ async def test_collection_asks_only_the_columns_and_writes_zero_for_missing_rows
     async with database.session() as session:
         result = await CollectionService(session, FbsStocksRepository(session), client).collect(seller)
 
-    # DBS-склад в таблице не стоит — его не спрашивали.
     assert sorted(client.asked) == sorted(
         [PITER.warehouse_id, KAZAN.warehouse_id, SPB_FF.warehouse_id, VOLOGDA_FF.warehouse_id]
     )
@@ -138,7 +136,6 @@ async def test_collection_asks_only_the_columns_and_writes_zero_for_missing_rows
     fen, unknown = view.rows
     assert (fen.title, fen.article, fen.in_catalog) == ("Фен для волос", "1223328520", True)
     assert unknown.in_catalog is False
-    # Строки нет — ноль; сумма группы считается по её складам.
     assert fen.amount(SPB_FF.warehouse_id) == 28 and fen.amount(VOLOGDA_FF.warehouse_id) == 0
     own, northwest = view.groups
     assert [column.name for column in own.columns] == ["4. Питер наш", "5. Казань наша"]
@@ -155,7 +152,6 @@ async def test_a_warehouse_gone_or_being_deleted_leaves_the_table(database: Data
         await CollectionService(session, FbsStocksRepository(session), client).collect(seller)
         view = await service(session).view(seller)
         setup = await service(session).setup(seller)
-        # Удаляемый склад остаётся в зеркале с пометкой, но в группу его не поставить.
         with pytest.raises(BoardConflictError):
             await service(session).set_group_columns(seller, view.groups[0].id, [KAZAN.warehouse_id])
 
@@ -176,7 +172,6 @@ async def test_an_empty_warehouse_list_keeps_the_previous_collection(database: D
     assert await worker.collect(seller) is not None
     async with database.session() as session:
         view = await service(session).view(seller)
-    # Столбцы и остатки прежнего сбора на месте, ошибка названа.
     assert [column.name for column in view.groups[0].columns] == ["4. Питер наш", "5. Казань наша"]
     assert view.rows[0].amount(SPB_FF.warehouse_id) == 28
     assert view.collection_error is not None
@@ -190,7 +185,6 @@ async def test_groups_and_barcodes_keep_the_order_they_were_added_in(database: D
         await board.add_barcodes(seller, ["3000"], None)
         await board.add_barcodes(seller, ["2000", "1000"], None)
         view = await board.view(seller)
-    # Без явной позиции порядок был бы алфавитным, а не её.
     assert [group.title for group in view.groups] == ["Наш склад", "ФФ Стас", "Приволжский округ"]
     assert [row.barcode for row in view.rows] == ["3000", "2000", "1000"]
 
@@ -230,7 +224,6 @@ async def test_a_hidden_barcode_leaves_the_table_and_the_poll_but_keeps_its_note
     assert result.barcodes == 1
     assert all(UNKNOWN not in skus for skus in client.skus_asked)
 
-    # Возврат ставит обновление в очередь: остаток по строке устарел, пока она была скрыта.
     async with database.session() as session:
         board = service(session)
         await board.set_hidden(seller, UNKNOWN, False)
@@ -244,7 +237,6 @@ async def test_group_edits_keep_one_place_per_warehouse(database: Database, sell
     own_id, northwest_id = await seed(database, seller)
     async with database.session() as session:
         board = service(session)
-        # Питер переезжает в округ: из «Нашего склада» он уходит сам.
         await board.set_group_columns(seller, northwest_id, [PITER.warehouse_id, SPB_FF.warehouse_id])
         await board.update_group(seller, own_id, title="Свои", kind=GROUP_FULFILMENT)
         with pytest.raises(BoardConflictError):
@@ -283,10 +275,8 @@ async def test_export_follows_the_sellers_spreadsheet(database: Database, seller
     ]
     assert [cell.value for cell in sheet[2]] == ["дубль карточки", FEN, "=SUM(D2:E2)", 0, 0, "=SUM(G2:H2)", 28, 0]
     assert sheet["B2"].number_format == "@"
-    # Группы сворачиваются, сводный столбец слева от своих складов.
     assert sheet.column_dimensions["D"].outline_level == 1 and sheet.column_dimensions["C"].outline_level == 0
     assert sheet.sheet_properties.outlinePr.summaryRight is False
-    # Нули красятся условным форматом на всей области чисел.
     assert [str(area.sqref) for area in sheet.conditional_formatting] == ["C2:H3"]
     assert sheet.freeze_panes == "C2"
 
@@ -300,9 +290,7 @@ async def test_export_follows_the_sellers_spreadsheet(database: Database, seller
         "Северо-западный округ",
     ]
     assert [cell.value for cell in comparison[2]] == ["дубль карточки", FEN, "=SUM(D2:E2)", 0, 0, 28]
-    # Красятся только записанные ячейки: разрыв между блоками для Excel равен нулю.
     assert sorted(str(area.sqref) for area in comparison.conditional_formatting) == ["C2:E3", "F2:F3"]
-    # «Сравнение ФФ» раскрывает фулфилмент; у этого кабинета его нет — только суммы групп.
     fulfilment = workbook["Сравнение ФФ"]
     assert [cell.value for cell in fulfilment[1]] == [
         "ИП Остатки",
@@ -321,7 +309,6 @@ async def test_worker_polls_on_an_interval_and_serves_the_button(database: Datab
     now = datetime.now(UTC)
 
     assert await worker.collect_due(now) == 1
-    # Только что собрали — до истечения интервала кабинет не в очереди.
     assert await worker.collect_due(now) == 0
     assert await worker.collect_due(now + timedelta(minutes=SETTINGS.fbs_stocks.poll_minutes + 1)) == 1
 

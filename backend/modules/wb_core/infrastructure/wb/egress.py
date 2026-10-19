@@ -1,13 +1,3 @@
-"""Клиент шлюза wb-egress — единственная дорога отсюда к Wildberries.
-
-Ключи селлеров, троттлинг и исходящие IP живут на шлюзе: этот сервис передаёт
-`seller_id`, шлюз сам подставляет ключ и выпускает запрос с закреплённого за
-селлером адреса. Прямых обращений к `*.wildberries.ru` в коде больше нет.
-
-Канал — тот же набор, что у телеграм-релея: HTTPS с запиненным self-signed
-сертификатом шлюза и короткоживущий JWT (HS256) на каждый запрос.
-"""
-
 import asyncio
 import random
 import ssl
@@ -39,7 +29,6 @@ class EgressAdminError(Exception):
         self.status_code = status_code
 
 
-# Маршруты шлюза: у WB и Ozon один конверт, разные хосты и ключи за ним.
 WB_ROUTE = "/api/v1/wb/request"
 OZON_ROUTE = "/api/v1/ozon/request"
 
@@ -56,9 +45,6 @@ class EgressGateway:
         elif lowered in {"false", "0", "no"}:
             self._verify = False
         else:
-            # Путь к сертификату шлюза. Соединение идёт на VPS по IP, а имя в
-            # сертификате — внутреннее, поэтому проверка имени выключена:
-            # доверие держится на пиннинге самого сертификата.
             context = ssl.create_default_context(cafile=config.verify)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_REQUIRED
@@ -70,8 +56,6 @@ class EgressGateway:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
-
-    # --- WB-запросы -----------------------------------------------------
 
     async def call(
         self,
@@ -131,8 +115,6 @@ class EgressGateway:
             if status >= 400:
                 raise WBPermanentError(f"{api_name} отклонил запрос: HTTP {status}")
             if payload.get("truncated"):
-                # Обрезанный JSON перестаёт быть JSON: молча отдать его дальше
-                # значит записать в базу половину страницы как целую.
                 raise WBTemporaryError(
                     f"{api_name}: ответ не поместился в потолок шлюза и пришёл обрезанным — "
                     "поднимите EGRESS_MAX_RESPONSE_BYTES или уменьшите размер страницы"
@@ -189,7 +171,6 @@ class EgressGateway:
             "priority": priority,
         }
         if form is not None:
-            # Поле есть только у запросов с multipart: остальные конверты не меняются.
             envelope["form"] = form
         try:
             response = await client.post(route, json=envelope, headers=self._headers())
@@ -199,31 +180,21 @@ class EgressGateway:
             try:
                 payload = response.json()
             except ValueError:
-                # Обрезанный ответ или HTML от промежуточного nginx — не повод
-                # ронять вызывающего сырым исключением мимо контракта ошибок.
                 return _Retry(reason="шлюз вернул не JSON", delay=2.0)
             if not isinstance(payload, dict):
                 return _Retry(reason="шлюз вернул JSON неожиданной формы", delay=2.0)
             return payload
         detail = self._detail(response)
         if response.status_code == 429:
-            # Очередь шлюза не нашла бюджета даже за своё ожидание — дальше
-            # пусть решает повтор уровня задачи, а не сон внутри вызова.
             raise WBTemporaryError(detail or "Лимит запросов к WB исчерпан — повторите позже")
         if response.status_code in {404, 409}:
             raise WBPermanentError(detail or f"Селлер {seller_id} не обслуживается шлюзом")
         if response.status_code in {400, 422}:
             raise WBPermanentError(detail or "Шлюз отверг запрос как некорректный")
         if response.status_code == 401:
-            # Рассинхрон секрета — постоянная ошибка конфигурации: падать надо
-            # сразу и громко, а не жечь минуту сна на каждый вызов.
             raise WBTemporaryError("Шлюз WB отверг авторизацию сервиса — проверьте EGRESS_JWT_SECRET на обеих сторонах")
-        # Текст шлюза дороже кода ответа: в нём написано, почему он не смог —
-        # например, что не удалось привязаться к исходящему адресу селлера.
         reason = f"шлюз ответил HTTP {response.status_code}"
         return _Retry(reason=f"{reason}: {detail}" if detail else reason, delay=5.0)
-
-    # --- Управление селлерами -------------------------------------------
 
     async def put_seller(self, *, seller_id: str, name: str, api_key: str, event_version: int) -> dict[str, Any]:
         return await self._admin(
@@ -310,8 +281,6 @@ class EgressGateway:
             status_code=response.status_code,
         )
 
-    # --- Вспомогательное -------------------------------------------------
-
     def _headers(self) -> dict[str, str]:
         now = int(time.time())
         token = jwt.encode(
@@ -327,8 +296,6 @@ class EgressGateway:
         return {"Authorization": f"Bearer {token}"}
 
     def _require_client(self) -> httpx.AsyncClient:
-        # Ленивая инициализация: одному клиенту рады и API-процесс, и воркеры,
-        # и никому из них не нужен отдельный этап start().
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self._config.base_url.rstrip("/"),

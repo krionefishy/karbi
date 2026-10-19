@@ -15,8 +15,6 @@ from backend.modules.wb_fbs_distribution.domain import (
 )
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 
-# Причины, по которым размер не попал в план. Пропуск без причины неотличим от
-# «товара нет», а это разные вещи.
 NO_STOCK = "no_stock"
 NO_WAREHOUSES = "no_warehouses"
 SHARES_MISSING = "shares_missing"
@@ -106,8 +104,6 @@ class PlanningService:
                 region_code=assignment.get(warehouses[entry.warehouse_id].office_id, ""),
             )
             for entry in await self.placement.queue(seller_id)
-            # Пока WB обрабатывает создание или удаление, склад не готов
-            # принимать остатки, и план обязан его пропустить.
             if entry.warehouse_id in warehouses
             and not warehouses[entry.warehouse_id].is_processing
             and not warehouses[entry.warehouse_id].is_deleting

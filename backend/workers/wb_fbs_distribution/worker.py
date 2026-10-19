@@ -81,8 +81,6 @@ class FbsDistributionWorker:
         async with self.database.session() as session:
             distribution = FbsDistributionRepository(session)
             latest = await distribution.latest_snapshot()
-            # Источник может отдавать один и тот же снимок каждый оборот;
-            # без отсечки журнал наполнялся бы повторами каждые полминуты.
             if latest is not None and latest.generated_at >= snapshot.generated_at:
                 return False
             service = SnapshotService(
@@ -118,8 +116,6 @@ class FbsDistributionWorker:
         retry_after = now.astimezone(UTC) - timedelta(minutes=self.config.mirror_retry_minutes)
         async with self.database.session() as session:
             due = await FbsDistributionRepository(session).sellers_due_for_sync(since, retry_after=retry_after)
-            # Архивный кабинет остаётся подключённым до отключения, но ключа его
-            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
             active = {seller.id for seller in await SellerRepository(session).list_sellers()}
         due = [seller_id for seller_id in due if seller_id in active]
         synced = 0
@@ -131,8 +127,6 @@ class FbsDistributionWorker:
         return synced
 
     async def _sync_seller(self, seller_id: uuid.UUID) -> bool:
-        # Попытка отмечается до сети: упавший процесс не должен превращаться в
-        # кабинет, который спрашивают снова и снова.
         async with self.database.session() as session:
             await FbsDistributionRepository(session).record_sync_attempt(seller_id)
             await session.commit()
@@ -146,8 +140,6 @@ class FbsDistributionWorker:
             try:
                 result = await service.sync_seller(seller_id)
             except WBPermanentError as error:
-                # Ключ без прав или отозван: повтор через минуту ничего не
-                # изменит, поэтому кабинет ждёт следующего срока.
                 self.logger.warning("fbs_mirror_rejected", seller_id=str(seller_id), error=str(error))
                 return False
             except WBTemporaryError as error:

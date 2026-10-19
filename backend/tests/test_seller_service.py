@@ -306,7 +306,6 @@ async def test_edit_seller() -> None:
 
     updated = await service.update(repository.seller_id, "Seller Latin", None)
     assert updated.name == "Seller Latin"
-    # Без нового ключа имя едет на шлюз отдельным вызовом.
     assert gateway.renamed == [(str(repository.seller_id), "Seller Latin")]
     assert gateway.delivered == []
 
@@ -380,7 +379,6 @@ async def test_restoring_asks_for_the_key_again() -> None:
 
     assert not restored.is_archived
     assert restored.catalog_sync_status == "queued"
-    # Архивация отпустила ключ, поэтому на шлюз уезжает новый.
     assert gateway.delivered[-1][2] == "wb-api-key-restored"
     assert restored.egress_status == "verified"
 
@@ -443,9 +441,6 @@ async def test_an_invalid_key_verdict_lands_on_the_seller() -> None:
     assert not any(isinstance(item, OutboxEventModel) for item in session.added)
 
 
-# --- Ozon -------------------------------------------------------------------
-
-
 async def test_ozon_credentials_are_delivered_to_the_gateway() -> None:
     service, repository, _, _, gateway = service_fixture()
 
@@ -461,7 +456,6 @@ async def test_ozon_credentials_are_delivered_to_the_gateway() -> None:
     delivered = gateway.ozon_delivered[0]
     assert delivered["client_id"] == "111222"
     assert delivered["performance_client_secret"] == "perf-secret"
-    # Имя селлера едет вместе с учёткой: шлюзу оно нужно для строки селлера.
     assert delivered["name"] == repository.model.name
 
 
@@ -531,9 +525,6 @@ async def test_archiving_puts_out_every_marketplace() -> None:
 
     assert archived.egress_status == "disabled"
     assert archived.ozon_egress_status == "disabled"
-
-
-# --- MPStats ----------------------------------------------------------------
 
 
 async def test_the_mpstats_token_is_delivered_to_the_gateway() -> None:

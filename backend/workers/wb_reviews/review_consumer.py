@@ -20,9 +20,6 @@ from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
 NO_MEDIA = (0, 0)
-# Extra time on top of the job lease before Kafka considers the consumer dead.
-# The default 300s poll interval is shorter than a legitimate job, and a
-# rebalance in the middle of one means double work and a dead task.
 POLL_INTERVAL_MARGIN_MS = 60_000
 
 
@@ -65,9 +62,6 @@ class ReviewSyncConsumer:
         try:
             while True:
                 message = await consumer.getone()
-                # Decoded here rather than by a value_deserializer: a deserializer
-                # raises inside getone(), outside every guard below, which kills
-                # the task and leaves the restart re-reading the same message.
                 try:
                     payload = json.loads(message.value)
                 except (TypeError, ValueError):
@@ -90,8 +84,6 @@ class ReviewSyncConsumer:
             await consumer.stop()
 
     async def process(self, payload: dict) -> None:
-        # Parse before touching the database: a malformed message stays
-        # malformed forever, so it is skipped instead of retried.
         try:
             event_id = uuid.UUID(payload["event_id"])
             run_id = uuid.UUID(payload["run_id"])
@@ -101,7 +93,6 @@ class ReviewSyncConsumer:
         except (KeyError, TypeError, ValueError) as error:
             raise InvalidPayloadError(str(error)) from error
 
-        # Phase 1: read everything needed and close the DB session before any HTTP request.
         async with self.database.session() as session:
             sellers = SellerRepository(session)
             reviews = ReviewSyncRepository(session)
@@ -120,8 +111,6 @@ class ReviewSyncConsumer:
                 await session.commit()
                 return
             if not await reviews.mark_job_running(job_id, self.lease_seconds):
-                # Someone else holds the job (or the reaper already closed it);
-                # going to WB anyway would double the work and the traffic.
                 sellers.mark_inbox(event_id, "WBReviewSyncRequested")
                 await session.commit()
                 self.logger.info("review_sync_job_not_claimed", extra={"job_id": str(job_id)})
@@ -129,8 +118,6 @@ class ReviewSyncConsumer:
             await reviews.mark_run_running(run_id)
             await session.commit()
 
-        # Phase 2: talk to WB. The catalog is already in Postgres, so only
-        # feedbacks are fetched here.
         try:
             aggregation = await self.feedback_client.aggregate(str(seller_id))
         except WBFeedbackPermanentError as error:
@@ -140,15 +127,12 @@ class ReviewSyncConsumer:
             await self._finish(event_id, run_id, job_id, str(error), retry=True)
             return
 
-        # Phase 3: persist the fully collected result in one short transaction.
         async with self.database.session() as session:
             sellers = SellerRepository(session)
             reviews = ReviewSyncRepository(session)
             if await sellers.get(seller_id) is None:
                 await reviews.fail_job(job_id, "Селлер удалён во время синхронизации")
             elif not await reviews.is_tracked(seller_id):
-                # Detached from the automation while the job was in flight: his
-                # history was just purged, so writing counts would resurrect it.
                 await reviews.complete_job(job_id, 0, 0)
                 self.logger.info(
                     "review_sync_seller_detached_skipped",

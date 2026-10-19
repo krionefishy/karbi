@@ -70,7 +70,6 @@ describe("sortByMovement", () => {
       product("lost", { "2026-08-17": 100, [day]: 95 }),
       product("gained", { "2026-08-17": 100, [day]: 105 }),
     ];
-    // Equal magnitude, so the incoming order decides and neither jumps ahead.
     expect(sortByMovement(products, day).map((entry) => entry.id)).toEqual(["lost", "gained"]);
   });
 

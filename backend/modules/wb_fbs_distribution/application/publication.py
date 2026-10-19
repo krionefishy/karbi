@@ -78,8 +78,6 @@ class PublicationService:
 
         desired = await self._desired(seller_id, plan.id)
         published = await self.distribution.published(seller_id)
-        # Пара, которая была опубликована, но в плане её больше нет, обязана
-        # уехать нулём: иначе проданный или выведенный товар останется в WB.
         changes: dict[int, dict[str, int]] = {}
         for key in set(desired) | set(published):
             amount = desired.get(key, 0)
@@ -108,16 +106,12 @@ class PublicationService:
             await self._record(seller_id, plan_id, warehouse_id, len(rows), FAILED, 0, str(error), stamp)
             return WarehouseOutcome(warehouse_id, sent=0, drift=0, status=FAILED, error=str(error))
 
-        # Ответ 204 не значит, что число опубликовано: WB не валидирует имена
-        # полей и на неверном имени вернёт успех, ничего не изменив. Поэтому
-        # состояние считается подтверждённым только после вычитки.
         try:
             actual = await self.marketplace.stocks(seller_key, warehouse_id, [sku for sku, _ in rows])
         except (WBPermanentError, WBTemporaryError) as error:
             await self._record(seller_id, plan_id, warehouse_id, len(rows), FAILED, 0, str(error), stamp)
             return WarehouseOutcome(warehouse_id, sent=len(rows), drift=0, status=FAILED, error=str(error))
 
-        # Отсутствующая строка — это ноль: WB не возвращает позиции без остатка.
         confirmed = {sku: actual.get(sku, 0) for sku, _ in rows}
         drift = sum(1 for sku, amount in rows if confirmed[sku] != amount)
         await self.distribution.confirm_published(seller_id, warehouse_id, confirmed, now=stamp)
@@ -175,5 +169,4 @@ class PublicationService:
             raise SellerNotFoundError(str(seller_id))
         if not enrollment.write_enabled:
             raise WriteNotAllowedError("Кабинету не разрешена запись в Wildberries")
-        # Ключа здесь больше нет: шлюз подставит его сам по seller_id.
         return str(seller_id)

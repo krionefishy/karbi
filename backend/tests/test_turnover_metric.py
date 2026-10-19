@@ -38,8 +38,6 @@ def metric(
 def test_the_window_of_orders_becomes_a_daily_rate_and_days_of_cover() -> None:
     row = metric()
 
-    # Six orders over the three whole days of the window is two a day; 42 in
-    # stock lasts three weeks at that rate.
     assert row.avg_daily_orders == 2.0
     assert row.days_of_cover == 21
     assert row.status == STATUS_OK
@@ -113,7 +111,6 @@ def test_days_are_whole_and_rounded_down() -> None:
     """Half a day of cover is not a day the seller has to ship in."""
     row = metric(stock=ArticleStock("123", 5, 0), average_stock=5.0)
 
-    # 5 in stock at two a day is 2.5 days, and 2.5 days is two days.
     assert row.days_of_cover == 2
     assert row.turnover_days == 2
 

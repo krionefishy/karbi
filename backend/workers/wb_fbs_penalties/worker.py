@@ -15,8 +15,6 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.storage.pg import Database
 
-# Проход — до шести отчётов по минуте на страницу (лимит WB). Запрос «в работе»
-# дольше часа живым быть не может: его бросил упавший процесс.
 STALE_REFRESH = timedelta(hours=1)
 
 
@@ -75,8 +73,6 @@ class PenaltiesWorker:
         retry_after = now.astimezone(UTC) - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
             due = await PenaltiesRepository(session).sellers_due(since, retry_after=retry_after)
-            # Архивный кабинет остаётся подключённым до отключения, но ключа его
-            # у шлюза уже нет: спрашивать WB от его имени бессмысленно.
             active = {seller.id for seller in await SellerRepository(session).list_sellers()}
         collected = 0
         for seller_id in due:

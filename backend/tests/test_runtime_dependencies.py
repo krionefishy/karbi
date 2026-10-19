@@ -1,11 +1,3 @@
-"""Всё, что импортирует код сервиса, ставится в образ без dev-зависимостей.
-
-Тесты гоняются в окружении с dev-группой, и пакет, который приехал только
-транзитивно через dev-зависимость, здесь импортируется, а в образе — нет.
-Так 25.09.2026 стикеры коробов упали на проде с `No module named 'PIL'`:
-Pillow приезжала через reportlab, а reportlab перенесли в dev.
-"""
-
 import ast
 import importlib.metadata as metadata
 import re
@@ -40,7 +32,6 @@ def _runtime_closure() -> set[str]:
         try:
             requirements = metadata.requires(name) or []
         except metadata.PackageNotFoundError:
-            # Не установлен — значит, под этот Python не нужен (маркер версии).
             continue
         seen.add(name)
         for requirement in requirements:

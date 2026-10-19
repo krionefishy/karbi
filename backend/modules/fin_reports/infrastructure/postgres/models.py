@@ -58,7 +58,6 @@ class CostPriceModel(FinReportsBase):
     )
 
 
-# Суммы за отчёт — рубли с копейками; запас по разрядам на годовые итоги крупного кабинета.
 MONEY = Numeric(16, 2)
 
 
@@ -141,14 +140,12 @@ class WbStockSnapshotModel(FinReportsBase):
     __tablename__ = "wb_stock_snapshots"
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
-    # Воскресенье недели, которую закрывает снимок.
     week_end: Mapped[date] = mapped_column(Date, primary_key=True)
     nm_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     tech_size: Mapped[str] = mapped_column(String(64), primary_key=True, default="")
     in_warehouse: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     to_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     from_client: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Всего: на складах плюс в пути туда и обратно.
     total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -162,8 +159,6 @@ class OzonDayModel(FinReportsBase):
     day: Mapped[date] = mapped_column(Date, primary_key=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    # Отпечаток дня в зеркале на момент сложения: число строк и время их чтения.
-    # Зеркало перечитывает последние дни — отпечаток сменился, день складывается заново.
     mirror_lines: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     mirror_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -175,7 +170,6 @@ class WbStockWeekModel(FinReportsBase):
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     week_end: Mapped[date] = mapped_column(Date, primary_key=True)
-    # Когда зеркало прочитало остаток, который лёг в снимок.
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

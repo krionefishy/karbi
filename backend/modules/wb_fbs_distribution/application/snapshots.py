@@ -8,15 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_fbs_distribution.domain import StockSnapshot, available_units
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 
-# Идентификатор источника, которым подпишется будущий обмен с 1С.
 ONEC = "1c"
 DISCONNECTED = "disconnected"
 
 ACCEPTED = "accepted"
 REJECTED = "rejected"
 
-# Часы вперёд, которые ещё можно списать на разъехавшиеся часы, а не на
-# испорченный файл.
 CLOCK_SKEW = timedelta(minutes=5)
 
 
@@ -144,8 +141,6 @@ class SnapshotService:
             if not line.barcode:
                 continue
             if line.barcode in barcodes:
-                # Один баркод — один размер карточки WB. Две строки на один
-                # баркод означают, что остаток задвоится при сопоставлении.
                 raise SnapshotRejected(f"Баркод {line.barcode} встречается дважды")
             barcodes.add(line.barcode)
 

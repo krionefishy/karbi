@@ -9,7 +9,6 @@ export interface BoxStickerBox {
   position: number;
   shk: string;
   package_code: string;
-  /** Страница исходного PDF, с которой взят стикер. */
   page: number;
   quantity: number;
   items: BoxStickerItem[];
@@ -24,7 +23,6 @@ export interface BoxStickerPlan {
   boxes: BoxStickerBox[];
 }
 
-/** Короб шаблона WB, получивший товар из таблицы сборки. */
 export interface PackedBox {
   position: number;
   shk: string;
@@ -42,7 +40,6 @@ export interface PackingPlan {
   boxes: PackedBox[];
 }
 
-/** Коробовка, заполненная здесь: на шаге стикеров её Excel не нужен. */
 export interface RecentPacking {
   supply_id: number;
   seller_name: string;
@@ -50,5 +47,4 @@ export interface RecentPacking {
   saved_at: string;
 }
 
-/** Откуда брать Excel коробовки на шаге стикеров: файлом или по номеру поставки. */
 export type WorkbookSource = { kind: "file"; file: File } | { kind: "supply"; supplyId: number };

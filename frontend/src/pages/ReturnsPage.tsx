@@ -92,7 +92,6 @@ export function ReturnsPage() {
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refreshSellers });
 
-  // Пока идёт сбор, состояние опрашивается; страница обновится сама, как только он закончится.
   const { data: refreshState } = useQuery({
     queryKey: ["wb-returns-refresh", sellerId],
     queryFn: () => getRefreshState(sellerId),

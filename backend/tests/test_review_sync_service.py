@@ -96,7 +96,6 @@ async def test_manual_review_sync_creates_one_outbox_event_per_seller() -> None:
 class HistorySellers:
     def __init__(self, seller_id: uuid.UUID) -> None:
         self.seller_id = seller_id
-        # Two articles of one склейка plus one card WB never glued.
         self.articles = [
             Article(uuid.uuid4(), seller_id, "101", "SKU-101", "Шуруповерт", imt_id=900),
             Article(uuid.uuid4(), seller_id, "102", "SKU-102", "Шуруповерт", imt_id=900),
@@ -135,15 +134,10 @@ async def test_history_reports_both_the_article_and_the_whole_card() -> None:
     history = await service.history(seller_id, 90)
     products = {product.article: product for product in history.products}
 
-    # Per-article numbers stay untouched...
     assert products["101"].snapshots[-1]["ratings"] == {1: 1, 2: 0, 3: 0, 4: 0, 5: 12}
-    # ...while the card series sums every nmID of imtID 900, which is what the
-    # seller sees on the WB card itself.
     assert products["101"].card_snapshots[-1]["ratings"] == {1: 1, 2: 0, 3: 0, 4: 2, 5: 17}
     assert products["102"].card_snapshots == products["101"].card_snapshots
-    # A day only one article reported still appears in the card series.
     assert [snapshot["date"] for snapshot in products["101"].card_snapshots] == ["2026-08-17", "2026-08-18"]
-    # Without an imtID the card series is just the article itself.
     assert products["103"].card_snapshots == products["103"].snapshots
 
 

@@ -1,5 +1,3 @@
-"""Зеркало отчётов реализации: клиент финансового API и сбор в wb_core."""
-
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -198,7 +196,6 @@ async def test_a_page_asks_only_for_the_fields_the_mirror_stores() -> None:
     assert (delivery.delivery_amount, delivery.delivery_service) == (1, Decimal("63.50"))
     call = stub.requests_to(DETAILED)[0]
     assert call["body"] == {"limit": client_module.PAGE_LIMIT, "rrdId": 0, "fields": ROW_REQUEST_FIELDS}
-    # Коды маркировки и реквизиты покупателей в зеркало не просятся.
     assert "kiz" not in ROW_REQUEST_FIELDS and "b2bCustomerTin" not in ROW_REQUEST_FIELDS
 
 
@@ -217,9 +214,6 @@ async def test_a_non_list_answer_is_a_permanent_error() -> None:
         EgressStub(router).on("POST", LIST, body={"error": "nope"})
         with pytest.raises(WBPermanentError):
             await WBSalesReportsClient(make_gateway()).reports(SELLER, date(2026, 9, 1), date(2026, 9, 30))
-
-
-# --- сбор в зеркало -------------------------------------------------------------------
 
 
 def money(value: str) -> Decimal:
@@ -350,7 +344,6 @@ async def test_reports_are_listed_from_the_history_start_and_rows_read_to_the_en
     outcome = await mirror(database, client).collect_sales_reports(seller, now=at(6))
 
     assert (outcome.reports, outcome.loaded, outcome.pages, outcome.rows, outcome.pending) == (2, 2, 3, 4, 0)
-    # Окно списка — от начала истории до сегодняшнего дня по Москве.
     assert client.windows == [(date(2026, 1, 1), date(2026, 9, 29))]
     assert client.page_calls == [(MAIN, 0), (MAIN, 12), (BUYOUT, 0)]
     async with database.session() as session:
@@ -402,7 +395,6 @@ async def test_only_so_many_reports_are_read_per_run_and_loaded_ones_are_not_rer
 
     first = await service.collect_sales_reports(seller, now=at(6))
     assert (first.loaded, first.pending) == (1, 0)
-    # Старший отчёт первым: история дочитывается с начала.
     assert client.page_calls == [(700, 0)]
 
     second = await service.collect_sales_reports(seller, now=at(7))
@@ -437,7 +429,6 @@ async def test_a_loaded_report_is_checked_against_wb_totals_with_returns_subtrac
         assert not [item for item in caplog.records if item.getMessage() == "sales_report_sums_mismatch"]
         outcome = await mirror(database, wrong).collect_sales_reports(seller, now=at(7))
 
-    # Расхождение — строка в журнале, а отчёт остаётся дочитанным: других строк WB не отдаст.
     assert outcome.loaded == 1
     [record] = [item for item in caplog.records if item.getMessage() == "sales_report_sums_mismatch"]
     assert record.report_id == 700 and record.mismatch["for_pay_sum"] == ("1.00", "3576.40")
@@ -490,7 +481,6 @@ async def test_a_report_wb_refuses_does_not_lock_out_the_newer_ones(database: Da
     with pytest.raises(WBPermanentError) as error:
         await mirror(database, client).collect_sales_reports(seller, now=at(6))
 
-    # Курсор, который не двигается, — отказ, а не вечный цикл; оба отказа названы.
     assert "отчёт 700" in str(error.value) and "курсор отчёта 600 не двигается" in str(error.value)
     assert client.page_calls == [(600, 0), (700, 0), (MAIN, 0)]
     async with database.session() as session:

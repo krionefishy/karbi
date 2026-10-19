@@ -15,7 +15,6 @@ class CollectionResult:
     claims_seen: int
     changes: list[ReturnChange] = field(default_factory=list)
     new_claims: list[Claim] = field(default_factory=list)
-    # Кабинет отключили, пока читали WB: писать нечего и некуда.
     skipped: bool = False
 
 
@@ -59,7 +58,6 @@ class CollectionService:
             or tracked.claims_archived_at is None
             or (tracked.claims_archived_at < stamp - timedelta(hours=self.claims_archive_hours))
         )
-        # Сеть идёт до первой записи: держать транзакцию весь запрос незачем.
         await self.session.commit()
 
         items = await self.report_client.report(seller_key, today - timedelta(days=depth), today)
@@ -67,8 +65,6 @@ class CollectionService:
             await self.session.rollback()
             return CollectionResult(len(items), 0, skipped=True)
         changes = await self.returns.upsert_returns(seller_id, items, now=stamp)
-        # Отчёт — отдельная транзакция: упавший на заявках проход не должен
-        # заставлять воркер перечитывать возвраты и терять их изменения.
         await self.session.commit()
 
         open_claims = await self.claims_client.claims(seller_key, archive=False)

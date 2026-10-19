@@ -1,11 +1,3 @@
-"""Заполненные коробовки под номером поставки — в Redis, с истечением.
-
-Файл нужен между двумя шагами одного дня: заполнили коробовку → загрузили в WB
-→ скачали стикеры → вернулись за PDF по порядку. Своя схема в Postgres ради
-шести килобайт на несколько часов — лишняя: Redis в стеке уже есть, с appendonly,
-а если запись всё же пропала, Excel всегда можно загрузить руками.
-"""
-
 import base64
 import json
 from datetime import datetime
@@ -14,7 +6,6 @@ from backend.modules.wb_box_stickers.domain import StoredPacking
 from backend.storage.redis import RedisClient
 
 KEY_PREFIX = "wb_box_stickers:packing:"
-# Поставку отгружают в пределах недели с создания; месяц — с запасом на перенос.
 PACKING_TTL_SECONDS = 30 * 24 * 3600
 
 

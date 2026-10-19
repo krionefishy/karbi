@@ -40,8 +40,6 @@ class NotificationTopics:
     """Outgoing notifications. The payload names the bot to speak through."""
 
     TELEGRAM_MESSAGE_REQUESTED = validate_topic_name("notifications.telegram.message.requested")
-    # Команда из чата, которую модуль уведомлений сам не понимает, и удачный /start:
-    # автоматизация, которой принадлежит бот, отвечает обычным сообщением в чат.
     TELEGRAM_COMMAND_RECEIVED = validate_topic_name("notifications.telegram.command.received")
 
     @classmethod

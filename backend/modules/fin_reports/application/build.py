@@ -1,10 +1,3 @@
-"""Сборка отчёта: дочитанные зеркалом отчёты реализации складываются в суммы модуля.
-
-Отчёт WB неизменяем — складывается один раз. Страница и выгрузка после
-этого читают сотни готовых сумм, а зеркало с миллионами строк трогает только
-воркер, по одному отчёту за запрос.
-"""
-
 import logging
 import uuid
 from collections.abc import Callable
@@ -15,15 +8,9 @@ from backend.modules.fin_reports.infrastructure.postgres import FinReportsReposi
 from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMirror
 from backend.storage.pg import Database
 
-# Версия правила сложения. Меняется, когда в суммах появляется новое поле или
-# ключ: отчёты, сложенные по старой версии, пересобираются сами.
 FACTS_VERSION = 1
-# Отдельная версия для начислений Ozon: их правило сложения своё.
-# 2 — продажи и возвраты одного SKU за день складываются порознь.
 OZON_FACTS_VERSION = 2
-# С какого дня отчёты вообще интересны: раньше зеркало не хранит.
 HISTORY_FROM = date(2024, 1, 1)
-# Окно в будущее — на отчёт, период которого зеркало записало с завтрашней датой.
 HISTORY_AHEAD = timedelta(days=31)
 
 
@@ -33,9 +20,7 @@ logger = logging.getLogger("fin_reports.build")
 @dataclass(frozen=True, slots=True)
 class BuildOutcome:
     built: int
-    # Сколько дочитанных отчётов ещё ждёт сложения: потолок за проход не дал дойти.
     left: int
-    # Отчёты, на которых сложение упало: пропущены, остальные сложены; в `left` не входят.
     failed: int = 0
 
 
@@ -57,8 +42,6 @@ class FactsBuilder:
         failed = 0
         for report in due[:limit]:
             self._heartbeat()
-            # Отчёт — своей транзакцией: сбой на десятом не откатывает девять сложенных
-            # и не запирает одиннадцатый — старший отчёт в очереди стоит первым всегда.
             try:
                 async with self.database.session() as session:
                     totals = await SalesReportMirror(session).totals(seller_id, [report.report_id])
@@ -93,7 +76,6 @@ class FactsBuilder:
             lines, collected_at = signatures.get(day, (0, None))
             return OzonDayMark(OZON_FACTS_VERSION, lines, collected_at)
 
-        # Дни от первого начисления до курсора зеркала; пустой день тоже складывается — нулём.
         first = min(min(signatures), *built) if built else min(signatures)
         due = [
             day

@@ -27,7 +27,6 @@ class OfficeRow:
     federal_district: str
     cargo_type: int
     region_code: str | None
-    # Есть ли под этот объект склад хотя бы у одного подключённого кабинета.
     used_by_cabinets: int
 
 

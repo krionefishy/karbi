@@ -1,9 +1,3 @@
-"""Сага доставки ключа на шлюз wb-egress; ключи покидают эту базу.
-
-Статусы селлеров существующего пула добиваются сверкой со шлюзом
-(backend/commands/sync_egress_status.py) после выкатки.
-"""
-
 import sqlalchemy as sa
 from alembic import op
 
@@ -24,14 +18,10 @@ def upgrade() -> None:
     op.add_column(
         "sellers", sa.Column("egress_version", sa.BigInteger(), nullable=False, server_default="0"), schema="wb_core"
     )
-    # Ключи уже доставлены на шлюз (backend/commands/export_sellers_to_egress.py)
-    # и живут только там; шифртексты здесь — лишняя копия, которую нечем читать.
     op.drop_table("credentials", schema="wb_core")
 
 
 def downgrade() -> None:
-    # Таблицу можно вернуть, но данные ключей не восстановимы из этой базы —
-    # их пришлось бы заливать заново с шлюза недоступным ему способом.
     op.create_table(
         "credentials",
         sa.Column("id", sa.dialects.postgresql.UUID(as_uuid=True), primary_key=True),

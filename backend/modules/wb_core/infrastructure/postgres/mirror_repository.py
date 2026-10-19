@@ -71,8 +71,6 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
 )
 
 _INSERT_CHUNK = 1000
-# asyncpg принимает не больше 32 767 параметров на запрос: у широкой таблицы
-# порция строк считается от числа колонок, а не берётся круглой.
 _MAX_QUERY_PARAMETERS = 32_767
 
 
@@ -85,8 +83,6 @@ class MirrorRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
-
-    # --- schedule -------------------------------------------------------------
 
     async def states(self, kind: str) -> dict[uuid.UUID, MirrorStateModel]:
         rows = await self.session.scalars(select(MirrorStateModel).where(MirrorStateModel.kind == kind))
@@ -144,8 +140,6 @@ class MirrorRepository:
             .values(error=error[:1000])
         )
 
-    # --- stocks -----------------------------------------------------------------
-
     async def replace_stocks(
         self,
         seller_id: uuid.UUID,
@@ -202,8 +196,6 @@ class MirrorRepository:
             select(FbsWarehouseStockModel).where(FbsWarehouseStockModel.seller_id == seller_id)
         )
         return {(row.article, row.warehouse_id): row.quantity for row in rows}
-
-    # --- reviews ----------------------------------------------------------------
 
     async def replace_remains(self, seller_id: uuid.UUID, remains: Iterable[WarehouseRemain], *, now: datetime) -> None:
         """Отчёт по складам целиком: баркод, пропавший из ответа, пропадает и отсюда.
@@ -286,8 +278,6 @@ class MirrorRepository:
             for row in rows
         }
 
-    # --- склады продавца и объекты WB ---------------------------------------------
-
     async def replace_seller_warehouses(
         self, seller_id: uuid.UUID, warehouses: Iterable[SellerWarehouse], *, now: datetime
     ) -> None:
@@ -347,8 +337,6 @@ class MirrorRepository:
             select(WbOfficeModel).where(_any_of(WbOfficeModel.office_id, wanted, Integer))
         )
         return {row.office_id: WbOffice(row.office_id, row.name, row.city, row.address) for row in rows}
-
-    # --- сборочные задания ----------------------------------------------------------
 
     async def upsert_orders(self, seller_id: uuid.UUID, orders: Iterable[FbsOrder], *, now: datetime) -> int:
         """Задание перечитывается, пока не попадёт в поставку: `supply_id` и то, что
@@ -450,8 +438,6 @@ class MirrorRepository:
         result = await self.session.execute(delete(FbsOrderModel).where(FbsOrderModel.created_at < before))
         return int(getattr(result, "rowcount", 0) or 0)
 
-    # --- поставки ---------------------------------------------------------------------
-
     async def upsert_supplies(self, seller_id: uuid.UUID, supplies: Iterable[FbsSupply], *, now: datetime) -> int:
         rows = [
             {
@@ -530,8 +516,6 @@ class MirrorRepository:
             wb_status=row.wb_status,
             source=row.source,
         )
-
-    # --- чаты с покупателями ------------------------------------------------------------
 
     async def chat_cursor(self, seller_id: uuid.UUID) -> ChatCursorModel | None:
         return await self.session.get(ChatCursorModel, seller_id)
@@ -703,8 +687,6 @@ class MirrorRepository:
             reply_sign=row.reply_sign,
         )
 
-    # --- отчёты реализации --------------------------------------------------------------
-
     async def upsert_sales_reports(self, seller_id: uuid.UUID, reports: Iterable[SalesReport], *, now: datetime) -> int:
         """Шапки перечитываются каждым сбором; докуда дочитаны строки — не трогается."""
         rows = [{"seller_id": seller_id, "collected_at": now, **asdict(report)} for report in reports]
@@ -802,7 +784,6 @@ class MirrorRepository:
         if not wanted:
             return []
         model = SalesReportRowModel
-        # Недельный отчёт на стыке месяцев WB делит не всегда: месяц операции — в ключе.
         month = cast(func.date_trunc("month", model.rr_date), Date).label("month")
         keys = (
             model.report_id,
@@ -862,8 +843,6 @@ class MirrorRepository:
     @staticmethod
     def _sales_report_row(row: SalesReportRowModel) -> SalesReportRow:
         return SalesReportRow(**{field.name: getattr(row, field.name) for field in fields(SalesReportRow)})
-
-    # --- реклама ------------------------------------------------------------------------
 
     async def advert_cursor(self, seller_id: uuid.UUID) -> date | None:
         row = await self.session.get(AdvertCursorModel, seller_id)
@@ -964,7 +943,6 @@ class MirrorRepository:
         )
         if not wanted:
             return 0
-        # Повтор ключа в одном ответе WB уронил бы вставку целиком — побеждает последняя запись.
         unique = {(item.advert_id, item.day, item.nm_id): item for item in stats}
         rows = [
             {
@@ -1043,8 +1021,6 @@ class MirrorRepository:
             for row in rows
         }
 
-    # --- начисления Ozon ------------------------------------------------------------------
-
     async def ozon_cursor(self, seller_id: uuid.UUID) -> date | None:
         row = await self.session.get(OzonAccrualCursorModel, seller_id)
         return row.collected_through if row else None
@@ -1065,7 +1041,6 @@ class MirrorRepository:
         Начисление, которое Ozon перенёс на этот день с другого, удаляется и со
         старого дня — вместе со строками, которых в новом ответе уже нет.
         """
-        # Повтор ключа на стыке страниц уронил бы вставку целиком — побеждает последняя строка.
         unique = {(line.accrual_id, line.line_no): line for line in lines}
         await self.session.execute(
             delete(OzonAccrualLineModel).where(
@@ -1084,7 +1059,6 @@ class MirrorRepository:
         chunk = _chunk_size(rows)
         for offset in range(0, len(rows), chunk):
             statement = insert(OzonAccrualLineModel).values(rows[offset : offset + chunk])
-            # Одно начисление может прийти в двух днях (Ozon правит дату): побеждает свежее.
             excluded = statement.excluded
             await self.session.execute(
                 statement.on_conflict_do_update(
@@ -1114,8 +1088,6 @@ class MirrorRepository:
         names = [field.name for field in fields(OzonAccrualLine)]
         return [OzonAccrualLine(**{name: getattr(row, name) for name in names}) for row in rows]
 
-    # --- catalog ----------------------------------------------------------------
-
     async def lock_catalog(self, seller_id: uuid.UUID) -> None:
         """Транзакционная блокировка на селлера: вторая запись каталога ждёт первую."""
         await self.session.execute(
@@ -1127,7 +1099,6 @@ class MirrorRepository:
             await self.session.execute(insert(model).values(rows[offset : offset + _INSERT_CHUNK]))
 
 
-# Колонки строки отчёта, которые в сводке складываются как есть.
 _TOTALS_SUMMED = (
     "quantity",
     "delivery_amount",

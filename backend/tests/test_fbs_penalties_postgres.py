@@ -251,12 +251,10 @@ async def test_collection_keeps_only_charged_rows_and_lists_three_months_first(
         stored = await PenaltiesRepository(session).rows_in_period(seller, TODAY - timedelta(days=30), TODAY)
         report = await session.get(ReportModel, (seller, REPORT_ID))
         tracked = await session.get(TrackedSellerModel, seller)
-    # Строка без удержаний (4) не хранится; отчёт дочитан, кабинет собран.
     assert sorted(row.rrd_id for row in stored) == [1, 2, 3]
     assert report is not None and report.loaded_at is not None and report.penalty_sum == 573.04
     assert tracked is not None and tracked.collected_at is not None
 
-    # Повторный сбор смотрит список на две недели, а дочитанный отчёт не перечитывает.
     again = await collect(database, seller, ROWS, now=NOW + timedelta(days=1))
     assert again.list_calls == [(TODAY + timedelta(days=1) - timedelta(days=14), TODAY + timedelta(days=1))]
     assert again.page_calls == []
@@ -264,7 +262,6 @@ async def test_collection_keeps_only_charged_rows_and_lists_three_months_first(
 
 async def test_a_long_report_is_read_page_by_page_within_one_run(database: Database, seller: uuid.UUID) -> None:
     client = await collect(database, seller, ROWS, page_size=3)
-    # Полная страница → вторая с курсором 3; неполная закрывает отчёт.
     assert client.page_calls == [(REPORT_ID, 0), (REPORT_ID, 3)]
     async with database.session() as session:
         report = await session.get(ReportModel, (seller, REPORT_ID))
@@ -291,7 +288,7 @@ async def test_only_a_few_reports_per_run_and_the_seller_stays_due(database: Dat
 
 async def test_daily_reports_inside_a_loaded_weekly_one_are_not_reread(database: Database, seller: uuid.UUID) -> None:
     """Кабинет собран по недельным отчётам; суточные за ту же неделю — те же строки."""
-    await collect(database, seller, ROWS)  # недельный REPORT_ID за TODAY-12..TODAY-6 прочитан
+    await collect(database, seller, ROWS)
     inside = ReportHeader(REPORT_ID + 100, TODAY - timedelta(days=9), TODAY - timedelta(days=9), None, 1, 0.0, 0.0)
     after = ReportHeader(REPORT_ID + 101, TODAY - timedelta(days=3), TODAY - timedelta(days=3), None, 1, 0.0, 0.0)
     client = FakeFinance(ROWS, headers=[inside, after])
@@ -322,7 +319,6 @@ async def test_rows_without_an_order_are_retraced_when_the_mirror_catches_up(
             seller, [order(5551059999, "er.i999z.0.0", supply="WB-GI-1")], now=NOW
         )
         await session.commit()
-    # Сразу повторный сбор строку не трогает — не раньше чем через несколько часов.
     await collect(database, seller, ROWS, now=NOW + timedelta(hours=1))
     async with database.session() as session:
         soon = await service(session).view(seller, TODAY - timedelta(days=30), TODAY)
@@ -365,13 +361,11 @@ async def test_the_view_traces_each_row_to_its_warehouse_and_supply(database: Da
             seller, TODAY - timedelta(days=30), TODAY, warehouse_id=KAZAN.warehouse_id, page=1, page_size=1
         )
     assert sorted(item.row.rrd_id for item in only_penalties.rows) == [1, 2]
-    # Итоги — за весь период, вкладкам нужны счётчики всех групп и на странице одной.
     assert {t.group for t in only_penalties.totals} == {GROUP_PENALTIES, GROUP_STORAGE}
     assert only_penalties.total_rows == 2
     assert outside.rows == ()
     assert (len(first.rows), len(last.rows), first.total_rows, last.page) == (2, 1, 3, 2)
     assert {item.row.rrd_id for item in first.rows} | {item.row.rrd_id for item in last.rows} == {1, 2, 3}
-    # Фильтр по складу знает только зеркало, поэтому и итоги считаются по отфильтрованным строкам.
     assert (kazan.total_rows, len(kazan.rows)) == (2, 1)
     assert {t.group: t.count for t in kazan.totals} == {GROUP_PENALTIES: 2}
 
@@ -389,10 +383,8 @@ async def test_lookup_accepts_stickers_assembly_ids_and_srids(database: Database
         )
 
     by_key = {item.row.srid: item for item in result.rows}
-    # Стикер из отчёта → строка со штрафом и складом; srid и номер задания той же строки не задваивают её.
     assert by_key["er.i902a.0.0"].row.amount == 198.06 and by_key["er.i902a.0.0"].trace == TRACE_FOUND
     assert by_key["er.i903b.0.0"].trace == TRACE_NO_SUPPLY
-    # Стикер из архива заданий: в отчётах штрафа нет, но склад и поставка известны.
     stub = by_key["er.i904c.0.0"]
     assert (stub.row.rrd_id, stub.row.amount, stub.trace, stub.supply_id) == (0, 0.0, TRACE_FOUND, "WB-GI-1")
     assert {miss.key for miss in result.missing} == {"777", "???"}
@@ -404,7 +396,6 @@ async def test_export_writes_numbers_as_text_and_totals_on_top(database: Databas
         report = await service(session).export(seller, TODAY - timedelta(days=30), TODAY)
 
     assert report.filename.startswith("fbs_penalties_ИП_Штрафы_")
-    # В заголовок идёт только ASCII: кириллица в `filename=` роняла выгрузку.
     assert (
         report.ascii_filename
         == f"fbs_penalties_seller_{(TODAY - timedelta(days=30)).isoformat()}_{TODAY.isoformat()}.xlsx"
@@ -415,7 +406,6 @@ async def test_export_writes_numbers_as_text_and_totals_on_top(database: Databas
         only = await service(session).export(seller, TODAY - timedelta(days=30), TODAY, group=GROUP_PENALTIES)
     assert "_penalties_" in only.filename
     sheet = load_workbook(io.BytesIO(only.content))["Штрафы"]
-    # Итоги сверху — по тому, что в файле: одна группа, две строки.
     assert sheet["A2"].value == "Штрафы" and sheet["B2"].value == 2
     assert sheet["A3"].value != "Хранение и приёмка"
     sheet = load_workbook(io.BytesIO(report.content))["Штрафы"]
@@ -432,8 +422,6 @@ async def test_worker_collects_every_few_hours_and_serves_refresh(database: Data
     worker = PenaltiesWorker(database, client, SETTINGS, now=lambda tz: morning.astimezone(tz))
 
     assert await worker.collect_due(morning) == 1
-    # Отметка сбора ставится настоящим временем: через час после него кабинет ещё не в очереди,
-    # а через сутки — снова да.
     assert await worker.collect_due(datetime.now(UTC) + timedelta(hours=1)) == 0
     assert await worker.collect_due(datetime.now(UTC) + timedelta(days=1)) == 1
     assert len(client.list_calls) == 2

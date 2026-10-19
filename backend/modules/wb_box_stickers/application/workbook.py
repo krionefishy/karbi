@@ -1,5 +1,3 @@
-"""Excel коробовки: какие короба, в каком порядке и что селлер в них положил."""
-
 import io
 import re
 import zipfile
@@ -13,7 +11,6 @@ HEADER_SHK = "шк короба"
 HEADER_CODE = "шк короба для печати"
 HEADER_BARCODE = "баркод товара"
 HEADER_QUANTITY = "кол-во товаров"
-# Шапка у WB в первой строке; несколько строк сверху — запас на ручную правку.
 HEADER_SEARCH_ROWS = 10
 
 
@@ -50,7 +47,6 @@ def read_workbook(data: bytes) -> list[WorkbookBox]:
         sheet = book.active
         if sheet is None:
             raise StickerInputError("В Excel нет листов")
-        # WB пишет в файл размер листа «A1», и read_only без сброса видит одну ячейку.
         sheet.reset_dimensions()  # type: ignore[union-attr]
         rows = [tuple(row) for row in sheet.iter_rows(values_only=True)]
     finally:

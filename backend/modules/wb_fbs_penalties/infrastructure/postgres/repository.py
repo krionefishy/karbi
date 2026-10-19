@@ -32,8 +32,6 @@ class PenaltiesRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- membership -------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -62,8 +60,6 @@ class PenaltiesRepository:
         )
         return found is not None
 
-    # --- collection schedule ---------------------------------------------
-
     async def sellers_due(self, since: datetime, *, retry_after: datetime) -> list[uuid.UUID]:
         rows = await self.session.scalars(
             select(TrackedSellerModel.seller_id)
@@ -88,8 +84,6 @@ class PenaltiesRepository:
             .where(TrackedSellerModel.seller_id == seller_id)
             .values(collected_at=now, collection_error=None)
         )
-
-    # --- reports ----------------------------------------------------------
 
     async def upsert_reports(self, seller_id: uuid.UUID, headers: Iterable[ReportHeader], *, now: datetime) -> int:
         """Список отчётов: новые появляются, известные обновляют суммы; курсор и отметка загрузки не трогаются."""
@@ -143,7 +137,6 @@ class PenaltiesRepository:
                 & covering.loaded_at.is_not(None)
                 & (covering.date_from <= ReportModel.date_from)
                 & (covering.date_to >= ReportModel.date_to)
-                # Строго шире: два отчёта за один и тот же период друг друга не заменяют.
                 & ((covering.date_to - covering.date_from) > (ReportModel.date_to - ReportModel.date_from)),
             )
             .where(ReportModel.seller_id == seller_id, ReportModel.loaded_at.is_(None))
@@ -207,8 +200,6 @@ class PenaltiesRepository:
             )
         ).one()
         return row[0], int(row[1] or 0)
-
-    # --- report rows ------------------------------------------------------
 
     async def upsert_rows(self, seller_id: uuid.UUID, rows: Iterable[ReportRow], *, now: datetime) -> int:
         values = [
@@ -487,8 +478,6 @@ class PenaltiesRepository:
             .order_by(ReportRowModel.rr_dt.desc(), ReportRowModel.rrd_id.desc())
         )
         return [self._row(row) for row in rows]
-
-    # --- manual refresh --------------------------------------------------
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None) -> RefreshRequestModel:
         """Поставить запрос или вернуть тот, что уже ждёт: уникальный индекс

@@ -2,20 +2,16 @@ import type { CostUploadResult, PnlPeriod } from "./types";
 
 const moneyFormatter = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** Сумма строки отчёта; ноль — прочерк, как в привычной таблице финансиста. */
 export function money(value: number | undefined): string {
   if (!value) return "—";
-  // Минус-ноль после округления тоже прочерк: «-0,00» читается как расход.
   const text = moneyFormatter.format(value);
   return /^-?0,00$/.test(text) ? "—" : text;
 }
 
-/** Период по умолчанию — самый свежий закрытый, по которому дочитаны все кабинеты. */
 export function defaultPeriod(periods: PnlPeriod[]): string {
   return (periods.find((item) => !item.open && item.pending_sellers.length === 0) ?? periods[0])?.key ?? "";
 }
 
-/** Сегодняшняя дата по часам браузера — `toISOString` дал бы вчерашнюю до трёх ночи по Москве. */
 export function localToday(now: Date = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   const day = String(now.getDate()).padStart(2, "0");
@@ -34,7 +30,6 @@ export const articles = (count: number) => `${count} ${plural(count, "артик
 export const reports = (count: number) => `${count} ${plural(count, "отчёт", "отчёта", "отчётов")}`;
 export const days = (count: number) => `${count} ${plural(count, "день", "дня", "дней")}`;
 
-/** Что сделала загрузка файла себестоимости — одной фразой. */
 export function uploadSummary(result: CostUploadResult): string {
   const marketplace = result.marketplace === "wb" ? "Wildberries" : "Ozon";
   const parts = [`новых — ${result.added}`, `цена изменилась — ${result.changed}`, `без изменений — ${result.unchanged}`];

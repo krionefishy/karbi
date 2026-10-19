@@ -1,11 +1,3 @@
-"""Лист «По артикулам»: юнит-экономика артикула за неделю из строк отчёта реализации.
-
-Колонки и формулы повторяют отчёт, которым финансист пользовался раньше,
-и восстановлены по его цифрам: итог услуг WB — плановая комиссия плюс все
-удержания, налог — от реализации после СПП, прибыль — к оплате без налога
-минус себестоимость. Проценты от отрицательной прибыли там нули, здесь тоже.
-"""
-
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
@@ -24,10 +16,8 @@ from backend.modules.wb_core.domain import SALES_RETURN_DOC_TYPE, SalesReportTot
 
 ZERO = Decimal("0")
 SALE_DOC_TYPE = "Продажа"
-# Строки без артикула (удержания по документу, а не по товару) собираются в одну.
 NO_ARTICLE = 0
 
-# Направление логистики WB пишет в название строки.
 TO_CLIENT = "к клиенту"
 FROM_CLIENT = "от клиента"
 CANCELLED = "при отмене"
@@ -41,7 +31,6 @@ class Stock:
     in_warehouse: int = 0
     to_client: int = 0
     from_client: int = 0
-    # Всего: на складах плюс в пути туда и обратно.
     total: int = 0
 
 
@@ -75,137 +64,128 @@ class ArticleRow:
     nm_id: int
     vendor_code: str = ""
     tech_size: str = ""
-    # Штуки.
-    deliveries: int = 0  # E
-    refusals: int = 0  # F
-    sales: int = 0  # H
-    self_buyouts: int = 0  # I — руками, у нас всегда ноль
-    giveaways: int = 0  # J — руками
-    dbs: int = 0  # K
-    returns: int = 0  # N
-    stock_from_client: int = 0  # P
-    stock_to_client: int = 0  # Q
-    stock_in_warehouse: int = 0  # R
-    stock_total: int = 0  # S
-    sale_corrections: int = 0  # T
-    disposed: int = 0  # W
-    payout_corrections_qty: int = 0  # X
-    # Деньги до СПП.
-    sales_gross: Decimal = ZERO  # Z
-    returns_gross: Decimal = ZERO  # AA
-    corrections_gross: Decimal = ZERO  # AB
-    dbs_gross: Decimal = ZERO  # AG
-    # Деньги после СПП.
-    sales_after: Decimal = ZERO  # AL
-    returns_after: Decimal = ZERO  # AM
-    corrections_after: Decimal = ZERO  # AN
-    # Перечисление и услуги.
-    payout_corrections: Decimal = ZERO  # AV
-    for_pay: Decimal = ZERO  # AW
-    acquiring: Decimal = ZERO  # BD
-    logistics: Decimal = ZERO  # BF
-    logistics_to_client: Decimal = ZERO  # BG
-    logistics_from_client: Decimal = ZERO  # BH
-    logistics_own_return: Decimal = ZERO  # BI
-    penalties: Decimal = ZERO  # BO
-    reward_corrections: Decimal = ZERO  # BR
-    storage: Decimal = ZERO  # BU
-    acceptance: Decimal = ZERO  # BX
-    ads: AdSpend = field(default_factory=AdSpend)  # CA–CE
-    rating_abuse: Decimal = ZERO  # CI
-    reviews: Decimal = ZERO  # CL
-    credit: Decimal = ZERO  # CO
-    loyalty_points: Decimal = ZERO  # CR
-    loyalty_program: Decimal = ZERO  # CU
-    payout_term: Decimal = ZERO  # CX
-    other_deductions: Decimal = ZERO  # DA
-    damage_payout: Decimal = ZERO  # DB
-    tax_rate: Decimal = ZERO  # доля, не проценты
-    unit_cost: Decimal | None = None  # EB
-    marketing: Decimal = ZERO  # EM — внешний, руками
-    # Доли в итогах кабинета, проставляются после расчёта всех строк.
-    revenue_share: Decimal = ZERO  # AD
-    size_share: Decimal = ZERO  # M
-    profit_share: Decimal = ZERO  # ER
+    deliveries: int = 0
+    refusals: int = 0
+    sales: int = 0
+    self_buyouts: int = 0
+    giveaways: int = 0
+    dbs: int = 0
+    returns: int = 0
+    stock_from_client: int = 0
+    stock_to_client: int = 0
+    stock_in_warehouse: int = 0
+    stock_total: int = 0
+    sale_corrections: int = 0
+    disposed: int = 0
+    payout_corrections_qty: int = 0
+    sales_gross: Decimal = ZERO
+    returns_gross: Decimal = ZERO
+    corrections_gross: Decimal = ZERO
+    dbs_gross: Decimal = ZERO
+    sales_after: Decimal = ZERO
+    returns_after: Decimal = ZERO
+    corrections_after: Decimal = ZERO
+    payout_corrections: Decimal = ZERO
+    for_pay: Decimal = ZERO
+    acquiring: Decimal = ZERO
+    logistics: Decimal = ZERO
+    logistics_to_client: Decimal = ZERO
+    logistics_from_client: Decimal = ZERO
+    logistics_own_return: Decimal = ZERO
+    penalties: Decimal = ZERO
+    reward_corrections: Decimal = ZERO
+    storage: Decimal = ZERO
+    acceptance: Decimal = ZERO
+    ads: AdSpend = field(default_factory=AdSpend)
+    rating_abuse: Decimal = ZERO
+    reviews: Decimal = ZERO
+    credit: Decimal = ZERO
+    loyalty_points: Decimal = ZERO
+    loyalty_program: Decimal = ZERO
+    payout_term: Decimal = ZERO
+    other_deductions: Decimal = ZERO
+    damage_payout: Decimal = ZERO
+    tax_rate: Decimal = ZERO
+    unit_cost: Decimal | None = None
+    marketing: Decimal = ZERO
+    revenue_share: Decimal = ZERO
+    size_share: Decimal = ZERO
+    profit_share: Decimal = ZERO
 
-    # --- штуки --------------------------------------------------------------------
     @property
-    def refusal_rate(self) -> Decimal:  # G
+    def refusal_rate(self) -> Decimal:
         return _ratio(Decimal(self.refusals), self.deliveries)
 
     @property
-    def organic_sales(self) -> int:  # L
+    def organic_sales(self) -> int:
         return self.sales - self.self_buyouts - self.giveaways - self.dbs
 
     @property
-    def return_rate(self) -> Decimal:  # O
+    def return_rate(self) -> Decimal:
         return _ratio(Decimal(self.returns), self.sales)
 
     @property
-    def realized(self) -> int:  # U
+    def realized(self) -> int:
         return self.sales - self.returns + self.sale_corrections
 
     @property
-    def buyout_rate(self) -> Decimal:  # V
+    def buyout_rate(self) -> Decimal:
         return _ratio(Decimal(self.realized), self.deliveries)
 
-    # --- выручка -----------------------------------------------------------------
     @property
-    def revenue_gross(self) -> Decimal:  # AC
+    def revenue_gross(self) -> Decimal:
         return self.sales_gross + self.returns_gross + self.corrections_gross
 
     @property
-    def average_gross(self) -> Decimal:  # AE
+    def average_gross(self) -> Decimal:
         return _ratio(self.sales_gross, self.sales)
 
     @property
-    def planned_commission_rate(self) -> Decimal:  # AF
+    def planned_commission_rate(self) -> Decimal:
         return _ratio(self.planned_commission, self.revenue_gross)
 
     @property
-    def average_dbs_gross(self) -> Decimal:  # AH
+    def average_dbs_gross(self) -> Decimal:
         return _ratio(self.dbs_gross, self.dbs)
 
     @property
-    def sales_gross_without_dbs(self) -> Decimal:  # AI
+    def sales_gross_without_dbs(self) -> Decimal:
         return self.sales_gross - self.dbs_gross
 
     @property
-    def average_gross_without_dbs(self) -> Decimal:  # AJ
+    def average_gross_without_dbs(self) -> Decimal:
         return _ratio(self.sales_gross_without_dbs, self.sales - self.dbs)
 
     @property
-    def revenue_after(self) -> Decimal:  # AO, AQ
+    def revenue_after(self) -> Decimal:
         return self.sales_after + self.returns_after + self.corrections_after
 
     @property
-    def average_after(self) -> Decimal:  # AP, AR
+    def average_after(self) -> Decimal:
         return _ratio(self.sales_after, self.sales)
 
     @property
-    def spp(self) -> Decimal:  # AS
+    def spp(self) -> Decimal:
         return self.revenue_gross - self.revenue_after
 
     @property
-    def spp_rate(self) -> Decimal:  # AT
+    def spp_rate(self) -> Decimal:
         return _ratio(self.spp, self.revenue_gross)
 
-    # --- комиссии ----------------------------------------------------------------
     @property
-    def planned_commission(self) -> Decimal:  # AY
+    def planned_commission(self) -> Decimal:
         return self.revenue_gross - self.for_pay
 
     @property
-    def actual_commission(self) -> Decimal:  # BA
+    def actual_commission(self) -> Decimal:
         return self.revenue_after - self.for_pay
 
     @property
-    def logistics_other(self) -> Decimal:  # BJ
+    def logistics_other(self) -> Decimal:
         return self.logistics - self.logistics_to_client - self.logistics_from_client - self.logistics_own_return
 
-    # --- итоги услуг WB -----------------------------------------------------------
     @property
-    def services_gross(self) -> Decimal:  # DE
+    def services_gross(self) -> Decimal:
         return (
             self.planned_commission
             + self.logistics
@@ -224,49 +204,47 @@ class ArticleRow:
         )
 
     @property
-    def services_gross_without_account_ads(self) -> Decimal:  # DF
+    def services_gross_without_account_ads(self) -> Decimal:
         return self.services_gross - self.ads.account
 
     @property
-    def services_gross_without_credit(self) -> Decimal:  # DI
+    def services_gross_without_credit(self) -> Decimal:
         return self.services_gross - self.credit
 
     @property
-    def services_after(self) -> Decimal:  # DL
+    def services_after(self) -> Decimal:
         return self.services_gross - self.spp
 
     @property
-    def services_after_without_account_ads(self) -> Decimal:  # DM
+    def services_after_without_account_ads(self) -> Decimal:
         return self.services_after - self.ads.account
 
     @property
-    def payout(self) -> Decimal:  # DQ, DS
+    def payout(self) -> Decimal:
         return self.revenue_after - self.services_after
 
     @property
-    def tax(self) -> Decimal:  # DU
-        # В старом отчёте копейки налога отбрасывались, а не округлялись.
+    def tax(self) -> Decimal:
         return (self.revenue_after * self.tax_rate).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
     @property
-    def payout_after_tax(self) -> Decimal:  # DX
+    def payout_after_tax(self) -> Decimal:
         return self.payout - self.tax
 
-    # --- себестоимость и прибыль -----------------------------------------------------
     @property
-    def cost(self) -> Decimal:  # EB — ноль, когда себестоимости нет
+    def cost(self) -> Decimal:
         return self.unit_cost or ZERO
 
     @property
-    def cost_of_sales(self) -> Decimal:  # DY
+    def cost_of_sales(self) -> Decimal:
         return self.cost * self.realized
 
     @property
-    def cost_rate(self) -> Decimal:  # EA
+    def cost_rate(self) -> Decimal:
         return _ratio(self.cost_of_sales, self.revenue_gross)
 
     @property
-    def operating_profit(self) -> Decimal:  # EQ
+    def operating_profit(self) -> Decimal:
         return self.payout_after_tax - self.cost_of_sales - self.marketing
 
     def per_unit(self, value: Decimal) -> Decimal:
@@ -279,20 +257,18 @@ class ArticleRow:
         return _ratio(value, self.revenue_after)
 
     @property
-    def profit_rate_gross(self) -> Decimal:  # ET
+    def profit_rate_gross(self) -> Decimal:
         return _positive_ratio(self.operating_profit, self.revenue_gross)
 
     @property
-    def profit_rate_after(self) -> Decimal:  # EU
+    def profit_rate_after(self) -> Decimal:
         return _positive_ratio(self.operating_profit, self.revenue_after)
 
     @property
-    def profit_rate_cost(self) -> Decimal:  # EV
+    def profit_rate_cost(self) -> Decimal:
         return _positive_ratio(self.operating_profit, self.cost_of_sales)
 
 
-# Колонки листа в порядке старого отчёта: заголовок и как взять значение из строки.
-# Служебные колонки-разделители («1», «2»…) старого листа оставлены на своих местах.
 ARTICLE_COLUMNS: tuple[tuple[str, Callable[[ArticleRow], object]], ...] = (
     ("Артикул ВБ", lambda r: str(r.nm_id) if r.nm_id else "(пусто)"),
     ("Артикул продавца", lambda r: r.vendor_code),
@@ -456,7 +432,6 @@ ARTICLE_COLUMNS: tuple[tuple[str, Callable[[ArticleRow], object]], ...] = (
     ("% прибыли от себестоимости реализованного товара", lambda r: r.profit_rate_cost),
     ("Компенсация Шушары | Компенсация за утраченный товар", lambda r: ZERO),
 )
-# Колонки, которые в старом отчёте заполнялись руками или из источников, которых у нас нет.
 UNVERIFIED_COLUMNS = (
     "Самовыкупы",
     "Раздачи",
@@ -537,7 +512,6 @@ def _accumulate(row: ArticleRow, item: SalesReportTotals) -> None:
         row.returns_after -= after
         row.for_pay -= pay
     elif item.quantity or gross or after:
-        # Строка с деньгами за товар, но не продажа и не возврат: корректировка продаж.
         row.sale_corrections += item.quantity
         row.corrections_gross += gross
         row.corrections_after += after
@@ -569,7 +543,6 @@ def _accumulate(row: ArticleRow, item: SalesReportTotals) -> None:
     if deduction:
         kind = deduction_kind(item.bonus_type_name)
         if kind == ADVERTISING:
-            # Реклама по удержаниям идёт без артикула; по артикулам её даёт рекламный API.
             row.ads = AdSpend(promotion_info=row.ads.promotion_info + deduction)
         elif kind == REVIEWS:
             row.reviews += deduction

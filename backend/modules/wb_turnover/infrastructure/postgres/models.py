@@ -33,20 +33,10 @@ class TrackedSellerModel(WBTurnoverBase):
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    # Highest lastChangeDate we have pulled orders up to. Only moves on success,
-    # so a failed run simply repeats itself instead of leaving a hole.
     orders_watermark: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     warehouses_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Границы непрерывного отрезка, за который собран спрос по округам. Сбор
-    # растягивает отрезок в обе стороны — вперёд до вчера, назад до горизонта —
-    # и по паре суток за цикл, поэтому прерванный сбор продолжается с того же
-    # места, а пропущенные сутки закрываются сами.
     regions_filled_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     regions_filled_to: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # Когда в последний раз удалось переписать слой остатков FBS по складам.
-    # Отметка на селлере, а не на строке: слой пишется целиком, и без неё
-    # «везде ноль» не отличить от «ни разу не собирали» — строк нет в обоих
-    # случаях.
     fbs_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -75,8 +65,6 @@ class StockSnapshotModel(WBTurnoverBase):
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     article: Mapped[str] = mapped_column(String(255), primary_key=True)
     snapshot_date: Mapped[date] = mapped_column(Date, primary_key=True)
-    # Index of the configured collection hour, so a repeated run overwrites
-    # its own slot instead of inventing a new point in the average.
     slot: Mapped[int] = mapped_column(Integer, primary_key=True)
     delivery_model: Mapped[str] = mapped_column(String(8), primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -181,11 +169,7 @@ class TurnoverDailyModel(WBTurnoverBase):
     orders_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cancelled_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     avg_daily_orders: Mapped[float] = mapped_column(Numeric(12, 4), nullable=False, default=0)
-    # What the alert watches: current stock divided by the daily sales rate.
-    # Whole days, rounded down — a fraction of a day is not a day in hand.
     days_of_cover: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # The bookkeeping figure: average stock over the window, honest only once
-    # the window is full of our own snapshots.
     turnover_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stock_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sales_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

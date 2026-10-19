@@ -1,5 +1,3 @@
-"""Зеркало начислений Ozon: клиент и сбор по дням от курсора."""
-
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
@@ -147,11 +145,7 @@ async def test_a_day_of_accruals_is_read_page_by_page_and_unfolded_into_lines() 
         "Fbo",
     )
     assert (lines[2].amount, lines[3].amount, lines[4].amount) == (money("-9.99"), money("-20.63"), money("-28433.34"))
-    # Запрос ушёл по маршруту Ozon, а не WB.
     assert stub.routes == ["/api/v1/ozon/request", "/api/v1/ozon/request"]
-
-
-# --- сбор ----------------------------------------------------------------------------
 
 
 def line(day: date, accrual_id: int, amount: str) -> OzonAccrualLine:
@@ -218,7 +212,6 @@ async def database() -> AsyncIterator[Database]:
 @pytest_asyncio.fixture
 async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
     async with database.session() as session:
-        # Ключа WB нет, учётка Ozon проверена: начисления Ozon читаются, зеркало WB — нет.
         model = SellerModel(
             name="ИП Ozon", catalog_sync_status="success", egress_status="undelivered", ozon_egress_status="verified"
         )
@@ -250,7 +243,6 @@ async def test_accruals_are_collected_day_by_day_up_to_yesterday_and_resumed_wit
     assert client.days == [date(2026, 9, 20), date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23)]
     assert (first.days, first.lines, first.collected_through) == (4, 1, date(2026, 9, 23))
     second = await service.collect_ozon_accruals(seller, now=at(27))
-    # Два дня перекрытия, дальше до вчера; сегодня не читается — день ещё идёт.
     assert client.days[4:] == [date(2026, 9, 21), date(2026, 9, 22), date(2026, 9, 23), date(2026, 9, 24)]
     third = await service.collect_ozon_accruals(seller, now=at(27))
     assert (second.collected_through, third.collected_through, third.days) == (date(2026, 9, 24), date(2026, 9, 25), 4)
@@ -286,7 +278,6 @@ async def test_ozon_accruals_are_due_by_the_ozon_key_not_the_wb_one(database: Da
     worker = WBCoreWorker(database, service, SETTINGS, now=lambda: at(27))
 
     assert worker.due_since(MIRROR_OZON_ACCRUALS, at(27)) == at(27) - interval
-    # Ключа WB у кабинета нет — зеркало WB его не трогает, а Ozon собирается.
     assert await worker.collect_due(MIRROR_OZON_ACCRUALS, at(27)) == 1
     later = WBCoreWorker(database, service, SETTINGS, now=lambda: at(27, hour=7))
     assert await later.collect_due(MIRROR_OZON_ACCRUALS, at(27, hour=7)) == 0

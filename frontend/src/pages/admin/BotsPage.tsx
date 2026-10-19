@@ -11,7 +11,6 @@ import type { BotDelivery } from "../../features/admin/types";
 const moment = (value: string) =>
   new Date(value).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** Отказы после последней доставки — признак сломанного канала, а не одного заблокированного чата. */
 function DeliveryState({ delivery }: { delivery: BotDelivery }) {
   if (delivery.failed_count > 0) {
     return (
@@ -119,8 +118,6 @@ export function BotsPage() {
                         aria-label={`Отключить ${bot.code}`}
                         disabled={deleteMutation.isPending}
                         onClick={() => {
-                          // Deleting takes the token with it on the relay, and the
-                          // subscriptions here: there is no undo worth pretending about.
                           if (window.confirm(`Отключить бота ${bot.code}? Подписки будут потеряны.`)) {
                             deleteMutation.mutate(bot.code);
                           }

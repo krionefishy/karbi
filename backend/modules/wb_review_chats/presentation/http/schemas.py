@@ -6,7 +6,6 @@ class GroupSummaryResponse(BaseModel):
     replied: int
     silent: int
     pending: int
-    # Доли от всех диалогов группы; null — диалогов нет.
     reply_rate: float | None
     silent_rate: float | None
     pending_rate: float | None

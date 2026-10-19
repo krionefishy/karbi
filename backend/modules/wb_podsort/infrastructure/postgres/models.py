@@ -17,7 +17,6 @@ class TrackedSellerModel(WBPodsortBase):
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    # Последний проход, после которого все сутки истории на месте.
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -83,6 +82,5 @@ class WarehouseRegionModel(WBPodsortBase):
     __tablename__ = "warehouse_regions"
 
     warehouse_name: Mapped[str] = mapped_column(String(255), primary_key=True)
-    # NULL — склад нарочно не относится ни к одному региону.
     region: Mapped[str | None] = mapped_column(String(64), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

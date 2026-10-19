@@ -26,8 +26,6 @@ function apply(choice: ThemeChoice) {
   else root.setAttribute("data-theme", choice);
 }
 
-/** Тема хранится в браузере: без выбора интерфейс следует за системой,
- * а `data-theme` на <html> переключает токены — стили сами ничего не знают. */
 export function useTheme(): { theme: Theme; toggle: () => void } {
   const [choice, setChoice] = useState<ThemeChoice>(readChoice);
   useEffect(() => apply(choice), [choice]);

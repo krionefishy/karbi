@@ -46,15 +46,10 @@ from backend.storage.pg import Database
 
 NO_RATINGS = (0, 0, 0, 0, 0)
 NO_MEDIA = (0, 0)
-# Живой список заданий WB помнит столько; что старше, лежит в архиве помесячно.
 LIVE_ORDERS_MONTHS = 3
-# Свежие задания перечитываются с таким запасом: в поставку их кладут не сразу.
 ORDERS_OVERLAP = timedelta(days=3)
-# Даты отчётов реализации WB считает по Москве; окно списка — до сегодняшнего дня по ней.
 WB_TIMEZONE = ZoneInfo("Europe/Moscow")
-# Окно рекламного API: списания и статистика — не больше 31 дня за запрос.
 MAX_ADVERT_WINDOW = 31
-# Итоги шапки, по которым дочитанный отчёт сверяется с суммой своих строк.
 SALES_REPORT_CHECKED_SUMS = (
     "retail_amount_sum",
     "for_pay_sum",
@@ -201,12 +196,8 @@ class MirrorService:
         self.ozon_history_from = ozon_history_from
         self.ozon_days_per_run = ozon_days_per_run
         self.ozon_overlap_days = ozon_overlap_days
-        # Долгий сбор отмечается между страницами: каждая ждёт минуту лимита WB, а
-        # healthcheck воркера считает процесс мёртвым после четверти часа тишины.
         self._heartbeat = heartbeat or (lambda: None)
         self.logger = logging.getLogger("wb.core.mirror")
-
-    # --- catalog ------------------------------------------------------------------
 
     async def sync_catalog(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> CatalogOutcome:
         stamp = now or datetime.now(UTC)
@@ -220,9 +211,6 @@ class MirrorService:
                 sellers = SellerRepository(session)
                 mirror = MirrorRepository(session)
                 await self._ensure_alive(session, seller_id)
-                # Расписание и консьюмер события могут синхронизировать одного
-                # селлера одновременно; две записи каталога вперемешку — тупик
-                # в Postgres, поэтому запись идёт по очереди.
                 await mirror.lock_catalog(seller_id)
                 await sellers.upsert_catalog(
                     seller_id,
@@ -236,16 +224,11 @@ class MirrorService:
         except SellerGoneError:
             raise
         except Exception as error:
-            # Любая неудача — «ошибка» с текстом, а не «идёт синхронизация»
-            # навсегда и не «в очереди» без события: по этим двум статусам
-            # интерфейс ждёт результата и опрашивает сервер.
             await self._fail(seller_id, MIRROR_CATALOG, str(error) or error.__class__.__name__, sync_status="error")
             raise
         outcome = CatalogOutcome(len(catalog.active), len(catalog.archived), catalog.archived_available)
         self.logger.info("catalog_synced", extra={"seller_id": str(seller_id), **asdict(outcome)})
         return outcome
-
-    # --- stocks -------------------------------------------------------------------
 
     async def collect_stocks(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> StocksOutcome:
         """FBO из отчёта аналитики, FBS обходом складов продавца по chrtId.
@@ -265,8 +248,6 @@ class MirrorService:
             for row in await self.analytics.stocks(seller_key):
                 values = fbo.setdefault(row.article, [0, 0])
                 values[0] += row.quantity
-                # Отчёт больше не отдаёт quantityFull: складываем сами, с товаром
-                # в пути к клиенту и от клиента.
                 values[1] += row.quantity + row.in_way_to_client + row.in_way_from_client
             warehouses, fbs, per_warehouse = await self._collect_fbs(seller_key, article_of)
         except (WBPermanentError, WBTemporaryError) as error:
@@ -308,8 +289,6 @@ class MirrorService:
                     per_warehouse[(article, warehouse.id)] += amount
         return len(warehouses), dict(totals), dict(per_warehouse)
 
-    # --- остатки по складам WB --------------------------------------------------
-
     async def collect_remains(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> RemainsOutcome:
         """Отчёт «Остатки на складах» целиком — баркод × склад WB.
 
@@ -337,8 +316,6 @@ class MirrorService:
         outcome = RemainsOutcome(len({remain.barcode for remain in remains}), len(remains))
         self.logger.info("remains_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
-
-    # --- reviews ------------------------------------------------------------------
 
     async def collect_reviews(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> ReviewsOutcome:
         """Отзывы по звёздам на каждую известную карточку; нули — тоже факт.
@@ -379,8 +356,6 @@ class MirrorService:
         outcome = ReviewsOutcome(len(facts), aggregation.feedback_count)
         self.logger.info("reviews_collected", extra={"seller_id": str(seller_id), **asdict(outcome)})
         return outcome
-
-    # --- сборочные задания ------------------------------------------------------
 
     async def collect_orders(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OrdersOutcome:
         """Живые задания с перекрытием и архив по месяцам, которых ещё нет.
@@ -432,8 +407,6 @@ class MirrorService:
             year, month = (year + 1, 1) if month == 12 else (year, month + 1)
         return months
 
-    # --- поставки, склады, объекты ------------------------------------------------
-
     async def collect_supplies(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> SuppliesOutcome:
         """Поставки кабинета целиком, склады продавца и справочник объектов WB.
 
@@ -469,8 +442,6 @@ class MirrorService:
         self.logger.info("supplies_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
 
-    # --- чаты с покупателями ------------------------------------------------------
-
     async def collect_chats(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> ChatsOutcome:
         """Лента событий чатов от сохранённого курсора до конца или до потолка страниц.
 
@@ -494,8 +465,6 @@ class MirrorService:
                 page = await self.chats.events(seller_key, after=cursor)
                 pages += 1
                 events += len(page.events)
-                # Курсор, который не сдвинулся, — конец ленты: WB возвращает его же
-                # на пустой странице, а на стыке может повторить последнее событие.
                 caught_up = not page.events or page.next is None or page.next <= cursor
                 cursor = max(cursor, page.next or cursor)
                 await self._write_chat_page(seller_id, page.events, cursor, stamp, caught_up=caught_up)
@@ -521,16 +490,11 @@ class MirrorService:
             for event in events:
                 if event.review_prompt:
                     prompted.add(event.chat_id)
-                # Слова покупателя вне диалогов об отзыве отчётам не нужны — остаётся факт сообщения.
-                # Тексты продавца хранятся всегда: по ним историю можно переразметить, если WB
-                # сменит текст автосообщения.
                 private = event.sender == CHAT_SENDER_CLIENT and event.chat_id not in prompted
                 kept.append(replace(event, text=None) if private else event)
             await mirror.insert_chat_events(seller_id, kept, now=stamp)
             await mirror.save_chat_cursor(seller_id, cursor, tail_reached_at=stamp if caught_up else None)
             await session.commit()
-
-    # --- реклама -------------------------------------------------------------------
 
     async def collect_adverts(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> AdvertsOutcome:
         """Списания, состав кампаний и статистика по артикулам — окнами по 31 дню от курсора.
@@ -574,7 +538,6 @@ class MirrorService:
                     stat_rows += await mirror.replace_advert_nm_stats(
                         seller_id, advert_ids, start, end, stats, now=stamp
                     )
-                    # Сегодняшний день ещё дописывается: курсор не заходит за вчера.
                     collected_through = min(end, today - timedelta(days=1))
                     await mirror.save_advert_cursor(seller_id, collected_through)
                     await session.commit()
@@ -590,8 +553,6 @@ class MirrorService:
         outcome = AdvertsOutcome(windows, campaigns, spend_rows, stat_rows, collected_through)
         self.logger.info("adverts_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
-
-    # --- начисления Ozon ---------------------------------------------------------------
 
     async def collect_ozon_accruals(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OzonAccrualsOutcome:
         """Начисления Ozon по дням от курсора: день — своей транзакцией, за проход — не больше `ozon_days_per_run`.
@@ -622,8 +583,6 @@ class MirrorService:
                     await self._ensure_alive(session, seller_id)
                     mirror = MirrorRepository(session)
                     lines += await mirror.replace_ozon_accruals(seller_id, day, accruals, now=stamp)
-                    # Перечитывание перекрытия курсор назад не двигает: сбой на втором дне
-                    # перекрытия иначе откатывал бы его на три дня за каждый неудачный проход.
                     collected_through = max(day, cursor) if cursor else day
                     await mirror.save_ozon_cursor(seller_id, collected_through)
                     await session.commit()
@@ -639,8 +598,6 @@ class MirrorService:
         outcome = OzonAccrualsOutcome(days, lines, collected_through)
         self.logger.info("ozon_accruals_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
-
-    # --- отчёты реализации ----------------------------------------------------------
 
     async def collect_sales_reports(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> SalesReportsOutcome:
         """Шапки недельных отчётов с начала истории и строки отчётов, которых ещё нет.
@@ -685,7 +642,6 @@ class MirrorService:
                         pages += 1
                         rows += len(page.rows)
                         if not page.exhausted and page.cursor <= cursor:
-                            # Полная страница, а курсор стоит: следующий запрос вернул бы её же.
                             raise WBPermanentError(f"WB Finance API: курсор отчёта {report_id} не двигается")
                         cursor = max(cursor, page.cursor)
                         await self._write_sales_report_page(
@@ -695,8 +651,6 @@ class MirrorService:
                             loaded += 1
                             break
                 except WBPermanentError as error:
-                    # Отказ по одному отчёту не должен запирать остальные: он старший в
-                    # очереди, и без пропуска новые недели не читались бы никогда.
                     refused.append(f"отчёт {report_id}: {error}")
         except WBTemporaryError as error:
             await self._fail(seller_id, MIRROR_SALES_REPORTS, str(error))
@@ -765,8 +719,6 @@ class MirrorService:
             for article, product in aggregation.products.items()
             if article not in known
         ]
-
-    # --- phases -------------------------------------------------------------------
 
     async def _start(self, session, seller_id: uuid.UUID, kind: str, now: datetime) -> None:
         seller = await SellerRepository(session).get(seller_id)

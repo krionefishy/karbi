@@ -29,7 +29,6 @@ function total(counts: SendPage["counts"]): number {
   return Object.values(counts).reduce((sum, value) => sum + (value ?? 0), 0);
 }
 
-/** Вариант A: пилюли по статусам со счётчиками и таблица «когда, диалог, статус, текст». */
 export function SupportBotJournal({ page, filter, onFilter }: Props) {
   const counts = page?.counts ?? {};
   const countOf = (value: JournalStatus | "") => (value === "" ? total(counts) : (counts[value] ?? 0));

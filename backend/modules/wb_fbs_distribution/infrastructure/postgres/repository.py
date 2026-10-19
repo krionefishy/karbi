@@ -31,8 +31,6 @@ class FbsDistributionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    # --- подключение ------------------------------------------------------
-
     async def tracked_seller_ids(self) -> set[uuid.UUID]:
         return set(await self.session.scalars(select(TrackedSellerModel.seller_id)))
 
@@ -90,8 +88,6 @@ class FbsDistributionRepository:
             .returning(TrackedSellerModel.seller_id)
         )
         return result.scalar_one_or_none() is not None
-
-    # --- зеркало WB ------------------------------------------------------
 
     async def replace_offices(self, offices: Sequence[Office], *, now: datetime | None = None) -> None:
         """Обновить общий справочник объектов.
@@ -160,9 +156,6 @@ class FbsDistributionRepository:
             condition = model.seller_id == seller_id
             if keep:
                 condition = condition & model.warehouse_id.not_in(keep)
-            # Опубликованное состояние уходит вместе со складом. Иначе
-            # публикация продолжала бы слать на него ноль, WB отказывал бы, и
-            # каждая выгрузка навсегда оставалась бы с ошибкой.
             await self.session.execute(delete(model).where(condition))
         if not warehouses:
             return
@@ -243,8 +236,6 @@ class FbsDistributionRepository:
             )
         )
 
-    # --- регионы, разметка и настройки -----------------------------------
-
     async def regions(self) -> list[Region]:
         rows = await self.session.scalars(select(RegionModel).order_by(RegionModel.position))
         return [Region(code=row.code, title=row.title, position=row.position, share_bp=row.share_bp) for row in rows]
@@ -303,8 +294,6 @@ class FbsDistributionRepository:
     async def settings(self) -> DistributionSettingsModel:
         row = await self.session.get(DistributionSettingsModel, 1)
         if row is None:
-            # Строку заводит миграция; её отсутствие означает недокатанную базу,
-            # а не повод считать по молчаливым умолчаниям.
             raise RuntimeError("Настройки распределения не заведены: не докатана миграция модуля")
         return row
 
@@ -319,8 +308,6 @@ class FbsDistributionRepository:
             )
         )
         return await self.settings()
-
-    # --- снимки 1С и пулы -------------------------------------------------
 
     async def record_snapshot(
         self,
@@ -434,8 +421,6 @@ class FbsDistributionRepository:
             )
         return list(await self.session.scalars(statement.limit(limit)))
 
-    # --- сопоставление товаров -------------------------------------------
-
     async def replace_mappings(
         self, seller_id: uuid.UUID, rows: Sequence[dict], *, now: datetime | None = None
     ) -> None:
@@ -523,8 +508,6 @@ class FbsDistributionRepository:
             ]
         )
 
-    # --- планы -----------------------------------------------------------
-
     async def save_plan(
         self,
         *,
@@ -602,8 +585,6 @@ class FbsDistributionRepository:
         return list(
             await self.session.scalars(select(AllocationSkipModel).where(AllocationSkipModel.plan_id == plan_id))
         )
-
-    # --- публикация остатков ---------------------------------------------
 
     async def published(self, seller_id: uuid.UUID) -> dict[tuple[int, str], int]:
         """Последнее подтверждённое чтением состояние складов кабинета."""

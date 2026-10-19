@@ -7,7 +7,6 @@ class AutomationRunResponse(BaseModel):
     id: uuid.UUID
     trigger: str
     status: str
-    # Which piece of work ran: automations with several daily steps say so.
     kind: str | None = None
     snapshot_date: str
     created_at: str
@@ -23,8 +22,6 @@ class AutomationResponse(BaseModel):
     id: str
     title: str
     description: str
-    # automation — работает по расписанию с подключёнными селлерами; tool — инструмент,
-    # который запускает человек: ни селлеров, ни запусков у него нет.
     kind: str = "automation"
     status: str
     seller_count: int

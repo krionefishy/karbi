@@ -1,11 +1,3 @@
-"""Файл себестоимости: выгрузка, которую аналитик ведёт в Excel по кабинетам.
-
-Формат один для обоих маркетплейсов — строка шапки с колонками «Кабинет»,
-«Артикул пост.» и «Себес, руб»; артикул маркетплейса лежит в «АртикулВБ» у
-Wildberries и в «SKU» у Ozon, по этой колонке файл и опознаётся. Остальные
-колонки («Проч.затр» и другие) не читаются: в отчёт идёт только себестоимость.
-"""
-
 import io
 import re
 import uuid
@@ -22,7 +14,6 @@ CABINET_COLUMN = "кабинет"
 COST_COLUMN = "себес, руб"
 VENDOR_COLUMN = "артикул пост."
 ARTICLE_COLUMNS = {"артикулвб": MARKETPLACE_WB, "sku": MARKETPLACE_OZON}
-# Шапка — вторая строка выгрузки, над ней подписи групп колонок; ищем с запасом.
 HEADER_SEARCH_ROWS = 10
 MAX_PROBLEMS = 50
 
@@ -122,7 +113,6 @@ def _read_rows(
         elif value is None:
             problems.append(f"Строка {number}: себестоимость «{cell(raw, cost)}» — не число")
         else:
-            # Артикул, повторённый в файле, — последняя строка: так его увидел бы и человек.
             parsed[(name.lower(), code)] = CostRow(name, code, str(cell(raw, vendor) or "").strip(), value)
     return CostFile(marketplace, list(parsed.values()), problems[:MAX_PROBLEMS])
 

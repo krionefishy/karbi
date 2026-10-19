@@ -49,8 +49,6 @@ class TestAuthorization:
             audience=CONFIG.audience,
             issuer=CONFIG.issuer,
         )
-        # The audience is what keeps this token from being replayed back at us
-        # through the relay's own callbacks.
         assert claims["aud"] == "relay"
         assert claims["exp"] > claims["iat"]
 
@@ -61,8 +59,6 @@ class TestAuthorization:
 
         payload = json.loads(route.calls.last.request.content)
         assert set(payload) == {"bot_code", "recipient", "text", "idempotency_key"}
-        # No token, no chat object, no parse_mode: the messenger's shapes stay
-        # on the other side of the wire.
         assert "token" not in route.calls.last.request.content.decode()
 
 
@@ -71,8 +67,6 @@ class TestSending:
         assert await send(Response(200, json={"status": "sent", "message_ref": "777"})) == "777"
 
     async def test_a_refusal_is_permanent_and_keeps_the_messenger_wording(self) -> None:
-        # The dispatcher matches its dead-chat markers against this text, so the
-        # relay's description has to survive the trip intact.
         with pytest.raises(MessengerPermanentError, match="bot was blocked"):
             await send(Response(422, json={"detail": "bot was blocked by the user"}))
 
@@ -91,9 +85,6 @@ class TestSending:
         ],
     )
     async def test_everything_else_is_worth_retrying(self, status: int, detail: str) -> None:
-        # A bot nobody registered on the relay yet and a skewed clock are both
-        # operator problems: failing the message would throw away a notification
-        # that will go through minutes later.
         with pytest.raises(MessengerTemporaryError):
             await send(Response(status, json={"detail": detail}))
 
@@ -125,7 +116,6 @@ class TestRegistration:
 
         assert bot.invite_link_template == "https://t.me/mplace_auto_bot?start={token}"
         assert bot.title == "Оборачиваемость"
-        # The token goes out once, to the relay, and nowhere else.
         assert route.calls.last.request.url.path == "/api/v1/bots"
 
     async def test_a_token_the_relay_rejects_is_permanent(self) -> None:

@@ -85,7 +85,6 @@ class DialogPage:
     total: int
     page: int
     page_size: int
-    # Вердикты нейросети по хвостам диалогов страницы: ключ — (чат, отпечаток хвоста).
     verdicts: dict[tuple[str, str], VerdictModel] = field(default_factory=dict)
 
 

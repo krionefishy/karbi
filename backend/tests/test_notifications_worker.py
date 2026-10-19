@@ -34,7 +34,6 @@ def test_httpx_loggers_do_not_log_token_urls() -> None:
 
     configure_logging("INFO")
 
-    # httpx puts the full request URL — token included — into INFO records.
     assert logging.getLogger("httpx").level == logging.WARNING
     assert logging.getLogger("httpcore").level == logging.WARNING
 
@@ -43,7 +42,7 @@ async def test_a_poisonous_kafka_message_is_rejected_not_raised(caplog) -> None:
     poisonous = [
         b"\xffnot json at all",
         b'["a", "json", "array"]',
-        json.dumps({"message_id": "m1", "bot": "b"}).encode(),  # no template
+        json.dumps({"message_id": "m1", "bot": "b"}).encode(),
     ]
 
     with caplog.at_level(logging.ERROR, logger="notifications.sender"):
@@ -109,17 +108,14 @@ async def test_the_pacer_keeps_a_full_second_between_two_sends_to_one_chat() -> 
         return now
 
     async def sleep(seconds: float) -> None:
-        # Advance the clock the way a real event loop would.
         nonlocal now
         slept.append(seconds)
         now += seconds
 
     pacer = SendPacer(bot_messages_per_second=30.0, chat_messages_per_second=1.0, clock=clock, sleep=sleep)
 
-    assert await pacer.wait_turn(1) == 0  # first send goes immediately
-    # Same chat again: Telegram allows one message a second into a chat.
+    assert await pacer.wait_turn(1) == 0
     assert await pacer.wait_turn(1) == pytest.approx(1.0)
-    # A different chat is bound only by the bot-wide 30/s budget.
     assert await pacer.wait_turn(2) == pytest.approx(1 / 30, abs=1e-6)
     assert slept == pytest.approx([1.0, 1 / 30], abs=1e-6)
 
@@ -138,7 +134,7 @@ async def test_the_pacer_forgets_chats_it_has_not_seen_in_a_long_time() -> None:
     now = 10_000.0
     await pacer.wait_turn(2)
 
-    assert 1 not in pacer._last_by_chat  # would grow without bound otherwise
+    assert 1 not in pacer._last_by_chat
 
 
 async def test_a_hanging_bot_does_not_delay_another_bots_queue() -> None:
@@ -152,7 +148,7 @@ async def test_a_hanging_bot_does_not_delay_another_bots_queue() -> None:
         async def deliver_forever(self, which: Bot) -> None:
             if which.code == "slow":
                 started.set()
-                await release.wait()  # Telegram never answers
+                await release.wait()
             delivered.append(which.code)
 
     application = NotificationsWorkerApplication(SETTINGS)
@@ -162,7 +158,6 @@ async def test_a_hanging_bot_does_not_delay_another_bots_queue() -> None:
     await started.wait()
     await asyncio.sleep(0)
 
-    # The quick bot finished while the slow one is still hanging.
     assert delivered == ["quick"]
     assert not application._deliveries[slow.id].done()
 
@@ -183,8 +178,6 @@ async def test_delivery_loops_follow_the_bot_table() -> None:
     application._sync_deliveries([first])
     assert set(application._deliveries) == {first.id}
 
-    # A bot registered since the last sweep starts delivering without a deploy;
-    # one deactivated since then has its loop cancelled.
     application._sync_deliveries([second])
     assert set(application._deliveries) == {second.id}
 

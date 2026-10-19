@@ -49,7 +49,6 @@ class SellerState:
     reports: int
     pending_reports: int
     collected_at: datetime | None
-    # Когда воркер в последний раз складывал отчёты кабинета в суммы; `None` — ещё ни разу.
     built_at: datetime | None
     error: str | None
 
@@ -63,9 +62,7 @@ class PeriodColumn:
     date_to: date
     total: Figures = field(default_factory=Statement)
     by_seller: dict[uuid.UUID, Figures] = field(default_factory=dict)
-    # Кабинеты, у которых за период есть недочитанный отчёт (у Ozon — день).
     pending: set[uuid.UUID] = field(default_factory=set)
-    # Период ещё идёт: его последний день не раньше сегодняшнего. Цифры заведомо не итоговые.
     open: bool = False
 
     @property
@@ -79,7 +76,6 @@ class UncostedArticle:
 
     seller_id: uuid.UUID
     seller_name: str
-    # nmId у WB, SKU у Ozon.
     nm_id: int
     vendor_code: str
     revenue: Decimal
@@ -89,10 +85,8 @@ class UncostedArticle:
 class PnlView:
     year: int
     granularity: str
-    # wb — из отчётов реализации, ozon — из начислений по дням; строки у них свои.
     marketplace: str
     sellers: list[SellerState]
-    # Свежие первыми — как в отчёте, к которому привык финансист.
     periods: list[PeriodColumn]
     total: Figures
     total_by_seller: dict[uuid.UUID, Figures]
@@ -102,7 +96,6 @@ class PnlView:
 @dataclass(frozen=True, slots=True)
 class CostUploadResult:
     marketplace: str
-    # Новые версии: артикул появился впервые или у него сменилась цена.
     added: int
     changed: int
     unchanged: int
@@ -119,11 +112,8 @@ class SellerArticles:
     name: str
     rows: list[ArticleRow]
     stocks: list[StockRow]
-    # Отчёты недели у кабинета есть, но не все дочитаны и сложены.
     pending: bool
-    # Ставка налога, по которой считалась колонка «Налог»; `None` — не задана, налог ноль.
     tax_rate: Decimal | None
-    # Докуда зеркало рекламы прочитало списания; раньше конца недели — реклама неполная.
     ads_through: date | None
 
 
@@ -133,7 +123,6 @@ class ArticlesView:
     date_from: date
     date_to: date
     sellers: list[SellerArticles]
-    # Откуда остаток: снимок на конец недели или зеркало на момент выгрузки.
     stock_taken_at: datetime | None
     stock_is_live: bool
 
@@ -145,7 +134,6 @@ class SellerSkus:
     seller_id: uuid.UUID
     name: str
     rows: list[OzonSkuRow]
-    # Не все дни недели дочитаны и сложены: строки неполные.
     pending: bool
     collected_through: date | None
 

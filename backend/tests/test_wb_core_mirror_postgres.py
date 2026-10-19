@@ -290,7 +290,6 @@ async def test_stocks_are_mirrored_with_zeros_for_cards_the_report_omits(databas
         per_warehouse = await MirrorRepository(session).fbs_warehouse_stocks(seller)
     assert facts is not None
     assert (facts[FAN].fbo_quantity, facts[FAN].fbo_quantity_full, facts[FAN].fbs_quantity) == (40, 43, 6)
-    # Пылесоса в отчёте нет — это ноль FBO, а не пропуск; FBS у него только в Казани.
     assert (facts[VACUUM].fbo_quantity, facts[VACUUM].fbs_quantity, facts[VACUUM].total) == (0, 2, 2)
     assert per_warehouse == {(FAN, KAZAN.id): 5, (FAN, PITER.id): 1, (VACUUM, KAZAN.id): 2}
 
@@ -338,9 +337,7 @@ async def test_reviews_are_mirrored_for_every_known_card(database: Database, sel
         articles = {article.article: article for article in await SellerRepository(session).list_articles(seller)}
     assert totals is not None
     assert (totals[FAN].total, totals[FAN].with_photo, totals[FAN].with_video) == (10, 4, 1)
-    # Известная карточка без отзывов — нули, а не отсутствие строки.
     assert (totals[VACUUM].total, totals[VACUUM].with_photo) == (0, 0)
-    # Карточка только из отзывов заводится в каталоге, иначе отзывы не к чему привязать.
     assert totals["3003"].total == 1
     assert articles["3003"].state == "feedback_only"
 
@@ -356,7 +353,6 @@ async def test_catalog_sync_updates_the_registry_status(database: Database, sell
         articles = {article.article: article for article in await SellerRepository(session).list_articles(seller)}
     assert model is not None and model.catalog_sync_status == "success"
     assert state is not None and state.collected_at == moment
-    # Пылесос из ответа пропал — карточка остаётся, но уже не как товар каталога.
     assert (articles[FAN].state, articles[VACUUM].state) == ("active", "feedback_only")
 
 
@@ -389,9 +385,6 @@ async def test_purging_the_seller_drops_the_mirror(database: Database, seller: u
         assert await repository.state(seller, MIRROR_STOCKS) is None
 
 
-# --- worker schedule -------------------------------------------------------------
-
-
 def worker(database: Database, service: MirrorService, moment: datetime) -> WBCoreWorker:
     return WBCoreWorker(database, service, SETTINGS, now=lambda: moment)
 
@@ -412,7 +405,6 @@ def test_due_since_takes_the_last_passed_slot() -> None:
 
     assert schedule.due_since(MIRROR_STOCKS, at(10)) == at(9)
     assert schedule.due_since(MIRROR_STOCKS, at(9)) == at(9)
-    # До первого среза дня — последний срез вчерашнего, иначе полночь собирала бы всех заново.
     assert schedule.due_since(MIRROR_STOCKS, at(2)) == at(21) - timedelta(days=1)
     assert schedule.due_since(MIRROR_CATALOG, at(2)) == at(2, 30) - timedelta(days=1)
     assert schedule.due_since(MIRROR_REVIEWS, at(4)) == at(4)
@@ -422,12 +414,10 @@ async def test_a_never_collected_seller_is_due_at_once_and_then_waits_for_the_ne
     database: Database, seller: uuid.UUID
 ) -> None:
     service = mirror(database)
-    # Остатки ключуются размерами каталога: пока каталог не собран, срез остатков не берётся.
     assert await worker(database, service, at(10)).collect_due(MIRROR_STOCKS, at(10)) == 0
     assert await worker(database, service, at(10)).collect_due(MIRROR_CATALOG, at(10)) == 1
 
     assert await worker(database, service, at(10)).collect_due(MIRROR_STOCKS, at(10)) == 1
-    # Собран в 10:00 — срез 09:00 закрыт, до 15:00 делать нечего.
     assert await worker(database, service, at(12)).collect_due(MIRROR_STOCKS, at(12)) == 0
     assert await worker(database, service, at(15)).collect_due(MIRROR_STOCKS, at(15)) == 1
 
@@ -478,9 +468,6 @@ async def test_a_failed_mirror_reads_as_stalled_rather_than_not_yet(database: Da
         assert await ReviewMirror(session).totals(seller) is None
 
 
-# --- задания и поставки -----------------------------------------------------------
-
-
 async def test_orders_are_mirrored_live_and_from_the_archive_once(database: Database, seller: uuid.UUID) -> None:
     now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
     marketplace = FakeMarketplace({})
@@ -499,14 +486,10 @@ async def test_orders_are_mirrored_live_and_from_the_archive_once(database: Data
     first = await service.collect_orders(seller, now=now)
 
     assert (first.live, first.archived) == (1, 1)
-    # Глубина 6 месяцев минус живые 3: архив спрошен по месяцам с марта по июнь, старшие первыми.
     assert marketplace.archive_calls == [(2026, 3), (2026, 4), (2026, 5), (2026, 6)]
     assert first.months == 4
-    # Первое живое окно — три месяца назад.
     assert marketplace.order_windows[0][0] == now - timedelta(days=90)
 
-    # Задание легло в поставку: повторный сбор перечитывает свежие и дозаполняет supply_id,
-    # а архив второй раз не трогает.
     marketplace.live = [order(1, supply="WB-GI-1", created=now - timedelta(days=1))]
     second = await service.collect_orders(seller, now=now + timedelta(hours=1))
 
@@ -541,7 +524,6 @@ async def test_order_mirror_resolves_by_rid_order_id_and_sticker(database: Datab
             seller, rids=["eAK.r1.0.0"], order_ids=[9], sticker_ids=[33811984302, 5]
         )
 
-    # Каждое найденное задание отвечает всеми своими ключами; несуществующий стикер 5 не отвечает ничем.
     assert {"eAK.r1.0.0", "1", "9", "33811984302"} <= set(traces) and "5" not in traces
     trace = traces["eAK.r1.0.0"]
     assert trace.warehouse_name == KAZAN.name
@@ -549,7 +531,6 @@ async def test_order_mirror_resolves_by_rid_order_id_and_sticker(database: Datab
     assert trace.destination_office_name == "Коледино"
     assert traces["33811984302"].order.order_id == 9
 
-    # Выгрузка за неделю спрашивает о десятках тысяч заданий: у asyncpg потолок 32 767 параметров.
     async with database.session() as session:
         many = await OrderMirror(session).resolve(
             seller, rids=[f"r{i}" for i in range(20_000)], order_ids=[*range(10, 20_010), 9], sticker_ids=range(20_000)
@@ -597,7 +578,6 @@ async def test_the_chat_feed_is_read_to_its_end_and_resumed_from_the_cursor(
 
     outcome = await service.collect_chats(seller, now=at(17))
     assert (outcome.events, outcome.caught_up) == (3, True)
-    # Первый сбор начинает не с начала ленты, а с глубины истории.
     assert chats.cursors[0] == millis(at(17) - timedelta(days=90))
 
     chats.feed = feed
@@ -626,7 +606,6 @@ async def test_client_text_outside_review_dialogs_is_not_stored(database: Databa
         }
     assert rows["event-1"] is None and rows["event-4"] is None
     assert rows["event-5"] == "Товар сломался"
-    # Слова продавца хранятся всегда: по ним историю можно переразметить.
     assert rows["event-3"] == "Ответ не нужен"
 
 
@@ -640,8 +619,6 @@ async def test_a_long_history_is_read_in_portions_and_is_not_called_complete(
     async with database.session() as session:
         state = await ChatMirror(session).state(seller)
         schedule = await MirrorRepository(session).state(seller, MIRROR_CHATS)
-    # Проход успешен — повтор придёт по расписанию, а не через паузу после ошибки, —
-    # но до конца ленты ещё не дошли.
     assert schedule is not None and schedule.collected_at == at(17)
     assert state is not None and state.synced_through is None
 

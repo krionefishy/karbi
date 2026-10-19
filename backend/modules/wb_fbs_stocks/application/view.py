@@ -32,8 +32,6 @@ class RowView:
     article: str
     title: str
     vendor_code: str
-    # Баркода нет в каталоге кабинета: остаток WB по нему всё равно спросили,
-    # но подсказать, что это за товар, нечем.
     in_catalog: bool
     amounts: dict[int, int]
 
@@ -118,8 +116,6 @@ class BoardOverview:
     seller_count: int
     last_success_at: datetime | None
     failing: int
-    # Опрос идёт по кабинетам: следующий сбор — у того, кого собирали раньше всех,
-    # а кабинет без единого сбора — уже в очереди.
     earliest_collected_at: datetime | None = None
     uncollected: int = 0
 

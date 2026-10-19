@@ -81,7 +81,6 @@ async def test_created_employee_gets_a_password_that_is_shown_exactly_once(stand
     assert hired["is_admin"] is False
     assert password not in listed.text
 
-    # The password works, which is the only proof it was hashed from this value.
     assert await login(stand.client, username, password)
 
 
@@ -132,7 +131,6 @@ async def test_revoked_admin_loses_the_section_without_waiting_for_the_token_to_
 
     demoted = await stand.client.patch(f"{USERS}/{operator_id}", json={"is_admin": False}, headers=bearer(admin_token))
     assert demoted.status_code == 200
-    # Same token, still valid and not revoked — only the flag changed.
     assert (await stand.client.get(USERS, headers=bearer(operator_token))).status_code == 403
 
 

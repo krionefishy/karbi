@@ -7,7 +7,6 @@ export interface Employee {
   last_login_at: string | null;
 }
 
-/** The generated password comes back once, on creation and on reset. */
 export interface IssuedPassword {
   user: Employee;
   password: string;
@@ -18,8 +17,6 @@ export interface EmployeeUpdate {
   is_admin?: boolean;
 }
 
-/** A bot as this server knows it: no token, only the link template the relay
- * handed back at registration. */
 export interface BotDelivery {
   last_sent_at: string | null;
   failed_count: number;

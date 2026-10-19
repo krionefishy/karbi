@@ -32,8 +32,6 @@ def upgrade() -> None:
         sa.CheckConstraint("share_bp BETWEEN 0 AND 10000", name="ck_wb_fbs_region_share"),
         schema=SCHEMA,
     )
-    # Порядок направлений подтверждён бизнесом и заводится сразу; доли остаются
-    # нулевыми, пока логист не назовёт проценты — считать по выдуманным нельзя.
     op.bulk_insert(
         regions,
         [

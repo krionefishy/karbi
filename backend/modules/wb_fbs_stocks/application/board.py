@@ -24,8 +24,6 @@ from backend.modules.wb_fbs_stocks.application.view import (
 from backend.modules.wb_fbs_stocks.domain import GROUP_KINDS
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository, RefreshRequestModel
 
-# Баркод WB — цифры, но чужие штрихкоды бывают с буквами; режем только мусор
-# вокруг и то, что явно не баркод.
 BARCODE = re.compile(r"^[0-9A-Za-z-]{4,64}$")
 
 
@@ -59,8 +57,6 @@ class FbsStocksService:
             earliest_collected_at=earliest,
             uncollected=uncollected,
         )
-
-    # --- reading ---------------------------------------------------------------
 
     async def view(self, seller_id: uuid.UUID) -> BoardView:
         seller_name = await self._enrolled(seller_id)
@@ -133,8 +129,6 @@ class FbsStocksService:
         )
         return SetupView(seller_id=seller_id, groups=groups, warehouses=warehouses)
 
-    # --- groups and columns ------------------------------------------------------
-
     async def add_group(self, seller_id: uuid.UUID, title: str, kind: str) -> GroupView:
         await self._enrolled(seller_id)
         title, kind = self._group_fields(title, kind)
@@ -174,12 +168,9 @@ class FbsStocksService:
             if warehouse is None:
                 raise BoardConflictError(f"Склада {warehouse_id} нет в кабинете")
             if warehouse.is_deleting:
-                # Остаток на нём не спрашивается, и столбец показал бы ноль, которого не мерили.
                 raise BoardConflictError(f"Склад «{warehouse.name}» удаляется из кабинета, в таблицу его не поставить")
         await self.stocks.set_group_columns(seller_id, group_id, warehouse_ids)
         await self.session.commit()
-
-    # --- barcodes ----------------------------------------------------------------
 
     async def add_barcodes(self, seller_id: uuid.UUID, raw: Sequence[str], added_by: uuid.UUID | None) -> int:
         """Вписать баркоды. Остаток по ним подтянет ближайший сбор или кнопка «Обновить»."""
@@ -217,8 +208,6 @@ class FbsStocksService:
             raise BoardConflictError("Такого баркода в таблице нет")
         await self.session.commit()
 
-    # --- export and refresh -------------------------------------------------------
-
     async def export(self) -> BoardReportFile:
         views = await self.views()
         day = datetime.now(self.timezone).date()
@@ -243,8 +232,6 @@ class FbsStocksService:
         await self._enrolled(seller_id)
         request = await self.stocks.latest_refresh(seller_id)
         return self._refresh(request) if request else None
-
-    # --- helpers ---------------------------------------------------------------------
 
     async def _groups(self, seller_id: uuid.UUID) -> tuple[GroupView, ...]:
         names = {warehouse.warehouse_id: warehouse.name for warehouse in await self.stocks.warehouses(seller_id)}

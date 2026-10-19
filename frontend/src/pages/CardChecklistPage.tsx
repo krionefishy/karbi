@@ -89,7 +89,6 @@ export function CardChecklistPage() {
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refreshSellers });
 
-  // Пока идёт сбор, состояние опрашивается; таблица обновится сама, как только он закончится.
   const { data: refreshState } = useQuery({
     queryKey: ["card-checklist-refresh", sellerId],
     queryFn: () => getRefreshState(sellerId),
@@ -353,7 +352,6 @@ function ChecklistRowView({ row, items, onComment }: RowProps) {
       <span className="checklist-note">{row.note}</span>
       <div className="checklist-comment">
         <input
-          // Ключ с текстом: после ответа сервера поле берёт сохранённое значение.
           key={`${row.article}:${row.comment}`}
           aria-label={`Комментарий к ${row.article}`}
           defaultValue={row.comment}

@@ -58,8 +58,6 @@ class PenaltiesService:
         last_success_at, failing = await self.penalties.collection_summary(enrolled)
         return PenaltiesOverview(seller_count=len(enrolled), last_success_at=last_success_at, failing=failing)
 
-    # --- reading ---------------------------------------------------------------
-
     async def view(
         self,
         seller_id: uuid.UUID,
@@ -88,8 +86,6 @@ class PenaltiesService:
             seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id
         )
         totals = await self._totals(seller_id, date_from, date_to, warehouse_id=warehouse_id)
-        # Склады для фильтра — все, что есть в кабинете, плюс те, с которых в периоде
-        # уходили заказы: так фильтр не прячет склад, у которого сегодня чисто.
         warehouses = {
             item.warehouse_id: item.name for item in (await self.mirror.seller_warehouses(seller_id)).values()
         }
@@ -168,7 +164,6 @@ class PenaltiesService:
         if date_from > date_to:
             raise PenaltiesQueryError("Начало периода позже его конца")
         seller_name = await self._enrolled(seller_id)
-        # Итоги сверху — по тому, что в файле, а не по всем группам периода.
         totals = await self._totals(seller_id, date_from, date_to, group=group, warehouse_id=warehouse_id)
         writer = WorkbookWriter(seller_name, date_from, date_to, totals)
         async for chunk in self.penalties.iter_rows_in_period(
@@ -180,8 +175,6 @@ class PenaltiesService:
             seller_name=seller_name, date_from=date_from, date_to=date_to, group=group, content=content
         )
 
-    # --- refresh ----------------------------------------------------------------
-
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None = None) -> RefreshRequest:
         await self._enrolled(seller_id)
         request = await self.penalties.request_refresh(seller_id, requested_by)
@@ -192,8 +185,6 @@ class PenaltiesService:
         await self._enrolled(seller_id)
         request = await self.penalties.latest_refresh(seller_id)
         return self._refresh(request) if request else None
-
-    # --- helpers ----------------------------------------------------------------------
 
     async def _totals(
         self,

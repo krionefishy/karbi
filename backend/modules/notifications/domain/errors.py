@@ -1,11 +1,3 @@
-"""What can go wrong when a message leaves for the messenger.
-
-Deliberately not named after any one messenger: this vocabulary is what the
-dispatcher retries on, and it survives swapping Telegram for something else.
-The relay translates the messenger's own wording into these three outcomes.
-"""
-
-
 class MessengerPermanentError(Exception):
     """The messenger will answer the same way next time: retrying is pointless."""
 

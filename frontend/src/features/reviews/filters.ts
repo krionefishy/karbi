@@ -1,8 +1,3 @@
-/**
- * Filtering for the seller's goods, shared by the timeline and the catalog
- * fallback. Both lists carry the same identifying fields, so the helpers work
- * off this minimum rather than either full type.
- */
 export interface FilterableArticle {
   article: string;
   vendor_code: string;
@@ -19,7 +14,6 @@ export interface ArticleFilters {
   subjects: string[];
 }
 
-/** Goods that never came from the catalog have no subject at all. */
 export const NO_SUBJECT = "Без предмета";
 
 export const EMPTY_FILTERS: ArticleFilters = { query: "", subjects: [] };
@@ -32,11 +26,6 @@ export function subjectOf(item: FilterableArticle): string {
   return item.subject_name.trim() || NO_SUBJECT;
 }
 
-/**
- * Matches the WB article, the seller's own article and the subject. A partial
- * number is enough — "5268" finds 1272526845 — because sellers paste fragments
- * out of spreadsheets.
- */
 export function matchesQuery(item: FilterableArticle, query: string): boolean {
   const needle = normalize(query);
   if (!needle) return true;
@@ -47,7 +36,6 @@ export function matchesSubjects(item: FilterableArticle, subjects: string[]): bo
   return subjects.length === 0 || subjects.includes(subjectOf(item));
 }
 
-/** Subjects present in the list, most populated first, then alphabetically. */
 export function collectSubjects(items: readonly FilterableArticle[]): Subject[] {
   const counts = new Map<string, number>();
   for (const item of items) {

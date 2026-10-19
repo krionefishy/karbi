@@ -3,7 +3,6 @@ export type AutomationStatus = "active" | "degraded" | "failed" | "running" | "i
 export interface AutomationRun {
   id: string;
   trigger: "scheduled" | "manual";
-  /** Which daily step ran, for automations that have several. */
   kind?: string | null;
   status: "queued" | "running" | "success" | "partial_success" | "error";
   snapshot_date: string;
@@ -20,7 +19,6 @@ export interface Automation {
   id: string;
   title: string;
   description: string;
-  /** tool — инструмент, который запускает человек: без селлеров и расписания. */
   kind: "automation" | "tool";
   status: AutomationStatus;
   seller_count: number;

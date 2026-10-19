@@ -65,7 +65,6 @@ async def seller_report(
         report = await service.build(seller_id, date_from, date_to)
     except SellerNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не найден") from error
-    # Имя с кириллицей уезжает в filename*, а ascii-вариант остаётся запасным.
     fallback = f"reviews_{date_from.isoformat()}_{date_to.isoformat()}.xlsx"
     encoded = urllib.parse.quote(report.filename)
     return Response(

@@ -126,7 +126,6 @@ async def test_rematching_drops_a_link_whose_side_disappeared(cabinets) -> None:
         await mapping(session).rematch(first)
     async with database.session() as session:
         rows = await FbsDistributionRepository(session).mappings(first)
-    # Пул A2 обнулился, но остался; связь пропала вместе с его баркодом в снимке.
     assert [row.item_id for row in rows] == ["A1", "A2"]
 
 

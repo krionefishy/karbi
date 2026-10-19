@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, apiRequest, refreshAccessToken, setAccessToken } from "./http";
 
-/** Заголовок Authorization, который клиент подставил бы следующему запросу. */
 async function tokenInUse(): Promise<string | null> {
   const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -18,9 +17,6 @@ afterEach(() => {
 
 describe("обновление сессии", () => {
   it("не роняет сессию, когда сервер занят", async () => {
-    // 429 от лимитера — это «сейчас не получилось», а не «сессии больше нет»:
-    // разлогинивать из-за него значит выбрасывать человека из интерфейса
-    // каждый раз, когда открыто несколько вкладок с опросом.
     setAccessToken("live-token");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 429 })));
 

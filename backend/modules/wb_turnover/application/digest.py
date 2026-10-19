@@ -54,11 +54,6 @@ class DigestService:
 
     async def send(self, seller_id: uuid.UUID, day: date) -> DigestResult:
         rows = await self.turnover.turnover_on(seller_id, day)
-        # An article already at zero belongs in the digest more than any other:
-        # losing the alert the moment the shelf empties would be exactly wrong.
-        # But only if it was actually selling — «нет остатка и не заказывали ни
-        # разу за окно» is the assortment tail, not news. For one seller that
-        # split was 28 against 927.
         alerting = [
             row
             for row in rows
@@ -70,16 +65,11 @@ class DigestService:
             )
         ]
         if not alerting:
-            # Nothing to say. A daily "всё в порядке" teaches people to ignore
-            # the bot, and then the real alert goes unread too.
             return DigestResult(seller_id, 0, sent=False)
 
         try:
             await self.bots.by_code(self.bot_code)
         except BotNotFoundError:
-            # Without a registered bot nothing will ever be delivered. Logging
-            # the day as sent would silently burn it, so leave no trace and let
-            # a retry succeed once the bot is registered.
             self.logger.error("turnover_digest_bot_missing", extra={"seller_id": str(seller_id), "bot": self.bot_code})
             return DigestResult(seller_id, len(alerting), sent=False)
 

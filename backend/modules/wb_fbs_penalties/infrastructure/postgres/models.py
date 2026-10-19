@@ -30,8 +30,6 @@ class TrackedSellerModel(WBFbsPenaltiesBase):
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Попытка отмечается до сети: упавший процесс не должен превращаться в
-    # кабинет, который спрашивают снова и снова.
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
 
@@ -97,8 +95,6 @@ class ReportRowModel(WBFbsPenaltiesBase):
     additional_payment: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
     acceptance: Mapped[float] = mapped_column(Numeric(14, 2, asdecimal=False), nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    # Сводка с заданием зеркала, посчитанная при сборе: страница, фильтр по складу и
-    # выгрузка читают одну таблицу. `traced_at` пуст — строку ещё не сводили.
     trace: Mapped[str] = mapped_column(String(16), nullable=False, default="no_order", server_default="no_order")
     warehouse_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     warehouse_name: Mapped[str | None] = mapped_column(String(255), nullable=True)

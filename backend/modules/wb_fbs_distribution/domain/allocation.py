@@ -89,9 +89,6 @@ def _full_coverage(available: int, queue: Sequence[AllocationTarget], shares_bp:
     for target in queue:
         by_region.setdefault(target.region_code, []).append(target)
 
-    # Доля направления, у которого не осталось разрешённых складов,
-    # перераспределяется между остальными: иначе сумма плана окажется меньше
-    # доступного количества.
     weights = [Fraction(shares_bp.get(code, 0)) for code in by_region]
     if sum(weights) <= 0:
         raise SharesNotConfigured("Доли направлений не заданы")

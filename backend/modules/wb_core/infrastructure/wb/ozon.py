@@ -16,7 +16,6 @@ from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 
 OZON_SELLER_API = "seller"
 OZON_PERFORMANCE_API = "performance"
-# Страниц начислений за день — предохранитель от курсора, который не двигается.
 MAX_PAGES = 200
 KOPECK = Decimal("0.01")
 ZERO = Decimal("0.00")

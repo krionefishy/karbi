@@ -35,9 +35,6 @@ class CatalogCard:
     subject_id: int | None = None
     subject_name: str = ""
     photo_url: str = ""
-    # Сколько всего фото в карточке. None — карточку каталогом ещё не читали
-    # (так приходят товары, замеченные только в отзывах): «нет фото» и «не
-    # смотрели» решаются по-разному теми, кто по этому числу фильтрует.
     photo_count: int | None = None
     sizes: list[dict[str, Any]] = field(default_factory=list)
 
@@ -126,8 +123,6 @@ class WBContentClient:
             result_cursor = payload.get("cursor") or {}
             if int(result_cursor.get("total", len(page))) < PAGE_LIMIT:
                 return
-            # WB names the continuation field differently per endpoint (updatedAt for
-            # the catalog, trashedAt for the корзина), so echo back whatever it sent.
             continuation = {key: value for key, value in result_cursor.items() if key != "total"}
             if not continuation:
                 raise WBPermanentError("WB вернул некорректный курсор пагинации")

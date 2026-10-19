@@ -1,4 +1,3 @@
-/** Сервис-воркер: по будильнику и по просьбе бота берёт код получения со страницы WB и отдаёт бэкенду. */
 
 import { collectFromPage, type PageResult } from "./page";
 import { browserName, loadSettings, saveSettings, type Message, type Settings } from "./shared";
@@ -9,16 +8,12 @@ const HEARTBEAT_ALARM = "heartbeat";
 const COLLECT_ALARM = "collect";
 const RETRY_ALARM = "retry";
 const RETRY_MINUTES = 10;
-// Сайт продлевает токен сессии при загрузке страницы: перезагрузка вкладки раз в несколько
-// часов не даёт ему протухнуть от бездействия. Только фоновую вкладку — рабочую не трогаем.
 const KEEPALIVE_ALARM = "keepalive";
 const KEEPALIVE_HOURS = 3;
 const HEARTBEAT_MINUTES = 10;
-// Код меняется в полночь по Москве; второй заход днём — на случай, если ночью браузер спал.
 const COLLECT_HOURS_MSK = [0, 12];
 const COLLECT_MINUTE = 5;
 const PAGE_TIMEOUT_MS = 45_000;
-// Кода на сегодня нет, а последний заход был давно — идём за ним по heartbeat, не дожидаясь будильника.
 const MISSING_CODE_RETRY_MS = 30 * 60_000;
 
 let running: Promise<void> | null = null;
@@ -35,8 +30,6 @@ chrome.action.onClicked.addListener(() => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === COLLECT_ALARM) {
-    // Следующий заход назначается до текущего: если сервис-воркер умрёт посреди сбора,
-    // цепочка будильников не оборвётся (так пять установок молчали днями при живом heartbeat).
     void scheduleCollect().then(() => collect("schedule"));
   } else if (alarm.name === HEARTBEAT_ALARM) {
     void heartbeat();
@@ -74,7 +67,6 @@ async function scheduleAll(): Promise<void> {
   await scheduleCollect();
 }
 
-/** Следующий из заходов по московскому времени, сегодня или завтра. */
 function nextCollectAt(now = new Date()): Date {
   const candidates = COLLECT_HOURS_MSK.map((hour) => {
     const moscow = new Date(now.toLocaleString("en-US", { timeZone: "Europe/Moscow" }));
@@ -93,7 +85,6 @@ async function scheduleCollect(): Promise<void> {
   await saveSettings({ nextRunAt: when.toISOString() });
 }
 
-/** Будильник сбора мог потеряться (браузер снёс будильники, воркер умер до перепланирования) — восстановить. */
 async function ensureCollectScheduled(): Promise<void> {
   const alarm = await chrome.alarms.get(COLLECT_ALARM);
   if (!alarm || alarm.scheduledTime < Date.now() - 60_000) await scheduleCollect();
@@ -168,7 +159,6 @@ async function heartbeat(): Promise<void> {
   }
 }
 
-/** Один заход: открыть страницу доставок, снять коды и список, отправить, закрыть. Заходы не накладываются. */
 async function collect(reason: string): Promise<void> {
   if (running) return running;
   running = (async () => {
@@ -205,7 +195,6 @@ async function collect(reason: string): Promise<void> {
     if (state === "ok") {
       await chrome.alarms.clear(RETRY_ALARM);
     } else {
-      // Вкладка появится или вход восстановят — не ждать полуночи, попробовать снова.
       await chrome.alarms.create(RETRY_ALARM, { delayInMinutes: RETRY_MINUTES });
     }
     try {
@@ -226,11 +215,6 @@ interface CodesReply {
   text: string;
 }
 
-/** Код дня — запросом из сервис-воркера: у него есть право на хост, CORS его не касается.
- *
- * Сначала так, как ходит сайт: JWT и заголовки приложения. Если отказ — ещё раз с
- * антибот-cookie, вдруг сервис её проверяет. Ответ отдаём как есть, разбор ниже.
- */
 async function fetchCodes(jwt: string, antibot: string | null): Promise<CodesReply> {
   const base: Record<string, string> = {
     Authorization: `Bearer ${jwt}`,
@@ -261,7 +245,6 @@ async function fetchCodes(jwt: string, antibot: string | null): Promise<CodesRep
   return last;
 }
 
-/** Освежить сессию: перезагрузить фоновую вкладку WB, чтобы сайт продлил токен. */
 async function keepAlive(): Promise<void> {
   const settings = await loadSettings();
   if (!settings.token) return;
@@ -274,7 +257,6 @@ async function keepAlive(): Promise<void> {
   }
 }
 
-/** Любая открытая вкладка www.wildberries.ru: запросы к своему домену оттуда те же, что с /lk/deliveries. */
 async function findWbTab(): Promise<chrome.tabs.Tab | undefined> {
   const tabs = await chrome.tabs.query({ url: "https://www.wildberries.ru/*" });
   return tabs.find((tab) => tab.url?.startsWith(DELIVERIES_URL)) ?? tabs.find((tab) => tab.status === "complete") ?? tabs[0];
@@ -287,8 +269,6 @@ async function readPage(): Promise<PageResult> {
     try {
       tab = await chrome.tabs.create({ url: DELIVERIES_URL, active: false });
     } catch (error) {
-      // Антидетект-браузеры (Dolphin) не дают расширению открывать вкладки — тогда
-      // код можно взять только из вкладки, которую открыл сам менеджер.
       throw new Error(
         `браузер не дал открыть вкладку (${error instanceof Error ? error.message : String(error)}). ` +
           "Откройте wildberries.ru в этом браузере и оставьте вкладку — расширение возьмёт код из неё",
@@ -322,7 +302,6 @@ function waitForLoad(tabId: number): Promise<void> {
       if (updatedId === tabId && info.status === "complete") {
         clearTimeout(timer);
         chrome.tabs.onUpdated.removeListener(listener);
-        // SPA дорисовывает профиль после load: даём ей секунды на токен и cookie.
         setTimeout(resolve, 4000);
       }
     }
@@ -338,7 +317,6 @@ interface CodeRow {
   ext_qr: string;
 }
 
-/** Ответ `otp/get`: массив по дням с полями date, code, extCode, qr, extQr — в любой обёртке. */
 function normalizeCodes(payload: unknown): CodeRow[] {
   const list = findArray(payload, (item) => typeof item === "object" && item !== null && "date" in item);
   const rows: CodeRow[] = [];

@@ -58,7 +58,6 @@ async def test_cards_keep_what_the_checklist_checks() -> None:
     assert (first.photo_count, first.photo_url) == (2, "https://basket/1/small.webp")
     assert first.description_length == len("Мощная пила для сада.")
     assert first.has_video
-    # Пустое значение — это незаполненная характеристика, а не заполненная пустотой.
     assert first.characteristic_ids == frozenset({385630, 73899})
     assert first.card_created_at == datetime(2026, 7, 29, 6, 56, 14, 338393, tzinfo=UTC)
     assert (second.has_video, second.photo_count, second.description_length) == (False, 0, 0)
@@ -121,7 +120,6 @@ async def test_prices_are_read_page_by_page(monkeypatch) -> None:
         assert {call["api"] for call in calls} == {"prices"}
 
     assert [price.article for price in prices] == ["1", "2", "3"]
-    # На витрине покупатель видит самую низкую цену из размеров.
     assert (prices[0].price, prices[0].discounted_price, prices[0].discount) == (179999, 8899.95, 95)
     assert prices[0].club_discounted_price == 8543.95
     assert prices[1].discount == 0

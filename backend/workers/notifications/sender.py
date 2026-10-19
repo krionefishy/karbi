@@ -77,9 +77,6 @@ class NotificationSender:
         try:
             request = MessageRequest.parse(json.loads(raw))
         except Exception as error:
-            # Parsing touches nothing but the payload, so any failure here — bad
-            # JSON, a JSON array, a missing field — can only ever repeat itself:
-            # replaying it forever would wedge the partition behind a producer bug.
             self.logger.error("notification_payload_rejected", extra={"error": str(error)})
             return
         async with self.database.session() as session:

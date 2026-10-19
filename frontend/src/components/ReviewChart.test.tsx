@@ -10,7 +10,6 @@ function day(date: string, total: number): DailyReviewSnapshot {
   return { date, ratings: { 1: 0, 2: 0, 3: 0, 4: 0, 5: total } };
 }
 
-/** Thirty consecutive days ending on END, growing by `step` a day. */
 function climbing(from: number, step: number): DailyReviewSnapshot[] {
   return Array.from({ length: 30 }, (_, index) => {
     const cursor = new Date(`${END}T00:00:00Z`);
@@ -40,8 +39,6 @@ describe("ReviewChart", () => {
   });
 
   it("puts a bigger total higher up the axis", () => {
-    // SVG y grows downward, so a rising count has to produce falling y. An
-    // inverted axis is the one geometry bug the data tests cannot see.
     const { container } = render(<ReviewChart snapshots={climbing(900, 3)} cardSnapshots={[]} endDate={END} />);
 
     const points = pointsOf(linePath(container));
@@ -52,7 +49,6 @@ describe("ReviewChart", () => {
     const partial = climbing(900, 2).filter((snapshot) => snapshot.date !== "2026-08-20");
     const { container } = render(<ReviewChart snapshots={partial} cardSnapshots={[]} endDate={END} />);
 
-    // Two separate subpaths mean two M commands in one `d`.
     expect(linePath(container).match(/M/g)).toHaveLength(2);
     expect(container.querySelector(".chart-bridge")).toBeInTheDocument();
     expect(container.querySelector(".chart-blank")).toBeInTheDocument();
@@ -104,12 +100,9 @@ describe("ReviewChart", () => {
     const { container } = render(<ReviewChart snapshots={climbing(900, 2)} cardSnapshots={[]} endDate={END} />);
     expect(container.querySelector(".chart-tip")).not.toBeInTheDocument();
 
-    // React derives onMouseEnter from a delegated mouseover, so a direct
-    // mouseenter — which does not bubble — would never reach the handler.
     const hotspots = container.querySelectorAll(".chart-hotspot");
     fireEvent.mouseOver(hotspots[hotspots.length - 1]);
 
-    // The date also sits on the axis, so read it out of the tooltip itself.
     const tip = container.querySelector(".chart-tip");
     expect(tip).toHaveTextContent("25 авг");
     expect(tip).toHaveTextContent("за день +2");

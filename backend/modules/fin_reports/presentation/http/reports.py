@@ -26,7 +26,6 @@ from backend.modules.fin_reports.presentation.http.schemas import (
 
 router = APIRouter(prefix="/fin-reports", tags=["fin-reports"])
 
-# Файл себестоимости — сотня строк; предел — от случайно выбранного не того файла.
 MAX_COST_FILE_BYTES = 5 * 1024 * 1024
 
 

@@ -72,7 +72,6 @@ class WBCoreWorker:
         self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
-        # Каталог первым: остатки и отзывы ключуются его размерами и карточками.
         now = self._now()
         await self.collect_due(MIRROR_CATALOG, now)
         await self.collect_due(MIRROR_STOCKS, now)
@@ -108,7 +107,6 @@ class WBCoreWorker:
         с предыдущим срезом, иначе перезапуск в полночь собрал бы всех заново.
         """
         if kind == MIRROR_ORDERS:
-            # Задания — интервалом, а не по часам: свежие перечитываются, пока не лягут в поставку.
             return now - timedelta(minutes=self.config.orders_interval_minutes)
         if kind == MIRROR_CHATS:
             return now - timedelta(minutes=self.config.chats_interval_minutes)
@@ -139,9 +137,6 @@ class WBCoreWorker:
         since = self.due_since(kind, now)
         retry_after = now - timedelta(minutes=self.config.retry_minutes)
         async with self.database.session() as session:
-            # Только селлеры с рабочим ключом на шлюзе: остальных шлюз отвергнет,
-            # и ошибка зеркала заслонила бы настоящую причину — недоставленный ключ.
-            # Ozon — своя учётка: ключ WB тут ни при чём, и наоборот.
             status_of = (
                 (lambda seller: seller.ozon_egress_status)
                 if kind == MIRROR_OZON_ACCRUALS
@@ -154,9 +149,6 @@ class WBCoreWorker:
             ]
             mirror = MirrorRepository(session)
             if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS, MIRROR_OZON_ACCRUALS):
-                # Без каталога нечем ключевать остатки и отзывы: у нового селлера
-                # первый сбор остатков дал бы нули на весь срез. Чатам и отчётам
-                # реализации каталог не нужен: артикул в них приходит от WB.
                 catalog = await mirror.states(MIRROR_CATALOG)
                 candidates = [
                     seller_id
@@ -168,8 +160,6 @@ class WBCoreWorker:
         for seller_id in due:
             if self._stop.is_set():
                 break
-            # Один селлер — минуты под троттлингом, а healthcheck ждёт heartbeat
-            # не реже раза в четверть часа: отмечаемся перед каждым.
             touch_heartbeat()
             if await self.collect(kind, seller_id) is None:
                 collected += 1
@@ -194,7 +184,6 @@ class WBCoreWorker:
         except SellerGoneError:
             return "seller gone"
         except (WBPermanentError, WBTemporaryError) as error:
-            # Состояние уже записано сервисом; здесь только журнал.
             return str(error)
         except Exception as error:
             self.logger.exception("wb_core_collection_crashed", kind=kind, seller_id=str(seller_id))

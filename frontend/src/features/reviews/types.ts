@@ -25,7 +25,6 @@ export interface ProductReviewHistory {
   photo_url: string;
   state: ArticleState;
   snapshots: DailyReviewSnapshot[];
-  /** Same days, summed across every article of the WB склейка. */
   card_snapshots: DailyReviewSnapshot[];
 }
 

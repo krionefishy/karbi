@@ -37,9 +37,6 @@ class TrackedSellerModel(WBFbsDistributionBase):
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     write_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     warehouses_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Последняя попытка, удачная или нет. Успех отмечает `warehouses_synced_at`,
-    # а эта колонка не даёт переспрашивать WB каждый оборот воркера, пока
-    # причина отказа никуда не делась.
     warehouses_sync_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -64,8 +61,6 @@ class WBOfficeModel(WBFbsDistributionBase):
     federal_district: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # 1 — обычный груз, 3 — КГТ. Товар несовместимого габарита через объект не
-    # повезти, поэтому тип груза участвует в отборе допустимых складов.
     cargo_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     delivery_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -89,13 +84,9 @@ class SellerWarehouseModel(WBFbsDistributionBase):
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     cargo_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     delivery_type: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Пока WB обрабатывает создание или удаление, склад не готов принимать
-    # остатки, и публикация обязана его пропускать.
     is_deleting: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_processing: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    # Участие и место в очереди ставит оператор, поэтому сверка с WB их не
-    # трогает: она обновляет только то, что приехало из ответа.
     participates: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     position: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
@@ -145,9 +136,7 @@ class DistributionSettingsModel(WBFbsDistributionBase):
     __tablename__ = "distribution_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # Резерв на брак. Вычитается один раз на товар, до любого деления.
     reserve_units: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
-    # K для малого остатка. Считается в регионах, не в складах.
     priority_regions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="3")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -169,8 +158,6 @@ class StockSnapshotModel(WBFbsDistributionBase):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
-    # Когда данные сформировала 1С, а не когда мы их получили: устаревание
-    # считается от первого.
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     lines: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -198,8 +185,6 @@ class StockPoolModel(WBFbsDistributionBase):
     barcode: Mapped[str] = mapped_column(String(64), nullable=False, server_default="")
     name: Mapped[str] = mapped_column(String(512), nullable=False, server_default="")
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    # Снимок, который последним назвал это число. Пул, которого в свежем снимке
-    # не было, обнуляется, но строка остаётся: на ней держится сопоставление.
     snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -261,10 +246,6 @@ class AllocationPlanModel(WBFbsDistributionBase):
     __tablename__ = "allocation_plans"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    # Возрастающий номер: по нему и определяется «последний план». Двух
-    # расчётов в одну отметку времени достаточно, чтобы порядок по времени стал
-    # произвольным, а произвольный порядок здесь означает публикацию устаревшего
-    # плана.
     sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=False), nullable=False, unique=True)
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     snapshot_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
@@ -338,7 +319,6 @@ class StockPublicationModel(WBFbsDistributionBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     rows: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    # Сколько строк после вычитки не совпало с планом.
     drift: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

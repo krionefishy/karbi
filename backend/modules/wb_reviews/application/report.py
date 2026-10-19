@@ -42,9 +42,6 @@ class ReviewReportService:
         return await asyncio.to_thread(self._build, seller_id, date_from, date_to)
 
     def _build(self, seller_id: uuid.UUID, date_from: date, date_to: date) -> ReviewReportFile:
-        # Весь отчёт — от чтения из БД до сборки книги — живёт в этом треде.
-        # Соединения общего движка привязаны к event loop приложения, поэтому
-        # тред поднимает собственный одноразовый движок без пула.
         seller_name, names, counts = asyncio.run(self._load(seller_id, date_from, date_to))
         content = self._render(seller_name, names, counts, date_from, date_to)
         return ReviewReportFile(seller_name, date_from, date_to, content)
@@ -95,7 +92,6 @@ class ReviewReportService:
 
         for article in sorted(by_article):
             snapshots = by_article[article]
-            # Пустая ячейка означает «в этот день снапшота нет», а не ноль отзывов.
             row = [article, names.get(article, "—")] + [snapshots.get(day) for day in days]
             sheet.append(row)
             for column in range(3, len(days) + 3):

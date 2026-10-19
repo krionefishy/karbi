@@ -9,8 +9,6 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # The old table has not been populated in production yet and its single total
-    # cannot be converted into a truthful 1–5 star distribution.
     op.drop_table("daily_review_counts", schema="wb_reviews")
     op.create_table(
         "daily_review_counts",

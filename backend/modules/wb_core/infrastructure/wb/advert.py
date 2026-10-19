@@ -10,10 +10,8 @@ from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
 from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 
 ADVERT_BUCKET = "advert"
-# Потолки WB: кампаний в одном запросе и дней в окне.
 IDS_CHUNK = 50
 MAX_WINDOW_DAYS = 31
-# Списания WB датирует московскими сутками; день берётся по Москве.
 MOSCOW = ZoneInfo("Europe/Moscow")
 KOPECK = Decimal("0.01")
 
@@ -179,7 +177,6 @@ class WBAdvertClient(WBJsonClient):
             moment = _moment(day.get("date"))
             if moment is None:
                 continue
-            # Дата статистики — сутки без времени: берётся как есть, без сдвига по поясу.
             when = moment.date()
             for app in day.get("apps") or []:
                 if not isinstance(app, dict):

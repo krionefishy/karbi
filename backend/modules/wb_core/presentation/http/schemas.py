@@ -118,8 +118,6 @@ class SellerResponse(BaseModel):
     catalog_sync_error: str | None
     archived_at: str | None = None
     automations: list[str] = []
-    # Сага доставки учётки на шлюз wb-egress. Пара без префикса — про
-    # Wildberries, по истории.
     egress_status: str = "undelivered"
     egress_error: str | None = None
     ozon_egress_status: str = "undelivered"
@@ -127,7 +125,6 @@ class SellerResponse(BaseModel):
     mpstats_egress_status: str = "undelivered"
     mpstats_egress_error: str | None = None
     egress_ip: str | None = None
-    # Действующая сегодня ставка налога, % — и с какого дня; None — не задана.
     tax_rate: float | None = None
     tax_rate_from: str | None = None
 

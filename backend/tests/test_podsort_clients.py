@@ -43,7 +43,6 @@ async def test_orders_of_a_day_come_by_barcode_and_region() -> None:
             order("a"),
             order("b", warehouseType="Склад продавца", isCancel=True),
             order("c", countryName="Беларусь", oblastOkrugName=""),
-            # Повтор той же строки и чужой день не должны раздувать сутки.
             order("a"),
             order("d", date="2026-09-21T23:59:00"),
             order("e", barcode=""),
@@ -112,7 +111,6 @@ async def test_remains_that_never_get_ready_are_a_temporary_error() -> None:
     stub.on("GET", REMAINS, body={"data": {"taskId": "task-2"}})
     stub.on("GET", f"{REMAINS}/tasks/task-2/status", body={"data": {"status": "processing"}})
 
-    # Опрос статуса у шлюза идёт дольше паузы: срок считается по часам, а не по сумме пауз.
     moment = [0.0]
 
     async def sleep(seconds: float) -> None:

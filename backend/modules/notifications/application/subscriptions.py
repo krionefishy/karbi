@@ -10,7 +10,6 @@ from backend.modules.notifications.infrastructure.postgres import NotificationRe
 from backend.shared.kafka_streams.topics import NotificationTopics
 from backend.shared.outbox import OutboxRepository
 
-# Telegram allows up to 64 characters of [A-Za-z0-9_-] in a start payload.
 TOKEN_BYTES = 24
 
 
@@ -44,9 +43,6 @@ class SubscriptionService:
         try:
             return await self._issue_invite(bot, seller_id, seller_name, created_by)
         except IntegrityError:
-            # Two concurrent requests raced past each other's revoke; the partial
-            # unique index on live links let only one insert through. Revoke the
-            # winner's link too and reissue once.
             await self.session.rollback()
             return await self._issue_invite(bot, seller_id, seller_name, created_by)
 
@@ -70,8 +66,6 @@ class SubscriptionService:
         await self.session.commit()
         return Invite(
             token=token,
-            # The relay handed this template over at registration; this side only
-            # substitutes its own invite token and never learns the link's shape.
             url=bot.invite_link_template.replace("{token}", token),
             expires_at=model.expires_at,
             seller_id=seller_id,
@@ -101,16 +95,12 @@ class SubscriptionService:
         same /start with an already spent invitation.
         """
         command, _, argument = update.text.strip().partition(" ")
-        # In groups Telegram addresses the bot explicitly: /start@BotName token.
         command = command.partition("@")[0]
         if command == "/start":
             await self._start(bot, update, argument.strip())
         elif command == "/stop":
             await self._stop(bot, update)
         elif command.startswith("/"):
-            # Команду, которой здесь нет, знает автоматизация бота: ей и отвечать.
-            # Чат без подписок тоже получает событие — пусть автоматизация сама
-            # скажет, что сначала нужна ссылка.
             await self._publish_command(bot, update, command[1:].lower(), argument.strip())
         else:
             await self._reply(bot, update, templates.SUBSCRIPTION_NO_TOKEN, {})
@@ -138,7 +128,6 @@ class SubscriptionService:
             templates.SUBSCRIPTION_CONFIRMED,
             {"seller_name": invite.seller_name, "bot_title": bot.title or "Marketplace Auto"},
         )
-        # Автоматизация бота может добавить своё приветствие — например, шаги подключения.
         await self._publish_command(bot, update, COMMAND_START, "")
 
     async def _stop(self, bot: Bot, update: Update) -> None:

@@ -1,4 +1,3 @@
-/** Период по умолчанию — последняя неделя по дате операции отчёта, в местном календаре: отчёт WB недельный. */
 export function defaultPeriod(today = new Date()): { dateFrom: string; dateTo: string } {
   const to = new Date(today);
   const from = new Date(today);
@@ -12,7 +11,6 @@ export function isoDay(value: Date): string {
   return `${value.getFullYear()}-${month}-${day}`;
 }
 
-/** «2026-09-01/2026-09-07» → «01.09 — 07.09.2026». */
 export function periodLabel(period: string): string {
   const [from, to] = period.split("/");
   if (!from || !to) return period;

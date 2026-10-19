@@ -21,8 +21,6 @@ DONE_COLUMN = LAST_ITEM_COLUMN + 1
 NOTE_COLUMN = DONE_COLUMN + 1
 COMMENT_COLUMN = NOTE_COLUMN + 1
 
-# Цвета шапки — из таблицы, которую менеджеры вели руками: тёмная для
-# реквизитов, синяя для пунктов проверки.
 IDENTITY_FILL = PatternFill("solid", fgColor="1F3864")
 ITEM_FILL = PatternFill("solid", fgColor="2E5F8A")
 HEADER_FONT = Font(bold=True, color="FFFFFF")
@@ -30,8 +28,6 @@ HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=T
 CENTERED = Alignment(horizontal="center", vertical="center", wrap_text=True)
 WRAPPED = Alignment(vertical="center", wrap_text=True)
 
-# Выполнено — зелёный, нет — красный, как в интерфейсе. Ячейку без данных
-# не красим: «не знаем» не должно выглядеть как «не выполнено».
 DONE_FILL = PatternFill("solid", fgColor="C6EFCE")
 DONE_FONT = Font(color="006100")
 MISSING_FILL = PatternFill("solid", fgColor="FFC7CE")
@@ -88,7 +84,6 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
             ]
         )
         sheet.cell(row=index, column=1).number_format = "DD.MM.YYYY"
-        # Артикул и баркод — текст: иначе Excel покажет баркод как 2,05E+12.
         sheet.cell(row=index, column=2).number_format = "@"
         sheet.cell(row=index, column=4).number_format = "@"
         for column in range(FIRST_ITEM_COLUMN, DONE_COLUMN + 1):

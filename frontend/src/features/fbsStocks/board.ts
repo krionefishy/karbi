@@ -1,15 +1,9 @@
 import type { StocksBoard, StocksGroup, StocksRow } from "./types";
 
-/** Ячейка таблицы: сводная (сумма группы) или по складу. */
 export type BoardCell =
   | { kind: "group"; group: StocksGroup; value: number }
   | { kind: "warehouse"; group: StocksGroup; warehouseId: number; value: number };
 
-/**
- * Столбцы строки в порядке таблицы: сводный столбец группы, за ним — её склады,
- * если группа раскрыта. Свёрнутая группа — один столбец с суммой, как «минус»
- * в Excel.
- */
 export function rowCells(row: StocksRow, groups: StocksGroup[], collapsed: Set<string>): BoardCell[] {
   const cells: BoardCell[] = [];
   for (const group of groups) {
@@ -22,7 +16,6 @@ export function rowCells(row: StocksRow, groups: StocksGroup[], collapsed: Set<s
   return cells;
 }
 
-/** Ширины колонок для CSS grid: заметка, баркод, товар, потом столбцы данных. */
 export function gridTemplate(groups: StocksGroup[], collapsed: Set<string>): string {
   const data = groups.flatMap((group) => [
     "112px",
@@ -39,7 +32,6 @@ export function visibleRows(rows: StocksRow[], search: string): StocksRow[] {
   );
 }
 
-/** Почему таблица пустая или неполная — одной строкой над ней. */
 export function notices(board: StocksBoard): string[] {
   const collected: string[] = [];
   if (board.groups.length === 0) {
