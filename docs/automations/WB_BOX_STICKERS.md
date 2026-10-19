@@ -134,7 +134,7 @@ Redis в стеке с appendonly, а пропавшую запись замен
 - `.../application/service.py` — сопоставление и все сверки.
 - `.../infrastructure/wb/supplies.py` — поставка и упаковка из API поставок.
 - `frontend/src/pages/BoxStickersPage.tsx` — страница «Стикеры коробов».
-- `backend/tests/test_box_packing.py` — вставка в формах записи живой таблицы и раскладка.
-- `backend/tests/test_box_stickers.py` — синтетические файлы в формате WB: репозиторий
+- `backend/tests/wb_box_stickers/test_box_packing.py` — вставка в формах записи живой таблицы и раскладка.
+- `backend/tests/wb_box_stickers/test_box_stickers.py` — синтетические файлы в формате WB: репозиторий
   публичный, настоящие стикеры клиентов в него не кладём. Шрифт с кириллицей для них —
   DejaVu Sans Bold из Debian `fonts-dejavu-core` в `backend/tests/fixtures/`, лицензия рядом.

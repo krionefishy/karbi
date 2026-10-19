@@ -1,6 +1,4 @@
-import uuid
-
-from backend.modules.wb_core.application import AutomationEnrollment
+from backend.modules.wb_core.application import TrackedEnrollment
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 
 AUTOMATION_ID = "wb-support-bot"
@@ -12,23 +10,11 @@ DESCRIPTION = (
 )
 
 
-class SupportBotEnrollment(AutomationEnrollment):
+class SupportBotEnrollment(TrackedEnrollment[SupportBotRepository]):
+    """Подключение не включает отправку: кабинет стартует в режиме сухого прогона.
+
+    Журнал отправок и диалоги принадлежат модулю и стираются вместе с кабинетом.
+    """
+
     automation_id = AUTOMATION_ID
     title = TITLE
-
-    def __init__(self, repository: SupportBotRepository) -> None:
-        self.repository = repository
-
-    async def seller_ids(self) -> set[uuid.UUID]:
-        return await self.repository.tracked_seller_ids()
-
-    async def attach(self, seller_id: uuid.UUID) -> None:
-        """Подключение не включает отправку: кабинет стартует в режиме сухого прогона."""
-        await self.repository.track(seller_id)
-
-    async def detach(self, seller_id: uuid.UUID) -> None:
-        await self.repository.untrack(seller_id)
-
-    async def purge(self, seller_id: uuid.UUID) -> None:
-        """Журнал отправок и диалоги принадлежат модулю и стираются вместе с кабинетом."""
-        await self.repository.purge(seller_id)

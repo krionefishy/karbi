@@ -50,7 +50,7 @@ class FinReportsRepository:
     async def untrack(self, seller_id: uuid.UUID) -> None:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
-    async def purge(self, seller_id: uuid.UUID) -> None:
+    async def purge_seller(self, seller_id: uuid.UUID) -> None:
         await self.session.execute(delete(CostPriceModel).where(CostPriceModel.seller_id == seller_id))
         await self.session.execute(delete(WbFactModel).where(WbFactModel.seller_id == seller_id))
         await self.session.execute(delete(WbReportModel).where(WbReportModel.seller_id == seller_id))

@@ -1,7 +1,7 @@
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Response, status
 
-from backend.app.http.authentication import CurrentAdmin
+from backend.app.http.principals import CurrentAdmin
 from backend.modules.notifications.application import BotAdminService, BotNotFoundError, BotRejectedError
 from backend.modules.notifications.domain import Bot, BotDelivery, MessengerTemporaryError
 from backend.modules.notifications.presentation.http.schemas import BotCreate, BotDeliveryResponse, BotResponse

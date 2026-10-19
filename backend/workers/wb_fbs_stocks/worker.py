@@ -1,22 +1,19 @@
-import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
-
-import structlog
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.modules.wb_fbs_stocks.application import CollectionService
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
 from backend.modules.wb_fbs_stocks.infrastructure.wb import WBFbsStocksClient
-from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 STALE_REFRESH = timedelta(hours=1)
 
 
-class FbsStocksWorker:
+class FbsStocksWorker(PollingWorker):
     """Опрос остатков раз в N минут плюс кнопка «Обновить».
 
     Расписание интервальное, а не суточное: селлер правит кабинет днём и хочет
@@ -24,30 +21,16 @@ class FbsStocksWorker:
     кабинете; после неудачи повтор через `retry_minutes`.
     """
 
+    tick_failed_event = "fbs_stocks_tick_failed"
+
     def __init__(self, database: Database, client: WBFbsStocksClient, settings: Settings) -> None:
+        super().__init__(
+            logger_name="wb_fbs_stocks_worker", poll_interval_seconds=settings.worker.poll_interval_seconds
+        )
         self.database = database
         self.client = client
         self.settings = settings
         self.config = settings.fbs_stocks
-        self.logger = structlog.get_logger("wb_fbs_stocks_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("fbs_stocks_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         await self.serve_refresh_requests()

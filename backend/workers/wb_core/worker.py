@@ -1,10 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.wb_core.application import MirrorService, SellerGoneError
 from backend.modules.wb_core.domain import (
@@ -24,10 +21,11 @@ from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, Se
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
-class WBCoreWorker:
+class WBCoreWorker(PollingWorker):
     """Обход всех активных селлеров реестра: каталог, остатки, отзывы, задания, поставки, чаты, склады WB, фин. отчёты.
 
     Подключение к автоматизациям на зеркало не влияет — оно нужно любой из
@@ -35,6 +33,8 @@ class WBCoreWorker:
     после неудачи повтор через `retry_minutes`, никогда не собранный селлер —
     в очереди сразу.
     """
+
+    tick_failed_event = "wb_core_tick_failed"
 
     def __init__(
         self,
@@ -44,32 +44,14 @@ class WBCoreWorker:
         *,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        super().__init__(logger_name="wb_core_worker", poll_interval_seconds=settings.worker.poll_interval_seconds)
         self.database = database
         self.mirror = mirror
         self.settings = settings
         self.config = settings.core_mirror
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda: datetime.now(UTC))
-        self.logger = structlog.get_logger("wb_core_worker")
-        self._stop = asyncio.Event()
         self._pruned_on: date | None = None
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("wb_core_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         now = self._now()

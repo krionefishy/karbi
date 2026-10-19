@@ -3,7 +3,7 @@ import uuid
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Response, status
 
-from backend.app.http.authentication import CurrentAdmin
+from backend.app.http.principals import CurrentAdmin
 from backend.modules.platform.application import (
     SelfLockoutError,
     UserAdminService,

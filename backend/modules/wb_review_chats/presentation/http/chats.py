@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_review_chats.application import (
     XLSX_MEDIA_TYPE,

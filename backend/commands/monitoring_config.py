@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from backend.app.application import create_app
+from backend.app.factory import create_app
 
 BASE_PATH = "/api/v1"
 LOG_PATH = "/var/log/nginx/marketplace-auto-monitoring.json"

@@ -3,7 +3,7 @@ import uuid
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import (
     DuplicateCredentialError,
     SellerArchivedError,

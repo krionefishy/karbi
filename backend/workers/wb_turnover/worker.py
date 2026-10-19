@@ -1,10 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.notifications.application import BotRegistry
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
@@ -17,8 +14,8 @@ from backend.modules.wb_turnover.infrastructure.wb import (
     WBMarketplaceClient,
     WBStatisticsClient,
 )
-from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 STALE_RUN = timedelta(hours=6)
@@ -26,13 +23,15 @@ TURNOVER_RETENTION_DAYS = 180
 NOTIFICATION_RETENTION_DAYS = 90
 
 
-class TurnoverWorker:
+class TurnoverWorker(PollingWorker):
     """The whole schedule of the automation: snapshots, orders, maths, digest.
 
     Slots are claimed through a unique key on (kind, date, slot), so a restart
     in the middle of the day repeats nothing and needs no leases: every step is
     a handful of requests per seller, not a full scan.
     """
+
+    tick_failed_event = "turnover_tick_failed"
 
     def __init__(
         self,
@@ -43,6 +42,7 @@ class TurnoverWorker:
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
+        super().__init__(logger_name="wb_turnover_worker", poll_interval_seconds=settings.worker.poll_interval_seconds)
         self.database = database
         self.statistics = statistics
         self.analytics = analytics
@@ -51,26 +51,9 @@ class TurnoverWorker:
         self.turnover = settings.turnover
         self.timezone = ZoneInfo(settings.turnover.timezone)
         self._now = now or (lambda timezone: datetime.now(timezone))
-        self._stop = asyncio.Event()
-        self.logger = structlog.get_logger("wb_turnover_worker")
 
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self._close_stale_runs()
-                await self.tick()
-            except Exception:
-                self.logger.exception("turnover_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
+    async def before_tick(self) -> None:
+        await self._close_stale_runs()
 
     async def tick(self) -> None:
         now = self._now(self.timezone)

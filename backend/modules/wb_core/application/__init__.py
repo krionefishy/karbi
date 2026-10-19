@@ -1,4 +1,4 @@
-from backend.modules.wb_core.application.enrollment import AutomationEnrollment
+from backend.modules.wb_core.application.enrollment import AutomationEnrollment, TrackedEnrollment, TrackingRepository
 from backend.modules.wb_core.application.mirror import (
     AdvertsOutcome,
     CatalogOutcome,
@@ -40,6 +40,8 @@ __all__ = [
     "AdvertMirror",
     "AdvertsOutcome",
     "AutomationEnrollment",
+    "TrackedEnrollment",
+    "TrackingRepository",
     "AutomationNotFoundError",
     "CatalogMirror",
     "CatalogOutcome",

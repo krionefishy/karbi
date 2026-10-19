@@ -1,18 +1,17 @@
-import asyncio
 from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import structlog
-
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_reviews.application import ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
-from backend.shared.heartbeat import touch_heartbeat
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
-class WBReviewsWorker:
+class WBReviewsWorker(PollingWorker):
+    tick_failed_event = "worker_iteration_failed"
+
     def __init__(
         self,
         database: Database,
@@ -25,8 +24,8 @@ class WBReviewsWorker:
         job_max_attempts: int = 3,
         run_max_age_seconds: int = 21_600,
     ) -> None:
+        super().__init__(logger_name="wb_reviews_worker", poll_interval_seconds=poll_interval_seconds)
         self._database = database
-        self._poll_interval_seconds = poll_interval_seconds
         self._sync_hour = sync_hour
         self._sync_minute = sync_minute
         self._timezone = ZoneInfo(timezone)
@@ -34,27 +33,12 @@ class WBReviewsWorker:
         self._now = now or (lambda timezone: datetime.now(timezone))
         self._job_max_attempts = job_max_attempts
         self._run_max_age_seconds = run_max_age_seconds
-        self._stop = asyncio.Event()
-        self._logger = structlog.get_logger("wb_reviews_worker")
 
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self._logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            if self._enabled:
-                try:
-                    await self._recover()
-                    await self._schedule_if_due()
-                except Exception:
-                    self._logger.exception("worker_iteration_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self._poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self._logger.info("worker_stopped")
+    async def tick(self) -> None:
+        if not self._enabled:
+            return
+        await self._recover()
+        await self._schedule_if_due()
 
     async def _recover(self) -> None:
         """Re-dispatch retries and release jobs whose worker never came back."""
@@ -65,7 +49,7 @@ class WBReviewsWorker:
                 max_run_age_seconds=self._run_max_age_seconds,
             )
         if report.changed:
-            self._logger.info(
+            self.logger.info(
                 "review_sync_maintenance",
                 expired_leases=report.expired_leases,
                 requeued_jobs=report.requeued_jobs,
@@ -89,7 +73,7 @@ class WBReviewsWorker:
             if await reviews.run_for_date(now.date()) is not None:
                 return
             run = await self._service(session).request("scheduled", now.date())
-            self._logger.info("review_sync_scheduled", run_id=str(run.id), status=run.status)
+            self.logger.info("review_sync_scheduled", run_id=str(run.id), status=run.status)
 
     @staticmethod
     def _service(session) -> ReviewSyncService:

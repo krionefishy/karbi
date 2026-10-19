@@ -48,7 +48,7 @@ class SupportBotRepository:
     async def untrack(self, seller_id: uuid.UUID) -> None:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
-    async def purge(self, seller_id: uuid.UUID) -> None:
+    async def purge_seller(self, seller_id: uuid.UUID) -> None:
         for model in (SendModel, DialogModel, VerdictModel, TemplateModel, TrackedSellerModel):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
 

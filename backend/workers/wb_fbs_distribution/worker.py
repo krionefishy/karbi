@@ -1,10 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
@@ -16,18 +13,20 @@ from backend.modules.wb_fbs_distribution.application import (
 )
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import FbsDistributionRepository
 from backend.modules.wb_fbs_distribution.infrastructure.wb import WBFbsMarketplaceClient
-from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
-class FbsDistributionWorker:
+class FbsDistributionWorker(PollingWorker):
     """Расписание автоматизации: пока только суточная сверка складов кабинета.
 
     Слоты не резервируются журналом, как в оборачиваемости: сверка приводит
     зеркало к тому, что вернул WB, и повтор после перезапуска ничего не портит.
     Достаточно времени последней успешной сверки на самом кабинете.
     """
+
+    tick_failed_event = "fbs_tick_failed"
 
     def __init__(
         self,
@@ -37,6 +36,9 @@ class FbsDistributionWorker:
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
+        super().__init__(
+            logger_name="wb_fbs_distribution_worker", poll_interval_seconds=settings.worker.poll_interval_seconds
+        )
         self.database = database
         self.marketplace = marketplace
         self.stock_source = stock_source
@@ -44,25 +46,6 @@ class FbsDistributionWorker:
         self.config = settings.fbs_distribution
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda timezone: datetime.now(timezone))
-        self.logger = structlog.get_logger("wb_fbs_distribution_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("fbs_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         await self.poll_stock_source()

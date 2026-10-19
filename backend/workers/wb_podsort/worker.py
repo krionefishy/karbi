@@ -1,10 +1,8 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
@@ -15,10 +13,11 @@ from backend.modules.wb_podsort.infrastructure.postgres import PodsortRepository
 from backend.modules.wb_podsort.infrastructure.wb import WBPodsortStatisticsClient
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
-class PodsortWorker:
+class PodsortWorker(PollingWorker):
     """Догрузка суточных итогов заказов по подключённым кабинетам.
 
     Каждый проход — по кабинетам по очереди, у каждого не больше
@@ -26,6 +25,8 @@ class PodsortWorker:
     три месяца кабинета не должны держать остальных. Кабинет без долгов
     пропускается без запроса к WB; после неудачи — пауза `retry_minutes`.
     """
+
+    tick_failed_event = "wb_podsort_tick_failed"
 
     def __init__(
         self,
@@ -35,31 +36,13 @@ class PodsortWorker:
         *,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        super().__init__(logger_name="wb_podsort_worker", poll_interval_seconds=settings.worker.poll_interval_seconds)
         self.database = database
         self.client = client
         self.settings = settings
         self.config = settings.podsort
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda: datetime.now(UTC))
-        self.logger = structlog.get_logger("wb_podsort_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("wb_podsort_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> int:
         now = self._now()

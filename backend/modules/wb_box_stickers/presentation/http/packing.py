@@ -3,7 +3,7 @@ import urllib.parse
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_box_stickers.application import (
     PackingPlan,
     PackingService,

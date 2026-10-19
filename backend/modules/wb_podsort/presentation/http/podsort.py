@@ -4,7 +4,7 @@ from datetime import datetime
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_podsort.application import XLSX_MEDIA_TYPE, PodsortQueryError, PodsortService, PodsortView
 from backend.modules.wb_podsort.domain import (
     MAX_COVER_DAYS,

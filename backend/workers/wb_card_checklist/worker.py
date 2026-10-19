@@ -1,30 +1,29 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.wb_card_checklist.application import CollectionService
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
 from backend.modules.wb_card_checklist.infrastructure.wb import WBCardClient, WBPricesClient
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
-from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 STALE_REFRESH = timedelta(hours=1)
 
 
-class CardChecklistWorker:
+class CardChecklistWorker(PollingWorker):
     """Расписание чек-листа: суточный сбор карточек и цен плюс кнопка «Обновить».
 
     Слоты не резервируются журналом: сбор переписывает данные селлера целиком,
     и повтор после перезапуска ничего не портит. Хватает отметки последнего
     успешного сбора и последней попытки на самом селлере.
     """
+
+    tick_failed_event = "checklist_tick_failed"
 
     def __init__(
         self,
@@ -34,6 +33,9 @@ class CardChecklistWorker:
         settings: Settings,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
+        super().__init__(
+            logger_name="wb_card_checklist_worker", poll_interval_seconds=settings.worker.poll_interval_seconds
+        )
         self.database = database
         self.cards = cards
         self.prices = prices
@@ -41,25 +43,6 @@ class CardChecklistWorker:
         self.config = settings.card_checklist
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda timezone: datetime.now(timezone))
-        self.logger = structlog.get_logger("wb_card_checklist_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("checklist_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         await self.serve_refresh_requests()

@@ -1,10 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
@@ -13,18 +10,21 @@ from backend.modules.wb_fbs_penalties.infrastructure.postgres import PenaltiesRe
 from backend.modules.wb_fbs_penalties.infrastructure.wb import WBFinanceClient
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 STALE_REFRESH = timedelta(hours=1)
 
 
-class PenaltiesWorker:
+class PenaltiesWorker(PollingWorker):
     """Сбор фин. отчёта каждые `poll_hours` плюс кнопка «Обновить».
 
     Отчёты суточные и появляются на следующий день в неизвестный час, поэтому
     список спрашивается несколько раз в сутки (один запрос), а детализация
     читается только у новых отчётов. После неудачи повтор через `retry_minutes`.
     """
+
+    tick_failed_event = "fbs_penalties_tick_failed"
 
     def __init__(
         self,
@@ -34,31 +34,15 @@ class PenaltiesWorker:
         *,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
+        super().__init__(
+            logger_name="wb_fbs_penalties_worker", poll_interval_seconds=settings.worker.poll_interval_seconds
+        )
         self.database = database
         self.client = client
         self.settings = settings
         self.config = settings.fbs_penalties
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda tz: datetime.now(tz))
-        self.logger = structlog.get_logger("wb_fbs_penalties_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("fbs_penalties_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         await self.serve_refresh_requests()

@@ -1,10 +1,7 @@
-import asyncio
 import random
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
@@ -14,6 +11,7 @@ from backend.modules.wb_support_bot.domain import CampaignRules, Pace, SendWindo
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
@@ -49,13 +47,15 @@ def policy_from(settings: Settings) -> BotPolicy:
     )
 
 
-class SupportBotWorker:
+class SupportBotWorker(PollingWorker):
     """Раз в `tick_minutes` проходит по подключённым кабинетам.
 
     Один проход по кабинету — разбор диалогов из зеркала и отправка того, что
     пора. Ошибка одного кабинета не останавливает остальные; отправку по
     кабинету с ошибкой доступа бот снимает сам и пишет причину в карточку.
     """
+
+    tick_failed_event = "support_bot_tick_failed"
 
     def __init__(
         self,
@@ -65,31 +65,15 @@ class SupportBotWorker:
         *,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        super().__init__(
+            logger_name="wb_support_bot_worker", poll_interval_seconds=settings.worker.poll_interval_seconds
+        )
         self.database = database
         self.sender = sender
         self.settings = settings
         self.policy = policy_from(settings)
         self._now = now or (lambda: datetime.now(UTC))
-        self.logger = structlog.get_logger("wb_support_bot_worker")
-        self._stop = asyncio.Event()
         self._last_tick: datetime | None = None
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("support_bot_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     def _due(self, now: datetime) -> bool:
         gap = timedelta(minutes=self.settings.support_bot.tick_minutes)

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_reviews.application import XLSX_MEDIA_TYPE, ReviewReportService, ReviewSyncService
 from backend.modules.wb_reviews.presentation.http.schemas import ReviewHistoryResponse, SyncRunResponse

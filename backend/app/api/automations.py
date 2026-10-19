@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Response, status
 
 from backend.app.api.schemas import AutomationResponse, AutomationSellerAttach
 from backend.app.api.utils import automation_catalog
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.fin_reports.application import FinReportsService
 from backend.modules.wb_card_checklist.application import ChecklistService
 from backend.modules.wb_core.application import (

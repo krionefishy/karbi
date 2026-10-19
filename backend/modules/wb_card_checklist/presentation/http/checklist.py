@@ -4,7 +4,7 @@ import uuid
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_card_checklist.application import (
     XLSX_MEDIA_TYPE,
     ArticleNotInChecklistError,

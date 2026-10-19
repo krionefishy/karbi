@@ -4,7 +4,7 @@ from datetime import datetime
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_support_bot.application import (
     BotRequestError,

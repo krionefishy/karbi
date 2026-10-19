@@ -4,7 +4,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from backend.app.application import create_app
+from backend.app.factory import create_app
 from backend.shared.settings import load_settings
 
 

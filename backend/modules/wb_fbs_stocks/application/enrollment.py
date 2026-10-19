@@ -1,6 +1,4 @@
-import uuid
-
-from backend.modules.wb_core.application import AutomationEnrollment
+from backend.modules.wb_core.application import TrackedEnrollment
 from backend.modules.wb_fbs_stocks.infrastructure.postgres import FbsStocksRepository
 
 AUTOMATION_ID = "wb-fbs-stocks"
@@ -11,21 +9,6 @@ DESCRIPTION = (
 )
 
 
-class FbsStocksEnrollment(AutomationEnrollment):
+class FbsStocksEnrollment(TrackedEnrollment[FbsStocksRepository]):
     automation_id = AUTOMATION_ID
     title = TITLE
-
-    def __init__(self, stocks: FbsStocksRepository) -> None:
-        self.stocks = stocks
-
-    async def seller_ids(self) -> set[uuid.UUID]:
-        return await self.stocks.tracked_seller_ids()
-
-    async def attach(self, seller_id: uuid.UUID) -> None:
-        await self.stocks.track(seller_id)
-
-    async def detach(self, seller_id: uuid.UUID) -> None:
-        await self.stocks.untrack(seller_id)
-
-    async def purge(self, seller_id: uuid.UUID) -> None:
-        await self.stocks.purge_seller(seller_id)

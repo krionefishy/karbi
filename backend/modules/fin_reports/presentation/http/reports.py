@@ -5,7 +5,7 @@ from datetime import date
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.fin_reports.application import (
     XLSX_MEDIA_TYPE,
     CostFileError,

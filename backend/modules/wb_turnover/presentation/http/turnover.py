@@ -4,7 +4,7 @@ import uuid
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, HTTPException, Response, status
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_turnover.application import (
     XLSX_MEDIA_TYPE,

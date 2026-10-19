@@ -1,20 +1,18 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
-
-import structlog
 
 from backend.modules.fin_reports.application import FactsBuilder, StockSnapshots
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 
-class FinReportsWorker:
+class FinReportsWorker(PollingWorker):
     """Раз в `build_interval_minutes` складывает новые отчёты реализации подключённых кабинетов.
 
     Отчёт складывается один раз, поэтому проход без новых отчётов почти
@@ -23,6 +21,8 @@ class FinReportsWorker:
     прочитанное можно и при отозванном ключе.
     """
 
+    tick_failed_event = "fin_reports_tick_failed"
+
     def __init__(
         self,
         database: Database,
@@ -30,32 +30,14 @@ class FinReportsWorker:
         *,
         now: Callable[[], datetime] | None = None,
     ) -> None:
+        super().__init__(logger_name="fin_reports_worker", poll_interval_seconds=settings.worker.poll_interval_seconds)
         self.database = database
         self.settings = settings
         self.config = settings.fin_reports
         self._now = now or (lambda: datetime.now(UTC))
         self.builder = FactsBuilder(database, heartbeat=touch_heartbeat)
         self.snapshots = StockSnapshots(database, timezone=ZoneInfo(self.config.timezone))
-        self.logger = structlog.get_logger("fin_reports_worker")
-        self._stop = asyncio.Event()
         self._built_at: datetime | None = None
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("fin_reports_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     def due(self, now: datetime) -> bool:
         """Пора ли: после старта — сразу, дальше раз в интервал; недособранное — без паузы."""

@@ -23,3 +23,7 @@ class ReviewChatsRepository:
 
     async def untrack(self, seller_id: uuid.UUID) -> None:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
+
+    async def purge_seller(self, seller_id: uuid.UUID) -> None:
+        """Своей истории у модуля нет: события чатов принадлежат зеркалу и уходят вместе с селлером."""
+        await self.untrack(seller_id)

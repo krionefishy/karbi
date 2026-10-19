@@ -1,10 +1,8 @@
-import asyncio
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry
@@ -16,12 +14,13 @@ from backend.modules.wb_returns.infrastructure.postgres import ReturnsRepository
 from backend.modules.wb_returns.infrastructure.wb import WBClaimsClient, WBReturnsReportClient
 from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
+from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
 
 STALE_REFRESH = timedelta(minutes=30)
 
 
-class ReturnsWorker:
+class ReturnsWorker(PollingWorker):
     """Сбор возвратов и заявок каждые `poll_minutes`, уведомления после каждого сбора и по расписанию.
 
     Отчёт отдаётся целиком за окно, заявки страницами; оба лимита держит шлюз.
@@ -29,6 +28,8 @@ class ReturnsWorker:
     (дайджест, напоминания, сроки заявок) проверяются каждый проход по всем
     подключённым кабинетам — им сбор не нужен.
     """
+
+    tick_failed_event = "returns_tick_failed"
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class ReturnsWorker:
         *,
         now: Callable[[ZoneInfo], datetime] | None = None,
     ) -> None:
+        super().__init__(logger_name="wb_returns_worker", poll_interval_seconds=settings.worker.poll_interval_seconds)
         self.database = database
         self.report_client = report_client
         self.claims_client = claims_client
@@ -46,25 +48,6 @@ class ReturnsWorker:
         self.config = settings.returns
         self.timezone = ZoneInfo(self.config.timezone)
         self._now = now or (lambda tz: datetime.now(tz))
-        self.logger = structlog.get_logger("wb_returns_worker")
-        self._stop = asyncio.Event()
-
-    def stop(self) -> None:
-        self._stop.set()
-
-    async def run(self) -> None:
-        self.logger.info("worker_started")
-        while not self._stop.is_set():
-            touch_heartbeat()
-            try:
-                await self.tick()
-            except Exception:
-                self.logger.exception("returns_tick_failed")
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=self.settings.worker.poll_interval_seconds)
-            except TimeoutError:
-                continue
-        self.logger.info("worker_stopped")
 
     async def tick(self) -> None:
         now = self._now(self.timezone)

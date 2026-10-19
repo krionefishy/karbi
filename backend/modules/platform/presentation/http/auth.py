@@ -3,7 +3,7 @@ from typing import Annotated
 from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter, Cookie, Request, Response
 
-from backend.app.http.authentication import CurrentPrincipal
+from backend.app.http.principals import CurrentPrincipal
 from backend.modules.platform.application import (
     AuthenticationError,
     AuthService,
