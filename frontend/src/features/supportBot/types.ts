@@ -14,7 +14,8 @@ export type DialogState =
   | "closed";
 export type BotMode = "dry_run" | "canary" | "live";
 export type DialogFlag = "no_contact" | "attention" | "excluded";
-export type SendStatus = "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";
+export type SendStatus =
+  "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";
 
 export interface Template {
   id: number;
@@ -35,7 +36,15 @@ export interface SupportBot {
   mirror_read_through: string | null;
   /** Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения. */
   canary_percent: number;
+  /** Как вердикт нейросети влияет на отправку: off, shadow (только запись) или enforce. */
+  classifier_mode: ClassifierMode;
 }
+
+export type ClassifierMode = "off" | "shadow" | "enforce";
+/** Вердикт нейросети по последнему сообщению специалиста: ждёт ответа, завершает диалог, неясно. */
+export type Verdict = "open" | "closing" | "unclear";
+/** Решение менеджера: писать или не писать; действует, пока специалист не написал ещё раз. */
+export type ManualVerdict = "allow" | "deny";
 
 export interface BotDialog {
   chat_id: string;
@@ -54,6 +63,9 @@ export interface BotDialog {
   excluded: boolean;
   closed: boolean;
   chat_url: string | null;
+  verdict: Verdict | null;
+  verdict_reason: string | null;
+  manual_verdict: ManualVerdict | null;
 }
 
 export interface DialogPage {

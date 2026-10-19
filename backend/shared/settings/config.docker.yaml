@@ -118,3 +118,15 @@ returns:
 support_bot:
   # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
   canary_percent: ${SUPPORT_BOT_CANARY_PERCENT:-30}
+  # off | shadow | enforce: как вердикт нейросети влияет на отправку (shadow — только записываем).
+  classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-shadow}
+  classifier_prompt_version: v2
+
+llm:
+  # Модель меняется здесь: правка строки и перераскатка. Ключ — только из окружения.
+  base_url: ${LLM_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
+  model: ${LLM_MODEL:-Qwen/Qwen3-30B-A3B}
+  api_key: ${FOUNDATION_MODELS_API_KEY:-}
+  timeout_seconds: 60
+  max_tokens: 150
+  temperature: 0

@@ -45,6 +45,7 @@ flowchart LR
 | --- | --- | --- |
 | `wb.catalog.sync.requested` | api при подключении и ручном ресинке | консьюмер каталога в `wb-core-worker` |
 | `wb.reviews.sync.requested` | ночной планировщик и reaper повторов | консьюмер отзывов |
+| `wb.support-bot.classify.requested` | воркер бота поддержки, через outbox | консьюмер вердиктов в `wb-support-bot-worker` |
 | `notifications.telegram.message.requested` | автоматизации | воркер уведомлений |
 | `storage.s3.*.upload` / `.delete` | код, которому нужно записать в S3 | подписчик хранилища |
 

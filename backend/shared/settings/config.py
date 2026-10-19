@@ -354,6 +354,22 @@ class CoreMirrorConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LLMConfig:
+    """Языковая модель по OpenAI-совместимому API (Cloud.ru Foundation Models).
+
+    Модель задаётся здесь, а не в коде: смена модели — правка одной строки и
+    перераскатка. Ключ приходит только из окружения.
+    """
+
+    base_url: str = "https://foundation-models.api.cloud.ru/v1"
+    model: str = "Qwen/Qwen3-30B-A3B"
+    api_key: str = field(default="", repr=False)
+    timeout_seconds: int = 60
+    max_tokens: int = 150
+    temperature: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class SupportBotConfig:
     """Бот поддержки в чатах WB: когда и как часто писать покупателю, который замолчал."""
 
@@ -387,6 +403,15 @@ class SupportBotConfig:
     max_idle_days: int = 5
     # В режиме «канарейка» живая отправка идёт только по этому проценту диалогов.
     canary_percent: int = 10
+    # Определение «диалог завершён нашей стороной» нейросетью по последнему сообщению специалиста:
+    # off — не спрашиваем; shadow — спрашиваем и пишем вердикт, на отправку он не влияет;
+    # enforce — пишем, только если свежий вердикт «ждём покупателя» (или менеджер разрешил вручную).
+    classifier_mode: str = "shadow"
+    # Версия промпта: смена версии заново классифицирует диалоги и позволяет сравнить модели.
+    classifier_prompt_version: str = "v2"
+    # Сколько ждать ответа модели, прежде чем поставить запрос заново, и сколько раз пробуем.
+    classifier_retry_minutes: int = 15
+    classifier_max_attempts: int = 3
     # Шаблон ссылки на чат в кабинете WB: `{chat_id}` — uuid чата без префикса `1:`.
     # Пусто — ссылку не строим.
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
@@ -521,6 +546,7 @@ class Settings:
     podsort: PodsortConfig
     fin_reports: FinReportsConfig
     support_bot: SupportBotConfig = SupportBotConfig()
+    llm: LLMConfig = LLMConfig()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -642,8 +668,14 @@ class Settings:
                 review_chats[key] = int(review_chats[key])
         support_bot = dict(data.get("support_bot", {}))
         for key, value in list(support_bot.items()):
-            if key not in ("timezone", "chat_url_template"):
+            if key not in ("timezone", "chat_url_template", "classifier_mode", "classifier_prompt_version"):
                 support_bot[key] = int(value)
+        llm = dict(data.get("llm", {}))
+        for key in ("timeout_seconds", "max_tokens"):
+            if key in llm:
+                llm[key] = int(llm[key])
+        if "temperature" in llm:
+            llm["temperature"] = float(llm["temperature"])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
         for key in (
             "poll_hours",
@@ -727,6 +759,7 @@ class Settings:
             podsort=PodsortConfig(**podsort),
             fin_reports=FinReportsConfig(**fin_reports),
             support_bot=SupportBotConfig(**support_bot),
+            llm=LLMConfig(**llm),
         )
         settings.validate_values()
         return settings
@@ -835,6 +868,12 @@ class Settings:
             raise ValueError("support_bot.max_idle_days must be positive")
         if bot.history_days <= bot.campaign_days:
             raise ValueError("support_bot.history_days must exceed campaign_days")
+        if bot.classifier_mode not in ("off", "shadow", "enforce"):
+            raise ValueError("support_bot.classifier_mode must be off, shadow or enforce")
+        if min(bot.classifier_retry_minutes, bot.classifier_max_attempts) < 1:
+            raise ValueError("support_bot.classifier_* limits must be positive")
+        if self.llm.timeout_seconds < 1 or self.llm.max_tokens < 1:
+            raise ValueError("llm.timeout_seconds and llm.max_tokens must be positive")
         penalties = self.fbs_penalties
         if (
             min(

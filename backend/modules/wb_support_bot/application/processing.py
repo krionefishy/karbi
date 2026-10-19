@@ -19,6 +19,8 @@ from backend.modules.wb_core.domain import CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_support_bot.application.ports import ChatSender
 from backend.modules.wb_support_bot.domain import (
+    MODE_ENFORCE,
+    MODE_OFF,
     CampaignRules,
     DialogState,
     Pace,
@@ -26,8 +28,11 @@ from backend.modules.wb_support_bot.domain import (
     SentMessage,
     first_send_at,
     in_canary,
+    may_send,
     next_send_at,
     project_dialog,
+    tail_fingerprint,
+    tail_message,
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     MODE_CANARY,
@@ -37,17 +42,24 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     SEND_SENDING,
     SEND_SENT,
     SEND_UNKNOWN,
+    VERDICT_DONE,
+    VERDICT_PENDING,
     DialogKey,
     DialogModel,
     SendModel,
     SupportBotRepository,
     TemplateModel,
+    VerdictModel,
 )
+from backend.shared.kafka_streams.topics import SupportBotTopics
+from backend.shared.outbox.repository import OutboxRepository
 
 # «Неизвестную» отправку признаём неудавшейся, если лента за это время её не показала.
 UNKNOWN_RESOLVE_AFTER = timedelta(minutes=45)
 # После неудачи, которая не лечится повтором в ту же минуту, диалог ждёт столько.
 RETRY_DELAY = timedelta(minutes=30)
+# Диалог, которому ещё нет вердикта «ждём покупателя», проверяется заново через столько.
+VERDICT_RECHECK = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +74,11 @@ class BotPolicy:
     mirror_stale: timedelta = timedelta(minutes=90)
     # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
     canary_percent: int = 10
+    # Как вердикт нейросети влияет на отправку: off, shadow (только запись) или enforce.
+    classifier_mode: str = MODE_OFF
+    classifier_prompt_version: str = "v2"
+    classifier_retry: timedelta = timedelta(minutes=15)
+    classifier_max_attempts: int = 3
 
 
 @dataclass(slots=True)
@@ -73,6 +90,9 @@ class SellerReport:
     sent: int = 0
     dry_run: int = 0
     failed: int = 0
+    # Диалоги, которым пора писать, но вердикта «ждём покупателя» ещё нет: ждут.
+    held: int = 0
+    verdicts_requested: int = 0
     skipped: str | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -164,6 +184,8 @@ class SupportBotProcessor:
             models[key] = model
             report.dialogs += 1
         await self.repository.retire_out_of_window(seller_id, since)
+        # Запросы вердикта кладём в outbox в той же транзакции, что и состояние диалогов.
+        await self._request_verdicts(seller_id, models, now, report)
         await self.repository.session.commit()
 
         await self._reconcile(seller_id, segments, now)
@@ -218,6 +240,13 @@ class SupportBotProcessor:
             campaigns_count=model.campaigns_count,
             product_removed=product_removed,
         )
+        tail = tail_message(segment.events, record)
+        model.tail_event_id = tail.event_id if tail else None
+        model.tail_fingerprint = tail_fingerprint(tail) if tail else None
+        if model.manual_verdict is not None and model.manual_fingerprint != model.tail_fingerprint:
+            # Написали ещё раз: прежнее решение менеджера относилось к другому сообщению.
+            model.manual_verdict = None
+            model.manual_fingerprint = None
         model.nm_id = segment.nm_id
         model.buyer_first_at = projection.buyer_first_at
         model.buyer_last_at = projection.buyer_last_at
@@ -242,6 +271,65 @@ class SupportBotProcessor:
         if created:
             await self.repository.add_dialog(model)
         return model
+
+    # --- вердикты нейросети -----------------------------------------------------
+
+    async def _request_verdicts(
+        self, seller_id: uuid.UUID, models: dict[tuple[str, datetime], DialogModel], now: datetime, report: SellerReport
+    ) -> None:
+        """Ставит запрос вердикта по диалогам, где идёт рассылка, а хвост ещё не оценён.
+
+        Модель не вызывается здесь: бот только кладёт запрос в outbox и не ждёт ответа.
+        Зависший или упавший запрос ставится заново, но не больше `classifier_max_attempts` раз.
+        """
+        if self.policy.classifier_mode == MODE_OFF:
+            return
+        version = self.policy.classifier_prompt_version
+        existing = await self.repository.verdicts_by_tail(seller_id, version)
+        outbox = OutboxRepository(self.repository.session)
+        for model in models.values():
+            if model.state != DialogState.IN_CAMPAIGN.value or not model.tail_fingerprint or not model.tail_event_id:
+                continue
+            if model.excluded or model.closed or model.no_contact:
+                continue
+            row = existing.get((model.chat_id, model.tail_fingerprint))
+            if row is None:
+                row = VerdictModel(
+                    id=uuid.uuid4(),
+                    seller_id=seller_id,
+                    chat_id=model.chat_id,
+                    tail_event_id=model.tail_event_id,
+                    tail_fingerprint=model.tail_fingerprint,
+                    prompt_version=version,
+                    status=VERDICT_PENDING,
+                    attempts=1,
+                    requested_at=now,
+                )
+                self.repository.add_verdict(row)
+            elif row.status == VERDICT_DONE or (
+                row.attempts >= self.policy.classifier_max_attempts
+                or now - row.requested_at < self.policy.classifier_retry
+            ):
+                continue
+            else:
+                row.status = VERDICT_PENDING
+                row.error = None
+                row.attempts += 1
+                row.requested_at = now
+            outbox.add(
+                aggregate_id=row.id,
+                event_type="SupportBotClassifyRequested",
+                topic=SupportBotTopics.CLASSIFY_REQUESTED,
+                payload={"verdict_id": str(row.id), "seller_id": str(seller_id)},
+            )
+            report.verdicts_requested += 1
+
+    def _cleared(self, dialog: DialogModel, verdicts: dict[tuple[str, str], VerdictModel]) -> bool:
+        """Можно ли писать по диалогу с учётом вердикта нейросети и ручной отметки менеджера."""
+        manual = dialog.manual_verdict if dialog.manual_fingerprint == dialog.tail_fingerprint else None
+        row = verdicts.get((dialog.chat_id, dialog.tail_fingerprint)) if dialog.tail_fingerprint else None
+        verdict = row.verdict if row is not None and row.status == VERDICT_DONE else None
+        return may_send(self.policy.classifier_mode, verdict, manual)
 
     # --- сверка «неизвестных» отправок ------------------------------------------
 
@@ -299,7 +387,16 @@ class SupportBotProcessor:
             for event in segment.events:
                 if event.reply_sign:
                     signs[segment.chat_id] = event.reply_sign
+        verdicts: dict[tuple[str, str], VerdictModel] = {}
+        if self.policy.classifier_mode == MODE_ENFORCE:
+            verdicts = await self.repository.verdicts_by_tail(seller_id, self.policy.classifier_prompt_version)
         for dialog in due:
+            if not self._cleared(dialog, verdicts):
+                # Вердикта «ждём покупателя» нет: лучше промолчать. Срок сдвигаем, иначе они займут всю пачку.
+                dialog.next_send_at = now + VERDICT_RECHECK
+                report.held += 1
+                await self.repository.session.commit()
+                continue
             live = self._is_live(mode, dialog)
             text_model = self._pick_template(templates, await self._last_template(dialog))
             sends = await self.repository.dialog_sends(_key(dialog))

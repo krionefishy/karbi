@@ -611,6 +611,10 @@ class MirrorRepository:
         )
         return [self._chat_event(row) for row in rows]
 
+    async def chat_event(self, seller_id: uuid.UUID, event_id: str) -> ChatEvent | None:
+        row = await self.session.get(ChatEventModel, (seller_id, event_id))
+        return self._chat_event(row) if row is not None else None
+
     async def first_api_reply_at(self, seller_id: uuid.UUID, *, within: timedelta) -> datetime | None:
         """Первое сообщение из публичного API не позже `within` после автосообщения WB в том же чате.
 

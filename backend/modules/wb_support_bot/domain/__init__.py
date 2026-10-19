@@ -9,8 +9,40 @@ from backend.modules.wb_support_bot.domain.dialog import (
 from backend.modules.wb_support_bot.domain.links import DEFAULT_CHAT_URL_TEMPLATE, chat_url
 from backend.modules.wb_support_bot.domain.schedule import MOSCOW, Pace, SendWindow, first_send_at, next_send_at
 from backend.modules.wb_support_bot.domain.stopwords import StopMatch, match
+from backend.modules.wb_support_bot.domain.verdict import (
+    MANUAL_ALLOW,
+    MANUAL_DENY,
+    MODE_ENFORCE,
+    MODE_OFF,
+    MODE_SHADOW,
+    SYSTEM_PROMPT,
+    VERDICT_CLOSING,
+    VERDICT_OPEN,
+    VERDICT_UNCLEAR,
+    VERDICTS,
+    may_send,
+    parse_verdict,
+    tail_fingerprint,
+    tail_message,
+    user_message,
+)
 
 __all__ = [
+    "MANUAL_ALLOW",
+    "MANUAL_DENY",
+    "MODE_ENFORCE",
+    "MODE_OFF",
+    "MODE_SHADOW",
+    "SYSTEM_PROMPT",
+    "VERDICTS",
+    "VERDICT_CLOSING",
+    "VERDICT_OPEN",
+    "VERDICT_UNCLEAR",
+    "may_send",
+    "parse_verdict",
+    "tail_fingerprint",
+    "tail_message",
+    "user_message",
     "DEFAULT_CHAT_URL_TEMPLATE",
     "MOSCOW",
     "CampaignRules",

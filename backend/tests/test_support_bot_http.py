@@ -155,3 +155,84 @@ async def test_the_journal_is_filtered_counted_and_linked(
     assert everything["sends"][0]["chat_url"].endswith("chatId=aaaa-bbbb")
     assert failed["total"] == 1 and failed["sends"][0]["error"] == "нет подписи"
     assert (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "nope"})).status_code == 422
+
+
+async def test_a_manager_can_allow_or_forbid_a_dialog_and_the_page_shows_the_verdict(
+    application: Application, client: AsyncClient, seller: uuid.UUID
+) -> None:
+    from datetime import UTC, datetime
+
+    from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel, VerdictModel
+
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    prompt = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        session.add(
+            DialogModel(
+                seller_id=seller,
+                chat_id="1:aaaa-bbbb",
+                prompt_at=prompt,
+                state="in_campaign",
+                tail_event_id="e1",
+                tail_fingerprint="a" * 40,
+            )
+        )
+        session.add(DialogModel(seller_id=seller, chat_id="1:no-tail", prompt_at=prompt, state="awaiting_buyer"))
+        session.add(
+            VerdictModel(
+                id=uuid.uuid4(),
+                seller_id=seller,
+                chat_id="1:aaaa-bbbb",
+                tail_event_id="e1",
+                tail_fingerprint="a" * 40,
+                prompt_version=application.settings.support_bot.classifier_prompt_version,
+                status="done",
+                verdict="closing",
+                reason="заявка одобрена",
+            )
+        )
+        await session.commit()
+    body = {"chat_id": "1:aaaa-bbbb", "prompt_at": prompt.isoformat()}
+
+    shown = {item["chat_id"]: item for item in (await client.get(f"{API}/sellers/{seller}/dialogs")).json()["dialogs"]}
+    assert shown["1:aaaa-bbbb"]["verdict"] == "closing" and shown["1:aaaa-bbbb"]["verdict_reason"] == "заявка одобрена"
+    assert shown["1:aaaa-bbbb"]["manual_verdict"] is None
+    assert shown["1:no-tail"]["verdict"] is None
+
+    allowed = await client.post(f"{API}/sellers/{seller}/dialogs/manual-verdict", json={**body, "value": "allow"})
+    assert allowed.status_code == 204
+    after = {item["chat_id"]: item for item in (await client.get(f"{API}/sellers/{seller}/dialogs")).json()["dialogs"]}
+    assert after["1:aaaa-bbbb"]["manual_verdict"] == "allow"
+
+    cleared = await client.post(f"{API}/sellers/{seller}/dialogs/manual-verdict", json={**body, "value": None})
+    assert cleared.status_code == 204
+    again = {item["chat_id"]: item for item in (await client.get(f"{API}/sellers/{seller}/dialogs")).json()["dialogs"]}
+    assert again["1:aaaa-bbbb"]["manual_verdict"] is None
+
+
+async def test_a_manual_decision_needs_a_known_dialog_with_a_tail_and_a_valid_value(
+    application: Application, client: AsyncClient, seller: uuid.UUID
+) -> None:
+    from datetime import UTC, datetime
+
+    from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel
+
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    prompt = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        session.add(DialogModel(seller_id=seller, chat_id="1:no-tail", prompt_at=prompt, state="awaiting_buyer"))
+        await session.commit()
+    url = f"{API}/sellers/{seller}/dialogs/manual-verdict"
+
+    assert (
+        await client.post(url, json={"chat_id": "1:none", "prompt_at": prompt.isoformat(), "value": "allow"})
+    ).status_code == 422
+    assert (
+        await client.post(url, json={"chat_id": "1:no-tail", "prompt_at": prompt.isoformat(), "value": "allow"})
+    ).status_code == 422
+    assert (
+        await client.post(url, json={"chat_id": "1:no-tail", "prompt_at": prompt.isoformat(), "value": "maybe"})
+    ).status_code == 422
+    assert (
+        await client.post(url, json={"chat_id": "1:no-tail", "prompt_at": "вчера", "value": "allow"})
+    ).status_code == 422

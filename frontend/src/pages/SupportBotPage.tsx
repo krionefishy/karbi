@@ -17,6 +17,7 @@ import {
   getSupportBot,
   PAGE_SIZE,
   setDialogFlags,
+  setManualVerdict,
   setMode,
   setPaused,
   setTemplateActive,
@@ -26,10 +27,20 @@ import {
   MODE_LABEL,
   STATE_LABEL,
   STATE_ORDER,
+  needsDecision,
   statusLine,
   totalDialogs,
+  verdictNote,
 } from "../features/supportBot/format";
-import type { BotDialog, BotMode, DialogFilter, DialogFlag, DialogState, JournalFilter } from "../features/supportBot/types";
+import type {
+  BotDialog,
+  BotMode,
+  DialogFilter,
+  DialogFlag,
+  DialogState,
+  JournalFilter,
+  ManualVerdict,
+} from "../features/supportBot/types";
 import {
   attachSeller,
   detachSeller,
@@ -185,6 +196,13 @@ export function SupportBotPage() {
       setDialogFlags(sellerId, item.dialog, item.flags),
     onSuccess: refresh,
     onError: failed("Не удалось изменить диалог"),
+  });
+
+  const verdictMutation = useMutation({
+    mutationFn: (item: { dialog: BotDialog; value: ManualVerdict | null }) =>
+      setManualVerdict(sellerId, item.dialog, item.value),
+    onSuccess: refresh,
+    onError: failed("Не удалось сохранить решение"),
   });
 
   const selected = sellers.find((seller) => seller.id === sellerId);
@@ -381,6 +399,9 @@ export function SupportBotPage() {
                     {dialog.no_contact && <em className="stocks-unknown">просил не писать</em>}
                     {dialog.attention && <em className="stocks-unknown">жалоба</em>}
                     {dialog.excluded && <em className="stocks-unknown">исключён</em>}
+                    {verdictNote(dialog) && (
+                      <em className={dialog.verdict === "open" ? undefined : "stocks-unknown"}>{verdictNote(dialog)}</em>
+                    )}
                     {dialog.next_send_at && dialog.state === "in_campaign" && (
                       <em>следующее: {stamp(dialog.next_send_at)}</em>
                     )}
@@ -401,6 +422,29 @@ export function SupportBotPage() {
                     >
                       {dialog.closed ? "Открыть" : "Закрыть"}
                     </button>
+                    {view && needsDecision(dialog, view.classifier_mode) && (
+                      <>
+                        {" "}
+                        <button
+                          className="secondary-button"
+                          aria-pressed={dialog.manual_verdict === "allow"}
+                          onClick={() =>
+                            verdictMutation.mutate({ dialog, value: dialog.manual_verdict === "allow" ? null : "allow" })
+                          }
+                        >
+                          Писать
+                        </button>{" "}
+                        <button
+                          className="secondary-button"
+                          aria-pressed={dialog.manual_verdict === "deny"}
+                          onClick={() =>
+                            verdictMutation.mutate({ dialog, value: dialog.manual_verdict === "deny" ? null : "deny" })
+                          }
+                        >
+                          Не писать
+                        </button>
+                      </>
+                    )}
                   </span>
                 </div>
               ))}

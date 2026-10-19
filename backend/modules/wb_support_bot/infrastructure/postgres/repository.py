@@ -18,6 +18,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     SendModel,
     TemplateModel,
     TrackedSellerModel,
+    VerdictModel,
 )
 
 # Статусы, которые видны в журнале: «запланировано» и «отправляется» живут доли секунды.
@@ -51,7 +52,7 @@ class SupportBotRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge(self, seller_id: uuid.UUID) -> None:
-        for model in (SendModel, DialogModel, TemplateModel, TrackedSellerModel):
+        for model in (SendModel, DialogModel, VerdictModel, TemplateModel, TrackedSellerModel):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
 
     async def set_mode(self, seller_id: uuid.UUID, mode: str) -> None:
@@ -300,3 +301,35 @@ class SupportBotRepository:
 
     async def last_activity(self, seller_id: uuid.UUID) -> datetime | None:
         return await self.session.scalar(select(func.max(SendModel.planned_at)).where(SendModel.seller_id == seller_id))
+
+    # --- вердикты нейросети ---------------------------------------------------
+
+    async def verdicts_by_tail(self, seller_id: uuid.UUID, prompt_version: str) -> dict[tuple[str, str], VerdictModel]:
+        """Все вердикты кабинета для версии промпта, по паре (чат, отпечаток хвоста)."""
+        rows = await self.session.scalars(
+            select(VerdictModel).where(
+                VerdictModel.seller_id == seller_id, VerdictModel.prompt_version == prompt_version
+            )
+        )
+        return {(row.chat_id, row.tail_fingerprint): row for row in rows}
+
+    async def get_verdict(self, verdict_id: uuid.UUID) -> VerdictModel | None:
+        return await self.session.get(VerdictModel, verdict_id)
+
+    def add_verdict(self, model: VerdictModel) -> None:
+        self.session.add(model)
+
+    async def set_manual_verdict(self, key: DialogKey, value: str | None) -> bool:
+        """Ручная отметка менеджера для текущего хвоста диалога; `None` снимает её.
+
+        Привязана к отпечатку хвоста: появится новое сообщение — отметка перестанет действовать.
+        """
+        dialog = await self.get_dialog(key)
+        if dialog is None:
+            return False
+        if value is not None and dialog.tail_fingerprint is None:
+            return False
+        dialog.manual_verdict = value
+        dialog.manual_fingerprint = dialog.tail_fingerprint if value is not None else None
+        dialog.updated_at = func.now()
+        return True

@@ -1,5 +1,15 @@
 import { apiRequest } from "../../api/http";
-import type { BotDialog, BotMode, DialogFilter, DialogPage, JournalFilter, SendPage, SupportBot, Template } from "./types";
+import type {
+  BotDialog,
+  BotMode,
+  DialogFilter,
+  DialogPage,
+  JournalFilter,
+  ManualVerdict,
+  SendPage,
+  SupportBot,
+  Template,
+} from "./types";
 
 const root = "/api/v1/wb/support-bot";
 const base = (sellerId: string) => `${root}/sellers/${sellerId}`;
@@ -50,4 +60,14 @@ export const setDialogFlags = (
   apiRequest<void>(`${base(sellerId)}/dialogs/flags`, {
     method: "POST",
     body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, ...flags }),
+  });
+
+export const setManualVerdict = (
+  sellerId: string,
+  dialog: Pick<BotDialog, "chat_id" | "prompt_at">,
+  value: ManualVerdict | null,
+) =>
+  apiRequest<void>(`${base(sellerId)}/dialogs/manual-verdict`, {
+    method: "POST",
+    body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, value }),
   });

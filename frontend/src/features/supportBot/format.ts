@@ -1,4 +1,4 @@
-import type { BotMode, DialogState, SendStatus, SupportBot } from "./types";
+import type { BotDialog, BotMode, DialogState, ManualVerdict, SendStatus, SupportBot, Verdict } from "./types";
 
 export const STATE_LABEL: Record<DialogState, string> = {
   no_reply: "Не отвечал",
@@ -54,4 +54,35 @@ export function statusLine(
     return `Канарейка: сообщения уходят только по ${bot.canary_percent ?? 10}% диалогов, по остальным сухой прогон`;
   }
   return "Сухой прогон: бот считает, но ничего не отправляет";
+}
+
+export const VERDICT_LABEL: Record<Verdict, string> = {
+  open: "ИИ: ждёт ответа",
+  closing: "ИИ: диалог завершён",
+  unclear: "ИИ: неясно",
+};
+
+export const MANUAL_LABEL: Record<ManualVerdict, string> = {
+  allow: "вручную: писать",
+  deny: "вручную: не писать",
+};
+
+/**
+ * Что по диалогу решила нейросеть и менеджер, для подписи в таблице. Решение менеджера
+ * важнее вердикта; пусто, пока вердикта нет и никто ничего не отмечал.
+ */
+export function verdictNote(dialog: Pick<BotDialog, "verdict" | "verdict_reason" | "manual_verdict">): string | null {
+  if (dialog.manual_verdict) return MANUAL_LABEL[dialog.manual_verdict];
+  if (!dialog.verdict) return null;
+  const label = VERDICT_LABEL[dialog.verdict];
+  return dialog.verdict_reason ? `${label} (${dialog.verdict_reason})` : label;
+}
+
+/** Нужна ли менеджеру отметка «писать / не писать»: рассылка идёт, а нейросеть не подтвердила, что покупателя ждут. */
+export function needsDecision(
+  dialog: Pick<BotDialog, "state" | "verdict" | "manual_verdict">,
+  mode: SupportBot["classifier_mode"],
+): boolean {
+  if (mode === "off" || dialog.state !== "in_campaign") return false;
+  return dialog.manual_verdict !== null || dialog.verdict !== "open";
 }

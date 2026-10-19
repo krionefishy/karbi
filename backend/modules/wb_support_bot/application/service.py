@@ -1,12 +1,12 @@
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_support_bot.domain import DialogState
+from backend.modules.wb_support_bot.domain import MANUAL_ALLOW, MANUAL_DENY, MODE_OFF, DialogState
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
     MODE_CANARY,
@@ -17,6 +17,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     SendModel,
     SupportBotRepository,
     TemplateModel,
+    VerdictModel,
 )
 
 MAX_TEMPLATE_LENGTH = 1000
@@ -60,6 +61,7 @@ class SellerBotView:
     mirror_read_through: datetime | None
     dry_run: bool
     canary_percent: int
+    classifier_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,8 @@ class DialogPage:
     total: int
     page: int
     page_size: int
+    # Вердикты нейросети по хвостам диалогов страницы: ключ — (чат, отпечаток хвоста).
+    verdicts: dict[tuple[str, str], VerdictModel] = field(default_factory=dict)
 
 
 class SupportBotService:
@@ -95,8 +99,12 @@ class SupportBotService:
         repository: SupportBotRepository,
         *,
         canary_percent: int = 10,
+        classifier_mode: str = MODE_OFF,
+        classifier_prompt_version: str = "v2",
     ) -> None:
         self.canary_percent = canary_percent
+        self.classifier_mode = classifier_mode
+        self.classifier_prompt_version = classifier_prompt_version
         self.session = session
         self.sellers = sellers
         self.repository = repository
@@ -144,6 +152,7 @@ class SupportBotService:
             mirror_read_through=state.read_through if state else None,
             dry_run=tracked.mode == MODE_DRY_RUN,
             canary_percent=self.canary_percent,
+            classifier_mode=self.classifier_mode,
         )
 
     async def dialogs(
@@ -157,7 +166,8 @@ class SupportBotService:
         rows, total = await self.repository.list_dialogs(
             seller_id, state=state, flag=flag, limit=page_size, offset=(page - 1) * page_size
         )
-        return DialogPage(tuple(rows), total, page, page_size)
+        verdicts = await self.repository.verdicts_by_tail(seller_id, self.classifier_prompt_version)
+        return DialogPage(tuple(rows), total, page, page_size, verdicts)
 
     async def sends(self, seller_id: uuid.UUID, *, status: str | None, page: int, page_size: int) -> SendPage:
         await self._tracked(seller_id)
@@ -239,4 +249,19 @@ class SupportBotService:
         key = DialogKey(seller_id, chat_id, prompt_at)
         if not await self.repository.set_dialog_flags(key, excluded=excluded, closed=closed):
             raise BotRequestError("Диалог не найден")
+        await self.session.commit()
+
+    async def set_manual_verdict(
+        self, seller_id: uuid.UUID, chat_id: str, prompt_at: datetime, value: str | None
+    ) -> None:
+        """Решение менеджера по диалогу: `allow` — писать, `deny` — не писать, `None` — снять отметку.
+
+        Действует только для текущего хвоста диалога: напишут снова — решение нужно принять заново.
+        """
+        await self._tracked(seller_id)
+        if value not in (None, MANUAL_ALLOW, MANUAL_DENY):
+            raise BotRequestError(f"Неизвестное решение: {value}")
+        key = DialogKey(seller_id, chat_id, prompt_at)
+        if not await self.repository.set_manual_verdict(key, value):
+            raise BotRequestError("Диалог не найден или в нём ещё нет сообщения специалиста")
         await self.session.commit()

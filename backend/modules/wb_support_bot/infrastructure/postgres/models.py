@@ -82,11 +82,64 @@ class DialogModel(WBSupportBotBase):
     attention: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     excluded: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     closed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Хвост диалога: последнее сообщение специалиста после ответа покупателя. Вердикт нейросети
+    # и ручная отметка менеджера действуют, пока хвост тот же.
+    tail_event_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tail_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # `allow` / `deny`: решение менеджера для хвоста с отпечатком `manual_fingerprint`.
+    manual_verdict: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    manual_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index("ix_wb_support_bot_dialogs_due", "seller_id", "state", "next_send_at"),
         Index("ix_wb_support_bot_dialogs_state", "seller_id", "state", "updated_at"),
+    )
+
+
+VERDICT_PENDING = "pending"
+VERDICT_DONE = "done"
+VERDICT_FAILED = "failed"
+
+
+class VerdictModel(WBSupportBotBase):
+    """Вердикт нейросети по хвосту диалога: кэш, журнал качества и учёт расхода.
+
+    Текст сообщения здесь не хранится: он остаётся в зеркале чатов, строка знает
+    только событие и отпечаток. Строка создаётся вместе с запросом в outbox.
+    """
+
+    __tablename__ = "verdicts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tail_event_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    tail_fingerprint: Mapped[str] = mapped_column(String(40), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, server_default=VERDICT_PENDING)
+    verdict: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Один хвост — один вердикт на версию промпта: повторный проход не плодит запросы.
+        Index(
+            "uq_wb_support_bot_verdicts_tail",
+            "seller_id",
+            "chat_id",
+            "tail_fingerprint",
+            "prompt_version",
+            unique=True,
+        ),
+        Index("ix_wb_support_bot_verdicts_status", "status", "requested_at"),
     )
 
 
@@ -132,10 +185,14 @@ __all__ = [
     "SEND_SENDING",
     "SEND_SENT",
     "SEND_UNKNOWN",
+    "VERDICT_DONE",
+    "VERDICT_FAILED",
+    "VERDICT_PENDING",
     "ControlModel",
     "DialogModel",
     "SendModel",
     "TemplateModel",
     "TrackedSellerModel",
+    "VerdictModel",
     "WBSupportBotBase",
 ]

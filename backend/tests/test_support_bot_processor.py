@@ -495,3 +495,206 @@ async def test_without_any_sign_the_send_is_written_off_with_a_clear_reason(
 
     assert report.failed == 1 and sender.calls == []
     assert (await sends(database, seller))[0].error == "ни лента, ни список чатов не отдали подпись чата"
+
+
+# --- вердикты нейросети --------------------------------------------------------
+
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel  # noqa: E402
+from backend.modules.wb_support_bot.domain import MANUAL_ALLOW, MANUAL_DENY  # noqa: E402
+from backend.modules.wb_support_bot.infrastructure.postgres import (  # noqa: E402
+    VERDICT_DONE,
+    VERDICT_FAILED,
+    VERDICT_PENDING,
+    DialogKey,
+    VerdictModel,
+)
+from backend.shared.kafka_streams.topics import SupportBotTopics  # noqa: E402
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def clean_classify_outbox(database: Database) -> AsyncIterator[None]:
+    yield
+    async with database.session() as session:
+        await session.execute(
+            delete(OutboxEventModel).where(OutboxEventModel.topic == SupportBotTopics.CLASSIFY_REQUESTED)
+        )
+        await session.commit()
+
+
+async def run_with(
+    database: Database, seller_id: uuid.UUID, sender: FakeSender, mode: str, *, now: datetime = NOW, **policy: object
+):
+    async with database.session() as session:
+        processor = SupportBotProcessor(
+            SupportBotRepository(session),
+            ChatMirror(session),
+            sender,
+            BotPolicy(classifier_mode=mode, **policy),  # type: ignore[arg-type]
+            rng=random.Random(1),
+            sleep=no_sleep,
+        )
+        return await processor.process_seller(seller_id, now=now)
+
+
+async def verdicts(database: Database, seller_id: uuid.UUID) -> list[VerdictModel]:
+    async with database.session() as session:
+        return list(await session.scalars(select(VerdictModel).where(VerdictModel.seller_id == seller_id)))
+
+
+async def classify_events(database: Database, seller_id: uuid.UUID) -> list[OutboxEventModel]:
+    async with database.session() as session:
+        rows = await session.scalars(
+            select(OutboxEventModel).where(OutboxEventModel.topic == SupportBotTopics.CLASSIFY_REQUESTED)
+        )
+        return [row for row in rows if row.payload.get("seller_id") == str(seller_id)]
+
+
+async def decide(database: Database, seller_id: uuid.UUID, verdict: str, *, status: str = VERDICT_DONE) -> None:
+    async with database.session() as session:
+        for row in await session.scalars(select(VerdictModel).where(VerdictModel.seller_id == seller_id)):
+            row.status = status
+            row.verdict = verdict if status == VERDICT_DONE else None
+        await session.commit()
+
+
+async def test_shadow_mode_asks_the_model_but_does_not_hold_the_send(database: Database, seller: uuid.UUID) -> None:
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+
+    report = await run_with(database, seller, FakeSender(), "shadow")
+    again = await run_with(database, seller, FakeSender(), "shadow", now=NOW + timedelta(minutes=10))
+
+    assert report.dry_run == 1 and report.held == 0 and report.verdicts_requested == 1
+    assert again.verdicts_requested == 0
+    rows = await verdicts(database, seller)
+    state = await dialog(database, seller)
+    assert len(rows) == 1 and rows[0].status == VERDICT_PENDING and rows[0].attempts == 1
+    assert rows[0].tail_fingerprint == state.tail_fingerprint and rows[0].tail_event_id == "specialist-60"
+    events = await classify_events(database, seller)
+    assert len(events) == 1 and events[0].payload["verdict_id"] == str(rows[0].id)
+
+
+async def test_mode_off_does_not_touch_the_model(database: Database, seller: uuid.UUID) -> None:
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+
+    report = await run_with(database, seller, FakeSender(), "off")
+
+    assert report.dry_run == 1 and report.verdicts_requested == 0
+    assert await verdicts(database, seller) == [] and await classify_events(database, seller) == []
+
+
+async def test_enforce_holds_a_dialog_without_a_verdict(database: Database, seller: uuid.UUID) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+
+    report = await run_with(database, seller, sender, "enforce")
+
+    assert report.held == 1 and report.sent == 0 and sender.calls == []
+    assert await sends(database, seller) == []
+    state = await dialog(database, seller)
+    assert state.next_send_at == NOW + timedelta(minutes=10)
+
+
+async def test_enforce_sends_once_the_model_says_the_buyer_is_awaited(database: Database, seller: uuid.UUID) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    await run_with(database, seller, sender, "enforce")
+    await decide(database, seller, "open")
+
+    report = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
+
+    assert report.sent == 1 and report.held == 0
+    assert sender.calls == [(str(seller), "1:sign", TEXT)]
+
+
+@pytest.mark.parametrize("verdict", ["closing", "unclear"])
+async def test_enforce_keeps_holding_when_the_dialog_is_closed_or_unclear(
+    database: Database, seller: uuid.UUID, verdict: str
+) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    await run_with(database, seller, sender, "enforce")
+    await decide(database, seller, verdict)
+
+    report = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
+
+    assert report.held == 1 and report.sent == 0 and sender.calls == []
+
+
+async def test_a_failed_verdict_does_not_let_the_message_through(database: Database, seller: uuid.UUID) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    await run_with(database, seller, sender, "enforce")
+    await decide(database, seller, "open", status=VERDICT_FAILED)
+
+    report = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
+
+    assert report.held == 1 and sender.calls == []
+
+
+async def test_a_manual_allow_overrides_a_closing_verdict_and_a_deny_overrides_open(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    sender = FakeSender()
+    await run_with(database, seller, sender, "enforce")
+    await decide(database, seller, "closing")
+    state = await dialog(database, seller)
+    key = DialogKey(seller, state.chat_id, state.prompt_at)
+    async with database.session() as session:
+        assert await SupportBotRepository(session).set_manual_verdict(key, MANUAL_ALLOW)
+        await session.commit()
+
+    allowed = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
+
+    assert allowed.sent == 1
+    await decide(database, seller, "open")
+    async with database.session() as session:
+        assert await SupportBotRepository(session).set_manual_verdict(key, MANUAL_DENY)
+        await session.commit()
+    after_slot = (await dialog(database, seller)).next_send_at
+    assert after_slot is not None
+
+    denied = await run_with(database, seller, sender, "enforce", now=after_slot + timedelta(minutes=1))
+
+    assert denied.held == 1 and denied.sent == 0 and len(sender.calls) == 1
+
+
+async def test_a_manual_decision_expires_when_the_specialist_writes_again(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    await run_with(database, seller, FakeSender(), "shadow")
+    state = await dialog(database, seller)
+    async with database.session() as session:
+        await SupportBotRepository(session).set_manual_verdict(
+            DialogKey(seller, state.chat_id, state.prompt_at), MANUAL_ALLOW
+        )
+        await session.commit()
+    first_tail = (await dialog(database, seller)).tail_fingerprint
+
+    later = BASE_FEED + [event(90, "specialist", "Уточните номер заказа")]
+    await feed(database, seller, later, read_at=NOW + timedelta(minutes=30))
+    await run_with(database, seller, FakeSender(), "shadow", now=NOW + timedelta(minutes=30))
+
+    after = await dialog(database, seller)
+    assert after.tail_fingerprint != first_tail and after.tail_event_id == "specialist-90"
+    assert after.manual_verdict is None and after.manual_fingerprint is None
+
+
+async def test_a_stuck_request_is_asked_again_but_only_a_few_times(database: Database, seller: uuid.UUID) -> None:
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    await run_with(database, seller, FakeSender(), "shadow")
+    step = timedelta(minutes=16)
+
+    await run_with(database, seller, FakeSender(), "shadow", now=NOW + step)
+    await run_with(database, seller, FakeSender(), "shadow", now=NOW + 2 * step)
+    await run_with(database, seller, FakeSender(), "shadow", now=NOW + 3 * step)
+
+    (row,) = await verdicts(database, seller)
+    assert row.attempts == 3
+    assert len(await classify_events(database, seller)) == 3

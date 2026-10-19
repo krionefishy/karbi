@@ -42,6 +42,10 @@ def policy_from(settings: Settings) -> BotPolicy:
         history=timedelta(days=config.history_days),
         mirror_stale=timedelta(minutes=config.mirror_stale_minutes),
         canary_percent=config.canary_percent,
+        classifier_mode=config.classifier_mode,
+        classifier_prompt_version=config.classifier_prompt_version,
+        classifier_retry=timedelta(minutes=config.classifier_retry_minutes),
+        classifier_max_attempts=config.classifier_max_attempts,
     )
 
 
@@ -132,6 +136,8 @@ class SupportBotWorker:
                 sent=report.sent,
                 dry_run=report.dry_run,
                 failed=report.failed,
+                held=report.held,
+                verdicts_requested=report.verdicts_requested,
                 skipped=report.skipped,
             )
         return handled

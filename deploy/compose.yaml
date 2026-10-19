@@ -266,7 +266,11 @@ services:
     restart: unless-stopped
     mem_limit: 384m
     command: ["python", "-m", "backend.workers.wb_support_bot.main"]
-    environment: *application-environment
+    environment:
+      <<: *application-environment
+      # Нейросеть для вердикта «диалог завершён»: ключ только здесь, модель задаётся в config.docker.yaml (раздел llm).
+      FOUNDATION_MODELS_API_KEY: ${FOUNDATION_MODELS_API_KEY:-}
+      SUPPORT_BOT_CLASSIFIER_MODE: ${SUPPORT_BOT_CLASSIFIER_MODE:-shadow}
     volumes:
       - ./egress-tls:/etc/egress:ro
     extra_hosts:

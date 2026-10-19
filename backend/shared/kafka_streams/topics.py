@@ -49,5 +49,21 @@ class NotificationTopics:
         return (cls.TELEGRAM_MESSAGE_REQUESTED, cls.TELEGRAM_COMMAND_RECEIVED)
 
 
+class SupportBotTopics:
+    """Запросы вердикта «диалог завершён нашей стороной» для нейросети: бот не ждёт модель, а кладёт запрос в outbox."""
+
+    CLASSIFY_REQUESTED = validate_topic_name("wb.support-bot.classify.requested")
+
+    @classmethod
+    def all(cls) -> tuple[str, ...]:
+        return (cls.CLASSIFY_REQUESTED,)
+
+
 def all_topics() -> tuple[str, ...]:
-    return (*StorageTopics.all(), *WBCoreTopics.all(), *WBReviewsTopics.all(), *NotificationTopics.all())
+    return (
+        *StorageTopics.all(),
+        *WBCoreTopics.all(),
+        *WBReviewsTopics.all(),
+        *NotificationTopics.all(),
+        *SupportBotTopics.all(),
+    )

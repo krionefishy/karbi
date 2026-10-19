@@ -13,11 +13,17 @@ from backend.modules.wb_support_bot.application import (
     SupportBotService,
 )
 from backend.modules.wb_support_bot.domain import chat_url
-from backend.modules.wb_support_bot.infrastructure.postgres import DialogModel, TemplateModel
+from backend.modules.wb_support_bot.infrastructure.postgres import (
+    VERDICT_DONE,
+    DialogModel,
+    TemplateModel,
+    VerdictModel,
+)
 from backend.modules.wb_support_bot.presentation.http.schemas import (
     DialogActionRequest,
     DialogPageResponse,
     DialogResponse,
+    ManualVerdictRequest,
     ModeRequest,
     PauseRequest,
     SendPageResponse,
@@ -48,7 +54,12 @@ def template_response(model: TemplateModel) -> TemplateResponse:
     return TemplateResponse(id=model.id, text=model.text, active=model.active)
 
 
-def dialog_response(model: DialogModel, chat_url_template: str) -> DialogResponse:
+def dialog_response(
+    model: DialogModel, chat_url_template: str, verdicts: dict[tuple[str, str], VerdictModel] | None = None
+) -> DialogResponse:
+    row = (verdicts or {}).get((model.chat_id, model.tail_fingerprint)) if model.tail_fingerprint else None
+    done = row is not None and row.status == VERDICT_DONE
+    manual = model.manual_verdict if model.manual_fingerprint == model.tail_fingerprint else None
     return DialogResponse(
         chat_id=model.chat_id,
         prompt_at=model.prompt_at.isoformat(),
@@ -66,6 +77,9 @@ def dialog_response(model: DialogModel, chat_url_template: str) -> DialogRespons
         excluded=model.excluded,
         closed=model.closed,
         chat_url=chat_url(chat_url_template, model.chat_id),
+        verdict=row.verdict if row is not None and done else None,
+        verdict_reason=row.reason if row is not None and done else None,
+        manual_verdict=manual,
     )
 
 
@@ -106,6 +120,7 @@ async def seller_view(
         mirror_error=view.mirror_error,
         mirror_read_through=_iso(view.mirror_read_through),
         canary_percent=view.canary_percent,
+        classifier_mode=view.classifier_mode,
     )
 
 
@@ -129,7 +144,7 @@ async def dialogs(
         raise bad_request(error) from error
     template = settings.support_bot.chat_url_template
     return DialogPageResponse(
-        dialogs=[dialog_response(item, template) for item in result.dialogs],
+        dialogs=[dialog_response(item, template, result.verdicts) for item in result.dialogs],
         total=result.total,
         page=result.page,
         page_size=result.page_size,
@@ -258,6 +273,24 @@ async def dialog_flags(
         await service.set_dialog_flags(
             seller_id, payload.chat_id, prompt_at, excluded=payload.excluded, closed=payload.closed
         )
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except BotRequestError as error:
+        raise bad_request(error) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/sellers/{seller_id}/dialogs/manual-verdict", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def dialog_manual_verdict(
+    seller_id: uuid.UUID, payload: ManualVerdictRequest, _: CurrentPrincipal, service: FromDishka[SupportBotService]
+) -> Response:
+    try:
+        prompt_at = datetime.fromisoformat(payload.prompt_at)
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Неверная дата диалога") from error
+    try:
+        await service.set_manual_verdict(seller_id, payload.chat_id, prompt_at, payload.value)
     except (SellerNotFoundError, NotEnrolledError) as error:
         raise not_enrolled() from error
     except BotRequestError as error:

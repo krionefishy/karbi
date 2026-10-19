@@ -18,6 +18,7 @@ class SupportBotResponse(BaseModel):
     mirror_error: str | None
     mirror_read_through: str | None
     canary_percent: int
+    classifier_mode: str
 
 
 class DialogResponse(BaseModel):
@@ -37,6 +38,11 @@ class DialogResponse(BaseModel):
     excluded: bool
     closed: bool
     chat_url: str | None
+    # Вердикт нейросети по последнему сообщению специалиста: open / closing / unclear; None — ещё не оценено.
+    verdict: str | None = None
+    verdict_reason: str | None = None
+    # Решение менеджера: allow / deny; None — не принималось или потеряло силу после нового сообщения.
+    manual_verdict: str | None = None
 
 
 class DialogPageResponse(BaseModel):
@@ -89,3 +95,10 @@ class DialogActionRequest(BaseModel):
     prompt_at: str
     excluded: bool | None = None
     closed: bool | None = None
+
+
+class ManualVerdictRequest(BaseModel):
+    chat_id: str
+    prompt_at: str
+    # allow — писать, deny — не писать, null — снять отметку.
+    value: str | None = None

@@ -397,7 +397,14 @@ class SessionProvider(Provider):
         self, session: AsyncSession, sellers: SellerRepository, repository: SupportBotRepository, settings: Settings
     ) -> SupportBotService:
         """Своего сбора нет: чаты берутся из зеркала wb_core, а отправляет воркер бота."""
-        return SupportBotService(session, sellers, repository, canary_percent=settings.support_bot.canary_percent)
+        return SupportBotService(
+            session,
+            sellers,
+            repository,
+            canary_percent=settings.support_bot.canary_percent,
+            classifier_mode=settings.support_bot.classifier_mode,
+            classifier_prompt_version=settings.support_bot.classifier_prompt_version,
+        )
 
     @provide(scope=Scope.REQUEST)
     def review_chats_service(
