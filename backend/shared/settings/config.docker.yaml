@@ -117,9 +117,9 @@ returns:
 
 support_bot:
   # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
-  canary_percent: ${SUPPORT_BOT_CANARY_PERCENT:-30}
+  canary_percent: ${SUPPORT_BOT_CANARY_PERCENT:-10}
   # off | shadow | enforce: как вердикт нейросети влияет на отправку (shadow — только записываем).
-  classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-shadow}
+  classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-enforce}
   classifier_prompt_version: v2
 
 llm:
