@@ -50,7 +50,7 @@ def test_the_default_model_is_the_one_chosen_for_the_bot(monkeypatch: pytest.Mon
     load_settings.cache_clear()
 
     assert settings.llm.model == "Qwen/Qwen3-30B-A3B"
-    assert settings.support_bot.classifier_mode == "enforce" and settings.support_bot.canary_percent == 30
+    assert settings.support_bot.classifier_mode == "enforce" and settings.support_bot.canary_percent == 50
 
 
 @pytest.mark.parametrize("mode", ["", "on", "ENFORCE", "shadows"])
