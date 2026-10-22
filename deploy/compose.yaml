@@ -456,7 +456,7 @@ services:
       PGUSER: ${DB_USER:-karbi}
       PGPASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env - no default in production}
       PGDATABASE: ${DB_NAME:-karbi}
-      BACKUP_RETENTION: ${BACKUP_RETENTION:-14}
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-1}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
     volumes:
       - ./pg-backup.sh:/pg-backup.sh:ro

@@ -6,7 +6,7 @@
 set -eu
 
 : "${BACKUP_DIR:=/backups}"
-: "${BACKUP_RETENTION:=14}"
+: "${BACKUP_RETENTION:=1}"
 : "${BACKUP_INTERVAL_SECONDS:=86400}"
 
 while true; do
