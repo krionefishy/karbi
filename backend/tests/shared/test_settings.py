@@ -71,7 +71,7 @@ def test_known_classifier_modes_are_accepted(mode: str) -> None:
 
 
 def test_screenshot_control_comes_from_docker_yaml_with_keys_out_of_the_repr(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("SCREENSHOT_CONTROL_MODE", "SCREENSHOT_CONTROL_S3_BUCKET", "VISION_MODEL"):
+    for name in ("SCREENSHOT_CONTROL_MODE", "SCREENSHOT_CONTROL_S3_BUCKET", "VISION_MODEL", "VISION_FALLBACK_MODEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SCREENSHOT_CONTROL_HMAC_KEY", "hmac-secret-that-is-long-enough-0123456789")
     monkeypatch.setenv("SCREENSHOT_CONTROL_TELEGRAM", "false")
@@ -87,7 +87,8 @@ def test_screenshot_control_comes_from_docker_yaml_with_keys_out_of_the_repr(mon
     assert screens.staging_root == "/data/screenshots-staging"
     assert screens.allowed_url_prefixes == ("https://seller.wildberries.ru/chat-with-clients",)
     assert "hmac-secret" not in repr(screens) and "hmac-secret" not in repr(settings)
-    assert settings.vision.model == "" and settings.vision.max_tokens == 1200
+    assert settings.vision.model == "Qwen/Qwen3.6-35B-A3B" and settings.vision.max_tokens == 1200
+    assert settings.vision.fallback_model == "Qwen/Qwen3.5-397B-A17B" and settings.vision.enable_thinking is False
 
 
 def test_the_module_bucket_falls_back_to_the_shared_one() -> None:
@@ -136,3 +137,14 @@ def test_production_needs_the_hmac_key_only_while_the_module_is_on() -> None:
     with pytest.raises(ValueError) as error:
         replace(production, screenshot_control=replace(keyless, mode="off")).validate_runtime_secrets()
     assert "screenshot_control" not in str(error.value)
+
+
+def test_an_empty_vision_model_from_compose_keeps_the_chosen_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VISION_MODEL", "")
+    monkeypatch.setenv("SCREENSHOT_CONTROL_HMAC_KEY", "hmac-secret-that-is-long-enough-0123456789")
+    load_settings.cache_clear()
+
+    settings = load_settings("backend/shared/settings/config.docker.yaml")
+    load_settings.cache_clear()
+
+    assert settings.vision.model == "Qwen/Qwen3.6-35B-A3B"

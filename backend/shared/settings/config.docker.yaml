@@ -206,9 +206,11 @@ screenshot_control:
   allowed_url_prefixes: ["https://seller.wildberries.ru/chat-with-clients"]
 
 vision:
-  # Модель для скриншотов, отдельно от текстовой llm. Не задана, пока не выбрана по пробному прогону.
+  # Модель для скриншотов, отдельно от текстовой llm; выбрана пробным прогоном, рассуждения выключены.
   base_url: ${LLM_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
-  model: ${VISION_MODEL:-}
+  model: ${VISION_MODEL:-Qwen/Qwen3.6-35B-A3B}
+  fallback_model: ${VISION_FALLBACK_MODEL:-Qwen/Qwen3.5-397B-A17B}
+  enable_thinking: false
   api_key: ${FOUNDATION_MODELS_API_KEY:-}
   timeout_seconds: 60
   max_tokens: 1200

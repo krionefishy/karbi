@@ -395,11 +395,14 @@ class ReturnsConfig:
 class VisionConfig:
     """Модель, читающая скриншоты. Отдельно от текстовой `llm`, чтобы её настройки не задели бота поддержки.
 
-    Модель не задана по умолчанию: её выбирают по итогам пробного прогона. Ключ — только из окружения.
+    Модель выбрана пробным прогоном (этап 0): Qwen3.6-35B-A3B без рассуждений — быстро и дёшево;
+    `fallback_model` точнее и дороже, ей уходит ремонтный запрос. Ключ — только из окружения.
     """
 
     base_url: str = "https://foundation-models.api.cloud.ru/v1"
-    model: str = ""
+    model: str = "Qwen/Qwen3.6-35B-A3B"
+    fallback_model: str = "Qwen/Qwen3.5-397B-A17B"
+    enable_thinking: bool = False
     api_key: str = field(default="", repr=False)
     timeout_seconds: int = 60
     max_tokens: int = 1200
@@ -736,6 +739,11 @@ class Settings:
                 vision[key] = int(vision[key])
         if "temperature" in vision:
             vision["temperature"] = float(vision["temperature"])
+        vision["enable_thinking"] = _as_bool(vision.get("enable_thinking", False))
+        for key in ("model", "fallback_model"):
+            # Пустая переменная окружения из compose не должна стирать выбранную модель.
+            if key in vision and not vision[key]:
+                del vision[key]
         relay = dict(data.get("relay", {}))
         relay["photos_enabled"] = _as_bool(relay.get("photos_enabled", False))
         for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
