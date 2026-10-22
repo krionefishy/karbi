@@ -48,6 +48,7 @@ class ScreenshotExtracted(_Event):
     extraction_id: uuid.UUID
     pipeline_version: str = Field(max_length=16)
     status: Literal["ok", "failed"]
+    deferrals: int = Field(default=0, ge=0, description="Сколько раз решение откладывалось ради более раннего скрина")
 
 
 class ScreenshotVerdictReady(_Event):

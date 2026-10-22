@@ -129,6 +129,8 @@ class SubmissionModel(WBScreenshotControlBase):
     verdict: Mapped[str | None] = mapped_column(String(12), nullable=True)
     auto_verdict: Mapped[str | None] = mapped_column(String(12), nullable=True)
     reasons: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    # С чем совпал скрин при решении: [{other_submission_id, kind, score, details}]; админ видит пару.
+    matches: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     duplicate_of: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("submissions.id"), nullable=True
     )
@@ -167,6 +169,7 @@ class SubmissionModel(WBScreenshotControlBase):
             postgresql_where=text("audit_requested AND audit_done_at IS NULL"),
         ),
         Index("ix_sc_sub_kpi", "user_id", "received_at", postgresql_where=text("verdict = 'accepted'")),
+        Index("ix_sc_sub_no_outcome", "received_at", postgresql_where=text("outcome IS NULL")),
     )
 
 
