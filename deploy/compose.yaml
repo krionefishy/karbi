@@ -75,6 +75,13 @@ services:
       CARD_DOCUMENTS_NOTIFICATION_BOT: ${CARD_DOCUMENTS_NOTIFICATION_BOT:-card-documents}
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       RELAY_PHOTOS_ENABLED: ${RELAY_PHOTOS_ENABLED:-true}
+      # Контроль скриншотов ДБС. По умолчанию выключен: shadow требует SCREENSHOT_CONTROL_HMAC_KEY
+      # (32+ символов) в .env, без него api и воркер не стартуют. S3_* выше общие; свой бакет — по желанию.
+      SCREENSHOT_CONTROL_MODE: ${SCREENSHOT_CONTROL_MODE:-off}
+      SCREENSHOT_CONTROL_HMAC_KEY: ${SCREENSHOT_CONTROL_HMAC_KEY:-}
+      SCREENSHOT_CONTROL_KPI_FROM: ${SCREENSHOT_CONTROL_KPI_FROM:-}
+      SCREENSHOT_CONTROL_S3_BUCKET: ${SCREENSHOT_CONTROL_S3_BUCKET:-}
+      SCREENSHOT_CONTROL_TELEGRAM: ${SCREENSHOT_CONTROL_TELEGRAM:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -90,6 +97,8 @@ services:
     volumes:
       - ./relay-tls:/etc/relay:ro
       - ./egress-tls:/etc/egress:ro
+      # Скрины до выгрузки в S3: api пишет, воркер выгружает и чистит.
+      - screenshots_staging:/data/screenshots-staging
     extra_hosts:
       - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
       - "egress.internal:${EGRESS_HOST_IP:?set EGRESS_HOST_IP in .env}"
@@ -348,6 +357,35 @@ services:
     networks:
       - internal
 
+  wb-screenshot-control-worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    # Ровно одна реплика: решения по скриншотам принимаются по одному в порядке приёма.
+    # Запас под декодирование кадра 2000 px при распознавании.
+    mem_limit: 512m
+    command: ["python", "-m", "backend.workers.wb_screenshot_control.main"]
+    environment:
+      <<: *application-environment
+      # Распознавание скриншотов: ключ только здесь, модель — VISION_MODEL (раздел vision в config.docker.yaml).
+      FOUNDATION_MODELS_API_KEY: ${FOUNDATION_MODELS_API_KEY:-}
+      VISION_MODEL: ${VISION_MODEL:-}
+    volumes:
+      - screenshots_staging:/data/screenshots-staging
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck: *worker-healthcheck
+    # egress: S3 Cloud.ru и модель распознавания снаружи; в WB не ходит.
+    networks:
+      - internal
+      - egress
+
   wb-core-worker:
     build:
       context: ..
@@ -429,7 +467,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head && alembic -n wb_card_checklist upgrade head && alembic -n wb_card_documents upgrade head && alembic -n wb_fbs_stocks upgrade head && alembic -n wb_fbs_penalties upgrade head && alembic -n wb_review_chats upgrade head && alembic -n wb_support_bot upgrade head && alembic -n wb_returns upgrade head && alembic -n wb_podsort upgrade head && alembic -n fin_reports upgrade head
+      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head && alembic -n wb_card_checklist upgrade head && alembic -n wb_card_documents upgrade head && alembic -n wb_fbs_stocks upgrade head && alembic -n wb_fbs_penalties upgrade head && alembic -n wb_review_chats upgrade head && alembic -n wb_support_bot upgrade head && alembic -n wb_returns upgrade head && alembic -n wb_podsort upgrade head && alembic -n fin_reports upgrade head && alembic -n wb_screenshot_control upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${DB_USER:-karbi}:${DB_PASSWORD:?set DB_PASSWORD in .env - no default in production}@db:5432/${DB_NAME:-karbi}
     depends_on:
@@ -548,6 +586,7 @@ volumes:
   postgres_backups:
   redis_data:
   kafka_data:
+  screenshots_staging:
 
 networks:
   proxy:

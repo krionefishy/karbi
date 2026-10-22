@@ -127,6 +127,9 @@ jobs:
       - name: Apply fin reports migrations
         run: uv run alembic -n fin_reports upgrade head
 
+      - name: Apply screenshot control migrations
+        run: uv run alembic -n wb_screenshot_control upgrade head
+
       - name: Run Ruff
         run: |
           uv run ruff check backend
