@@ -392,6 +392,92 @@ class ReturnsConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class VisionConfig:
+    """Модель, читающая скриншоты. Отдельно от текстовой `llm`, чтобы её настройки не задели бота поддержки.
+
+    Модель не задана по умолчанию: её выбирают по итогам пробного прогона. Ключ — только из окружения.
+    """
+
+    base_url: str = "https://foundation-models.api.cloud.ru/v1"
+    model: str = ""
+    api_key: str = field(default="", repr=False)
+    timeout_seconds: int = 60
+    max_tokens: int = 1200
+    temperature: float = 0.0
+    max_image_side: int = 2000
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenshotThresholds:
+    """Пороги дедупа. Подлежат калибровке на исторической выгрузке до боевого режима."""
+
+    text_dup: float = 0.90
+    text_maybe: float = 0.75
+    min_text_len: int = 25
+    vlm_ocr_text: float = 0.80
+    near_dhash_strict: int = 6
+    near_tile_strict: float = 0.97
+    near_dhash_soft: int = 12
+    near_tile_soft: float = 0.90
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenshotControlConfig:
+    """Контроль скриншотов ДБС: режим, сроки хранения, лимиты приёма и сопряжения расширения.
+
+    `mode`: off — модуль выключен; shadow — вердикты пишутся, KPI помечен как предварительный;
+    enforce — KPI боевой. Скрины лежат в S3: `s3_bucket` пустой — общий бакет `s3.bucket`,
+    ключи в любом случае под префиксом `dbs-screenshots/`.
+    """
+
+    mode: str = "shadow"
+    kpi_from: str = ""
+    timezone: str = "Europe/Moscow"
+    poll_seconds: int = 2
+    hmac_key: str = field(default="", repr=False)
+    s3_bucket: str = ""
+    staging_root: str = "/data/screenshots-staging"
+    staging_max_used_percent: int = 85
+    staging_stale_minutes: int = 15
+    max_upload_bytes: int = 15_728_640
+    min_side_px: int = 500
+    max_image_pixels: int = 40_000_000
+    retention_original_days: int = 365
+    retention_thumb_days: int = 365
+    retention_fields_days: int = 1095
+    purge_hour: int = 4
+    purge_minute: int = 10
+    dedupe_window_days: int = 90
+    outcome_ttl_hours: int = 24
+    late_upload_hours: int = 72
+    clock_skew_minutes: int = 15
+    review_age_max_days: int = 120
+    burst_per_hour: int = 60
+    uploads_per_minute: int = 20
+    uploads_per_hour: int = 120
+    status_polls_per_minute: int = 120
+    extraction_max_attempts: int = 4
+    audit_percent: float = 4.0
+    thresholds: ScreenshotThresholds = ScreenshotThresholds()
+    image_url_ttl_seconds: int = 300
+    pairing_ttl_minutes: int = 15
+    pair_attempts_per_window: int = 10
+    pair_window_seconds: int = 600
+    extension_token_idle_days: int = 60
+    link_token_ttl_minutes: int = 15
+    notification_bot: str = "screens"
+    telegram_enabled: bool = False
+    pipeline_version: str = "v1"
+    public_base_url: str = "http://localhost:5173"
+    extension_download_path: str = "/extension/marketplace-auto-screenshots.zip"
+    extension_min_version: str = "0.1.0"
+    allowed_url_prefixes: tuple[str, ...] = ("https://seller.wildberries.ru/chat-with-clients",)
+
+    def bucket(self, s3: S3Config) -> str:
+        return self.s3_bucket or s3.bucket
+
+
+@dataclass(frozen=True, slots=True)
 class FinReportsConfig:
     """Финансовые отчёты: как часто складывать дочитанные зеркалом отчёты реализации. Часы московские."""
 
@@ -441,6 +527,8 @@ class Settings:
     support_bot: SupportBotConfig = SupportBotConfig()
     llm: LLMConfig = LLMConfig()
     card_documents: CardDocumentsConfig = CardDocumentsConfig()
+    screenshot_control: ScreenshotControlConfig = ScreenshotControlConfig()
+    vision: VisionConfig = VisionConfig()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -642,6 +730,12 @@ class Settings:
                 telegram[key] = int(telegram[key])
         if "delivery_interval_seconds" in telegram:
             telegram["delivery_interval_seconds"] = float(telegram["delivery_interval_seconds"])
+        vision = dict(data.get("vision", {}))
+        for key in ("timeout_seconds", "max_tokens", "max_image_side"):
+            if key in vision:
+                vision[key] = int(vision[key])
+        if "temperature" in vision:
+            vision["temperature"] = float(vision["temperature"])
         relay = dict(data.get("relay", {}))
         relay["photos_enabled"] = _as_bool(relay.get("photos_enabled", False))
         for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
@@ -672,6 +766,8 @@ class Settings:
             support_bot=SupportBotConfig(**support_bot),
             llm=LLMConfig(**llm),
             card_documents=CardDocumentsConfig(**card_documents),
+            screenshot_control=_screenshot_control(dict(data.get("screenshot_control", {}))),
+            vision=VisionConfig(**vision),
         )
         settings.validate_values()
         return settings
@@ -919,6 +1015,82 @@ class Settings:
             ZoneInfo(self.worker.review_sync_timezone)
         except ZoneInfoNotFoundError as error:
             raise ValueError("worker.review_sync_timezone is invalid") from error
+        self._validate_screenshot_control()
+
+    def _validate_screenshot_control(self) -> None:
+        screens = self.screenshot_control
+        if screens.mode not in ("off", "shadow", "enforce"):
+            raise ValueError("screenshot_control.mode must be off, shadow or enforce")
+        if screens.kpi_from:
+            try:
+                date.fromisoformat(screens.kpi_from)
+            except ValueError as error:
+                raise ValueError("screenshot_control.kpi_from must be a YYYY-MM-DD date or empty") from error
+        try:
+            ZoneInfo(screens.timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("screenshot_control.timezone must be a known timezone") from error
+        if (
+            min(
+                screens.poll_seconds,
+                screens.max_upload_bytes,
+                screens.min_side_px,
+                screens.max_image_pixels,
+                screens.retention_original_days,
+                screens.retention_thumb_days,
+                screens.retention_fields_days,
+                screens.dedupe_window_days,
+                screens.outcome_ttl_hours,
+                screens.late_upload_hours,
+                screens.clock_skew_minutes,
+                screens.review_age_max_days,
+                screens.burst_per_hour,
+                screens.uploads_per_minute,
+                screens.uploads_per_hour,
+                screens.status_polls_per_minute,
+                screens.extraction_max_attempts,
+                screens.image_url_ttl_seconds,
+                screens.pairing_ttl_minutes,
+                screens.pair_attempts_per_window,
+                screens.pair_window_seconds,
+                screens.extension_token_idle_days,
+                screens.link_token_ttl_minutes,
+                screens.staging_stale_minutes,
+            )
+            < 1
+        ):
+            raise ValueError("screenshot_control: limits, retention days and intervals must be positive")
+        if screens.retention_fields_days < max(screens.retention_original_days, screens.retention_thumb_days):
+            raise ValueError("screenshot_control.retention_fields_days must cover the image retention")
+        if screens.image_url_ttl_seconds > 3600:
+            raise ValueError("screenshot_control.image_url_ttl_seconds must not exceed an hour")
+        if not 1 <= screens.staging_max_used_percent <= 100:
+            raise ValueError("screenshot_control.staging_max_used_percent must be between 1 and 100")
+        if not 0 <= screens.purge_hour <= 23 or not 0 <= screens.purge_minute <= 59:
+            raise ValueError("screenshot_control.purge_hour and purge_minute must form a valid time")
+        if not 0 <= screens.audit_percent <= 100:
+            raise ValueError("screenshot_control.audit_percent must be between 0 and 100")
+        limits = screens.thresholds
+        if not all(0 < value <= 1 for value in (limits.text_dup, limits.text_maybe, limits.vlm_ocr_text)):
+            raise ValueError("screenshot_control.thresholds text similarities must be in (0, 1]")
+        if not all(0 < value <= 1 for value in (limits.near_tile_strict, limits.near_tile_soft)):
+            raise ValueError("screenshot_control.thresholds tile similarities must be in (0, 1]")
+        if limits.text_maybe > limits.text_dup:
+            raise ValueError("screenshot_control.thresholds.text_maybe must not exceed text_dup")
+        if not 0 <= limits.near_dhash_strict <= limits.near_dhash_soft <= 64:
+            raise ValueError("screenshot_control.thresholds: near_dhash_strict <= near_dhash_soft <= 64")
+        if limits.min_text_len < 1:
+            raise ValueError("screenshot_control.thresholds.min_text_len must be positive")
+        if re.fullmatch(r"\d{1,4}\.\d{1,4}\.\d{1,4}", screens.extension_min_version) is None:
+            raise ValueError("screenshot_control.extension_min_version must look like 1.2.3")
+        if not screens.allowed_url_prefixes or not all(
+            prefix.startswith("https://") for prefix in screens.allowed_url_prefixes
+        ):
+            raise ValueError("screenshot_control.allowed_url_prefixes must be https:// prefixes")
+        if not screens.notification_bot:
+            raise ValueError("screenshot_control.notification_bot must be set")
+        if self.vision.timeout_seconds < 1 or self.vision.max_tokens < 1 or self.vision.max_image_side < 1:
+            raise ValueError("vision.timeout_seconds, max_tokens and max_image_side must be positive")
 
     def validate_runtime_secrets(self) -> None:
         if self.app.environment not in {"production", "prod"}:
@@ -948,8 +1120,50 @@ class Settings:
             invalid.append("egress.verify cannot disable TLS verification in production")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
+        if self.screenshot_control.mode != "off" and len(self.screenshot_control.hmac_key) < 32:
+            invalid.append("screenshot_control.hmac_key (SCREENSHOT_CONTROL_HMAC_KEY, 32+ characters)")
         if invalid:
             raise ValueError(f"Unsafe or missing production settings: {', '.join(invalid)}")
+
+
+_SCREENSHOT_TEXT_KEYS = frozenset(
+    {
+        "mode",
+        "kpi_from",
+        "timezone",
+        "hmac_key",
+        "s3_bucket",
+        "staging_root",
+        "notification_bot",
+        "pipeline_version",
+        "public_base_url",
+        "extension_download_path",
+        "extension_min_version",
+    }
+)
+_SCREENSHOT_THRESHOLD_INTS = frozenset({"min_text_len", "near_dhash_strict", "near_dhash_soft"})
+
+
+def _screenshot_control(raw: dict[str, Any]) -> ScreenshotControlConfig:
+    config: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key == "thresholds":
+            thresholds: dict[str, Any] = {
+                name: int(item) if name in _SCREENSHOT_THRESHOLD_INTS else float(item)
+                for name, item in dict(value or {}).items()
+            }
+            config[key] = ScreenshotThresholds(**thresholds)
+        elif key == "allowed_url_prefixes":
+            config[key] = tuple(str(prefix) for prefix in value)
+        elif key == "telegram_enabled":
+            config[key] = _as_bool(value)
+        elif key == "audit_percent":
+            config[key] = float(value)
+        elif key in _SCREENSHOT_TEXT_KEYS:
+            config[key] = "" if value is None else str(value)
+        else:
+            config[key] = int(value)
+    return ScreenshotControlConfig(**config)
 
 
 def _default_config_path() -> Path:

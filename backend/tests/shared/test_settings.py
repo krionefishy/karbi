@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import Any
 
 import pytest
 
@@ -67,3 +68,71 @@ def test_known_classifier_modes_are_accepted(mode: str) -> None:
     settings = load_settings("backend/shared/settings/config.test.yaml")
 
     replace(settings, support_bot=replace(settings.support_bot, classifier_mode=mode)).validate_values()
+
+
+def test_screenshot_control_comes_from_docker_yaml_with_keys_out_of_the_repr(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("SCREENSHOT_CONTROL_MODE", "SCREENSHOT_CONTROL_S3_BUCKET", "VISION_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SCREENSHOT_CONTROL_HMAC_KEY", "hmac-secret-that-is-long-enough-0123456789")
+    monkeypatch.setenv("SCREENSHOT_CONTROL_TELEGRAM", "false")
+    load_settings.cache_clear()
+
+    settings = load_settings("backend/shared/settings/config.docker.yaml")
+    load_settings.cache_clear()
+
+    screens = settings.screenshot_control
+    assert screens.mode == "shadow" and screens.telegram_enabled is False
+    assert (screens.retention_original_days, screens.retention_thumb_days) == (365, 365)
+    assert screens.thresholds.text_dup == 0.90 and screens.thresholds.min_text_len == 25
+    assert screens.staging_root == "/data/screenshots-staging"
+    assert screens.allowed_url_prefixes == ("https://seller.wildberries.ru/chat-with-clients",)
+    assert "hmac-secret" not in repr(screens) and "hmac-secret" not in repr(settings)
+    assert settings.vision.model == "" and settings.vision.max_tokens == 1200
+
+
+def test_the_module_bucket_falls_back_to_the_shared_one() -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    shared = replace(settings.s3, bucket="shared-bucket")
+
+    assert settings.screenshot_control.bucket(shared) == "shared-bucket"
+    assert replace(settings.screenshot_control, s3_bucket="dbs-pdn").bucket(shared) == "dbs-pdn"
+
+
+@pytest.mark.parametrize("mode", ["", "on", "SHADOW", "enforced"])
+def test_an_unknown_screenshot_mode_is_refused(mode: str) -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    broken = replace(settings, screenshot_control=replace(settings.screenshot_control, mode=mode))
+
+    with pytest.raises(ValueError, match="screenshot_control.mode"):
+        broken.validate_values()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("kpi_from", "23.10.2026", "kpi_from"),
+        ("retention_original_days", 0, "positive"),
+        ("retention_fields_days", 30, "retention_fields_days"),
+        ("extension_min_version", "v1", "extension_min_version"),
+        ("allowed_url_prefixes", ("http://seller.wildberries.ru",), "allowed_url_prefixes"),
+        ("purge_hour", 24, "purge_hour"),
+    ],
+)
+def test_broken_screenshot_settings_are_refused(field: str, value: Any, message: str) -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    broken = replace(settings, screenshot_control=replace(settings.screenshot_control, **{field: value}))
+
+    with pytest.raises(ValueError, match=message):
+        broken.validate_values()
+
+
+def test_production_needs_the_hmac_key_only_while_the_module_is_on() -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    production = replace(settings, app=replace(settings.app, environment="production"))
+    keyless = replace(production.screenshot_control, hmac_key="")
+
+    with pytest.raises(ValueError, match="screenshot_control.hmac_key"):
+        replace(production, screenshot_control=keyless).validate_runtime_secrets()
+    with pytest.raises(ValueError) as error:
+        replace(production, screenshot_control=replace(keyless, mode="off")).validate_runtime_secrets()
+    assert "screenshot_control" not in str(error.value)
