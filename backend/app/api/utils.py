@@ -102,6 +102,16 @@ from backend.modules.wb_reviews.application import (
 )
 from backend.modules.wb_reviews.application import SyncOverview
 from backend.modules.wb_reviews.domain import ReviewSyncRun
+from backend.modules.wb_screenshot_control.application import (
+    AUTOMATION_ID as WB_SCREENSHOT_CONTROL_ID,
+)
+from backend.modules.wb_screenshot_control.application import (
+    DESCRIPTION as WB_SCREENSHOT_CONTROL_DESCRIPTION,
+)
+from backend.modules.wb_screenshot_control.application import (
+    TITLE as WB_SCREENSHOT_CONTROL_TITLE,
+)
+from backend.modules.wb_screenshot_control.application import catalog_status as screenshot_control_status
 from backend.modules.wb_support_bot.application import (
     AUTOMATION_ID as WB_SUPPORT_BOT_ID,
 )
@@ -422,4 +432,18 @@ def automation_catalog(
                 next_run_at=next_support_bot_run_at(settings).isoformat(),
             ),
         )
+    catalog.append(
+        AutomationResponse(
+            id=WB_SCREENSHOT_CONTROL_ID,
+            title=WB_SCREENSHOT_CONTROL_TITLE,
+            description=WB_SCREENSHOT_CONTROL_DESCRIPTION,
+            kind="tool",
+            status=screenshot_control_status(settings.screenshot_control.mode),
+            seller_count=0,
+            runs_last_24h=0,
+            last_run=None,
+            last_success_at=None,
+            next_run_at=None,
+        )
+    )
     return catalog

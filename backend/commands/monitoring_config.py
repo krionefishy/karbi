@@ -30,6 +30,7 @@ SERVICE_NAMES = {
     "/wb/fbs-stocks": "Остатки FBS",
     "/wb/podsort": "Подсорт",
     "/wb/returns": "Возвраты",
+    "/wb/screenshot-control": "Контроль скриншотов ДБС",
     "/wb/review-chats": "Чаты после отзыва",
     "/wb/support-bot": "Бот поддержки в чатах",
     "/wb/reviews": "Отзывы",
