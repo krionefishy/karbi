@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** Машинный код из заголовка X-Error-Code, если сервер его прислал. */
+    public readonly code: string | null = null,
   ) {
     super(message);
   }
@@ -93,7 +95,7 @@ export async function apiDownload(path: string, init?: RequestInit): Promise<Fil
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса");
+    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса", response.headers.get("X-Error-Code"));
   }
   return {
     blob: await response.blob(),
@@ -114,7 +116,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit, options?: 
   }
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса");
+    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса", response.headers.get("X-Error-Code"));
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

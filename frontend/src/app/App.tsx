@@ -5,6 +5,7 @@ import { homeRoute } from "../features/admin/entry";
 import { AdminRoute, AuthProvider, ProtectedRoute } from "../features/auth/AuthContext";
 import { BotsPage } from "../pages/admin/BotsPage";
 import { EmployeesPage } from "../pages/admin/EmployeesPage";
+import { ScreenshotsPage } from "../pages/admin/ScreenshotsPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { CardChecklistPage } from "../pages/CardChecklistPage";
@@ -51,6 +52,7 @@ export function AppRoutes() {
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />
+          <Route path="/admin/screenshots" element={<ScreenshotsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to={homeRoute()} replace />} />

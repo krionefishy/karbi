@@ -52,4 +52,22 @@ describe("screenshot control api", () => {
     expect(request.mock.calls[1][0]).toBe("/api/v1/admin/screenshot-control/submissions/s-1/resolve");
     expect(JSON.parse(String(request.mock.calls[1][1]?.body))).toEqual({ decision: "decline", note: "чужой кейс" });
   });
+
+  it("keeps the machine error code from X-Error-Code", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ detail: "Нужен комментарий" }), {
+          status: 422,
+          headers: { "Content-Type": "application/json", "X-Error-Code": "note_required" },
+        }),
+      ),
+    );
+
+    await expect(resolveSubmission("s-1", { decision: "decline", note: "" })).rejects.toMatchObject({
+      status: 422,
+      code: "note_required",
+      message: "Нужен комментарий",
+    });
+  });
 });

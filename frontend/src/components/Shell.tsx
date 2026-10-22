@@ -5,6 +5,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  ScanSearch,
   Shield,
   Store,
   Sun,
@@ -88,6 +89,10 @@ export function Shell({ current, seller, actions, admin = false, children }: She
             <NavLink to="/admin/bots" title="Боты">
               <Bot size={20} />
               <span>Боты</span>
+            </NavLink>
+            <NavLink to="/admin/screenshots" title="Контроль скриншотов ДБС">
+              <ScanSearch size={20} />
+              <span>Контроль скриншотов ДБС</span>
             </NavLink>
           </nav>
         ) : (
