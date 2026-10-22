@@ -9,6 +9,7 @@ from backend.modules.platform.presentation.http import router as auth_router
 from backend.modules.wb_box_stickers.presentation.http import packing_router as wb_box_packing_router
 from backend.modules.wb_box_stickers.presentation.http import router as wb_box_stickers_router
 from backend.modules.wb_card_checklist.presentation.http import router as wb_card_checklist_router
+from backend.modules.wb_card_documents.presentation.http import router as wb_card_documents_router
 from backend.modules.wb_core.presentation.http import router as wb_sellers_router
 from backend.modules.wb_fbs_distribution.presentation.http import onec_router
 from backend.modules.wb_fbs_distribution.presentation.http import router as wb_fbs_distribution_router
@@ -32,6 +33,7 @@ router.include_router(wb_turnover_router)
 router.include_router(wb_fbs_distribution_router)
 router.include_router(onec_router)
 router.include_router(wb_card_checklist_router)
+router.include_router(wb_card_documents_router)
 router.include_router(wb_fbs_stocks_router)
 router.include_router(wb_fbs_penalties_router)
 router.include_router(wb_review_chats_router)

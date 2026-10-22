@@ -1,6 +1,7 @@
 import {
   Calculator,
   ClipboardCheck,
+  FileCheck2,
   Bot,
   Gauge,
   Grid3x3,
@@ -23,6 +24,7 @@ export const automationNav: AutomationNavItem[] = [
   { id: "wb-reviews", title: "Мониторинг отзывов", icon: MessageSquareText },
   { id: "wb-turnover", title: "Оборачиваемость", icon: Gauge },
   { id: "wb-card-checklist", title: "Чек-лист карточек", icon: ClipboardCheck },
+  { id: "wb-card-documents", title: "Документы карточек WB", icon: FileCheck2 },
   { id: "wb-fbs-stocks", title: "Остатки FBS", icon: Grid3x3 },
   { id: "wb-fbs-penalties", title: "Штрафы FBS", icon: ReceiptText },
   { id: "wb-review-chats", title: "Чаты после отзыва", icon: MessagesSquare },

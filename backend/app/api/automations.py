@@ -8,6 +8,7 @@ from backend.app.api.utils import automation_catalog
 from backend.app.http.principals import CurrentPrincipal
 from backend.modules.fin_reports.application import FinReportsService
 from backend.modules.wb_card_checklist.application import ChecklistService
+from backend.modules.wb_card_documents.application import CardDocumentsService
 from backend.modules.wb_core.application import (
     AutomationNotFoundError,
     DuplicateCredentialError,
@@ -48,6 +49,7 @@ async def automations(
     podsort: FromDishka[PodsortService],
     fin_reports: FromDishka[FinReportsService],
     support_bot: FromDishka[SupportBotService],
+    card_documents: FromDishka[CardDocumentsService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
     return automation_catalog(
@@ -62,6 +64,7 @@ async def automations(
         await fin_reports.overview(),
         settings,
         support_bot=await support_bot.overview(),
+        card_documents=await card_documents.overview(),
     )
 
 

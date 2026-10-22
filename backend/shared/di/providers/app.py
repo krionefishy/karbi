@@ -22,6 +22,8 @@ from backend.modules.wb_card_checklist.application import (
 )
 from backend.modules.wb_card_checklist.domain import Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
+from backend.modules.wb_card_documents.application import CardDocumentsEnrollment, CardDocumentsService
+from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.wb import EgressGateway
@@ -330,6 +332,37 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def card_documents_repository(self, session: AsyncSession) -> CardDocumentsRepository:
+        return CardDocumentsRepository(session)
+
+    @provide(scope=Scope.REQUEST)
+    def card_documents_enrollment(self, documents: CardDocumentsRepository) -> CardDocumentsEnrollment:
+        return CardDocumentsEnrollment(documents)
+
+    @provide(scope=Scope.REQUEST)
+    def card_documents_service(
+        self,
+        session: AsyncSession,
+        sellers: SellerRepository,
+        documents: CardDocumentsRepository,
+        bots: BotRegistry,
+        subscriptions: SubscriptionService,
+        settings: Settings,
+    ) -> CardDocumentsService:
+        """Состояния пишет воркер; API только читает их, ставит «Обновить» и выдаёт ссылку на бота."""
+        config = settings.card_documents
+        return CardDocumentsService(
+            session,
+            sellers,
+            documents,
+            bots,
+            subscriptions,
+            bot_code=config.notification_bot,
+            timezone=ZoneInfo(config.timezone),
+            stale_hours=config.stale_hours,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def fbs_stocks_repository(self, session: AsyncSession) -> FbsStocksRepository:
         return FbsStocksRepository(session)
 
@@ -538,6 +571,7 @@ class SessionProvider(Provider):
         turnover: TurnoverEnrollment,
         fbs_distribution: FbsDistributionEnrollment,
         card_checklist: ChecklistEnrollment,
+        card_documents: CardDocumentsEnrollment,
         fbs_stocks: FbsStocksEnrollment,
         fbs_penalties: PenaltiesEnrollment,
         review_chats: ReviewChatsEnrollment,
@@ -552,6 +586,7 @@ class SessionProvider(Provider):
             turnover,
             fbs_distribution,
             card_checklist,
+            card_documents,
             fbs_stocks,
             fbs_penalties,
             review_chats,

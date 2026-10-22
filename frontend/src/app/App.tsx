@@ -8,6 +8,7 @@ import { EmployeesPage } from "../pages/admin/EmployeesPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { CardChecklistPage } from "../pages/CardChecklistPage";
+import { CardDocumentsPage } from "../pages/CardDocumentsPage";
 import { ReviewChatsPage } from "../pages/ReviewChatsPage";
 import { SupportBotPage } from "../pages/SupportBotPage";
 import { ReviewsPage } from "../pages/ReviewsPage";
@@ -36,6 +37,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-reviews" element={<ReviewsPage />} />
         <Route path="/automations/wb-turnover" element={<TurnoverPage />} />
         <Route path="/automations/wb-card-checklist" element={<CardChecklistPage />} />
+        <Route path="/automations/wb-card-documents" element={<CardDocumentsPage />} />
         <Route path="/automations/wb-fbs-stocks" element={<FbsStocksPage />} />
         <Route path="/automations/wb-fbs-penalties" element={<FbsPenaltiesPage />} />
         <Route path="/automations/wb-review-chats" element={<ReviewChatsPage />} />

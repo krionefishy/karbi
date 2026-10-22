@@ -1,7 +1,9 @@
 import base64
 import io
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import segno
 
@@ -19,8 +21,15 @@ RETURNS_CODE = "returns.code"
 RETURNS_EXTENSION = "returns.extension"
 RETURNS_NO_SUBSCRIPTION = "returns.no_subscription"
 RETURNS_UNKNOWN = "returns.unknown"
+CARD_DOCUMENTS_ALERT = "card_documents.alert"
+CARD_DOCUMENTS_BASELINE = "card_documents.baseline"
+CARD_DOCUMENTS_DIGEST = "card_documents.digest"
+CARD_DOCUMENTS_STALE = "card_documents.stale"
+CARD_DOCUMENTS_COLLECTION_ERROR = "card_documents.collection_error"
 
 _DIGEST_LIMIT = 25
+_MESSAGE_BUDGET = 3900
+_MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 class UnknownTemplateError(Exception):
@@ -264,6 +273,150 @@ def _returns_unknown(params: dict[str, Any]) -> str:
     return f"Команду {params.get('command') or ''} не знаю.\n\nЧто умею:\n{_RETURNS_COMMANDS}"
 
 
+_DOCUMENT_STATES = {
+    "rejected": "WB отклонил документ",
+    "missing": "документ не загружен",
+    "expiring": "истекает срок документа",
+    "mismatch": "характеристики расходятся с документом",
+    "ok": "документ в порядке",
+}
+_DOCUMENT_REASONS = {
+    "valid": "документ действителен",
+    "document_not_found": "документ не найден в реестре",
+    "documents_invalid": "документ признан недействительным",
+    "documents_missing": "документ не загружен",
+    "expired": "срок действия истёк",
+    "number_mismatch": "номер в характеристиках не совпадает с документом",
+    "start_date_mismatch": "дата регистрации в характеристиках не совпадает с документом",
+    "end_date_mismatch": "дата окончания в характеристиках не совпадает с документом",
+    "status_2": "WB отклонил документ, причину не указал",
+}
+
+
+def _document_reason(params: dict[str, Any]) -> str | None:
+    reason = params.get("reason")
+    if not reason:
+        return None
+    return _DOCUMENT_REASONS.get(str(reason), f"причина WB: {reason}")
+
+
+def _document_term(params: dict[str, Any]) -> str | None:
+    left = params.get("days_left")
+    end = params.get("document_end")
+    if not isinstance(left, int):
+        return None
+    if left < 0:
+        return f"срок истёк {_day(end)}"
+    if left == 0:
+        return "срок истекает сегодня"
+    return f"действует до {_day(end)} {str(end)[:4]}, осталось {left} {_plural(left, 'день', 'дня', 'дней')}"
+
+
+def _document_card(params: dict[str, Any]) -> str:
+    """Карточка одной строкой: артикул продавца, nmID и название."""
+    vendor_code = str(params.get("vendor_code") or "").strip()
+    title = str(params.get("title") or "").strip()
+    head = f"{vendor_code} · nmID {params.get('nm_id')}" if vendor_code else f"nmID {params.get('nm_id')}"
+    return f"{head} — {title}" if title else head
+
+
+def _document_details(params: dict[str, Any]) -> list[str]:
+    lines = []
+    number = params.get("document_number")
+    if number:
+        lines.append(f"Документ: {number}")
+    for line in (_document_reason(params), _document_term(params)):
+        if line:
+            lines.append(line[:1].upper() + line[1:])
+    return lines
+
+
+def _card_documents_alert(params: dict[str, Any]) -> str:
+    state = _DOCUMENT_STATES.get(str(params.get("state")), str(params.get("state") or ""))
+    lines = [f"{params.get('seller_name') or 'Магазин'}: {state}", "", _document_card(params)]
+    lines.extend(_document_details(params))
+    return "\n".join(lines)
+
+
+def _card_documents_baseline(params: dict[str, Any]) -> str:
+    cards = int(params.get("cards") or 0)
+    problems = int(params.get("problems") or 0)
+    head = (
+        f"{params.get('seller_name') or 'Магазин'}: взяли под наблюдение {cards} "
+        f"{_plural(cards, 'карточку', 'карточки', 'карточек')}"
+    )
+    if problems:
+        tail = (
+            f"{problems} {_plural(problems, 'карточка', 'карточки', 'карточек')} с проблемами в документах — "
+            f"список придёт в дайджесте в {params.get('digest_time') or '10:00'} и есть в Marketplace Auto."
+        )
+    else:
+        tail = "Проблем с документами нет. Напишу, когда WB отклонит документ или подойдёт срок."
+    return f"{head}.\n{tail}"
+
+
+def _moscow(value: Any) -> str | None:
+    """ISO-момент → «22 окт. 14:05 МСК»: сообщения читают в Москве, а не в UTC."""
+    if not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if moment.tzinfo is None:
+        return str(value)
+    local = moment.astimezone(_MOSCOW)
+    return f"{local.day} {_MONTHS[local.month - 1]} {local:%H:%M} МСК"
+
+
+def _card_documents_digest(params: dict[str, Any]) -> str:
+    """Не длиннее лимита Telegram (4096): строки копятся, пока помещаются, остальное — «и ещё N»."""
+    items = list(params.get("items") or [])
+    count = len(items)
+    head = [
+        f"{params.get('seller_name') or 'Магазин'}: {count} "
+        f"{_plural(count, 'карточка', 'карточки', 'карточек')} с проблемами в документах"
+    ]
+    if params.get("stale"):
+        collected = _moscow(params.get("collected_at"))
+        head.append(f"Данные устарели: последний сбор {collected or 'ещё не прошёл'}")
+    text = "\n".join(head)
+    shown = 0
+    for item in items[:_DIGEST_LIMIT]:
+        state = _DOCUMENT_STATES.get(str(item.get("state")), str(item.get("state") or ""))
+        details = "; ".join(line for line in (_document_reason(item), _document_term(item)) if line)
+        block = f"\n\n• {_document_card(item)}\n  {state}" + (f": {details}" if details else "")
+        if len(text) + len(block) > _MESSAGE_BUDGET:
+            break
+        text += block
+        shown += 1
+    if count > shown:
+        hidden = count - shown
+        cards = _plural(hidden, "карточка", "карточки", "карточек")
+        text += f"\n\n…и ещё {hidden} {cards} — весь список в Marketplace Auto."
+    return text
+
+
+def _card_documents_stale(params: dict[str, Any]) -> str:
+    collected = _moscow(params.get("collected_at"))
+    since = f"последний удачный сбор {collected}" if collected else "сбора ещё не было"
+    lines = [
+        f"Документы карточек: наблюдение за {params.get('seller_name') or 'кабинетом'} не работает больше "
+        f"{params.get('hours', 9)} ч. ({since}). Для кабинета это «не знаем», а не «ошибок нет»."
+    ]
+    if params.get("error"):
+        lines.append(f"Последняя ошибка: {params.get('error')}")
+    return "\n".join(lines)
+
+
+def _card_documents_collection_error(params: dict[str, Any]) -> str:
+    return (
+        f"Документы карточек: {params.get('seller_name') or 'кабинет'} не собирается — "
+        f"{params.get('error') or 'ошибка WB'}. "
+        "Повтор не поможет: проверьте ключ и право на категорию «Контент»."
+    )
+
+
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_CONFIRMED: _confirmed,
     SUBSCRIPTION_INVALID_LINK: _invalid_link,
@@ -279,6 +432,11 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     RETURNS_EXTENSION: _returns_extension,
     RETURNS_NO_SUBSCRIPTION: _returns_no_subscription,
     RETURNS_UNKNOWN: _returns_unknown,
+    CARD_DOCUMENTS_ALERT: _card_documents_alert,
+    CARD_DOCUMENTS_BASELINE: _card_documents_baseline,
+    CARD_DOCUMENTS_DIGEST: _card_documents_digest,
+    CARD_DOCUMENTS_STALE: _card_documents_stale,
+    CARD_DOCUMENTS_COLLECTION_ERROR: _card_documents_collection_error,
 }
 
 

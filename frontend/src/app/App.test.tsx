@@ -11,6 +11,7 @@ vi.mock("../pages/TurnoverPage", () => ({ TurnoverPage: () => <div>оборач�
 vi.mock("../pages/FinReportsPage", () => ({ FinReportsPage: () => <div>финансовые отчёты</div> }));
 vi.mock("../pages/BoxStickersPage", () => ({ BoxStickersPage: () => <div>стикеры коробов</div> }));
 vi.mock("../pages/CardChecklistPage", () => ({ CardChecklistPage: () => <div>чек-лист</div> }));
+vi.mock("../pages/CardDocumentsPage", () => ({ CardDocumentsPage: () => <div>документы карточек</div> }));
 vi.mock("../pages/FbsStocksPage", () => ({ FbsStocksPage: () => <div>остатки FBS</div> }));
 vi.mock("../pages/FbsPenaltiesPage", () => ({ FbsPenaltiesPage: () => <div>штрафы FBS</div> }));
 vi.mock("../pages/ReturnsPage", () => ({ ReturnsPage: () => <div>возвраты WB</div> }));
@@ -45,6 +46,7 @@ describe("маршруты автоматизаций", () => {
     ["/automations/wb-reviews", "отзывы"],
     ["/automations/wb-turnover", "оборачиваемость"],
     ["/automations/wb-card-checklist", "чек-лист"],
+    ["/automations/wb-card-documents", "документы карточек"],
     ["/automations/wb-fbs-stocks", "остатки FBS"],
     ["/automations/wb-fbs-penalties", "штрафы FBS"],
     ["/automations/wb-returns", "возвраты WB"],

@@ -24,6 +24,7 @@ SERVICE_NAMES = {
     "/onec": "1С",
     "/wb/box-stickers": "Стикеры коробов",
     "/wb/card-checklist": "Чек-лист карточек",
+    "/wb/card-documents": "Документы карточек",
     "/wb/fbs": "Распределение FBS",
     "/wb/fbs-penalties": "Штрафы FBS",
     "/wb/fbs-stocks": "Остатки FBS",

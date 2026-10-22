@@ -31,6 +31,16 @@ from backend.modules.wb_card_checklist.application import (
     TITLE as WB_CHECKLIST_TITLE,
 )
 from backend.modules.wb_card_checklist.application import ChecklistOverview
+from backend.modules.wb_card_documents.application import (
+    AUTOMATION_ID as WB_CARD_DOCUMENTS_ID,
+)
+from backend.modules.wb_card_documents.application import (
+    DESCRIPTION as WB_CARD_DOCUMENTS_DESCRIPTION,
+)
+from backend.modules.wb_card_documents.application import (
+    TITLE as WB_CARD_DOCUMENTS_TITLE,
+)
+from backend.modules.wb_card_documents.application import CardDocumentsOverview
 from backend.modules.wb_fbs_penalties.application import (
     AUTOMATION_ID as WB_FBS_PENALTIES_ID,
 )
@@ -149,6 +159,17 @@ def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> da
     return _next_daily(ZoneInfo(checklist.timezone), [(checklist.collect_hour, checklist.collect_minute)], now)
 
 
+def next_card_documents_run_at(
+    settings: Settings, overview: CardDocumentsOverview, now: datetime | None = None
+) -> datetime:
+    """Опрос интервальный: следующий — через `interval_hours` после последнего удачного сбора."""
+    documents = settings.card_documents
+    moment = now or datetime.now(ZoneInfo(documents.timezone))
+    if overview.last_success_at is None:
+        return moment
+    return max(moment, overview.last_success_at + timedelta(hours=documents.interval_hours))
+
+
 def next_penalties_run_at(settings: Settings, overview: PenaltiesOverview, now: datetime | None = None) -> datetime:
     """Опрос интервальный: следующий — через `poll_hours` после последнего удачного сбора."""
     penalties = settings.fbs_penalties
@@ -255,6 +276,7 @@ def automation_catalog(
     fin_reports: FinReportsOverview,
     settings: Settings,
     support_bot: SupportBotOverview | None = None,
+    card_documents: CardDocumentsOverview | None = None,
 ) -> list[AutomationResponse]:
     """The automations we actually run, described by what they actually did."""
     catalog = [
@@ -370,6 +392,21 @@ def automation_catalog(
             next_run_at=None,
         ),
     ]
+    if card_documents is not None:
+        catalog.insert(
+            -1,
+            AutomationResponse(
+                id=WB_CARD_DOCUMENTS_ID,
+                title=WB_CARD_DOCUMENTS_TITLE,
+                description=WB_CARD_DOCUMENTS_DESCRIPTION,
+                status=card_documents.status,
+                seller_count=card_documents.seller_count,
+                runs_last_24h=0,
+                last_run=None,
+                last_success_at=card_documents.last_success_at.isoformat() if card_documents.last_success_at else None,
+                next_run_at=next_card_documents_run_at(settings, card_documents).isoformat(),
+            ),
+        )
     if support_bot is not None:
         catalog.insert(
             -1,

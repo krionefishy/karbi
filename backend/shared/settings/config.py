@@ -186,6 +186,27 @@ class CardChecklistConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CardDocumentsConfig:
+    """Документы карточек: как часто перечитывать вердикты WB и когда о них говорить. Часы московские.
+
+    Интервал меньше часа без курсора по `updatedAt` съедает бюджет «Контента» у всех
+    автоматизаций кабинета. В `skip_hours` плановый сбор не начинается: это окна каталога
+    (02:30) и чек-листа (05:00). `service_chat_id` 0 — служебный чат не задан, сбои только в лог.
+    """
+
+    timezone: str = "Europe/Moscow"
+    interval_hours: int = 3
+    retry_minutes: int = 30
+    stale_hours: int = 9
+    expiry_thresholds: tuple[int, ...] = (30, 14, 7)
+    digest_hour: int = 10
+    digest_minute: int = 0
+    skip_hours: tuple[int, ...] = (2, 5)
+    notification_bot: str = "card-documents"
+    service_chat_id: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class RelayConfig:
     """The messenger relay outside Russia: the only host allowed to reach the messenger.
 
@@ -415,6 +436,7 @@ class Settings:
     fin_reports: FinReportsConfig
     support_bot: SupportBotConfig = SupportBotConfig()
     llm: LLMConfig = LLMConfig()
+    card_documents: CardDocumentsConfig = CardDocumentsConfig()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Settings":
@@ -493,6 +515,22 @@ class Settings:
         ):
             if key in card_checklist:
                 card_checklist[key] = int(card_checklist[key])
+        card_documents = dict(data.get("card_documents", {}))
+        for key in (
+            "interval_hours",
+            "retry_minutes",
+            "stale_hours",
+            "digest_hour",
+            "digest_minute",
+            "service_chat_id",
+        ):
+            if key in card_documents:
+                card_documents[key] = int(card_documents[key] or 0)
+        for key in ("expiry_thresholds", "skip_hours"):
+            if key in card_documents:
+                card_documents[key] = tuple(int(value) for value in card_documents[key] or ())
+        if "notification_bot" in card_documents:
+            card_documents["notification_bot"] = str(card_documents["notification_bot"])
         fbs_stocks = dict(data.get("fbs_stocks", {}))
         for key in ("poll_minutes", "retry_minutes"):
             if key in fbs_stocks:
@@ -628,6 +666,7 @@ class Settings:
             fin_reports=FinReportsConfig(**fin_reports),
             support_bot=SupportBotConfig(**support_bot),
             llm=LLMConfig(**llm),
+            card_documents=CardDocumentsConfig(**card_documents),
         )
         settings.validate_values()
         return settings
@@ -660,6 +699,20 @@ class Settings:
             raise ValueError("card_checklist thresholds must not be negative")
         if checklist.subject_ttl_hours < 1:
             raise ValueError("card_checklist.subject_ttl_hours must be positive")
+        documents = self.card_documents
+        ZoneInfo(documents.timezone)
+        if min(documents.interval_hours, documents.retry_minutes, documents.stale_hours) < 1:
+            raise ValueError("card_documents.interval_hours, retry_minutes and stale_hours must be positive")
+        if documents.stale_hours <= documents.interval_hours:
+            raise ValueError("card_documents.stale_hours must exceed interval_hours")
+        if not documents.expiry_thresholds or any(days < 1 for days in documents.expiry_thresholds):
+            raise ValueError("card_documents.expiry_thresholds must contain positive days")
+        if not 0 <= documents.digest_hour <= 23 or not 0 <= documents.digest_minute <= 59:
+            raise ValueError("card_documents.digest_hour/minute must be a valid time of day")
+        if any(not 0 <= hour <= 23 for hour in documents.skip_hours) or len(documents.skip_hours) >= 24:
+            raise ValueError("card_documents.skip_hours must contain hours between 0 and 23 and leave some free")
+        if not documents.notification_bot:
+            raise ValueError("card_documents.notification_bot must be set")
         if self.fbs_stocks.poll_minutes < 1:
             raise ValueError("fbs_stocks.poll_minutes must be positive")
         if self.fbs_stocks.retry_minutes < 1:
