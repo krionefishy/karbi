@@ -18,6 +18,7 @@ import { PodsortPage } from "../pages/PodsortPage";
 import { BoxStickersPage } from "../pages/BoxStickersPage";
 import { FinReportsPage } from "../pages/FinReportsPage";
 import { ReturnsPage } from "../pages/ReturnsPage";
+import { ScreenshotControlPage } from "../pages/ScreenshotControlPage";
 import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
 
@@ -46,6 +47,7 @@ export function AppRoutes() {
         <Route path="/automations/wb-podsort" element={<PodsortPage />} />
         <Route path="/automations/wb-box-stickers" element={<BoxStickersPage />} />
         <Route path="/automations/fin-reports" element={<FinReportsPage />} />
+        <Route path="/automations/wb-screenshot-control" element={<ScreenshotControlPage />} />
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />
