@@ -24,12 +24,22 @@ export interface CardDocumentsSummary {
   mismatch: number;
 }
 
+export type NoticeLevel = "danger" | "warning";
+
+export interface Notice {
+  kind: string;
+  level: NoticeLevel;
+  since: string | null;
+  detail: string | null;
+}
+
 export interface CardDocuments {
   collected_at: string | null;
   last_error: string | null;
   stale: boolean;
   summary: CardDocumentsSummary;
   items: CardDocumentItem[];
+  notices: Notice[];
 }
 
 export interface RefreshState {

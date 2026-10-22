@@ -31,6 +31,10 @@ class SubscriptionService:
         self.repository = repository
         self.invite_ttl_hours = invite_ttl_hours
 
+    async def subscriber_count(self, bot: Bot, seller_id: uuid.UUID) -> int:
+        """Сколько чатов сейчас подписано на кабинет через этого бота — для автоматизаций, без чужих таблиц."""
+        return len(await self.repository.subscribers(bot.id, seller_id))
+
     async def create_invite(
         self,
         bot: Bot,

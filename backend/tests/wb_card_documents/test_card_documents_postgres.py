@@ -10,13 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
-from backend.modules.notifications.infrastructure.postgres.models import BotModel
+from backend.modules.notifications.infrastructure.postgres.models import BotModel, SubscriptionModel
 from backend.modules.wb_card_documents.application import (
     TEMPLATE_ALERT,
     TEMPLATE_BASELINE,
-    TEMPLATE_COLLECTION_ERROR,
     TEMPLATE_DIGEST,
-    TEMPLATE_STALE,
     CardDocumentsPublisher,
     CardDocumentsService,
     CollectionService,
@@ -25,7 +23,6 @@ from backend.modules.wb_card_documents.application import (
 from backend.modules.wb_card_documents.domain import CardDocument, CardDocuments, DeclaredDocument, Verdict
 from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
-    TrackedSellerModel,
 )
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
@@ -35,11 +32,8 @@ from backend.storage.pg import Database
 from backend.workers.wb_card_documents.worker import CardDocumentsWorker
 
 BOT = "card-documents-test"
-SERVICE_CHAT = 777_001
 BASE = load_settings("backend/shared/settings/config.test.yaml")
-SETTINGS = replace(
-    BASE, card_documents=replace(BASE.card_documents, notification_bot=BOT, service_chat_id=SERVICE_CHAT)
-)
+SETTINGS = replace(BASE, card_documents=replace(BASE.card_documents, notification_bot=BOT))
 MOSCOW = ZoneInfo("Europe/Moscow")
 NOW = datetime.now(UTC).replace(microsecond=0)
 TODAY = NOW.astimezone(MOSCOW).date()
@@ -126,9 +120,7 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
 
 
 def publisher(session: AsyncSession, bot: str = BOT) -> CardDocumentsPublisher:
-    return CardDocumentsPublisher(
-        session, BotRegistry(session, NotificationRepository(session)), bot_code=bot, service_chat_id=SERVICE_CHAT
-    )
+    return CardDocumentsPublisher(session, BotRegistry(session, NotificationRepository(session)), bot_code=bot)
 
 
 async def collect(
@@ -404,27 +396,100 @@ async def test_a_quiet_seller_gets_no_digest(database: Database, seller: uuid.UU
     assert [event["template"] for event in await outbox(database, seller)] == [TEMPLATE_BASELINE]
 
 
-async def test_stale_observation_is_reported_to_the_service_chat_once(database: Database, seller: uuid.UUID) -> None:
-    collected = NOW - timedelta(hours=10)
+async def notice_kinds(database: Database, seller_id: uuid.UUID, now: datetime = NOW) -> dict[str, tuple]:
     async with database.session() as session:
-        await session.execute(
-            update(TrackedSellerModel)
-            .where(TrackedSellerModel.seller_id == seller)
-            .values(collected_at=collected, baseline_at=collected, collection_error="WB Content API отвечает HTTP 503")
-        )
+        board = await board_service(session).board(seller_id, now=now)
+    return {notice.kind: (notice.level, notice.since, notice.detail) for notice in board.notices}
+
+
+async def subscribe(database: Database, seller_id: uuid.UUID, *, active: bool = True, chat_id: int = 900_001) -> None:
+    async with database.session() as session:
+        bot_id = await session.scalar(select(BotModel.id).where(BotModel.code == BOT))
+        session.add(SubscriptionModel(bot_id=bot_id, chat_id=chat_id, seller_id=seller_id, is_active=active))
         await session.commit()
 
-    async with database.session() as session:
-        first = await notifications(session).watch(seller, now=NOW)
-    async with database.session() as session:
-        second = await notifications(session).watch(seller, now=NOW + timedelta(hours=1))
 
-    assert (first.stale, second.stale) == (True, False)
-    [event] = [event for event in await outbox(database, seller) if event["template"] == TEMPLATE_STALE]
-    assert event["audience"] == {"type": "chat", "chat_id": SERVICE_CHAT}
-    assert event["params"]["error"] == "WB Content API отвечает HTTP 503"
+async def test_never_collected_shows_no_stale_banner(database: Database, seller: uuid.UUID) -> None:
+    """«Ещё не собирали» показывает фронт по collected_at = null; баннер stale его не дублирует."""
+    await subscribe(database, seller)
+
+    assert await notice_kinds(database, seller) == {}
+
+
+async def test_the_stale_banner_comes_and_goes_with_the_collection(database: Database, seller: uuid.UUID) -> None:
+    await subscribe(database, seller)
+    collected = NOW - timedelta(hours=10)
+    await collect(database, seller, [card(1)], now=collected)
+
+    assert await notice_kinds(database, seller) == {"stale": ("danger", collected, None)}
+
+    await collect(database, seller, [card(1)], now=NOW)
+
+    assert await notice_kinds(database, seller) == {}
+
+
+async def test_error_banners_tell_temporary_from_permanent_and_clear_on_success(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await subscribe(database, seller)
+    source = FakeSource([card(1)])
+    worker = CardDocumentsWorker(database, source, SETTINGS)
+    assert await worker.collect(seller) is None
+
+    source.error = WBTemporaryError("WB Content API отвечает HTTP 503")
+    await worker.collect(seller)
+    temporary = await notice_kinds(database, seller, datetime.now(UTC))
+    assert set(temporary) == {"collection_error"}
+    assert temporary["collection_error"][0] == "danger"
+    assert temporary["collection_error"][2] == "WB Content API отвечает HTTP 503"
+    assert temporary["collection_error"][1] is not None
+
+    source.error = WBPermanentError("Нет доступа к WB Content API: у ключа нет категории «Контент»")
+    await worker.collect(seller)
+    permanent = await notice_kinds(database, seller, datetime.now(UTC))
+    assert set(permanent) == {"permanent_error"}
+    assert permanent["permanent_error"][2] == "Нет доступа к WB Content API: у ключа нет категории «Контент»"
+
+    source.error = None
+    assert await worker.collect(seller) is None
+    assert await notice_kinds(database, seller, datetime.now(UTC)) == {}
+    assert [event["template"] for event in await outbox(database, seller)] == [TEMPLATE_BASELINE]
+
+
+async def test_subscriber_and_bot_banners_follow_the_notifications_module(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await collect(database, seller, [card(1)])
+
+    assert await notice_kinds(database, seller) == {"no_subscribers": ("warning", None, None)}
+
+    await subscribe(database, seller, active=False, chat_id=900_002)
+    assert set(await notice_kinds(database, seller)) == {"no_subscribers"}
+
+    await subscribe(database, seller, chat_id=900_003)
+    assert await notice_kinds(database, seller) == {}
+
     async with database.session() as session:
-        assert (await board_service(session).board(seller, now=NOW)).stale
+        await session.execute(update(BotModel).where(BotModel.code == BOT).values(is_active=False))
+        await session.commit()
+    assert await notice_kinds(database, seller) == {"bot_missing": ("warning", None, BOT)}
+
+    async with database.session() as session:
+        await session.execute(update(BotModel).where(BotModel.code == BOT).values(is_active=True))
+        await session.commit()
+    assert await notice_kinds(database, seller) == {}
+
+
+async def test_alerts_still_go_to_subscribers(database: Database, seller: uuid.UUID) -> None:
+    await subscribe(database, seller)
+    await collect(database, seller, [card(1)])
+
+    result = await collect(database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=3))
+
+    assert result.alerts == 1
+    events = await outbox(database, seller)
+    assert [event["template"] for event in events] == [TEMPLATE_BASELINE, TEMPLATE_ALERT]
+    assert all(event["audience"] == {"type": "seller_subscribers", "seller_id": str(seller)} for event in events)
 
 
 async def test_a_failed_collection_keeps_the_states(database: Database, seller: uuid.UUID) -> None:
@@ -444,19 +509,6 @@ async def test_a_failed_collection_keeps_the_states(database: Database, seller: 
     assert tracked.attempted_at is not None and tracked.collected_at is not None
     assert states[1].state == "rejected"
     assert [event["template"] for event in await outbox(database, seller)] == [TEMPLATE_BASELINE]
-
-
-async def test_a_permanent_error_goes_to_the_service_chat_once(database: Database, seller: uuid.UUID) -> None:
-    source = FakeSource([])
-    source.error = WBPermanentError("Нет доступа к WB Content API: у ключа нет категории «Контент»")
-    worker = CardDocumentsWorker(database, source, SETTINGS)
-
-    await worker.collect(seller)
-    await worker.collect(seller)
-
-    events = await outbox(database, seller)
-    assert [event["template"] for event in events] == [TEMPLATE_COLLECTION_ERROR]
-    assert events[0]["audience"] == {"type": "chat", "chat_id": SERVICE_CHAT}
 
 
 async def test_the_worker_collects_on_interval_skips_busy_hours_and_serves_the_button(

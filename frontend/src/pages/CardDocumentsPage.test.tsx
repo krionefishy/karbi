@@ -43,6 +43,7 @@ const sample: CardDocuments = {
     item(1175671003, { state: "expiring", reason: "valid", days_left: 6 }),
     item(42),
   ],
+  notices: [],
 };
 
 function json(body: unknown, status = 200) {
@@ -104,11 +105,27 @@ describe("CardDocumentsPage", () => {
     expect(await screen.findByRole("button", { name: "nmID 1504904633 скопирован" })).toBeInTheDocument();
   });
 
-  it("warns that watching stopped and that collection failed", async () => {
-    renderPage({ ...sample, stale: true, last_error: "WB ответил 401" });
+  it("stacks backend notices as banners by level", async () => {
+    renderPage({
+      ...sample,
+      notices: [
+        { kind: "stale", level: "warning", since: "2026-10-22T07:00:00Z", detail: null },
+        { kind: "collection_error", level: "danger", since: null, detail: "WB ответил 401" },
+        { kind: "no_subscribers", level: "warning", since: null, detail: null },
+      ],
+    });
 
     expect(await screen.findByText("Наблюдение не работает")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("WB ответил 401");
+    expect(screen.getByText(/Нажмите «Ссылка на бота»/)).toBeInTheDocument();
+  });
+
+  it("ignores legacy stale and last_error without notices", async () => {
+    renderPage({ ...sample, stale: true, last_error: "WB ответил 401" });
+
+    expect(await screen.findByText("Документ не найден в реестре")).toBeInTheDocument();
+    expect(screen.queryByText("Наблюдение не работает")).not.toBeInTheDocument();
+    expect(screen.queryByText(/WB ответил 401/)).not.toBeInTheDocument();
   });
 
   it("says the cabinet was never collected", async () => {

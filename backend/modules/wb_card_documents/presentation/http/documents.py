@@ -15,6 +15,7 @@ from backend.modules.wb_card_documents.presentation.http.schemas import (
     CardDocumentItemResponse,
     CardDocumentsBoardResponse,
     CardDocumentsInviteLinkResponse,
+    CardDocumentsNoticeResponse,
     CardDocumentsRefreshResponse,
     CardDocumentsSummaryResponse,
     CardDocumentState,
@@ -35,6 +36,7 @@ def board_response(board: DocumentsBoard) -> CardDocumentsBoardResponse:
         stale=board.stale,
         summary=CardDocumentsSummaryResponse(**asdict(board.summary)),
         items=[CardDocumentItemResponse(**asdict(row)) for row in board.items],
+        notices=[CardDocumentsNoticeResponse(**asdict(notice)) for notice in board.notices],
     )
 
 

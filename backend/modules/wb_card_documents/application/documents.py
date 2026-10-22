@@ -8,14 +8,26 @@ from backend.modules.notifications.application import BotNotFoundError, BotRegis
 from backend.modules.notifications.domain import Invite
 from backend.modules.wb_card_documents.application.notifications import remaining_days
 from backend.modules.wb_card_documents.application.view import (
+    LEVEL_DANGER,
+    LEVEL_WARNING,
+    NOTICE_BOT_MISSING,
+    NOTICE_COLLECTION_ERROR,
+    NOTICE_NO_SUBSCRIBERS,
+    NOTICE_PERMANENT_ERROR,
+    NOTICE_STALE,
     CardDocumentsOverview,
     DocumentsBoard,
     DocumentsRow,
     DocumentsSummary,
+    Notice,
     RefreshRequest,
 )
 from backend.modules.wb_card_documents.domain import STATES, rank
-from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository, RefreshRequestModel
+from backend.modules.wb_card_documents.infrastructure.postgres import (
+    CardDocumentsRepository,
+    RefreshRequestModel,
+    TrackedSellerModel,
+)
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
@@ -102,7 +114,31 @@ class CardDocumentsService:
             stale=collected_at is None or collected_at < moment - self.stale,
             summary=DocumentsSummary(total=len(rows), **counts),
             items=tuple(row for row in rows if state is None or row.state == state),
+            notices=await self._notices(seller_id, tracked, moment),
         )
+
+    async def _notices(
+        self, seller_id: uuid.UUID, tracked: TrackedSellerModel | None, now: datetime
+    ) -> tuple[Notice, ...]:
+        """Баннеры страницы, вычисленные на чтении: пропало условие — пропал баннер.
+
+        «Ещё не собирали» здесь не повторяется: при `collected_at = null` его показывает фронт.
+        """
+        notices: list[Notice] = []
+        if tracked is not None:
+            if tracked.collected_at is not None and tracked.collected_at < now - self.stale:
+                notices.append(Notice(NOTICE_STALE, LEVEL_DANGER, since=tracked.collected_at))
+            if tracked.collection_error:
+                kind = NOTICE_PERMANENT_ERROR if tracked.collection_error_permanent else NOTICE_COLLECTION_ERROR
+                notices.append(Notice(kind, LEVEL_DANGER, since=tracked.attempted_at, detail=tracked.collection_error))
+        try:
+            bot = await self.bots.by_code(self.bot_code)
+        except BotNotFoundError:
+            notices.append(Notice(NOTICE_BOT_MISSING, LEVEL_WARNING, detail=self.bot_code))
+            return tuple(notices)
+        if not await self.subscriptions.subscriber_count(bot, seller_id):
+            notices.append(Notice(NOTICE_NO_SUBSCRIBERS, LEVEL_WARNING))
+        return tuple(notices)
 
     async def request_refresh(self, seller_id: uuid.UUID, requested_by: uuid.UUID | None = None) -> RefreshRequest:
         await self._enrolled(seller_id)

@@ -15,7 +15,6 @@ from backend.modules.wb_card_documents.domain import PROBLEMS, rank
 from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
     CardStateModel,
-    TrackedSellerModel,
 )
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.shared.kafka_streams.topics import NotificationTopics
@@ -24,12 +23,8 @@ from backend.shared.outbox import OutboxRepository
 TEMPLATE_ALERT = "card_documents.alert"
 TEMPLATE_BASELINE = "card_documents.baseline"
 TEMPLATE_DIGEST = "card_documents.digest"
-TEMPLATE_STALE = "card_documents.stale"
-TEMPLATE_COLLECTION_ERROR = "card_documents.collection_error"
 
 KIND_DIGEST = "digest"
-KIND_STALE = "stale"
-KIND_ERROR = "error"
 
 EVENT_TYPE = "CardDocumentsNotificationRequested"
 
@@ -37,16 +32,15 @@ EVENT_TYPE = "CardDocumentsNotificationRequested"
 class CardDocumentsPublisher:
     """Кладёт сообщения бота документов в outbox; в мессенджер отсюда никто не ходит.
 
-    Подписчикам кабинета — аудитория `seller_subscribers`, служебному чату — `chat`.
-    Если бот ещё не заведён, сообщение не ставится: событие с неизвестным ботом
-    модуль уведомлений всё равно отклонил бы.
+    Аудитория — подписчики кабинета (`seller_subscribers`). Служебного чата нет: сбои
+    наблюдения показываются баннерами на странице автоматизации. Если бот ещё не заведён,
+    сообщение не ставится: событие с неизвестным ботом модуль уведомлений всё равно отклонил бы.
     """
 
-    def __init__(self, session: AsyncSession, bots: BotRegistry, *, bot_code: str, service_chat_id: int = 0) -> None:
+    def __init__(self, session: AsyncSession, bots: BotRegistry, *, bot_code: str) -> None:
         self.session = session
         self.bots = bots
         self.bot_code = bot_code
-        self.service_chat_id = service_chat_id
         self.logger = logging.getLogger("wb.card_documents.notifications")
         self._bot_ready: bool | None = None
 
@@ -64,15 +58,6 @@ class CardDocumentsPublisher:
         if not await self.ready():
             return False
         self._add(seller_id, {"type": "seller_subscribers", "seller_id": str(seller_id)}, template, dedupe, params)
-        return True
-
-    async def to_service(self, seller_id: uuid.UUID, template: str, *, dedupe: str, params: dict[str, Any]) -> bool:
-        if not self.service_chat_id:
-            self.logger.warning("card_documents_service_chat_missing", extra={"template": template, **params})
-            return False
-        if not await self.ready():
-            return False
-        self._add(seller_id, {"type": "chat", "chat_id": self.service_chat_id}, template, dedupe, params)
         return True
 
     def _add(self, seller_id: uuid.UUID, audience: dict[str, Any], template: str, dedupe: str, params: dict) -> None:
@@ -149,11 +134,10 @@ def remaining_days(end: date | None, endless: bool, today: date) -> int | None:
 @dataclass(frozen=True, slots=True)
 class WatchReport:
     digest: bool = False
-    stale: bool = False
 
 
 class NotificationService:
-    """Сообщения по расписанию: дайджест открытых проблем и служебное «наблюдение не работает»."""
+    """Сообщение по расписанию: дайджест открытых проблем раз в сутки."""
 
     def __init__(
         self,
@@ -181,29 +165,9 @@ class NotificationService:
         if tracked is None:
             return WatchReport()
         seller_name = await self._seller_name(seller_id)
-        stale = await self._stale(seller_id, seller_name, tracked, now)
         digest = await self._digest(seller_id, seller_name, tracked.baseline_at, tracked.collected_at, now)
         await self.session.commit()
-        return WatchReport(digest=digest, stale=stale)
-
-    async def collection_failed(self, seller_id: uuid.UUID, error: str, *, now: datetime) -> bool:
-        """Постоянная ошибка кабинета (ключ без «Контента» и т. п.) — один раз за эпизод, в служебный чат."""
-        tracked = await self.documents.tracked(seller_id)
-        if tracked is None:
-            return False
-        episode = _iso(tracked.collected_at) or f"never:{_iso(tracked.enrolled_at)}"
-        key = f"{episode}:{hashlib.sha1(error.encode()).hexdigest()[:12]}"
-        if await self.documents.logged(seller_id, KIND_ERROR, key):
-            return False
-        sent = await self.publisher.to_service(
-            seller_id,
-            TEMPLATE_COLLECTION_ERROR,
-            dedupe=f"card-documents:error:{seller_id}:{key}",
-            params={"seller_name": await self._seller_name(seller_id), "error": error[:500]},
-        )
-        await self.documents.log_sent(seller_id, KIND_ERROR, key, now)
-        await self.session.commit()
-        return sent
+        return WatchReport(digest=digest)
 
     def digest_due(self, now: datetime) -> bool:
         local = now.astimezone(self.timezone)
@@ -243,27 +207,6 @@ class NotificationService:
                 },
             )
         await self.documents.log_sent(seller_id, KIND_DIGEST, key, now)
-        return sent
-
-    async def _stale(self, seller_id: uuid.UUID, seller_name: str, tracked: TrackedSellerModel, now: datetime) -> bool:
-        reference = tracked.collected_at or tracked.enrolled_at
-        if reference >= now - self.stale:
-            return False
-        key = _iso(reference) or "never"
-        if await self.documents.logged(seller_id, KIND_STALE, key):
-            return False
-        sent = await self.publisher.to_service(
-            seller_id,
-            TEMPLATE_STALE,
-            dedupe=f"card-documents:stale:{seller_id}:{key}",
-            params={
-                "seller_name": seller_name,
-                "collected_at": _iso(tracked.collected_at),
-                "hours": int(self.stale.total_seconds() // 3600),
-                "error": tracked.collection_error,
-            },
-        )
-        await self.documents.log_sent(seller_id, KIND_STALE, key, now)
         return sent
 
     async def _seller_name(self, seller_id: uuid.UUID) -> str:

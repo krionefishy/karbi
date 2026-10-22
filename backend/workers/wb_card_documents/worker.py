@@ -25,12 +25,13 @@ STALE_REFRESH = timedelta(hours=1)
 
 
 class CardDocumentsWorker(PollingWorker):
-    """Документы карточек: сбор раз в `interval_hours`, кнопка «Обновить», дайджест и сторож.
+    """Документы карточек: сбор раз в `interval_hours`, кнопка «Обновить» и дайджест.
 
     Попытка отмечается до сети, после неудачи повтор через `retry_minutes`, никогда не
     собранный кабинет идёт сразу. В часы `skip_hours` плановый сбор не начинается — это
-    окна каталога и чек-листа, бюджет «Контента» у них общий. Дайджест и «наблюдение
-    не работает» проверяются каждый проход: им сеть WB не нужна.
+    окна каталога и чек-листа, бюджет «Контента» у них общий. Дайджест проверяется
+    каждый проход: ему сеть WB не нужна. Сбои наблюдения в Telegram не уходят — их
+    показывает страница автоматизации.
     """
 
     tick_failed_event = "card_documents_tick_failed"
@@ -99,11 +100,9 @@ class CardDocumentsWorker(PollingWorker):
             except Exception:
                 self.logger.exception("card_documents_watch_failed", seller_id=str(seller_id))
                 continue
-            if report.digest or report.stale:
+            if report.digest:
                 sent += 1
-                self.logger.info(
-                    "card_documents_watched", seller_id=str(seller_id), digest=report.digest, stale=report.stale
-                )
+                self.logger.info("card_documents_digest_sent", seller_id=str(seller_id))
         return sent
 
     async def serve_refresh_requests(self) -> None:
@@ -170,7 +169,6 @@ class CardDocumentsWorker(PollingWorker):
             session,
             BotRegistry(session, NotificationRepository(session)),
             bot_code=self.config.notification_bot,
-            service_chat_id=self.config.service_chat_id,
         )
 
     def notifications(self, session: AsyncSession) -> NotificationService:
@@ -186,13 +184,7 @@ class CardDocumentsWorker(PollingWorker):
         )
 
     async def _fail(self, seller_id: uuid.UUID, error: str, *, permanent: bool = False) -> None:
+        """Ошибка остаётся на кабинете; страница показывает её баннером, пока следующий сбор не пройдёт."""
         async with self.database.session() as session:
-            await CardDocumentsRepository(session).fail_collection(seller_id, error)
+            await CardDocumentsRepository(session).fail_collection(seller_id, error, permanent=permanent)
             await session.commit()
-        if not permanent:
-            return
-        try:
-            async with self.database.session() as session:
-                await self.notifications(session).collection_failed(seller_id, error, now=datetime.now(UTC))
-        except Exception:
-            self.logger.exception("card_documents_error_alert_failed", seller_id=str(seller_id))

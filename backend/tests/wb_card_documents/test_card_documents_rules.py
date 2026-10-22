@@ -8,9 +8,7 @@ from backend.modules.notifications.application.templates import render
 from backend.modules.wb_card_documents.application import (
     TEMPLATE_ALERT,
     TEMPLATE_BASELINE,
-    TEMPLATE_COLLECTION_ERROR,
     TEMPLATE_DIGEST,
-    TEMPLATE_STALE,
     alert_dedupe,
 )
 from backend.modules.wb_card_documents.domain import (
@@ -387,9 +385,6 @@ def test_the_digest_fits_telegram_on_a_mass_rejection() -> None:
 
 
 def test_times_in_messages_are_moscow_and_the_digest_hour_is_configurable() -> None:
-    stale = render(TEMPLATE_STALE, {"seller_name": "ИП", "hours": 9, "collected_at": "2026-10-21T22:30:00+00:00"})
-    assert "22 окт. 01:30 МСК" in stale and "UTC" not in stale
-
     digest = render(
         TEMPLATE_DIGEST,
         {"seller_name": "ИП", "stale": True, "collected_at": "2026-10-21T22:30:00+00:00", "items": []},
@@ -426,5 +421,3 @@ def test_templates_render_every_message() -> None:
     assert "3 карточки с проблемами" in render(TEMPLATE_BASELINE, {"seller_name": "ИП", "cards": 120, "problems": 3})
     digest = render(TEMPLATE_DIGEST, {"seller_name": "ИП", "items": [card, {**card, "state": "missing"}]})
     assert digest.startswith("ИП: 2 карточки с проблемами в документах")
-    assert "не работает больше 9 ч." in render(TEMPLATE_STALE, {"seller_name": "ИП", "hours": 9})
-    assert "«Контент»" in render(TEMPLATE_COLLECTION_ERROR, {"seller_name": "ИП", "error": "нет доступа"})

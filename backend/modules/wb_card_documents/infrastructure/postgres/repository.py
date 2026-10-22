@@ -94,19 +94,19 @@ class CardDocumentsRepository:
         )
 
     async def finish_collection(self, seller_id: uuid.UUID, now: datetime, *, baseline: bool) -> None:
-        values: dict[str, Any] = {"collected_at": now, "collection_error": None}
+        values: dict[str, Any] = {"collected_at": now, "collection_error": None, "collection_error_permanent": False}
         if baseline:
             values["baseline_at"] = now
         await self.session.execute(
             update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(**values)
         )
 
-    async def fail_collection(self, seller_id: uuid.UUID, error: str) -> None:
-        """Keep the previous states and their date; only say what went wrong."""
+    async def fail_collection(self, seller_id: uuid.UUID, error: str, *, permanent: bool = False) -> None:
+        """Keep the previous states and their date; only say what went wrong and whether a retry can help."""
         await self.session.execute(
             update(TrackedSellerModel)
             .where(TrackedSellerModel.seller_id == seller_id)
-            .values(collection_error=error[:1000])
+            .values(collection_error=error[:1000], collection_error_permanent=permanent)
         )
 
     async def collection_summary(self, seller_ids: set[uuid.UUID]) -> tuple[datetime | None, int]:

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Copy, Link2, RefreshCw } from "lucide-react";
+import { AlertOctagon, AlertTriangle, Check, Copy, Link2, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -15,11 +15,11 @@ import {
   requestRefresh,
 } from "../features/cardDocuments/api";
 import {
+  banners,
   daysLeftText,
   daysTone,
   documentPeriod,
   emptyMessage,
-  notices,
   reasonLabel,
   stateLabel,
   stateTone,
@@ -146,7 +146,7 @@ export function CardDocumentsPage() {
   const selected = sellers.find((seller) => seller.id === sellerId);
   const items = documents?.items ?? [];
   const shown = useMemo(() => visibleItems(items, filter, search), [items, filter, search]);
-  const warnings = documents ? notices(documents, formatMoment) : [];
+  const warnings = documents && selected ? banners(documents, true) : [];
   const requestError =
     refreshMutation.error instanceof ApiError ? refreshMutation.error.message : refreshMutation.error ? "Не удалось запустить обновление" : "";
 
@@ -235,23 +235,28 @@ export function CardDocumentsPage() {
         )}
         {requestError && <div className="inline-error">{requestError}</div>}
         {refreshError && <div className="inline-error">Обновление не удалось: {refreshError}</div>}
-        {warnings.map((notice) => (
-          <div
-            key={notice.title}
-            className={notice.tone === "error" ? "inline-error" : "fbs-notice"}
-            role={notice.tone === "error" ? "alert" : "status"}
-          >
-            {notice.tone === "warning" && (
-              <span className="fbs-notice-mark" aria-hidden="true">
-                <AlertTriangle size={18} />
-              </span>
-            )}
-            <div>
-              <strong>{notice.title}</strong>
-              <p className="docs-notice-text">{notice.text}</p>
-            </div>
+        {warnings.length > 0 && (
+          <div className="docs-banners">
+            {warnings.map((item) => {
+              const Icon = item.level === "danger" ? AlertOctagon : AlertTriangle;
+              return (
+                <div
+                  key={item.key}
+                  className={`docs-banner docs-banner-${item.level}`}
+                  role={item.level === "danger" ? "alert" : "status"}
+                >
+                  <span className="docs-banner-mark" aria-hidden="true">
+                    <Icon size={18} />
+                  </span>
+                  <div>
+                    <strong>{item.title}</strong>
+                    {item.text && <p>{item.text}</p>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))}
+        )}
 
         {isLoading || (Boolean(sellerId) && documentsLoading) ? (
           <div className="loading-block">Загружаем данные…</div>

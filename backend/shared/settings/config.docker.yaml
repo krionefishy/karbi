@@ -126,8 +126,6 @@ card_documents:
   # Плановый сбор не стартует в окна каталога (02:30) и чек-листа (05:00): бюджет «Контента» общий.
   skip_hours: [2, 5]
   notification_bot: ${CARD_DOCUMENTS_NOTIFICATION_BOT:-card-documents}
-  # Служебный чат для «наблюдение не работает» и постоянных ошибок кабинета; 0 — только лог.
-  service_chat_id: ${CARD_DOCUMENTS_SERVICE_CHAT_ID:-0}
 
 support_bot:
   # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.

@@ -1,4 +1,4 @@
-import type { CardDocumentItem, CardDocuments, CardDocumentsSummary, DocumentState } from "./types";
+import type { CardDocumentItem, CardDocuments, CardDocumentsSummary, DocumentState, Notice, NoticeLevel } from "./types";
 
 export type DocumentFilter = "problems" | "all" | DocumentState;
 
@@ -103,31 +103,69 @@ export function visibleItems(items: CardDocumentItem[], filter: DocumentFilter, 
   });
 }
 
-export interface Notice {
-  tone: "error" | "warning";
+export interface Banner {
+  key: string;
+  level: NoticeLevel;
   title: string;
-  text: string;
+  text: string | null;
 }
 
-export function notices(data: CardDocuments, formatMoment: (iso: string) => string): Notice[] {
-  const collected: Notice[] = [];
-  if (data.stale) {
-    collected.push({
-      tone: "warning",
-      title: "Наблюдение не работает",
-      text: data.collected_at
-        ? `Последний успешный сбор — ${formatMoment(data.collected_at)}. Новые проблемы с документами сейчас не видны: это не «ошибок нет», а «не знаем».`
-        : "Успешных сборов по кабинету ещё не было. Новые проблемы с документами сейчас не видны: это не «ошибок нет», а «не знаем».",
-    });
+const mskFormatter = new Intl.DateTimeFormat("ru-RU", {
+  timeZone: "Europe/Moscow",
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+export function formatMsk(iso: string): string {
+  return `${mskFormatter.format(new Date(iso))} МСК`;
+}
+
+export function agoText(iso: string, now: Date): string {
+  const minutes = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 60_000));
+  if (minutes < 60) return `${minutes} мин назад`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} ч назад`;
+  return `${Math.floor(hours / 24)} дн. назад`;
+}
+
+function banner(notice: Notice, data: CardDocuments, canInvite: boolean, now: Date): Omit<Banner, "key" | "level"> {
+  switch (notice.kind) {
+    case "stale": {
+      const last = notice.since ?? data.collected_at;
+      return {
+        title: "Наблюдение не работает",
+        text: last
+          ? `Последний сбор был ${agoText(last, now)} (${formatMsk(last)}). Состояния ниже могли устареть.`
+          : "Успешных сборов по кабинету ещё не было. Состояния ниже могли устареть.",
+      };
+    }
+    case "collection_error":
+      return { title: "Последний сбор не удался, показаны прежние состояния", text: notice.detail };
+    case "permanent_error":
+      return {
+        title: "Кабинет не читается",
+        text: notice.detail ? `${notice.detail}. Нужно вмешательство.` : "Нужно вмешательство.",
+      };
+    case "no_subscribers":
+      return {
+        title: "Некому слать уведомления: на кабинет никто не подписан",
+        text: canInvite ? "Нажмите «Ссылка на бота» и отправьте ссылку сотруднику." : null,
+      };
+    case "bot_missing":
+      return { title: "Бот уведомлений не зарегистрирован — обратитесь к администратору", text: null };
+    default:
+      return { title: notice.detail ?? notice.kind, text: null };
   }
-  if (data.last_error) {
-    collected.push({
-      tone: "error",
-      title: "Последний сбор не удался",
-      text: `${data.last_error}. Показаны состояния с прошлого успешного сбора.`,
-    });
-  }
-  return collected;
+}
+
+export function banners(data: CardDocuments, canInvite: boolean, now: Date = new Date()): Banner[] {
+  return (data.notices ?? []).map((notice, index) => ({
+    key: `${notice.kind}:${index}`,
+    level: notice.level === "danger" ? "danger" : "warning",
+    ...banner(notice, data, canInvite, now),
+  }));
 }
 
 export function emptyMessage(filter: DocumentFilter, summary: CardDocumentsSummary, search: string): string {

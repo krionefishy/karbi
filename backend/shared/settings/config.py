@@ -191,7 +191,8 @@ class CardDocumentsConfig:
 
     Интервал меньше часа без курсора по `updatedAt` съедает бюджет «Контента» у всех
     автоматизаций кабинета. В `skip_hours` плановый сбор не начинается: это окна каталога
-    (02:30) и чек-листа (05:00). `service_chat_id` 0 — служебный чат не задан, сбои только в лог.
+    (02:30) и чек-листа (05:00). Сбои наблюдения показываются баннерами на странице, `stale_hours`
+    — порог баннера «данные устарели».
     """
 
     timezone: str = "Europe/Moscow"
@@ -203,7 +204,6 @@ class CardDocumentsConfig:
     digest_minute: int = 0
     skip_hours: tuple[int, ...] = (2, 5)
     notification_bot: str = "card-documents"
-    service_chat_id: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -522,7 +522,6 @@ class Settings:
             "stale_hours",
             "digest_hour",
             "digest_minute",
-            "service_chat_id",
         ):
             if key in card_documents:
                 card_documents[key] = int(card_documents[key] or 0)

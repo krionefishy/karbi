@@ -28,6 +28,25 @@ class DocumentsSummary:
     mismatch: int = 0
 
 
+NOTICE_STALE = "stale"
+NOTICE_COLLECTION_ERROR = "collection_error"
+NOTICE_PERMANENT_ERROR = "permanent_error"
+NOTICE_NO_SUBSCRIBERS = "no_subscribers"
+NOTICE_BOT_MISSING = "bot_missing"
+LEVEL_DANGER = "danger"
+LEVEL_WARNING = "warning"
+
+
+@dataclass(frozen=True, slots=True)
+class Notice:
+    """A banner on the automation page, computed on read: the condition gone, the banner gone."""
+
+    kind: str
+    level: str
+    since: datetime | None = None
+    detail: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class DocumentsBoard:
     collected_at: datetime | None
@@ -35,6 +54,7 @@ class DocumentsBoard:
     stale: bool
     summary: DocumentsSummary
     items: tuple[DocumentsRow, ...]
+    notices: tuple[Notice, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

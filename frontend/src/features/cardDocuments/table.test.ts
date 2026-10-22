@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  agoText,
+  banners,
   daysLeftText,
   daysTone,
   documentPeriod,
   emptyMessage,
-  notices,
   reasonLabel,
   stateTone,
   tiles,
   visibleItems,
 } from "./table";
-import type { CardDocumentItem, CardDocuments, CardDocumentsSummary } from "./types";
+import type { CardDocumentItem, CardDocuments, CardDocumentsSummary, Notice } from "./types";
 
 const summary: CardDocumentsSummary = { total: 5, ok: 2, rejected: 1, missing: 0, expiring: 1, mismatch: 1 };
 
@@ -34,10 +35,20 @@ function item(nmId: number, overrides: Partial<CardDocumentItem> = {}): CardDocu
 }
 
 function data(overrides: Partial<CardDocuments> = {}): CardDocuments {
-  return { collected_at: "2026-10-22T07:00:00Z", last_error: null, stale: false, summary, items: [], ...overrides };
+  return { collected_at: "2026-10-22T07:00:00Z", last_error: null, stale: false, summary, items: [], notices: [], ...overrides };
 }
 
-const moment = (iso: string) => `[${iso}]`;
+const now = new Date("2026-10-22T19:00:00Z");
+
+function notice(kind: string, overrides: Partial<Notice> = {}): Notice {
+  return { kind, level: "warning", since: null, detail: null, ...overrides };
+}
+
+function only(item: Notice, canInvite = true) {
+  const [first, ...rest] = banners(data({ notices: [item] }), canInvite, now);
+  expect(rest).toEqual([]);
+  return first;
+}
 
 describe("card documents table", () => {
   it("names WB reasons in Russian and keeps unknown ones as they came", () => {
@@ -93,15 +104,59 @@ describe("card documents table", () => {
     expect(visibleItems(items, "all", "Д-3").map((row) => row.nm_id)).toEqual([3]);
   });
 
-  it("warns when watching stopped and when the last collection failed", () => {
-    expect(notices(data(), moment)).toEqual([]);
+  it("shows no banners when the backend reports nothing, even with legacy fields set", () => {
+    expect(banners(data({ stale: true, last_error: "WB ответил 401" }), true, now)).toEqual([]);
+  });
 
-    const stale = notices(data({ stale: true }), moment);
-    expect(stale[0].title).toBe("Наблюдение не работает");
-    expect(stale[0].text).toContain("[2026-10-22T07:00:00Z]");
+  it("tells how long ago the last collection was for stale", () => {
+    const stale = only(notice("stale", { since: "2026-10-22T07:00:00Z" }));
+    expect(stale.title).toBe("Наблюдение не работает");
+    expect(stale.text).toContain("Последний сбор был 12 ч назад");
+    expect(stale.text).toContain("10:00 МСК");
+    expect(stale.text).toContain("Состояния ниже могли устареть");
+    expect(only(notice("stale"), true).text).toContain("12 ч назад");
+    expect(banners(data({ collected_at: null, notices: [notice("stale")] }), true, now)[0].text).toContain(
+      "ещё не было",
+    );
+  });
 
-    const failed = notices(data({ last_error: "WB ответил 401" }), moment);
-    expect(failed).toEqual([expect.objectContaining({ tone: "error", text: expect.stringContaining("WB ответил 401") })]);
+  it("renders collection and permanent errors with the detail", () => {
+    const failed = only(notice("collection_error", { level: "danger", detail: "WB ответил 429" }));
+    expect(failed).toMatchObject({
+      level: "danger",
+      title: "Последний сбор не удался, показаны прежние состояния",
+      text: "WB ответил 429",
+    });
+    const permanent = only(notice("permanent_error", { level: "danger", detail: "ключ без права на «Контент»" }));
+    expect(permanent.title).toBe("Кабинет не читается");
+    expect(permanent.text).toBe("ключ без права на «Контент». Нужно вмешательство.");
+  });
+
+  it("asks to share the bot link when nobody is subscribed", () => {
+    const withButton = only(notice("no_subscribers"));
+    expect(withButton.title).toBe("Некому слать уведомления: на кабинет никто не подписан");
+    expect(withButton.text).toContain("«Ссылка на бота»");
+    expect(only(notice("no_subscribers"), false).text).toBeNull();
+  });
+
+  it("sends to the administrator when the bot is missing", () => {
+    expect(only(notice("bot_missing", { level: "danger" }))).toMatchObject({
+      level: "danger",
+      title: "Бот уведомлений не зарегистрирован — обратитесь к администратору",
+    });
+  });
+
+  it("shows an unknown kind as it came with its level", () => {
+    expect(only(notice("quota_low", { level: "danger", detail: "Квота почти кончилась" }))).toMatchObject({
+      level: "danger",
+      title: "Квота почти кончилась",
+    });
+    expect(only(notice("quota_low")).title).toBe("quota_low");
+  });
+
+  it("counts time ago in minutes, hours and days", () => {
+    expect(agoText("2026-10-22T18:35:00Z", now)).toBe("25 мин назад");
+    expect(agoText("2026-10-19T19:00:00Z", now)).toBe("3 дн. назад");
   });
 
   it("explains an empty table", () => {

@@ -35,7 +35,7 @@ flowchart TB
     end
     subgraph documents["wb-card-documents-worker"]
         d1["документы и вердикты карточек<br/>каждые 3 часа"]
-        d2["дайджест в 10:00, сторож «наблюдение не работает»"]
+        d2["дайджест в 10:00"]
         d3["кнопка «Обновить»"]
     end
     subgraph stocks["wb-fbs-stocks-worker"]

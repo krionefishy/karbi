@@ -26,7 +26,8 @@ class TrackedSellerModel(WBCardDocumentsBase):
     """Sellers under watch, how the last collection went and whether the first one is behind.
 
     `baseline_at` is set by the first successful collection: before it every
-    problem is «already there», after it a problem is news.
+    problem is «already there», after it a problem is news. `collection_error_permanent`
+    tells a key WB will keep refusing from a failure worth retrying; the page banner reads it.
     """
 
     __tablename__ = "tracked_sellers"
@@ -36,6 +37,7 @@ class TrackedSellerModel(WBCardDocumentsBase):
     collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    collection_error_permanent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

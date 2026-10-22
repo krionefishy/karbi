@@ -17,9 +17,7 @@ from backend.modules.wb_card_documents.application.enrollment import (
 from backend.modules.wb_card_documents.application.notifications import (
     TEMPLATE_ALERT,
     TEMPLATE_BASELINE,
-    TEMPLATE_COLLECTION_ERROR,
     TEMPLATE_DIGEST,
-    TEMPLATE_STALE,
     CardDocumentsPublisher,
     NotificationService,
     WatchReport,
@@ -30,6 +28,7 @@ from backend.modules.wb_card_documents.application.view import (
     DocumentsBoard,
     DocumentsRow,
     DocumentsSummary,
+    Notice,
     RefreshRequest,
 )
 
@@ -38,9 +37,7 @@ __all__ = [
     "DESCRIPTION",
     "TEMPLATE_ALERT",
     "TEMPLATE_BASELINE",
-    "TEMPLATE_COLLECTION_ERROR",
     "TEMPLATE_DIGEST",
-    "TEMPLATE_STALE",
     "TITLE",
     "CardDocumentsEnrollment",
     "CardDocumentsOverview",
@@ -54,6 +51,7 @@ __all__ = [
     "DocumentsSummary",
     "NotificationBotMissingError",
     "NotificationService",
+    "Notice",
     "RefreshRequest",
     "UnknownStateError",
     "WatchReport",

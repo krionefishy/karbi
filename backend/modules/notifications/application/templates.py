@@ -24,8 +24,6 @@ RETURNS_UNKNOWN = "returns.unknown"
 CARD_DOCUMENTS_ALERT = "card_documents.alert"
 CARD_DOCUMENTS_BASELINE = "card_documents.baseline"
 CARD_DOCUMENTS_DIGEST = "card_documents.digest"
-CARD_DOCUMENTS_STALE = "card_documents.stale"
-CARD_DOCUMENTS_COLLECTION_ERROR = "card_documents.collection_error"
 
 _DIGEST_LIMIT = 25
 _MESSAGE_BUDGET = 3900
@@ -397,26 +395,6 @@ def _card_documents_digest(params: dict[str, Any]) -> str:
     return text
 
 
-def _card_documents_stale(params: dict[str, Any]) -> str:
-    collected = _moscow(params.get("collected_at"))
-    since = f"последний удачный сбор {collected}" if collected else "сбора ещё не было"
-    lines = [
-        f"Документы карточек: наблюдение за {params.get('seller_name') or 'кабинетом'} не работает больше "
-        f"{params.get('hours', 9)} ч. ({since}). Для кабинета это «не знаем», а не «ошибок нет»."
-    ]
-    if params.get("error"):
-        lines.append(f"Последняя ошибка: {params.get('error')}")
-    return "\n".join(lines)
-
-
-def _card_documents_collection_error(params: dict[str, Any]) -> str:
-    return (
-        f"Документы карточек: {params.get('seller_name') or 'кабинет'} не собирается — "
-        f"{params.get('error') or 'ошибка WB'}. "
-        "Повтор не поможет: проверьте ключ и право на категорию «Контент»."
-    )
-
-
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_CONFIRMED: _confirmed,
     SUBSCRIPTION_INVALID_LINK: _invalid_link,
@@ -435,8 +413,6 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     CARD_DOCUMENTS_ALERT: _card_documents_alert,
     CARD_DOCUMENTS_BASELINE: _card_documents_baseline,
     CARD_DOCUMENTS_DIGEST: _card_documents_digest,
-    CARD_DOCUMENTS_STALE: _card_documents_stale,
-    CARD_DOCUMENTS_COLLECTION_ERROR: _card_documents_collection_error,
 }
 
 

@@ -1,9 +1,11 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 CardDocumentState = Literal["rejected", "missing", "expiring", "mismatch", "ok"]
+CardDocumentsNoticeKind = Literal["stale", "collection_error", "permanent_error", "no_subscribers", "bot_missing"]
+CardDocumentsNoticeLevel = Literal["danger", "warning"]
 
 
 class CardDocumentsSummaryResponse(BaseModel):
@@ -30,12 +32,24 @@ class CardDocumentItemResponse(BaseModel):
     since: datetime | None
 
 
+class CardDocumentsNoticeResponse(BaseModel):
+    """Баннер страницы. Вычисляется на чтении: пропало условие — пропал баннер."""
+
+    kind: CardDocumentsNoticeKind
+    level: CardDocumentsNoticeLevel
+    since: datetime | None
+    detail: str | None
+
+
 class CardDocumentsBoardResponse(BaseModel):
     collected_at: datetime | None
-    last_error: str | None
-    stale: bool
+    last_error: str | None = Field(
+        description="Устарело: используйте notices (collection_error / permanent_error).", deprecated=True
+    )
+    stale: bool = Field(description="Устарело: используйте notices (stale).", deprecated=True)
     summary: CardDocumentsSummaryResponse
     items: list[CardDocumentItemResponse]
+    notices: list[CardDocumentsNoticeResponse]
 
 
 class CardDocumentsRefreshResponse(BaseModel):
