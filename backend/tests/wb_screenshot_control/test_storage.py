@@ -344,6 +344,6 @@ def test_missing_recognition_is_a_clear_configuration_error(monkeypatch: pytest.
 
 def test_the_decider_seam_wraps_a_plain_function(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeDecider(verdict="needs_review")
-    monkeypatch.setattr(wiring, "_load", lambda target: fake.decide)
+    monkeypatch.setattr(wiring, "_load", lambda target: lambda inp, candidates, cfg: fake.decide(inp, candidates))
     decider = wiring.build_decider(BASE)
     assert decider.decide(None, []).verdict == "needs_review"  # type: ignore[arg-type]

@@ -43,17 +43,18 @@ def build_extractor(settings: Settings) -> Extractor:
 
 
 class _FunctionDecider:
-    def __init__(self, function: Any) -> None:
+    def __init__(self, function: Any, config: Any) -> None:
         self.function = function
+        self.config = config
 
     def decide(self, inp: DecisionInput, candidates: Sequence[Candidate]) -> Decision:
-        decision: Decision = self.function(inp, candidates)
+        decision: Decision = self.function(inp, candidates, self.config)
         return decision
 
 
 def build_decider(settings: Settings) -> Decider:
-    """`domain.decide.decide(inp, candidates) -> Decision` — чистая функция правил уникальности."""
-    return _FunctionDecider(_load(DECIDE_FUNCTION))
+    """`domain.decide.decide(inp, candidates, cfg) -> Decision` — чистая функция правил уникальности."""
+    return _FunctionDecider(_load(DECIDE_FUNCTION), settings.screenshot_control)
 
 
 def storage_bucket(settings: Settings) -> str:
