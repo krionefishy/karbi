@@ -162,12 +162,12 @@ def next_checklist_run_at(settings: Settings, now: datetime | None = None) -> da
 def next_card_documents_run_at(
     settings: Settings, overview: CardDocumentsOverview, now: datetime | None = None
 ) -> datetime:
-    """Опрос интервальный: следующий — через `interval_hours` после последнего удачного сбора."""
+    """Опрос интервальный: следующий — через `interval_minutes` после последнего удачного сбора."""
     documents = settings.card_documents
     moment = now or datetime.now(ZoneInfo(documents.timezone))
     if overview.last_success_at is None:
         return moment
-    return max(moment, overview.last_success_at + timedelta(hours=documents.interval_hours))
+    return max(moment, overview.last_success_at + timedelta(minutes=documents.interval_minutes))
 
 
 def next_penalties_run_at(settings: Settings, overview: PenaltiesOverview, now: datetime | None = None) -> datetime:

@@ -93,10 +93,22 @@ class CardDocumentsRepository:
             .values(attempted_at=now or datetime.now(UTC))
         )
 
-    async def finish_collection(self, seller_id: uuid.UUID, now: datetime, *, baseline: bool) -> None:
+    async def finish_collection(
+        self,
+        seller_id: uuid.UUID,
+        now: datetime,
+        *,
+        baseline: bool,
+        full: bool = False,
+        cursor: tuple[datetime, int] | None = None,
+    ) -> None:
         values: dict[str, Any] = {"collected_at": now, "collection_error": None, "collection_error_permanent": False}
         if baseline:
             values["baseline_at"] = now
+        if full:
+            values["full_collected_at"] = now
+        if cursor is not None:
+            values["cursor_updated_at"], values["cursor_nm_id"] = cursor
         await self.session.execute(
             update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(**values)
         )

@@ -117,7 +117,11 @@ returns:
 
 card_documents:
   timezone: Europe/Moscow
-  interval_hours: 3
+  # Каждый проход читает только изменённые карточки (курсор по updatedAt с запасом);
+  # полный обход — раз в full_interval_hours, только он видит карточки, ушедшие из каталога.
+  interval_minutes: 60
+  full_interval_hours: 24
+  cursor_margin_seconds: 60
   retry_minutes: 30
   stale_hours: 9
   expiry_thresholds: [30, 14, 7]

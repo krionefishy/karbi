@@ -2,7 +2,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
@@ -17,9 +17,12 @@ from backend.modules.wb_card_documents.application.notifications import (
 )
 from backend.modules.wb_card_documents.domain import (
     DEFAULT_THRESHOLDS,
+    CardDocument,
     CardDocuments,
     CardState,
+    DeclaredDocument,
     PreviousState,
+    Verdict,
     evaluate,
     should_alert,
 )
@@ -28,7 +31,9 @@ from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
 
 class CardDocumentsSource(Protocol):
-    async def cards(self, seller_id: str) -> list[CardDocuments]: ...
+    async def cards(
+        self, seller_id: str, *, start_cursor: tuple[datetime, int] | None = None
+    ) -> list[CardDocuments]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +45,7 @@ class CollectionResult:
     baseline: bool
     skipped: bool = False
     summary_sent: bool = False
+    full: bool = True
 
 
 class CollectionService:
@@ -52,6 +58,13 @@ class CollectionService:
     Первый сбор не считается состоявшимся, пока сводка не ушла: кабинет, подключённый
     до регистрации бота, остаётся в режиме первого сбора и получит сводку, как только бот
     появится. В журнал переходов `alerted` пишется по факту постановки сообщения.
+
+    Обход двух видов. Полный — весь каталог: первый сбор, раз в `full_interval` и по
+    кнопке; только он закрывает карточки, ушедшие из каталога. Между полными читаются
+    только изменённые карточки — от курсора (`updatedAt` минус `cursor_margin`, настоящий
+    `nmID` последней прочитанной карточки). Остальные
+    карточки с документами пересчитываются из сохранённого: пороги истечения сдвигаются
+    календарём, а не `updatedAt`.
     """
 
     def __init__(
@@ -65,6 +78,8 @@ class CollectionService:
         timezone: ZoneInfo,
         thresholds: Sequence[int] = DEFAULT_THRESHOLDS,
         digest_time: str = "10:00",
+        full_interval: timedelta = timedelta(hours=24),
+        cursor_margin: timedelta = timedelta(seconds=60),
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -74,24 +89,41 @@ class CollectionService:
         self.timezone = timezone
         self.thresholds = tuple(thresholds)
         self.digest_time = digest_time
+        self.full_interval = full_interval
+        self.cursor_margin = cursor_margin
         self.logger = logging.getLogger("wb.card_documents.collection")
 
-    async def collect(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> CollectionResult:
-        """Temporary WB errors propagate: the worker retries the whole seller later."""
-        cards = await self.source.cards(str(seller_id))
+    async def collect(
+        self, seller_id: uuid.UUID, *, now: datetime | None = None, full: bool = False
+    ) -> CollectionResult:
+        """Temporary WB errors propagate: the worker retries the whole seller later.
+
+        `full=True` forces the whole catalog (the «Обновить» button); otherwise the
+        kind of pass follows the schedule.
+        """
         moment = now or datetime.now(UTC)
+        since = await self._changed_since(seller_id, moment, force_full=full)
+        await self.session.rollback()
+        cards = await self.source.cards(str(seller_id), start_cursor=since)
         today = moment.astimezone(self.timezone).date()
+        incremental = since is not None
 
         tracked = await self.documents.still_tracked(seller_id)
         if tracked is None:
             await self.session.rollback()
-            return CollectionResult(0, 0, 0, 0, baseline=False, skipped=True)
+            return CollectionResult(0, 0, 0, 0, baseline=False, skipped=True, full=not incremental)
         baseline = tracked.baseline_at is None
         previous = await self.documents.open_states(seller_id)
         seller = await self.sellers.get(seller_id)
         seller_name = seller.name if seller else "магазин"
 
-        unique = {card.nm_id: card for card in cards}
+        fresh = {card.nm_id: card for card in cards}
+        cursor = max(((card.updated_at, card.nm_id) for card in cards if card.updated_at is not None), default=None)
+        unique = dict(fresh)
+        if incremental:
+            for nm_id, model in previous.items():
+                if nm_id not in unique and model.documents:
+                    unique[nm_id] = stored_card(model)
         rows: list[dict[str, Any]] = []
         transitions: list[dict[str, Any]] = []
         alerts: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -114,7 +146,7 @@ class CollectionService:
                 if alert:
                     alerts.append((row, transition))
 
-        closed = [nm_id for nm_id in previous if nm_id not in unique]
+        closed = [] if incremental else [nm_id for nm_id in previous if nm_id not in unique]
         await self.documents.save_states(rows)
         await self.documents.close_states(seller_id, closed, moment)
 
@@ -137,16 +169,48 @@ class CollectionService:
                 transition["alerted"] = await self._alert(seller_id, seller_name, row, today)
                 sent += int(transition["alerted"])
         await self.documents.add_transitions(transitions)
-        await self.documents.finish_collection(seller_id, moment, baseline=summary_sent)
+        stored = (
+            (tracked.cursor_updated_at, tracked.cursor_nm_id)
+            if tracked.cursor_updated_at is not None and tracked.cursor_nm_id is not None
+            else None
+        )
+        if stored is not None and (cursor is None or cursor < stored):
+            cursor = stored
+        await self.documents.finish_collection(
+            seller_id, moment, baseline=summary_sent, full=not incremental, cursor=cursor
+        )
         await self.session.commit()
         return CollectionResult(
-            cards=len(unique),
+            cards=len(fresh),
             problems=problems,
             alerts=sent,
             closed=len(closed),
             baseline=baseline,
             summary_sent=summary_sent,
+            full=not incremental,
         )
+
+    async def _changed_since(
+        self, seller_id: uuid.UUID, now: datetime, *, force_full: bool
+    ) -> tuple[datetime, int] | None:
+        """Where a changed-cards read starts, or None when this pass must read the whole catalog.
+
+        The start is the last card seen: its real nmID and its `updatedAt` moved back by the
+        margin. Without a stored nmID the read is full: WB ignores a cursor with `nmID: 0`.
+        """
+        if force_full:
+            return None
+        tracked = await self.documents.tracked(seller_id)
+        if (
+            tracked is None
+            or tracked.baseline_at is None
+            or tracked.full_collected_at is None
+            or tracked.cursor_updated_at is None
+            or tracked.cursor_nm_id is None
+            or tracked.full_collected_at <= now - self.full_interval
+        ):
+            return None
+        return tracked.cursor_updated_at - self.cursor_margin, tracked.cursor_nm_id
 
     async def _alert(self, seller_id: uuid.UUID, seller_name: str, row: dict[str, Any], today: date) -> bool:
         return await self.publisher.to_seller(
@@ -256,3 +320,59 @@ def _document_json(document: Any) -> dict[str, Any]:
         "reason": verdict.reason if verdict else None,
         "verdict_at": verdict.created_at.isoformat() if verdict and verdict.created_at else None,
     }
+
+
+def stored_card(model: CardStateModel) -> CardDocuments:
+    """A card rebuilt from what the last read stored, to recheck what the calendar moves."""
+    documents = tuple(_stored_document(item) for item in model.documents or [] if isinstance(item, dict))
+    declared = model.declared or {}
+    overall = (
+        Verdict(None, model.overall_status, model.overall_reason, model.overall_at)
+        if model.overall_status is not None or model.overall_reason or model.overall_at
+        else None
+    )
+    return CardDocuments(
+        nm_id=model.nm_id,
+        vendor_code=model.vendor_code,
+        title=model.title,
+        subject_name=model.subject_name,
+        has_block=True,
+        documents=documents,
+        overall=overall,
+        exclude_documents=False,
+        declared=DeclaredDocument(
+            number=declared.get("number"),
+            start=_day(declared.get("start")),
+            end=_day(declared.get("end")),
+        ),
+    )
+
+
+def _stored_document(item: dict[str, Any]) -> CardDocument:
+    has_verdict = any(item.get(key) is not None for key in ("verified", "status", "reason", "verdict_at"))
+    verdict_at = item.get("verdict_at")
+    return CardDocument(
+        document_id=str(item["id"]) if item.get("id") is not None else None,
+        document_type=item.get("type"),
+        number=str(item.get("number") or ""),
+        start=_day(item.get("start")),
+        end=_day(item.get("end")),
+        endless=bool(item.get("endless")),
+        verdict=Verdict(
+            item.get("verified"),
+            item.get("status"),
+            item.get("reason"),
+            datetime.fromisoformat(verdict_at) if verdict_at else None,
+        )
+        if has_verdict
+        else None,
+    )
+
+
+def _day(value: Any) -> date | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None

@@ -1,9 +1,12 @@
 from backend.modules.wb_card_documents.domain.entities import CardDocument, CardDocuments, DeclaredDocument, Verdict
 from backend.modules.wb_card_documents.domain.rules import (
     DEFAULT_THRESHOLDS,
+    DOCUMENT_REASONS,
     EXPIRED_THRESHOLD,
     KNOWN_REASONS,
+    LISTING_REASONS,
     PROBLEMS,
+    REASON_DOCUMENT_MISSING,
     REASON_END_MISMATCH,
     REASON_EXPIRED,
     REASON_INVALID,
@@ -31,6 +34,9 @@ from backend.modules.wb_card_documents.domain.rules import (
 
 __all__ = [
     "DEFAULT_THRESHOLDS",
+    "DOCUMENT_REASONS",
+    "LISTING_REASONS",
+    "REASON_DOCUMENT_MISSING",
     "EXPIRED_THRESHOLD",
     "KNOWN_REASONS",
     "PROBLEMS",

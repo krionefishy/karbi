@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.modules.wb_core.infrastructure.wb.egress import (
@@ -73,14 +74,27 @@ class WBContentClient:
     async def get_articles(self, seller_id: str) -> list[CatalogCard]:
         return await self._consume(seller_id, self.endpoint, {"withPhoto": -1})
 
-    async def raw_cards(self, seller_id: str) -> AsyncIterator[dict[str, Any]]:
+    async def raw_cards(
+        self, seller_id: str, *, start_cursor: tuple[datetime, int] | None = None
+    ) -> AsyncIterator[dict[str, Any]]:
         """Карточки в продаже как их отдал WB, без разбора в `CatalogCard`.
 
         Каталогу хватает названия и размеров, а автоматизациям бывают нужны
         описание, видео и характеристики. Пагинация при этом одна и та же,
         поэтому она живёт здесь, а разбор — у того, кому поля нужны.
+
+        `start_cursor` — пара (`updatedAt`, `nmID`), с которой продолжить обход по
+        возрастанию: приходят карточки, изменённые не раньше этого момента. `nmID` обязан
+        быть настоящим: на живом кабинете 22.10.2026 курсор с `nmID: 0` WB молча
+        игнорировал и отдавал каталог с начала, а реальный nmID со сдвинутым назад
+        `updatedAt` работал. Ушедшие из каталога так не видны — для них нужен полный обход.
         """
-        async for page in self._pages(seller_id, self.endpoint, {"withPhoto": -1}):
+        start = None
+        if start_cursor is not None:
+            updated_at, nm_id = start_cursor
+            moment = updated_at.astimezone(UTC).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            start = {"updatedAt": moment, "nmID": nm_id}
+        async for page in self._pages(seller_id, self.endpoint, {"withPhoto": -1}, start=start):
             for item in page:
                 yield item
 
@@ -100,8 +114,10 @@ class WBContentClient:
         seller_id: str,
         endpoint: str,
         card_filter: dict[str, Any] | None,
+        *,
+        start: dict[str, Any] | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        cursor: dict[str, Any] = {"limit": PAGE_LIMIT}
+        cursor: dict[str, Any] = {"limit": PAGE_LIMIT, **(start or {})}
         while True:
             settings: dict[str, Any] = {"sort": {"ascending": True}, "cursor": cursor}
             if card_filter is not None:

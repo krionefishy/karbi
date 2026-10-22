@@ -6,6 +6,7 @@ from backend.modules.wb_card_documents.domain import CardDocument, CardDocuments
 from backend.modules.wb_core.infrastructure.wb import EgressGateway, WBContentClient
 
 NUMBER_CHARACTERISTIC = 15001135
+CERTIFICATE_NUMBER_CHARACTERISTIC = 15001136
 START_CHARACTERISTIC = 15001137
 END_CHARACTERISTIC = 15001138
 NUMBER_NAMES = ("номер декларации", "номер сертификата")
@@ -23,9 +24,10 @@ class WBCardDocumentsClient:
     def __init__(self, gateway: EgressGateway) -> None:
         self.catalog = WBContentClient(gateway)
 
-    async def cards(self, seller_id: str) -> list[CardDocuments]:
+    async def cards(self, seller_id: str, *, start_cursor: tuple[datetime, int] | None = None) -> list[CardDocuments]:
+        """Весь каталог или, с `start_cursor` (`updatedAt`, настоящий `nmID`), только изменённые карточки."""
         cards = []
-        async for raw in self.catalog.raw_cards(seller_id):
+        async for raw in self.catalog.raw_cards(seller_id, start_cursor=start_cursor):
             parsed = parse_card_documents(raw)
             if parsed is not None:
                 cards.append(parsed)
@@ -57,6 +59,7 @@ def parse_card_documents(raw: Any) -> CardDocuments | None:
         overall=parse_verdict(block.get("overallVerdict")),
         exclude_documents=bool(block.get("excludeDocuments")),
         declared=parse_declared(raw.get("characteristics")),
+        updated_at=_moment(raw.get("updatedAt")),
     )
 
 
@@ -66,7 +69,7 @@ def parse_document(raw: dict[str, Any]) -> CardDocument | None:
     if not number and verdict is None:
         return None
     return CardDocument(
-        document_id=_int(raw.get("id")),
+        document_id=_text(raw.get("id")),
         document_type=_int(raw.get("type")),
         number=number,
         start=_iso_day(raw.get("startDate")),
@@ -113,6 +116,9 @@ def parse_declared(characteristics: Any) -> DeclaredDocument:
 
 
 def _declared_kind(charc_id: int | None, name: str) -> int | None:
+    """Номер декларации (тип 2) и номер сертификата (тип 1) — одно и то же для нашей сверки."""
+    if charc_id == CERTIFICATE_NUMBER_CHARACTERISTIC:
+        return NUMBER_CHARACTERISTIC
     if charc_id in (NUMBER_CHARACTERISTIC, START_CHARACTERISTIC, END_CHARACTERISTIC):
         return charc_id
     if name.startswith(NUMBER_NAMES):
@@ -168,6 +174,14 @@ def _moment(value: Any) -> datetime | None:
     except ValueError:
         return None
     return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+def _text(value: Any) -> str | None:
+    """Id документа у WB — строка UUID; число, если когда-то придёт, тоже станет строкой."""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _int(value: Any) -> int | None:

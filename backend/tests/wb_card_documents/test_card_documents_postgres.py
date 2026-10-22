@@ -23,6 +23,7 @@ from backend.modules.wb_card_documents.application import (
 from backend.modules.wb_card_documents.domain import CardDocument, CardDocuments, DeclaredDocument, Verdict
 from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
+    TrackedSellerModel,
 )
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
@@ -48,10 +49,11 @@ def card(
     end: date | None = None,
     vendor_code: str | None = None,
     declared: str | None = None,
+    updated_at: datetime | None = None,
 ) -> CardDocuments:
     status = 1 if reason == "valid" else 2
     document = CardDocument(
-        document_id=nm_id,
+        document_id=f"00000000-0000-4000-8000-{nm_id:012d}",
         document_type=2,
         number=number,
         start=date(2026, 10, 14),
@@ -69,6 +71,7 @@ def card(
         overall=None,
         exclude_documents=False,
         declared=DeclaredDocument(number=declared),
+        updated_at=updated_at,
     )
 
 
@@ -77,11 +80,15 @@ def day(moment: datetime) -> date:
 
 
 class FakeSource:
+    """Отдаёт заданные карточки и запоминает, с какого `updatedAt` его спрашивали (None — полный обход)."""
+
     def __init__(self, cards: list[CardDocuments]) -> None:
         self.cards_served = cards
         self.error: Exception | None = None
+        self.calls: list[tuple[datetime, int] | None] = []
 
-    async def cards(self, seller_id: str) -> list[CardDocuments]:
+    async def cards(self, seller_id: str, *, start_cursor: tuple[datetime, int] | None = None) -> list[CardDocuments]:
+        self.calls.append(start_cursor)
         if self.error is not None:
             raise self.error
         return list(self.cards_served)
@@ -124,17 +131,28 @@ def publisher(session: AsyncSession, bot: str = BOT) -> CardDocumentsPublisher:
 
 
 async def collect(
-    database: Database, seller_id: uuid.UUID, cards: list[CardDocuments], *, now: datetime = NOW, bot: str = BOT
+    database: Database,
+    seller_id: uuid.UUID,
+    cards: list[CardDocuments],
+    *,
+    now: datetime = NOW,
+    bot: str = BOT,
+    source: FakeSource | None = None,
+    full: bool = False,
+    full_interval: timedelta = timedelta(hours=24),
 ):
+    if source is not None:
+        source.cards_served = cards
     async with database.session() as session:
         return await CollectionService(
             session,
             SellerRepository(session),
             CardDocumentsRepository(session),
-            FakeSource(cards),
+            source or FakeSource(cards),
             publisher(session, bot),
             timezone=MOSCOW,
-        ).collect(seller_id, now=now)
+            full_interval=full_interval,
+        ).collect(seller_id, now=now, full=full)
 
 
 def notifications(session: AsyncSession) -> NotificationService:
@@ -518,7 +536,7 @@ async def test_the_worker_collects_on_interval_skips_busy_hours_and_serves_the_b
     quiet = datetime.combine(TODAY, datetime.min.time(), tzinfo=MOSCOW).replace(hour=2, minute=40)
     worker = CardDocumentsWorker(database, source, SETTINGS)
 
-    assert worker.due_since(NOW) == NOW - timedelta(hours=SETTINGS.card_documents.interval_hours)
+    assert worker.due_since(NOW) == NOW - timedelta(minutes=SETTINGS.card_documents.interval_minutes)
     assert await worker.collect_due(quiet) == 0
     assert await worker.collect_due(quiet.replace(hour=3)) >= 1
     async with database.session() as session:
@@ -539,3 +557,116 @@ async def test_the_worker_collects_on_interval_skips_busy_hours_and_serves_the_b
     async with database.session() as session:
         state = await board_service(session).refresh_state(seller)
     assert state is not None and (state.status, state.in_progress) == ("success", False)
+
+
+async def test_between_full_passes_only_changed_cards_are_read(database: Database, seller: uuid.UUID) -> None:
+    source = FakeSource([])
+    first_seen = NOW - timedelta(days=3)
+    last_seen = NOW - timedelta(hours=5)
+    full = await collect(
+        database,
+        seller,
+        [card(1, updated_at=first_seen), card(2, updated_at=last_seen)],
+        source=source,
+    )
+    assert full.full and source.calls == [None]
+
+    changed_at = NOW + timedelta(minutes=30)
+    later = NOW + timedelta(hours=1)
+    changed = await collect(
+        database, seller, [card(1, "document_not_found", updated_at=changed_at)], source=source, now=later
+    )
+
+    assert source.calls[-1] == (last_seen - timedelta(seconds=60), 2)
+    assert (changed.full, changed.cards, changed.closed, changed.alerts) == (False, 1, 0, 1)
+    async with database.session() as session:
+        repository = CardDocumentsRepository(session)
+        states = await repository.open_states(seller)
+        tracked = await repository.tracked(seller)
+    assert {nm_id: row.state for nm_id, row in states.items()} == {1: "rejected", 2: "ok"}
+    assert tracked is not None
+    assert (tracked.cursor_updated_at, tracked.cursor_nm_id) == (changed_at, 1)
+    assert (tracked.full_collected_at, tracked.collected_at) == (NOW, later)
+
+    quiet = await collect(database, seller, [], source=source, now=later + timedelta(hours=1))
+    assert (quiet.full, quiet.alerts) == (False, 0)
+    assert source.calls[-1] == (changed_at - timedelta(seconds=60), 1)
+
+
+async def test_a_changed_cards_read_still_moves_expiry_with_the_calendar(database: Database, seller: uuid.UUID) -> None:
+    """Порог истечения сдвигает календарь, а не updatedAt: карточку WB не вернёт, а алерт нужен."""
+    source = FakeSource([])
+    seen = NOW - timedelta(hours=1)
+    await collect(
+        database,
+        seller,
+        [card(1, end=day(NOW) + timedelta(days=32), updated_at=seen)],
+        source=source,
+        full_interval=timedelta(days=10),
+    )
+
+    two_days = NOW + timedelta(days=2)
+    result = await collect(database, seller, [], source=source, now=two_days, full_interval=timedelta(days=10))
+
+    assert (result.full, result.cards, result.alerts) == (False, 0, 1)
+    [alert] = [event for event in await outbox(database, seller) if event["template"] == TEMPLATE_ALERT]
+    assert alert["params"]["days_left"] == (day(NOW) + timedelta(days=32) - day(two_days)).days
+
+
+async def test_the_daily_full_pass_closes_cards_that_left_the_catalog(database: Database, seller: uuid.UUID) -> None:
+    source = FakeSource([])
+    seen = NOW - timedelta(hours=1)
+    await collect(database, seller, [card(1, updated_at=seen), card(2, updated_at=seen)], source=source)
+
+    hourly = await collect(database, seller, [], source=source, now=NOW + timedelta(hours=2))
+    daily = await collect(database, seller, [card(2, updated_at=seen)], source=source, now=NOW + timedelta(hours=25))
+
+    assert (hourly.full, hourly.closed) == (False, 0)
+    assert (daily.full, daily.closed) == (True, 1)
+    assert source.calls[-1] is None
+    async with database.session() as session:
+        assert set(await CardDocumentsRepository(session).open_states(seller)) == {2}
+
+
+async def test_the_refresh_button_always_reads_the_whole_catalog(database: Database, seller: uuid.UUID) -> None:
+    source = FakeSource([card(1, updated_at=NOW - timedelta(hours=1))])
+    worker = CardDocumentsWorker(database, source, SETTINGS)
+    assert await worker.collect(seller) is None
+    assert await worker.collect(seller) is None
+    assert source.calls[0] is None and source.calls[1] is not None
+
+    async with database.session() as session:
+        await board_service(session).request_refresh(seller)
+    await worker.serve_refresh_requests()
+
+    assert source.calls[-1] is None
+
+
+async def test_without_a_stored_nm_id_the_read_is_full(database: Database, seller: uuid.UUID) -> None:
+    """WB молча игнорирует курсор с nmID 0 (проверено 22.10.2026): без настоящего nmID — полный обход."""
+    source = FakeSource([])
+    seen = NOW - timedelta(hours=1)
+    await collect(database, seller, [card(1, updated_at=seen)], source=source)
+    async with database.session() as session:
+        await session.execute(
+            update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller).values(cursor_nm_id=None)
+        )
+        await session.commit()
+
+    result = await collect(database, seller, [card(1, updated_at=seen)], source=source, now=NOW + timedelta(hours=1))
+
+    assert result.full
+    assert source.calls == [None, None]
+    async with database.session() as session:
+        tracked = await CardDocumentsRepository(session).tracked(seller)
+    assert tracked is not None and (tracked.cursor_updated_at, tracked.cursor_nm_id) == (seen, 1)
+
+
+async def test_the_cursor_keeps_the_latest_card_including_ties(database: Database, seller: uuid.UUID) -> None:
+    source = FakeSource([])
+    same = NOW - timedelta(hours=1)
+    await collect(database, seller, [card(7, updated_at=same), card(3, updated_at=same)], source=source)
+
+    await collect(database, seller, [], source=source, now=NOW + timedelta(hours=1))
+
+    assert source.calls[-1] == (same - timedelta(seconds=60), 7)

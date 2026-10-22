@@ -28,6 +28,9 @@ class TrackedSellerModel(WBCardDocumentsBase):
     `baseline_at` is set by the first successful collection: before it every
     problem is «already there», after it a problem is news. `collection_error_permanent`
     tells a key WB will keep refusing from a failure worth retrying; the page banner reads it.
+    `cursor_updated_at` and `cursor_nm_id` are the latest card seen, where the next
+    changed-cards read starts (WB ignores a cursor without a real nmID);
+    `full_collected_at` is the last full pass, the only one that sees cards leave.
     """
 
     __tablename__ = "tracked_sellers"
@@ -39,6 +42,9 @@ class TrackedSellerModel(WBCardDocumentsBase):
     collection_error: Mapped[str | None] = mapped_column(String, nullable=True)
     collection_error_permanent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     baseline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cursor_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cursor_nm_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    full_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CardStateModel(WBCardDocumentsBase):

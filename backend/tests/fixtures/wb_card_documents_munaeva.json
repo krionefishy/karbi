@@ -1,0 +1,341 @@
+{
+ "cards": [
+  {
+   "nmID": 1504904633,
+   "vendorCode": "Зарядное устройство для АКБ2",
+   "subjectName": "Зарядные устройства для АКБ",
+   "updatedAt": "2026-10-21T12:49:11.172253Z",
+   "characteristics": [
+    {
+     "id": 15001137,
+     "value": [
+      "14.10.2026"
+     ]
+    },
+    {
+     "id": 15001138,
+     "value": [
+      "08.10.2031"
+     ]
+    },
+    {
+     "id": 15001135,
+     "value": [
+      "ЕАЭС N RU Д-CN.РА09.В.46306/26"
+     ]
+    }
+   ],
+   "documents": {
+    "items": [
+     {
+      "id": "62addb83-0d0d-4a1a-ae11-d1454049e7bf",
+      "type": 2,
+      "number": "ЕАЭС N RU Д-CN.РА09.В.46306/26",
+      "startDate": "2026-10-14T00:00:00Z",
+      "endDate": "2031-10-08T00:00:00Z",
+      "verdict": {
+       "verified": false,
+       "status": 2,
+       "reason": "document_not_found",
+       "createdAt": "2026-10-14T18:48:24.555914+03:00"
+      },
+      "createdAt": "2026-09-15T12:04:13.950181+03:00"
+     }
+    ],
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_invalid",
+     "createdAt": "2026-09-15T12:04:17.042265+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1521568994,
+   "vendorCode": "Ультрафиолетовая сушилка",
+   "subjectName": "Сушки для обуви",
+   "updatedAt": "2026-10-14T15:51:47.002992Z",
+   "characteristics": [
+    {
+     "id": 15001138,
+     "value": [
+      "08.10.2031"
+     ]
+    },
+    {
+     "id": 15001137,
+     "value": [
+      "14.10.2026"
+     ]
+    },
+    {
+     "id": 15001135,
+     "value": [
+      "ЕАЭС N RU Д-CN.РА09.В.46307/26"
+     ]
+    }
+   ],
+   "documents": {
+    "items": [
+     {
+      "id": "9b5130e9-8c35-449e-a7ff-0b9f09f145e1",
+      "type": 2,
+      "number": "ЕАЭС N RU Д-CN.РА09.В.46307/26",
+      "startDate": "2026-10-14T00:00:00Z",
+      "endDate": "2031-10-08T00:00:00Z",
+      "isEndless": false,
+      "verdict": {
+       "verified": false,
+       "status": 2,
+       "reason": "document_not_found",
+       "createdAt": "2026-10-14T18:51:52.954174+03:00"
+      },
+      "createdAt": "2026-10-14T18:51:46.201405+03:00"
+     }
+    ],
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_invalid",
+     "createdAt": "2026-09-14T14:21:47.890914+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1329315199,
+   "vendorCode": "карб20",
+   "subjectName": "Фонари спортивные",
+   "updatedAt": "2026-10-21T09:35:02.66602Z",
+   "characteristics": [],
+   "documents": {
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_missing",
+     "createdAt": "2026-09-14T13:58:47.3919+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1437532602,
+   "vendorCode": "Фитолампа10",
+   "subjectName": "Фитолампы для растений и аксессуары",
+   "updatedAt": "2026-10-09T09:50:43.578733Z",
+   "characteristics": [],
+   "documents": {
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_missing",
+     "createdAt": "2026-09-24T12:54:20.312011+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1579718656,
+   "vendorCode": "Отпариватель сенсор фото",
+   "subjectName": "Отпариватели",
+   "updatedAt": "2026-10-05T08:13:35.135568Z",
+   "characteristics": [],
+   "documents": {
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_missing",
+     "createdAt": "2026-09-14T13:24:28.506698+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1579874796,
+   "vendorCode": "Дождевики для обуви фото",
+   "subjectName": "Чехлы для обуви",
+   "updatedAt": "2026-10-21T02:57:41.286293Z",
+   "characteristics": [],
+   "documents": {
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 1,
+     "reason": "",
+     "createdAt": "2026-09-14T13:47:08.916244+03:00"
+    },
+    "excludeDocuments": true
+   }
+  },
+  {
+   "nmID": 1270964388,
+   "vendorCode": "Дождевики для обуви",
+   "subjectName": "Чехлы для обуви",
+   "updatedAt": "2026-10-16T13:24:28.377896Z",
+   "characteristics": [],
+   "documents": {
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 1,
+     "reason": "",
+     "createdAt": "2026-09-14T13:47:01.891593+03:00"
+    },
+    "excludeDocuments": true
+   }
+  },
+  {
+   "nmID": 1175671003,
+   "vendorCode": "Mini Fet Fan - воздуходувка беспроводная",
+   "subjectName": "Воздуходувки",
+   "updatedAt": "2026-10-21T12:34:18.681675Z",
+   "characteristics": [
+    {
+     "id": 15001135,
+     "value": [
+      "ЕАЭС N RU Д-CN.РА06.В.76811/26"
+     ]
+    },
+    {
+     "id": 15001138,
+     "value": [
+      "20.08.2031"
+     ]
+    },
+    {
+     "id": 15001137,
+     "value": [
+      "21.08.2026"
+     ]
+    }
+   ],
+   "documents": {
+    "items": [
+     {
+      "id": "339fc2e7-822b-46d7-8b98-f9972ebf24e2",
+      "type": 2,
+      "number": "ЕАЭС N RU Д-CN.РА06.В.76811/26",
+      "startDate": "2026-08-21T00:00:00Z",
+      "endDate": "2031-08-20T00:00:00Z",
+      "verdict": {
+       "verified": true,
+       "status": 1,
+       "reason": "valid",
+       "createdAt": "2026-10-21T15:34:21.257395+03:00"
+      },
+      "createdAt": "2026-09-10T14:51:36.260124+03:00"
+     }
+    ],
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 2,
+     "reason": "documents_missing",
+     "createdAt": "2026-09-10T14:51:47.856299+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1521568995,
+   "vendorCode": "Сушилка с таймером",
+   "subjectName": "Сушки для обуви",
+   "updatedAt": "2026-10-21T12:47:23.315381Z",
+   "characteristics": [
+    {
+     "id": 15001138,
+     "value": [
+      "08.10.2031"
+     ]
+    },
+    {
+     "id": 15001135,
+     "value": [
+      "ЕАЭС N RU Д-CN.РА09.В.46307/26"
+     ]
+    },
+    {
+     "id": 15001137,
+     "value": [
+      "14.10.2026"
+     ]
+    }
+   ],
+   "documents": {
+    "items": [
+     {
+      "id": "a869a90e-b739-40c3-ad26-7713d152a3ff",
+      "type": 2,
+      "number": "ЕАЭС N RU Д-CN.РА09.В.46307/26",
+      "startDate": "2026-10-14T00:00:00Z",
+      "endDate": "2031-10-08T00:00:00Z",
+      "isEndless": false,
+      "verdict": {
+       "verified": true,
+       "status": 1,
+       "reason": "valid",
+       "createdAt": "2026-10-21T15:47:27.844766+03:00"
+      },
+      "createdAt": "2026-10-14T18:54:56.177777+03:00"
+     }
+    ],
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 1,
+     "reason": "",
+     "createdAt": "2026-09-14T14:21:47.805114+03:00"
+    },
+    "excludeDocuments": false
+   }
+  },
+  {
+   "nmID": 1261276420,
+   "vendorCode": "Упаковщик вакуумный",
+   "subjectName": "Упаковщики вакуумные",
+   "updatedAt": "2026-10-21T11:35:57.932149Z",
+   "characteristics": [
+    {
+     "id": 15001135,
+     "value": [
+      "ЕАЭС N RU Д-CN.РА07.В.64166/26"
+     ]
+    },
+    {
+     "id": 15001137,
+     "value": [
+      "27.08.2026"
+     ]
+    },
+    {
+     "id": 15001138,
+     "value": [
+      "25.08.2031"
+     ]
+    }
+   ],
+   "documents": {
+    "items": [
+     {
+      "id": "0e721e49-6f4b-4fdd-a5b3-b3490ccc7e79",
+      "type": 2,
+      "number": "ЕАЭС N RU Д-CN.РА07.В.64166/26",
+      "startDate": "2026-08-27T00:00:00Z",
+      "endDate": "2031-08-25T00:00:00Z",
+      "verdict": {
+       "verified": true,
+       "status": 1,
+       "reason": "valid",
+       "createdAt": "2026-10-21T14:35:59.644169+03:00"
+      },
+      "createdAt": "2026-09-10T12:08:08.689604+03:00"
+     }
+    ],
+    "overallVerdict": {
+     "isFullyChecked": true,
+     "status": 1,
+     "reason": "",
+     "createdAt": "2026-09-10T12:08:18.856831+03:00"
+    },
+    "excludeDocuments": false
+   }
+  }
+ ]
+}

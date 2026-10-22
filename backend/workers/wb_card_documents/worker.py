@@ -25,7 +25,8 @@ STALE_REFRESH = timedelta(hours=1)
 
 
 class CardDocumentsWorker(PollingWorker):
-    """Документы карточек: сбор раз в `interval_hours`, кнопка «Обновить» и дайджест.
+    """Документы карточек: изменённые карточки раз в `interval_minutes`, полный обход раз в
+    `full_interval_hours`, кнопка «Обновить» (всегда полный обход) и дайджест.
 
     Попытка отмечается до сети, после неудачи повтор через `retry_minutes`, никогда не
     собранный кабинет идёт сразу. В часы `skip_hours` плановый сбор не начинается — это
@@ -61,7 +62,7 @@ class CardDocumentsWorker(PollingWorker):
         await self.watch_all(self._now(self.timezone))
 
     def due_since(self, now: datetime) -> datetime:
-        return now.astimezone(UTC) - timedelta(hours=self.config.interval_hours)
+        return now.astimezone(UTC) - timedelta(minutes=self.config.interval_minutes)
 
     def quiet(self, now: datetime) -> bool:
         return now.astimezone(self.timezone).hour in self.config.skip_hours
@@ -116,14 +117,18 @@ class CardDocumentsWorker(PollingWorker):
         active = set(await self._active_tracked()) if requests else set()
         for request_id, seller_id in requests:
             touch_heartbeat()
-            error = await self.collect(seller_id) if seller_id in active else "Кабинет отключён или в архиве"
+            error = await self.collect(seller_id, full=True) if seller_id in active else "Кабинет отключён или в архиве"
             async with self.database.session() as session:
                 await CardDocumentsRepository(session).finish_refresh(request_id, error)
                 await session.commit()
             self.logger.info("card_documents_refresh_served", seller_id=str(seller_id), failed=bool(error))
 
-    async def collect(self, seller_id: uuid.UUID) -> str | None:
-        """Сбор одного кабинета. Возвращает текст ошибки или None, если прошёл."""
+    async def collect(self, seller_id: uuid.UUID, *, full: bool = False) -> str | None:
+        """Сбор одного кабинета. Возвращает текст ошибки или None, если прошёл.
+
+        По расписанию вид обхода решает сбор (изменённые или раз в сутки полный);
+        `full=True` — кнопка «Обновить»: человек ждёт весь каталог, а не только изменения.
+        """
         async with self.database.session() as session:
             await CardDocumentsRepository(session).record_attempt(seller_id)
             await session.commit()
@@ -138,7 +143,9 @@ class CardDocumentsWorker(PollingWorker):
                     timezone=self.timezone,
                     thresholds=self.config.expiry_thresholds,
                     digest_time=f"{self.config.digest_hour}:{self.config.digest_minute:02d}",
-                ).collect(seller_id)
+                    full_interval=timedelta(hours=self.config.full_interval_hours),
+                    cursor_margin=timedelta(seconds=self.config.cursor_margin_seconds),
+                ).collect(seller_id, full=full)
         except WBPermanentError as error:
             self.logger.warning("card_documents_collection_failed", seller_id=str(seller_id), error=str(error))
             await self._fail(seller_id, str(error), permanent=True)
@@ -160,6 +167,7 @@ class CardDocumentsWorker(PollingWorker):
             closed=result.closed,
             baseline=result.baseline,
             summary_sent=result.summary_sent,
+            full=result.full,
             skipped=result.skipped,
         )
         return None

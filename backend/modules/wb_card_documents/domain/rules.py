@@ -17,11 +17,38 @@ REASON_VALID = "valid"
 REASON_NOT_FOUND = "document_not_found"
 REASON_INVALID = "documents_invalid"
 REASON_MISSING = "documents_missing"
+REASON_DOCUMENT_MISSING = "document_missing"
 REASON_EXPIRED = "expired"
 REASON_NUMBER_MISMATCH = "number_mismatch"
 REASON_START_MISMATCH = "start_date_mismatch"
 REASON_END_MISMATCH = "end_date_mismatch"
-KNOWN_REASONS = frozenset({REASON_VALID, REASON_NOT_FOUND, REASON_INVALID, REASON_MISSING})
+DOCUMENT_REASONS = frozenset(
+    {
+        REASON_DOCUMENT_MISSING,
+        REASON_NOT_FOUND,
+        "document_inactive",
+        "document_expired",
+        "applicant_mismatch",
+        "trade_name_mismatch",
+        "unknown",
+        "document_type_mismatch",
+        "document_dates_mismatch",
+    }
+)
+LISTING_REASONS = frozenset(
+    {
+        REASON_INVALID,
+        REASON_MISSING,
+        "tnved_missing",
+        "supplier_inn_missing",
+        "supplier_not_registered",
+        "supplier_inactive",
+        "product_group_not_registered",
+        "kiz_required",
+        "kiz_certificate_missing",
+    }
+)
+KNOWN_REASONS = frozenset({REASON_VALID}) | DOCUMENT_REASONS | LISTING_REASONS
 
 STATUS_VALID = 1
 STATUS_INVALID = 2
@@ -74,7 +101,7 @@ def evaluate(card: CardDocuments, today: date, thresholds: Sequence[int] = DEFAU
     if not documents:
         if _requires_document(card):
             overall = card.overall
-            return CardState(STATE_MISSING, REASON_MISSING, None, overall.created_at if overall else None)
+            return CardState(STATE_MISSING, REASON_DOCUMENT_MISSING, None, overall.created_at if overall else None)
         return CardState(STATE_OK, None, None, None)
 
     for document in documents:
@@ -149,17 +176,15 @@ def normalize_number(value: str | None) -> str:
 
 
 def _requires_document(card: CardDocuments) -> bool:
-    """Empty `items` is «missing» only when something says a document is due.
+    """Empty `items` is «missing» only when the seller declared a document WB does not see.
 
-    Either WB's overall verdict says so, or the seller has filled the
-    declaration characteristics. `excludeDocuments` means the card is out of
-    the check, and a card without the block has nothing to check.
+    That is a declaration or certificate number in the characteristics. The overall
+    verdict `documents_missing` alone does not count: on Мунаева's cabinet 33 lamps,
+    torches and steamers carry it with no document required of the seller (decision of
+    22.10.2026). `excludeDocuments` is the seller confirming no documents are needed.
     """
-    if not card.has_block or card.exclude_documents:
+    if card.exclude_documents:
         return False
-    overall = card.overall
-    if overall is not None and overall.reason == REASON_MISSING:
-        return True
     return card.declared.number is not None
 
 

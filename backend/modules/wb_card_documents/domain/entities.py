@@ -14,7 +14,7 @@ class Verdict:
 
 @dataclass(frozen=True, slots=True)
 class CardDocument:
-    document_id: int | None
+    document_id: str | None
     document_type: int | None
     number: str
     start: date | None
@@ -40,8 +40,9 @@ class DeclaredDocument:
 class CardDocuments:
     """One card as the documents automation needs it: identity, documents, verdicts.
 
-    `has_block` is False when the content API returned no `documents` at all:
-    then the card has nothing to check, which is not the same as «документ не загружен».
+    `has_block` is False when the content API returned no `documents` at all.
+    `updated_at` is the card's `updatedAt`: WB moves it on every change of a check
+    result, which is what lets the worker read only changed cards.
     """
 
     nm_id: int
@@ -53,3 +54,4 @@ class CardDocuments:
     overall: Verdict | None
     exclude_documents: bool
     declared: DeclaredDocument = field(default_factory=DeclaredDocument)
+    updated_at: datetime | None = None

@@ -189,14 +189,18 @@ class CardChecklistConfig:
 class CardDocumentsConfig:
     """Документы карточек: как часто перечитывать вердикты WB и когда о них говорить. Часы московские.
 
-    Интервал меньше часа без курсора по `updatedAt` съедает бюджет «Контента» у всех
-    автоматизаций кабинета. В `skip_hours` плановый сбор не начинается: это окна каталога
-    (02:30) и чек-листа (05:00). Сбои наблюдения показываются баннерами на странице, `stale_hours`
+    Раз в `interval_minutes` читаются только изменённые карточки: курсор по `updatedAt` с
+    запасом `cursor_margin_seconds`, WB двигает `updatedAt` при каждом новом результате
+    проверки. Раз в `full_interval_hours` — полный обход: только он замечает карточки, ушедшие
+    из каталога. В `skip_hours` плановый сбор не начинается: это окна каталога (02:30) и
+    чек-листа (05:00). Сбои наблюдения показываются баннерами на странице, `stale_hours`
     — порог баннера «данные устарели».
     """
 
     timezone: str = "Europe/Moscow"
-    interval_hours: int = 3
+    interval_minutes: int = 60
+    full_interval_hours: int = 24
+    cursor_margin_seconds: int = 60
     retry_minutes: int = 30
     stale_hours: int = 9
     expiry_thresholds: tuple[int, ...] = (30, 14, 7)
@@ -517,7 +521,9 @@ class Settings:
                 card_checklist[key] = int(card_checklist[key])
         card_documents = dict(data.get("card_documents", {}))
         for key in (
-            "interval_hours",
+            "interval_minutes",
+            "full_interval_hours",
+            "cursor_margin_seconds",
             "retry_minutes",
             "stale_hours",
             "digest_hour",
@@ -700,10 +706,24 @@ class Settings:
             raise ValueError("card_checklist.subject_ttl_hours must be positive")
         documents = self.card_documents
         ZoneInfo(documents.timezone)
-        if min(documents.interval_hours, documents.retry_minutes, documents.stale_hours) < 1:
-            raise ValueError("card_documents.interval_hours, retry_minutes and stale_hours must be positive")
-        if documents.stale_hours <= documents.interval_hours:
-            raise ValueError("card_documents.stale_hours must exceed interval_hours")
+        if (
+            min(
+                documents.interval_minutes,
+                documents.full_interval_hours,
+                documents.retry_minutes,
+                documents.stale_hours,
+            )
+            < 1
+        ):
+            raise ValueError(
+                "card_documents.interval_minutes, full_interval_hours, retry_minutes and stale_hours must be positive"
+            )
+        if documents.stale_hours * 60 <= documents.interval_minutes:
+            raise ValueError("card_documents.stale_hours must exceed interval_minutes")
+        if documents.full_interval_hours * 60 < documents.interval_minutes:
+            raise ValueError("card_documents.full_interval_hours must not be shorter than interval_minutes")
+        if not 0 <= documents.cursor_margin_seconds <= 3600:
+            raise ValueError("card_documents.cursor_margin_seconds must be between 0 and 3600")
         if not documents.expiry_thresholds or any(days < 1 for days in documents.expiry_thresholds):
             raise ValueError("card_documents.expiry_thresholds must contain positive days")
         if not 0 <= documents.digest_hour <= 23 or not 0 <= documents.digest_minute <= 59:

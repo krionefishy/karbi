@@ -1,5 +1,7 @@
+import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,6 +14,7 @@ from backend.modules.wb_card_documents.application import (
     alert_dedupe,
 )
 from backend.modules.wb_card_documents.domain import (
+    KNOWN_REASONS,
     STATE_EXPIRING,
     STATE_MISMATCH,
     STATE_MISSING,
@@ -30,7 +33,7 @@ NUMBER = "ЕАЭС N RU Д-CN.РА09.В.46306/26"
 
 def document(**overrides) -> dict:
     item = {
-        "id": 5512,
+        "id": "5512a0c4-7a51-4f43-9a8e-1f0b4b1e2a11",
         "type": 2,
         "number": NUMBER,
         "startDate": "2026-10-14T00:00:00Z",
@@ -180,13 +183,14 @@ def test_a_document_still_under_check_is_not_a_rejection() -> None:
 @pytest.mark.parametrize(
     ("overall_reason", "declared", "exclude", "expected"),
     [
-        ("documents_missing", None, False, STATE_MISSING),
+        ("documents_missing", None, False, STATE_OK),
         ("documents_invalid", NUMBER, False, STATE_MISSING),
+        ("documents_missing", NUMBER, False, STATE_MISSING),
         ("documents_invalid", None, False, STATE_OK),
         ("documents_missing", NUMBER, True, STATE_OK),
     ],
 )
-def test_empty_items_are_missing_only_when_a_document_is_due(
+def test_empty_items_are_missing_only_when_the_seller_declared_a_number(
     overall_reason: str, declared: str | None, exclude: bool, expected: str
 ) -> None:
     card = raw_card(
@@ -200,14 +204,94 @@ def test_empty_items_are_missing_only_when_a_document_is_due(
 
     assert state.state == expected
     if expected == STATE_MISSING:
-        assert state.reason == "documents_missing"
+        assert state.reason == "document_missing"
 
 
-def test_a_card_without_the_documents_block_has_nothing_to_check() -> None:
-    card = raw_card()
-    del card["documents"]
+def test_a_card_without_the_documents_block_is_judged_by_the_declared_number() -> None:
+    bare = raw_card(characteristics=characteristics(number=None, start=None, end=None))
+    del bare["documents"]
+    declared = raw_card()
+    del declared["documents"]
+
+    assert state_of(bare).state == STATE_OK
+    assert (state_of(declared).state, state_of(declared).reason) == (STATE_MISSING, "document_missing")
+
+
+def test_a_certificate_number_counts_as_a_declared_document() -> None:
+    card = raw_card(items=[], characteristics=[{"id": 15001136, "name": "Номер сертификата", "value": ["RU С-1"]}])
+
+    assert state_of(card).state == STATE_MISSING
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "document_missing",
+        "document_not_found",
+        "document_inactive",
+        "document_expired",
+        "applicant_mismatch",
+        "trade_name_mismatch",
+        "unknown",
+        "document_type_mismatch",
+        "document_dates_mismatch",
+    ],
+)
+def test_every_wb_document_reason_is_a_known_rejection(reason: str) -> None:
+    rejected = document(verdict={"verified": False, "status": 2, "reason": reason, "createdAt": None})
+
+    state = state_of(raw_card(items=[rejected]))
+
+    assert (state.state, state.reason, state.unknown_reason) == (STATE_REJECTED, reason, False)
+    assert "причина WB" not in render(TEMPLATE_ALERT, {"state": "rejected", "reason": reason, "nm_id": 1})
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "tnved_missing",
+        "supplier_inn_missing",
+        "supplier_not_registered",
+        "supplier_inactive",
+        "product_group_not_registered",
+        "kiz_required",
+        "kiz_certificate_missing",
+    ],
+)
+def test_overall_reasons_are_known_but_do_not_decide_the_state(reason: str) -> None:
+    card = raw_card(items=[valid()], overall={"status": 2, "reason": reason, "createdAt": "2026-10-01T00:00:00Z"})
 
     assert state_of(card).state == STATE_OK
+    assert reason in KNOWN_REASONS
+    assert "причина WB" not in render(TEMPLATE_ALERT, {"state": "rejected", "reason": reason, "nm_id": 1})
+
+
+def test_document_ids_are_uuid_strings() -> None:
+    card = raw_card(
+        items=[document(id="62addb83-0d0d-4a1a-ae11-d1454049e7bf")], updatedAt="2026-10-21T12:49:11.172253Z"
+    )
+
+    parsed = parse_card_documents(card)
+
+    assert parsed is not None
+    assert parsed.documents[0].document_id == "62addb83-0d0d-4a1a-ae11-d1454049e7bf"
+    assert parsed.updated_at == datetime(2026, 10, 21, 12, 49, 11, 172253, tzinfo=UTC)
+
+
+def test_the_munaeva_slice_flags_only_the_two_registry_rejections() -> None:
+    """Срез выгрузки 22.10: пустышки с общим documents_missing (фонари, фитолампы, отпариватели) — не проблема."""
+    fixture = Path(__file__).parents[1] / "fixtures" / "wb_card_documents_munaeva.json"
+    cards = json.loads(fixture.read_text(encoding="utf-8"))["cards"]
+
+    states = {card["nmID"]: state_of(card) for card in cards}
+
+    problems = {nm_id: (state.state, state.reason) for nm_id, state in states.items() if state.problem}
+    assert problems == {
+        1504904633: (STATE_REJECTED, "document_not_found"),
+        1521568994: (STATE_REJECTED, "document_not_found"),
+    }
+    for nm_id in (1329315199, 1437532602, 1579718656, 1579874796, 1270964388, 1175671003):
+        assert states[nm_id].state == STATE_OK
 
 
 @pytest.mark.parametrize(
