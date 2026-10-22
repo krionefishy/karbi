@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Отправить скриншот</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff;
+        --surface: #f4f5f7;
+        --text: #1f2328;
+        --muted: #6b7280;
+        --border: #d6d9de;
+        --accent: #2a5ce6;
+        --ok: #177a43;
+        --warn: #9a5b00;
+        --bad: #cf3434;
+        --warn-bg: #fff4e0;
+        --bad-bg: #fdecec;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 13px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --bg: #1c1e22;
+          --surface: #262930;
+          --text: #e6e8eb;
+          --muted: #9aa1ab;
+          --border: #3a3e46;
+          --accent: #6b8ff0;
+          --ok: #4cc287;
+          --warn: #e0a54a;
+          --bad: #f07a7a;
+          --warn-bg: #3a2f1c;
+          --bad-bg: #3d2224;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { width: 300px; margin: 0; padding: 12px; background: var(--bg); color: var(--text); line-height: 1.4; }
+      header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+      h1 { font-size: 15px; margin: 0; }
+      .muted { color: var(--muted); font-size: 12px; }
+      [hidden] { display: none !important; }
+      .banner { padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; background: var(--bad-bg); color: var(--bad); }
+      .banner a { color: inherit; font-weight: 600; }
+      .notice { padding: 16px 8px; text-align: center; }
+      #preview { display: block; width: 100%; max-height: 170px; object-fit: contain; object-position: top; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+      #source { margin: 6px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .outcomes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+      .outcomes button { height: 40px; font: inherit; font-size: 14px; font-weight: 600; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); background: transparent; cursor: pointer; }
+      .outcomes button:hover:not(:disabled) { background: var(--accent); color: #fff; }
+      .outcomes button.chosen { background: var(--accent); color: #fff; }
+      .outcomes button:disabled:not(.chosen) { opacity: 0.4; cursor: default; }
+      button.link { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; }
+      #status { margin: 10px 0 0; min-height: 18px; font-weight: 600; }
+      .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+      footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+      #summary { padding: 6px 8px; border-radius: 6px; background: var(--surface); }
+      ul { list-style: none; margin: 8px 0 0; padding: 0; }
+      li { display: flex; gap: 6px; padding: 3px 0; }
+      li .time { color: var(--muted); width: 38px; flex: none; }
+      li .outcome { width: 50px; flex: none; }
+      li .state { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .row { display: flex; justify-content: space-between; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Отправить скриншот</h1>
+      <span class="muted" id="version"></span>
+    </header>
+    <div id="banner" class="banner" hidden></div>
+
+    <main>
+      <section id="loading" class="notice muted">Снимаем вкладку…</section>
+      <section id="not-paired" class="notice" hidden>
+        <p>Расширение не подключено к сервису.</p>
+        <button class="link" data-open-options>Открыть настройки</button>
+      </section>
+      <section id="not-chat" class="notice" hidden>
+        <p>Откройте чат с покупателем в кабинете WB и повторите.</p>
+      </section>
+      <section id="capture-error" class="notice bad" hidden></section>
+      <section id="capture" hidden>
+        <img id="preview" alt="Снимок вкладки" />
+        <div id="source" class="muted"></div>
+        <div class="outcomes">
+          <button data-outcome="positive">Полож</button>
+          <button data-outcome="amended">Доп</button>
+          <button data-outcome="deleted">Удален</button>
+        </div>
+        <p id="status"></p>
+      </section>
+    </main>
+
+    <footer>
+      <div id="summary" class="muted">Сегодня: —</div>
+      <ul id="recent"></ul>
+      <div class="row">
+        <span id="queue-line" class="muted"></span>
+        <button class="link" data-open-options>Настройки</button>
+      </div>
+    </footer>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>
