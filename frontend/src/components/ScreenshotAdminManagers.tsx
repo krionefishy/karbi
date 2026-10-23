@@ -89,7 +89,7 @@ export function ScreenshotAdminManagers() {
         <span className="sca-hint">Сигналы для разговора, а не санкции</span>
         <span className="sca-export sca-push">
           {preliminary && (
-            <span className="sca-muted-small" id="sca-export-note">
+            <span className="sca-export-note" id="sca-export-note">
               Выгрузка предварительная
             </span>
           )}

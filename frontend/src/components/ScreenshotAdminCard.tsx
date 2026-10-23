@@ -30,7 +30,7 @@ import {
   reprocessSubmission,
 } from "../features/screenshotControl/api";
 import { apiErrorText } from "../features/screenshotControl/errors";
-import { formatMoment, toneBadgeClass } from "../features/screenshotControl/format";
+import { formatMoment, plural, toneBadgeClass } from "../features/screenshotControl/format";
 import { useStableImage } from "../features/screenshotControl/hooks";
 import { forgetImage, originalKey, stableImageUrl, thumbKey } from "../features/screenshotControl/images";
 import { reasonsLine } from "../features/screenshotControl/reasons";
@@ -542,7 +542,7 @@ function eraseDescription(detail: AdminSubmissionDetail | undefined): string {
   const base = "Оригинал и миниатюра будут удалены, вердикт останется.";
   const others = (detail?.file.submissions_count ?? 1) - 1;
   return others > 0
-    ? `${base} Этот же файл присылали ещё раз (${others}): картинка пропадёт и там. Отменить нельзя.`
+    ? `${base} Тот же файл прислан ещё ${others} ${plural(others, ["раз", "раза", "раз"])}: картинка пропадёт и там. Отменить нельзя.`
     : `${base} Отменить нельзя.`;
 }
 

@@ -709,3 +709,4 @@ button.sca-shot { cursor: zoom-in; }
 .sca-journal-note { color: var(--ink-secondary); overflow-wrap: anywhere; }
 .sca-source { overflow: hidden; max-width: 340px; color: var(--accent); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .sca-export { display: inline-flex; align-items: center; gap: var(--space-2); }
+.sca-export-note { color: var(--warning); font-size: 12px; line-height: 16px; font-weight: 500; }
