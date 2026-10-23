@@ -23,7 +23,12 @@ from backend.modules.wb_screenshot_control.application.events import (
 from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.ingest import IngestResult
 from backend.modules.wb_screenshot_control.application.outcomes import expire_outcomes
-from backend.modules.wb_screenshot_control.application.pipeline import MAX_DEFERRALS, RETRY_DELAYS, case_keys
+from backend.modules.wb_screenshot_control.application.pipeline import (
+    MAX_DEFERRALS,
+    RETRY_DELAYS,
+    case_keys,
+    queued_at,
+)
 from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
 from backend.modules.wb_screenshot_control.domain.pipeline_types import ExtractionResult
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
@@ -419,3 +424,11 @@ def test_text_key_needs_minute_precision(precision: Literal["minute", "day"]) ->
     assert keys["chat_id_norm"] == "abcdef01-2345-6789-abcd-ef0123456789"
     assert (keys["text_key"] is not None) == (precision == "minute")
     assert case_keys(replace(fields, chat_id="too-short"))["chat_id_norm"] is None
+
+
+def test_a_capture_from_the_future_is_a_clock_problem_not_a_queue() -> None:
+    """Раньше `queued_at` всегда был временем снимка, и проверка `clock_skew` не срабатывала никогда."""
+    received = datetime(2026, 10, 23, 9, 0, tzinfo=UTC)
+    assert queued_at(received + timedelta(minutes=40), received) is None  # часы впереди → clock_skew
+    assert queued_at(received - timedelta(days=4), received) == received - timedelta(days=4)  # → late_upload
+    assert queued_at(None, received) is None

@@ -82,6 +82,18 @@ def awaits_outcome(submission: SubmissionModel, now: datetime, config: Screensho
     return submission.outcome is None and submission.received_at > now - timedelta(hours=config.outcome_ttl_hours)
 
 
+def queued_at(captured_at: datetime | None, received_at: datetime) -> datetime | None:
+    """Когда снимок встал в очередь расширения, если это вообще могла быть очередь.
+
+    Отличить онлайн-отправку от выгрузки из оффлайн-очереди сервер не может: снимок в прошлом — это
+    либо очередь (проверка `late_upload`), либо отстающие часы. Снимок из будущего очередью не бывает —
+    это часы расширения впереди, и тогда проверяется `clock_skew` (строка 16 таблицы 8.2).
+    """
+    if captured_at is None or captured_at > received_at:
+        return None
+    return captured_at
+
+
 def case_keys(fields: ExtractedFields) -> dict[str, Any]:
     """Ключи кейса для индексов `submissions`; `text_key` = sha1(минута|text_norm) только при точности до минуты."""
     key_time = fields.review_at
@@ -457,7 +469,7 @@ class DecisionService:
                 tz_offset_min=submission.client_tz_offset_min,
             ),
             uploads_last_hour=await repository.uploads_in_hour(submission.user_id, submission.received_at),
-            queued_at=submission.client_captured_at,
+            queued_at=queued_at(submission.client_captured_at, submission.received_at),
         )
 
     def _query(self, submission: SubmissionModel, inp: DecisionInput, now: datetime) -> CandidateQuery:

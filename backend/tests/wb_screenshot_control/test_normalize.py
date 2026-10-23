@@ -205,6 +205,7 @@ def test_numbers_from_the_model_are_range_checked(numbers: dict, expected: Scree
         ("Размер маломерит…", "размер маломерит"),
         ("Не смог развернуть", "не смог развернуть"),
         ("Straße", "strasse"),
+        ("сло\u200bво при\u00adшло\ufeff", "слово пришло"),  # невидимое внутри слова не рвёт его
         ("", ""),
         (None, ""),
     ],

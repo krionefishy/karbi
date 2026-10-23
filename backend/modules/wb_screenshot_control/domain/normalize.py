@@ -49,6 +49,7 @@ _RELATIVE = {"сегодня": 0, "вчера": 1, "позавчера": 2}
 _TRUNCATION_TAILS = ("показать полностью", "читать полностью", "свернуть")
 _TAIL = re.compile(r"(?:\s|\.\.\.|…)*(?:(?<![а-я])(?:" + "|".join(_TRUNCATION_TAILS) + r"))?(?:\s|\.\.\.|…)*$")
 _SPACES = re.compile(r"\s+")
+_DROPPED_CATEGORIES = frozenset({"Mn", "Cf"})
 
 # Латинские двойники кириллицы, которые встречаются в подписях «полож / доп / удал».
 _LATIN_TWINS = str.maketrans({"a": "а", "o": "о", "e": "е", "p": "р", "c": "с", "x": "х", "y": "у", "k": "к"})
@@ -270,12 +271,18 @@ def _full_year(text: str | None) -> int | None:
 
 
 def normalize_text(text: str | None) -> str:
-    """NFKC → casefold → ё→е → только буквы, цифры и пробелы → схлопнуть пробелы → без хвостов «свернуть»."""
+    """NFKC → casefold → ё→е → только буквы, цифры и пробелы → схлопнуть пробелы → без хвостов «свернуть».
+
+    Невидимые символы форматирования (Cf: пробел нулевой ширины, мягкий перенос, BOM) выбрасываются, а не
+    становятся пробелом: иначе вставка их внутрь слов в DOM разбивает слова и роняет сходство текста.
+    """
     if not text:
         return ""
     value = unicodedata.normalize("NFKC", text).casefold().replace("ё", "е")
     value = _TAIL.sub("", value)
-    value = "".join(char if char.isalnum() else " " for char in value if unicodedata.category(char) != "Mn")
+    value = "".join(
+        char if char.isalnum() else " " for char in value if unicodedata.category(char) not in _DROPPED_CATEGORIES
+    )
     value = _SPACES.sub(" ", value).strip()
     return _TAIL.sub("", value).strip()
 
