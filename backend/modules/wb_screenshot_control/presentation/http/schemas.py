@@ -116,6 +116,8 @@ ErrorCode = Literal[
     "note_required",
     "duplicate_target_invalid",
     "telegram_disabled",
+    "transition_not_allowed",
+    "bad_cursor",
 ]
 
 
@@ -511,6 +513,28 @@ class ManagerStats(BaseModel):
 class ManagersOut(BaseModel):
     period: Period
     items: list[ManagerStats]
+
+
+class ManagerDayRow(BaseModel):
+    """Строка выгрузки для HR/KPI (`GET /managers/export`, CSV через `;`, UTF-8 с BOM): менеджер за день по Москве.
+
+    Колонки CSV — поля модели в этом порядке. `preliminary=true` — день в режиме shadow или раньше
+    kpi_from: цифры пробные, для оплаты не годятся.
+    """
+
+    day: date = Field(description="Дата по Москве")
+    user_id: uuid.UUID
+    username: str
+    total: int
+    accepted: int
+    positive: int
+    amended: int
+    deleted: int
+    duplicate: int
+    needs_review: int
+    rejected: int
+    processing: int
+    preliminary: bool
 
 
 class PipelineStages(BaseModel):

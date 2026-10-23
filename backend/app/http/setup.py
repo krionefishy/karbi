@@ -5,10 +5,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.app.http.middleware import AccessTokenMiddleware, RateLimitMiddleware
+from backend.app.http.middleware import AccessTokenMiddleware, RateLimitMiddleware, RelaxedRateLimit
 from backend.modules.platform.application import TokenService
 from backend.shared.settings import Settings
 from backend.storage.redis import RedisClient, SlidingWindowRateLimiter
+
+SCREENSHOT_CONTROL = "/api/v1/wb/screenshot-control"
 
 
 async def validation_error_handler(_: Request, exc: Exception) -> JSONResponse:
@@ -43,6 +45,7 @@ def setup_http_middleware(
         enabled=settings.rate_limit.enabled,
         limit=settings.rate_limit.requests,
         behind_trusted_proxy=settings.app.trust_proxy_headers,
+        relaxed=(screenshot_uploads(settings, redis),),
     )
     app.add_middleware(
         CORSMiddleware,
@@ -50,4 +53,17 @@ def setup_http_middleware(
         allow_credentials=bool(settings.app.cors_origins),
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+
+def screenshot_uploads(settings: Settings, redis: RedisClient) -> RelaxedRateLimit:
+    """Приём скриншотов и расширение: офис за одним IP. Обмен кода сопряжения — под общим лимитом."""
+    limit = settings.screenshot_control.ip_requests_per_minute
+    return RelaxedRateLimit(
+        limiter=SlidingWindowRateLimiter(
+            redis_client=redis, limit=limit, window_seconds=60, key_prefix="rate_limit:ip-screenshots"
+        ),
+        limit=limit,
+        prefixes=(f"{SCREENSHOT_CONTROL}/submissions", f"{SCREENSHOT_CONTROL}/extension/"),
+        excluded=(f"{SCREENSHOT_CONTROL}/extension/pair",),
     )

@@ -459,6 +459,8 @@ class ScreenshotControlConfig:
     uploads_per_minute: int = 20
     uploads_per_hour: int = 120
     status_polls_per_minute: int = 120
+    ip_requests_per_minute: int = 300
+    max_extension_installs: int = 3
     extraction_max_attempts: int = 4
     audit_percent: float = 4.0
     thresholds: ScreenshotThresholds = ScreenshotThresholds()
@@ -1056,6 +1058,8 @@ class Settings:
                 screens.uploads_per_minute,
                 screens.uploads_per_hour,
                 screens.status_polls_per_minute,
+                screens.ip_requests_per_minute,
+                screens.max_extension_installs,
                 screens.extraction_max_attempts,
                 screens.image_url_ttl_seconds,
                 screens.pairing_ttl_minutes,

@@ -5,6 +5,7 @@ from backend.app.http.principals import require_admin, require_authenticated
 from backend.commands.export_openapi import filter_by_tag
 from backend.modules.wb_screenshot_control import domain
 from backend.modules.wb_screenshot_control.presentation.http import schemas
+from backend.modules.wb_screenshot_control.presentation.http.common import STATUS_BY_CODE
 from backend.modules.wb_screenshot_control.presentation.http.extension import require_extension
 from backend.shared.settings import load_settings
 from backend.tests.wb_screenshot_control.routes import walk_routes
@@ -73,3 +74,7 @@ def test_reason_dictionaries_are_closed_and_distinct() -> None:
     assert not any(":" in reason for reason in reasons)
     manager = set(get_args(schemas.ManagerReasonCode))
     assert manager.isdisjoint({"cross_user_duplicate", "possible_tampering", "near_image"})
+
+
+def test_every_error_code_has_an_http_status() -> None:
+    assert set(STATUS_BY_CODE) == set(get_args(schemas.ErrorCode))
