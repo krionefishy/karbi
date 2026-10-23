@@ -1,18 +1,18 @@
-"""Общее для маршрутов менеджера, расширения и админа.
+"""Общее для маршрутов менеджера, расширения и админа: режим, периоды, ошибки, сборка сервисов."""
 
-Этап 1 — каркас: ответы канонные по форме, но данных за ними ещё нет (списки пустые, счётчики
-нулевые, конкретный скриншот — 404). Приём уже проверяет то, что проверит и боевой код:
-размер, тип по содержимому, период, режим модуля.
-"""
-
-import uuid
-from datetime import UTC, date, datetime
+from datetime import date, datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from fastapi import UploadFile
+from fastapi import HTTPException, Request, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_screenshot_control.application import Period as ReportPeriod
-from backend.modules.wb_screenshot_control.application import PeriodError, preliminary, resolve_period
+from backend.modules.wb_screenshot_control.application import PeriodError, resolve_period
+from backend.modules.wb_screenshot_control.application.errors import ServiceError
+from backend.modules.wb_screenshot_control.application.images import ImageLinks
+from backend.modules.wb_screenshot_control.application.kpi import window_of
+from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
 from backend.modules.wb_screenshot_control.domain import (
     IMAGE_TYPES,
     OUTCOME_CAPTIONS,
@@ -20,18 +20,51 @@ from backend.modules.wb_screenshot_control.domain import (
     OUTCOMES,
     sniff_image_type,
 )
+from backend.modules.wb_screenshot_control.domain.ports import BlobStore
+from backend.modules.wb_screenshot_control.infrastructure.postgres.queries import Window
+from backend.modules.wb_screenshot_control.infrastructure.wiring import build_blob_store
 from backend.modules.wb_screenshot_control.presentation.http.errors import api_error
 from backend.modules.wb_screenshot_control.presentation.http.schemas import (
-    Channel,
     ManagerConfigOut,
-    Outcome,
-    OutcomeCounts,
     OutcomeOption,
     Period,
-    SubmissionOut,
-    Summary,
 )
 from backend.shared.settings import Settings
+
+# Код ошибки контракта → HTTP-статус. Сервисы знают только код.
+STATUS_BY_CODE: dict[str, int] = {
+    "not_found": 404,
+    "file_too_large": 413,
+    "unsupported_type": 415,
+    "too_small": 422,
+    "bad_image": 422,
+    "bad_outcome": 422,
+    "outcome_required": 422,
+    "idempotency_conflict": 409,
+    "outcome_locked": 409,
+    "period_too_long": 422,
+    "storage_full": 503,
+    "rate_limited": 429,
+    "limiter_unavailable": 503,
+    "module_off": 503,
+    "code_invalid": 404,
+    "bad_token": 401,
+    "install_revoked": 401,
+    "user_blocked": 403,
+    "upgrade_required": 426,
+    "exact_key_conflict": 409,
+    "note_required": 422,
+    "duplicate_target_invalid": 422,
+    "telegram_disabled": 503,
+    "transition_not_allowed": 409,
+    "bad_cursor": 422,
+}
+_BEARER = {"bad_token", "install_revoked"}
+
+
+def http_error(error: ServiceError) -> HTTPException:
+    headers = {"WWW-Authenticate": "Bearer"} if error.code in _BEARER else None
+    return api_error(STATUS_BY_CODE[error.code], error.code, error.message, headers=headers)  # type: ignore[arg-type]
 
 
 def ensure_enabled(settings: Settings) -> None:
@@ -39,28 +72,41 @@ def ensure_enabled(settings: Settings) -> None:
         raise api_error(503, "module_off", "Контроль скриншотов выключен")
 
 
-def period_of(settings: Settings, start: date | None, end: date | None) -> Period:
+def report_period(settings: Settings, start: date | None, end: date | None) -> ReportPeriod:
     today = datetime.now(ZoneInfo(settings.screenshot_control.timezone)).date()
     try:
-        resolved = resolve_period(start, end, today=today)
+        return resolve_period(start, end, today=today)
     except PeriodError as error:
         raise api_error(422, "period_too_long", str(error)) from error
+
+
+def period_of(settings: Settings, start: date | None, end: date | None) -> Period:
+    resolved = report_period(settings, start, end)
     return Period.model_validate({"from": resolved.start, "to": resolved.end})
 
 
-def empty_summary(settings: Settings, period: Period) -> Summary:
-    screens = settings.screenshot_control
-    return Summary(
-        period=period,
-        mode=screens.mode,  # type: ignore[arg-type]
-        preliminary=preliminary(screens.mode, ReportPeriod(period.from_, period.to), screens.kpi_from),
-        counts=OutcomeCounts(positive=0, amended=0, deleted=0, accepted_total=0),
-        pending_review=0,
-        awaiting_outcome=0,
-        processing=0,
-        duplicates=0,
-        rejected=0,
-    )
+def list_window(settings: Settings, start: date | None, end: date | None) -> Window:
+    """Для списков: без дат — без границы; с датами — дни по Москве, как у сводки."""
+    if start is None and end is None:
+        return Window()
+    return window_of(report_period(settings, start, end), settings.screenshot_control.timezone)
+
+
+def blob_store(request: Request, settings: Settings) -> BlobStore | None:
+    """Клиент S3 один на приложение; тесты подкладывают свой в `app.state.screenshot_blobs`."""
+    state = request.app.state
+    if not hasattr(state, "screenshot_blobs"):
+        state.screenshot_blobs = build_blob_store(settings)
+    blobs: BlobStore | None = state.screenshot_blobs
+    return blobs
+
+
+def image_links(request: Request, settings: Settings) -> ImageLinks:
+    return ImageLinks(blob_store(request, settings), settings.screenshot_control.image_url_ttl_seconds)
+
+
+def submissions_service(request: Request, session: AsyncSession, settings: Settings) -> SubmissionsService:
+    return SubmissionsService(session, settings.screenshot_control, image_links(request, settings))
 
 
 def manager_config(settings: Settings) -> ManagerConfigOut:
@@ -92,19 +138,7 @@ async def read_screenshot(upload: UploadFile, settings: Settings) -> tuple[bytes
     return data, content_type
 
 
-def accepted_submission(
-    user_key: str, client_submission_id: uuid.UUID, channel: Channel, outcome: Outcome | None
-) -> SubmissionOut:
-    """Канонный ответ приёма: тот же client_submission_id даёт тот же id."""
-    return SubmissionOut(
-        id=uuid.uuid5(uuid.NAMESPACE_URL, f"wb-screenshot-control:{user_key}:{client_submission_id}"),
-        channel=channel,
-        received_at=datetime.now(UTC),
-        outcome=outcome,
-        status="processing" if outcome else "awaiting_outcome",
-        reason_code=None,
-        reason_text=None,
-        duplicate_received_at=None,
-        fields=None,
-        thumb_url=None,
-    )
+def client_meta(request: Request, **values: Any) -> dict[str, Any]:
+    """Что клиент рассказал о себе; пустое не пишется."""
+    meta = {"user_agent": (request.headers.get("user-agent") or "")[:300] or None, **values}
+    return {key: value for key, value in meta.items() if value is not None}

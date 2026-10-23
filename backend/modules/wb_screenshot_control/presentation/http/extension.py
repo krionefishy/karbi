@@ -1,23 +1,26 @@
-import hashlib
 import uuid
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Annotated
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, UploadFile, status
-from redis.exceptions import RedisError
+from fastapi import APIRouter, Depends, File, Form, Header, Query, Request, Response, UploadFile, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.http.client_ip import resolve_client_ip
-from backend.modules.wb_screenshot_control.domain import TOKEN_PREFIX, version_supported
+from backend.modules.wb_screenshot_control.application.errors import ServiceError
+from backend.modules.wb_screenshot_control.application.extension_service import ExtensionCaller, ExtensionService
+from backend.modules.wb_screenshot_control.application.kpi import KpiService
+from backend.modules.wb_screenshot_control.infrastructure.postgres.queries import Window
+from backend.modules.wb_screenshot_control.infrastructure.wiring import build_ingest
 from backend.modules.wb_screenshot_control.presentation.http.common import (
-    accepted_submission,
-    empty_summary,
+    client_meta,
     ensure_enabled,
-    period_of,
+    http_error,
     read_screenshot,
+    report_period,
+    submissions_service,
 )
-from backend.modules.wb_screenshot_control.presentation.http.errors import api_error, documented, not_found
+from backend.modules.wb_screenshot_control.presentation.http.errors import api_error, documented
+from backend.modules.wb_screenshot_control.presentation.http.limits import limit_pairing, limit_user
 from backend.modules.wb_screenshot_control.presentation.http.schemas import (
     ExtensionMeOut,
     ExtensionPairOut,
@@ -28,16 +31,8 @@ from backend.modules.wb_screenshot_control.presentation.http.schemas import (
     Summary,
 )
 from backend.shared.settings import Settings
-from backend.storage.redis import SlidingWindowRateLimiter
 
 router = APIRouter(prefix="/wb/screenshot-control/extension", tags=["wb-screenshot-control-extension"])
-
-BAD_TOKEN = "Токен расширения не подходит: подключите расширение заново по коду со страницы"
-
-
-@dataclass(frozen=True, slots=True)
-class ExtensionCaller:
-    token_hash: str
 
 
 async def require_extension(
@@ -45,76 +40,65 @@ async def require_extension(
     authorization: str | None = Header(default=None),
     x_extension_version: str | None = Header(default=None),
 ) -> ExtensionCaller:
-    """Токен `mas_…` установки расширения.
+    """Токен `mas_…` установки: не отозван, не простаивал дольше срока, сотрудник активен, версия не ниже минимальной.
 
-    Этап 1: проверяется только форма токена и версия расширения. Поиск установки по хешу,
-    отзыв, простой и блокировка сотрудника (401 install_revoked, 403 user_blocked) — следующий этап.
+    401 bad_token / install_revoked — расширение стирает токен и просит подключиться заново;
+    403 user_blocked; 426 upgrade_required. При mode=off после проверки токена — 503 module_off.
     """
     supplied = ""
     if authorization and authorization.lower().startswith("bearer "):
         supplied = authorization[7:].strip()
-    if not supplied.startswith(TOKEN_PREFIX) or not 36 <= len(supplied) <= 128:
-        raise api_error(401, "bad_token", BAD_TOKEN, headers={"WWW-Authenticate": "Bearer"})
-    settings: Settings = await request.state.dishka_container.get(Settings)
-    minimum = settings.screenshot_control.extension_min_version
-    if not version_supported(x_extension_version, minimum):
-        raise api_error(426, "upgrade_required", f"Обновите расширение до версии {minimum} или новее")
-    return ExtensionCaller(token_hash=hashlib.sha256(supplied.encode()).hexdigest())
+    container = request.state.dishka_container
+    settings: Settings = await container.get(Settings)
+    session: AsyncSession = await container.get(AsyncSession)
+    try:
+        caller = await ExtensionService(session, settings.screenshot_control).authenticate(
+            supplied, x_extension_version
+        )
+    except ServiceError as error:
+        raise http_error(error) from error
+    ensure_enabled(settings)
+    return caller
 
 
 CurrentExtension = Annotated[ExtensionCaller, Depends(require_extension)]
-
-
-async def limit_pairing(request: Request) -> None:
-    """Код сопряжения — единственный вход без токена, поэтому жёсткий лимит с одного IP.
-
-    Недоступный Redis — 503, как у общего лимитера: открыть перебор кодов хуже, чем отказать.
-    """
-    settings: Settings = await request.state.dishka_container.get(Settings)
-    screens = settings.screenshot_control
-    limiter = SlidingWindowRateLimiter(
-        request.app.state.redis,
-        limit=screens.pair_attempts_per_window,
-        window_seconds=screens.pair_window_seconds,
-        key_prefix="rate_limit:sc-pair",
-    )
-    identity = resolve_client_ip(request, behind_trusted_proxy=settings.app.trust_proxy_headers)
-    try:
-        decision = await limiter.check(identity)
-    except (RedisError, RuntimeError) as error:
-        raise api_error(503, "limiter_unavailable", "Сервис временно недоступен") from error
-    if not decision.allowed:
-        raise api_error(
-            429,
-            "rate_limited",
-            "Слишком много попыток ввести код, попробуйте позже",
-            headers={"Retry-After": str(decision.retry_after_seconds)},
-        )
 
 
 @router.post(
     "/pair",
     response_model=ExtensionPairOut,
     dependencies=[Depends(limit_pairing)],
-    responses=documented(404, 429, 503),
+    responses=documented(404, 426, 429, 503),
 )
 @inject
-async def pair(payload: ExtensionPairRequest, settings: FromDishka[Settings]) -> ExtensionPairOut:
-    """Обмен кода со страницы на токен установки; без авторизации, под лимитом на IP."""
+async def pair(
+    payload: ExtensionPairRequest, settings: FromDishka[Settings], session: FromDishka[AsyncSession]
+) -> ExtensionPairOut:
+    """Обмен кода со страницы на токен установки; без авторизации, под жёстким лимитом на IP."""
     ensure_enabled(settings)
-    raise api_error(404, "code_invalid", "Код не подошёл: он уже использован или устарел. Получите новый на странице")
+    try:
+        paired = await ExtensionService(session, settings.screenshot_control).pair(
+            payload.code, install_id=payload.install_id, browser=payload.browser, ext_version=payload.ext_version
+        )
+    except ServiceError as error:
+        raise http_error(error) from error
+    return ExtensionPairOut.model_validate(paired)
 
 
-@router.get("/me", response_model=ExtensionMeOut, responses=documented(401, 403, 426))
+@router.get("/me", response_model=ExtensionMeOut, responses=documented(401, 403, 426, 429))
 @inject
-async def me(_: CurrentExtension, settings: FromDishka[Settings]) -> ExtensionMeOut:
+async def me(
+    request: Request, caller: CurrentExtension, settings: FromDishka[Settings], session: FromDishka[AsyncSession]
+) -> ExtensionMeOut:
+    await limit_user(request, settings, caller.user_id, "poll")
     screens = settings.screenshot_control
+    kpi = KpiService(session, screens)
     return ExtensionMeOut(
-        username="",
+        username=caller.username,
         min_version=screens.extension_min_version,
         mode=screens.mode,  # type: ignore[arg-type]
         allowed_url_prefixes=list(screens.allowed_url_prefixes),
-        summary=empty_summary(settings, period_of(settings, None, None)),
+        summary=Summary.model_validate(await kpi.summary(caller.user_id, report_period(settings, None, None))),
         server_time=datetime.now(UTC),
     )
 
@@ -127,10 +111,13 @@ async def me(_: CurrentExtension, settings: FromDishka[Settings]) -> ExtensionMe
 )
 @inject
 async def submit_from_extension(
+    request: Request,
+    response: Response,
     caller: CurrentExtension,
     settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
     file: UploadFile = File(description="captureVisibleTab, PNG"),
-    outcome: Outcome = Form(),
+    outcome: Outcome | None = Form(default=None, description="Обязателен: без него 422 outcome_required"),
     client_submission_id: uuid.UUID = Form(),
     client_url: str = Form(max_length=2048, description="tab.url на момент снимка"),
     client_captured_at: datetime = Form(),
@@ -140,28 +127,79 @@ async def submit_from_extension(
     dpr: float | None = Form(default=None, gt=0, le=8),
 ) -> SubmissionOut:
     """Скрин из расширения; исход обязателен. Повтор того же `client_submission_id` отвечает 200."""
-    ensure_enabled(settings)
-    await read_screenshot(file, settings)
-    return accepted_submission(caller.token_hash, client_submission_id, "extension", outcome)
+    if outcome is None:
+        raise api_error(422, "outcome_required", "Выберите исход: полож, доп или удален")
+    await limit_user(request, settings, caller.user_id, "upload")
+    data, _ = await read_screenshot(file, settings)
+    meta = client_meta(request, ext_version=caller.ext_version, viewport_w=viewport_w, viewport_h=viewport_h, dpr=dpr)
+    try:
+        view, created = await submissions_service(request, session, settings).submit(
+            build_ingest(session, settings),
+            caller.user_id,
+            "extension",
+            data,
+            client_submission_id=str(client_submission_id),
+            outcome=outcome,
+            outcome_source="button",
+            client_url=client_url,
+            client_captured_at=client_captured_at,
+            tz_offset_min=tz_offset_min,
+            client_meta=meta,
+            install_id=caller.install_id,
+        )
+    except ServiceError as error:
+        raise http_error(error) from error
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return SubmissionOut.model_validate(view)
 
 
-@router.get("/submissions", response_model=ExtensionSubmissionList, responses=documented(401, 403, 426))
-async def submissions(_: CurrentExtension, limit: int = Query(default=10, ge=1, le=50)) -> ExtensionSubmissionList:
-    return ExtensionSubmissionList(items=[])
+@router.get("/submissions", response_model=ExtensionSubmissionList, responses=documented(401, 403, 426, 429))
+@inject
+async def submissions(
+    request: Request,
+    caller: CurrentExtension,
+    settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
+    limit: int = Query(default=10, ge=1, le=50),
+) -> ExtensionSubmissionList:
+    """Последние скрины, отправленные расширением."""
+    await limit_user(request, settings, caller.user_id, "poll")
+    page = await submissions_service(request, session, settings).page(
+        caller.user_id, window=Window(), channel="extension", limit=limit
+    )
+    return ExtensionSubmissionList.model_validate({"items": page["items"]})
 
 
-@router.get("/submissions/{submission_id}", response_model=SubmissionOut, responses=documented(401, 403, 404, 426))
-async def submission(submission_id: uuid.UUID, _: CurrentExtension) -> SubmissionOut:
-    """Опрос вердикта после отправки."""
-    raise not_found()
+@router.get("/submissions/{submission_id}", response_model=SubmissionOut, responses=documented(401, 403, 404, 426, 429))
+@inject
+async def submission(
+    submission_id: uuid.UUID,
+    request: Request,
+    caller: CurrentExtension,
+    settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
+) -> SubmissionOut:
+    """Опрос вердикта после отправки; чужой скрин — 404."""
+    await limit_user(request, settings, caller.user_id, "poll")
+    try:
+        view = await submissions_service(request, session, settings).card(caller.user_id, submission_id)
+    except ServiceError as error:
+        raise http_error(error) from error
+    return SubmissionOut.model_validate(view)
 
 
-@router.get("/summary", response_model=Summary, responses=documented(401, 403, 422, 426))
+@router.get("/summary", response_model=Summary, responses=documented(401, 403, 422, 426, 429))
 @inject
 async def summary(
-    _: CurrentExtension,
+    request: Request,
+    caller: CurrentExtension,
     settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
     date_from: date | None = Query(default=None, alias="from"),
     date_to: date | None = Query(default=None, alias="to"),
 ) -> Summary:
-    return empty_summary(settings, period_of(settings, date_from, date_to))
+    period = report_period(settings, date_from, date_to)
+    await limit_user(request, settings, caller.user_id, "poll")
+    kpi = KpiService(session, settings.screenshot_control)
+    return Summary.model_validate(await kpi.summary(caller.user_id, period))
