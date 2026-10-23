@@ -1081,6 +1081,9 @@ class Settings:
             raise ValueError("screenshot_control: limits, retention days and intervals must be positive")
         if screens.retention_fields_days < max(screens.retention_original_days, screens.retention_thumb_days):
             raise ValueError("screenshot_control.retention_fields_days must cover the image retention")
+        if screens.retention_fields_days <= screens.dedupe_window_days:
+            # Тексты — ключ кандидатов: стирать их внутри окна дедупа значит пропускать повторы.
+            raise ValueError("screenshot_control.retention_fields_days must exceed dedupe_window_days")
         if screens.image_url_ttl_seconds > 3600:
             raise ValueError("screenshot_control.image_url_ttl_seconds must not exceed an hour")
         if not 1 <= screens.staging_max_used_percent <= 100:

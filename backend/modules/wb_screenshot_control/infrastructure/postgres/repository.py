@@ -424,6 +424,59 @@ class ScreenshotRepository:
             query = query.where(~unresolved)
         return (await self.session.scalars(query)).all()
 
+    # срок хранения текстов (ПДн)
+    async def strip_submission_texts(self, cutoff: datetime, limit: int) -> int:
+        """Обнулить тексты у скринов старше `cutoff`: `text_norm`, MinHash и подпись. Вердикт, исход,
+        ключи (`text_key`, `chat_id_norm`, `key_time`) и длина текста остаются для KPI и журнала."""
+        ids = (
+            select(SubmissionModel.id)
+            .where(
+                SubmissionModel.received_at < cutoff,
+                or_(
+                    SubmissionModel.text_norm.is_not(None),
+                    SubmissionModel.caption_raw.is_not(None),
+                    SubmissionModel.text_minhash.is_not(None),
+                ),
+            )
+            .limit(limit)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(SubmissionModel)
+            .where(SubmissionModel.id.in_(ids))
+            .values(text_norm=None, caption_raw=None, text_minhash=None)
+            .returning(SubmissionModel.id)
+        )
+        return len(result.all())
+
+    async def extractions_with_texts(self, cutoff: datetime, limit: int) -> Sequence[ExtractionModel]:
+        """Распознавания файлов, последний скрин с которыми старше `cutoff`, а тексты ещё не стёрты."""
+        last_received = (
+            select(func.max(SubmissionModel.received_at))
+            .where(SubmissionModel.file_id == ExtractionModel.file_id)
+            .scalar_subquery()
+        )
+        return (
+            await self.session.scalars(
+                select(ExtractionModel)
+                .where(
+                    last_received < cutoff,
+                    or_(
+                        # JSON `null` и SQL NULL — оба «пусто»: jsonb_typeof(NULL) даёт NULL, а не 'null'
+                        func.jsonb_typeof(ExtractionModel.vlm_json) != "null",
+                        func.jsonb_typeof(ExtractionModel.ocr_json) != "null",
+                        and_(
+                            ExtractionModel.fields.is_not(None),
+                            ExtractionModel.fields["texts_purged"].astext.is_(None),
+                        ),
+                    ),
+                )
+                .order_by(ExtractionModel.created_at)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+
     async def stored_to_verify(self, limit: int) -> Sequence[StorageObjectModel]:
         """Выгруженные объекты по кругу: давно не проверенные первыми."""
         return (

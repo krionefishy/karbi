@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from backend.modules.wb_screenshot_control.application.outcomes import expire_outcomes
-from backend.modules.wb_screenshot_control.application.purge import purge_expired
+from backend.modules.wb_screenshot_control.application.purge import purge_expired, purge_texts
 from backend.modules.wb_screenshot_control.infrastructure.wiring import ScreenshotControlServices
 from backend.shared.settings import Settings
 from backend.shared.worker import PollingWorker
@@ -17,9 +17,9 @@ class ScreenshotControlWorker(PollingWorker):
     """Контроль скриншотов ДБС: фоновые шаги процесса; распознавание и решения — консьюмеры Kafka.
 
     Каждую минуту — истечение исхода; раз в час — сверка хранилища (зависшие выгрузки, пропавшие
-    объекты, сироты staging); раз в сутки в `purge_hour:purge_minute` по Москве — чистка по сроку.
-    Шаги независимы: сбой одного не мешает остальным. Без S3 сверка только смотрит на staging,
-    чистка не запускается.
+    объекты, сироты staging); раз в сутки в `purge_hour:purge_minute` по Москве — чистка по сроку:
+    файлы в S3 (только с S3) и тексты в базе (`retention_fields_days`, всегда).
+    Шаги независимы: сбой одного не мешает остальным. Без S3 сверка только смотрит на staging.
     """
 
     tick_failed_event = "screenshot_control_tick_failed"
@@ -58,11 +58,11 @@ class ScreenshotControlWorker(PollingWorker):
             await self._step("reconcile", lambda: self.services.reconciler().run(now))
         if self.purge_due(now):
             self.purged_on = now.astimezone(self.timezone).date()
-            await self._step("purge", lambda: purge_expired(self.database, self.config, now))
+            if self.services.blobs is not None:
+                await self._step("purge", lambda: purge_expired(self.database, self.config, now))
+            await self._step("purge_texts", lambda: purge_texts(self.database, self.config, now))
 
     def purge_due(self, now: datetime) -> bool:
-        if self.services.blobs is None:
-            return False
         local = now.astimezone(self.timezone)
         slot = datetime.combine(local.date(), time(self.config.purge_hour, self.config.purge_minute), self.timezone)
         return local >= slot and self.purged_on != local.date()
