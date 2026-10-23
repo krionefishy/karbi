@@ -76,7 +76,8 @@ services:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}
       RELAY_PHOTOS_ENABLED: ${RELAY_PHOTOS_ENABLED:-true}
       # Контроль скриншотов ДБС. По умолчанию выключен: shadow требует SCREENSHOT_CONTROL_HMAC_KEY
-      # (32+ символов) в .env, без него api и воркер не стартуют. S3_* выше общие; свой бакет — по желанию.
+      # (32+ символов) в .env, без него модуль сам выключается (503 module_off, ERROR в логе), остальное
+      # работает. S3_* выше общие; свой бакет — по желанию, без S3 staging держит до 2 ГБ.
       SCREENSHOT_CONTROL_MODE: ${SCREENSHOT_CONTROL_MODE:-off}
       SCREENSHOT_CONTROL_HMAC_KEY: ${SCREENSHOT_CONTROL_HMAC_KEY:-}
       SCREENSHOT_CONTROL_KPI_FROM: ${SCREENSHOT_CONTROL_KPI_FROM:-}

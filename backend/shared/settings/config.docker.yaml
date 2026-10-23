@@ -154,7 +154,7 @@ screenshot_control:
   kpi_from: ${SCREENSHOT_CONTROL_KPI_FROM:-}
   timezone: Europe/Moscow
   poll_seconds: 2
-  # Ключ HMAC для имён покупателей: обязателен в проде при mode != off.
+  # Ключ HMAC для имён покупателей, 32+ символов: без него при mode != off модуль выключается сам.
   hmac_key: ${SCREENSHOT_CONTROL_HMAC_KEY:-}
   # Отдельный бакет под скрины (ПДн, свой lifecycle); пусто — общий s3.bucket с префиксом dbs-screenshots/.
   s3_bucket: ${SCREENSHOT_CONTROL_S3_BUCKET:-}
