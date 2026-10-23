@@ -10,12 +10,12 @@ import {
   selectAfterRemoval,
   stepSelection,
   suspicionBadge,
-  toneBadgeClass,
   type QueuePeriod,
   type QueueTab,
 } from "../features/screenshotControl/admin";
 import { getManagers, getQueue, resolveSubmission } from "../features/screenshotControl/api";
-import { formatMoment, periodRange } from "../features/screenshotControl/format";
+import { apiErrorText } from "../features/screenshotControl/errors";
+import { formatMoment, periodRange, toneBadgeClass } from "../features/screenshotControl/format";
 import { primaryReason, REASON_GROUPS, reasonText } from "../features/screenshotControl/reasons";
 import type { AdminSubmission, ReasonCode, ResolveRequest } from "../features/screenshotControl/types";
 import { ScreenshotAdminCard, type Panel } from "./ScreenshotAdminCard";
@@ -86,15 +86,18 @@ export function ScreenshotAdminQueue({ kind }: { kind: QueueTab }) {
     setResolveError(null);
   };
 
+  /** Скриншот ушёл из очереди (решение или пересчёт): выбираем соседний, счётчики обновляем. */
+  const removeFromQueue = (id: string) => {
+    const next = selectAfterRemoval(ids, id);
+    setResolved((current) => new Set(current).add(id));
+    select(next);
+    void queryClient.invalidateQueries({ queryKey: [QUEUE_KEY, "counts"] });
+  };
+
   const resolve = useMutation({
     mutationFn: ({ item, payload }: { item: AdminSubmission; payload: ResolveRequest }) =>
       resolveSubmission(item.id, payload),
-    onSuccess: (_result, { item }) => {
-      const next = selectAfterRemoval(ids, item.id);
-      setResolved((current) => new Set(current).add(item.id));
-      select(next);
-      void queryClient.invalidateQueries({ queryKey: [QUEUE_KEY, "counts"] });
-    },
+    onSuccess: (_result, { item }) => removeFromQueue(item.id),
     onError: (error) => setResolveError(error),
   });
 
@@ -107,8 +110,10 @@ export function ScreenshotAdminQueue({ kind }: { kind: QueueTab }) {
   const handler = useRef<(event: KeyboardEvent) => void>(() => undefined);
   handler.current = (event: KeyboardEvent) => {
     const action = keyAction(event);
-    // Пока открыто увеличенное фото или другой диалог, очередь клавишами не листаем.
-    if (!action || !selected || resolve.isPending || document.querySelector('[role="dialog"]')) return;
+    // Пока открыто увеличенное фото или подтверждение, очередь клавишами не листаем.
+    if (!action || !selected || resolve.isPending || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+    // Открыта панель отклонения или дубля: решения клавишами не принимаем, чтобы не уйти мимо панели.
+    if (panel !== "none" && action !== "next" && action !== "prev") return;
     event.preventDefault();
     if (action === "next" || action === "prev") {
       select(stepSelection(ids, selected.id, action === "next" ? 1 : -1));
@@ -180,11 +185,11 @@ export function ScreenshotAdminQueue({ kind }: { kind: QueueTab }) {
 
       {queue.isLoading ? (
         <div className="loading-block">Загружаем очередь…</div>
-      ) : queue.isError ? (
+      ) : queue.isError && !queue.data ? (
         <div className="inline-error" role="alert">
           <div>
             <strong>Очередь не загрузилась</strong>
-            {queue.error instanceof ApiError ? queue.error.message : "Нет связи с сервером"}
+            {apiErrorText(queue.error)}
           </div>
           <button type="button" className="secondary-button sca-retry" onClick={() => void queue.refetch()}>
             Повторить
@@ -248,6 +253,11 @@ export function ScreenshotAdminQueue({ kind }: { kind: QueueTab }) {
                 );
               })}
             </ul>
+            {queue.isError && (
+              <p className="sca-queue-foot sca-muted-small" role="status">
+                Не удалось обновить очередь: {apiErrorText(queue.error)}
+              </p>
+            )}
             {queue.hasNextPage && (
               <div className="sca-queue-foot">
                 <button
@@ -274,6 +284,7 @@ export function ScreenshotAdminQueue({ kind }: { kind: QueueTab }) {
               onResolve={(payload) => submit(selected, payload)}
               pending={resolve.isPending}
               error={resolveError}
+              onReprocessed={() => removeFromQueue(selected.id)}
             />
           )}
         </div>

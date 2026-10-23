@@ -53,6 +53,8 @@ export function ScreenshotsPage() {
               key={item.key}
               type="button"
               role="tab"
+              id={`sca-tab-${item.key}`}
+              aria-controls="sca-tabpanel"
               aria-selected={tab === item.key}
               className={tab === item.key ? "mode-active" : undefined}
               onClick={() => setTab(item.key)}
@@ -63,13 +65,15 @@ export function ScreenshotsPage() {
           ))}
         </div>
 
-        {tab === "managers" ? (
-          <ScreenshotAdminManagers />
-        ) : tab === "pipeline" ? (
-          <ScreenshotAdminPipeline />
-        ) : (
-          <ScreenshotAdminQueue key={tab} kind={tab} />
-        )}
+        <div role="tabpanel" id="sca-tabpanel" aria-labelledby={`sca-tab-${tab}`}>
+          {tab === "managers" ? (
+            <ScreenshotAdminManagers />
+          ) : tab === "pipeline" ? (
+            <ScreenshotAdminPipeline />
+          ) : (
+            <ScreenshotAdminQueue key={tab} kind={tab} />
+          )}
+        </div>
       </main>
     </Shell>
   );
