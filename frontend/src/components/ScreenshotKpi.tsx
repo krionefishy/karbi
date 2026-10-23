@@ -1,6 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 
-import { ApiError } from "../api/http";
+import { apiErrorText } from "../features/screenshotControl/errors";
 import type { Summary } from "../features/screenshotControl/types";
 
 interface ScreenshotKpiProps {
@@ -12,13 +12,14 @@ interface ScreenshotKpiProps {
 
 export function ScreenshotKpi({ summary, loading, error, onRetry }: ScreenshotKpiProps) {
   if (loading) return <div className="loading-block sc-kpi-loading">Загружаем сводку…</div>;
-  if (error || !summary) {
+  // Фоновый опрос не удался, а цифры уже есть: показываем их, а не ошибку.
+  if (!summary) {
     return (
       <div className="inline-error" role="alert">
         <div>
           <strong>Не удалось загрузить сводку</strong>
-          {error instanceof ApiError ? error.message : "Сервер не ответил."}{" "}
-          <button className="secondary-button docs-retry" onClick={onRetry}>
+          {error ? apiErrorText(error) : "Сервер не ответил."}{" "}
+          <button type="button" className="secondary-button docs-retry" onClick={onRetry}>
             Повторить
           </button>
         </div>
@@ -60,6 +61,7 @@ export function ScreenshotKpi({ summary, loading, error, onRetry }: ScreenshotKp
         </div>
         <p className="sc-kpi-foot">
           Не засчитано: дубли {summary.duplicates}, отклонено {summary.rejected}
+          {error ? <span className="sc-queue-error"> · не обновилось: {apiErrorText(error)}</span> : null}
         </p>
       </section>
     </>

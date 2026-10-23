@@ -2,8 +2,8 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { ImageOff } from "lucide-react";
 import { useState } from "react";
 
-import { ApiError } from "../api/http";
 import { getSubmissions, setOutcome } from "../features/screenshotControl/api";
+import { apiErrorText } from "../features/screenshotControl/errors";
 import {
   formatMoment,
   hasPending,
@@ -14,6 +14,8 @@ import {
   statusLabel,
   submissionNote,
 } from "../features/screenshotControl/format";
+import { useStableImage } from "../features/screenshotControl/hooks";
+import { thumbKey } from "../features/screenshotControl/images";
 import type { Outcome, Status, Submission } from "../features/screenshotControl/types";
 
 export const SUBMISSIONS_KEY = "sc-submissions";
@@ -47,18 +49,23 @@ export function ScreenshotList() {
         <div className="card-head-title">
           <h2>Последние отправки</h2>
           {hasPending(items) && <span className="muted">обновляется</span>}
+          {query.isError && items.length > 0 && (
+            <span className="sc-queue-error" role="status">
+              не обновилось: {apiErrorText(query.error)}
+            </span>
+          )}
         </div>
       </div>
 
       {query.isLoading ? (
         <div className="sc-list-message muted">Загружаем отправки…</div>
-      ) : query.isError ? (
+      ) : query.isError && items.length === 0 ? (
         <div className="sc-list-message">
           <div className="inline-error" role="alert">
             <div>
               <strong>Не удалось загрузить отправки</strong>
-              {query.error instanceof ApiError ? query.error.message : "Сервер не ответил."}{" "}
-              <button className="secondary-button docs-retry" onClick={() => void query.refetch()}>
+              {apiErrorText(query.error)}{" "}
+              <button type="button" className="secondary-button docs-retry" onClick={() => void query.refetch()}>
                 Повторить
               </button>
             </div>
@@ -123,7 +130,10 @@ export function ScreenshotList() {
 
 function SubmissionRow({ item }: { item: Submission }) {
   const queryClient = useQueryClient();
-  const [broken, setBroken] = useState(false);
+  // Ссылка держится до истечения: опрос списка не заставляет браузер перекачивать миниатюру.
+  const thumb = useStableImage(thumbKey(item.id), item.thumb_url, {
+    onExpired: () => void queryClient.invalidateQueries({ queryKey: [SUBMISSIONS_KEY] }),
+  });
   const note = submissionNote(item);
   const mutation = useMutation({
     mutationFn: (outcome: Outcome) => setOutcome(item.id, outcome),
@@ -132,15 +142,15 @@ function SubmissionRow({ item }: { item: Submission }) {
 
   return (
     <li className="sc-row">
-      {item.thumb_url && !broken ? (
+      {thumb.src ? (
         <img
           className="sc-thumb"
-          src={item.thumb_url}
+          src={thumb.src}
           alt=""
           width={44}
           height={32}
           loading="lazy"
-          onError={() => setBroken(true)}
+          onError={thumb.onError}
         />
       ) : (
         <span className="sc-thumb sc-thumb-empty" aria-hidden="true">
@@ -154,12 +164,12 @@ function SubmissionRow({ item }: { item: Submission }) {
         {note && <small className={note.reason ? "sc-row-reason" : "muted mono"}>{note.text}</small>}
         {mutation.isError && (
           <small className="sc-queue-error">
-            {mutation.error instanceof ApiError ? mutation.error.message : "Не удалось сохранить исход"}
+            {apiErrorText(mutation.error, "Не удалось сохранить исход")}
           </small>
         )}
       </div>
       {item.status === "awaiting_outcome" && (
-        <div className="seg sc-outcome-seg" role="group" aria-label="Выбрать исход">
+        <div className="seg sc-outcome-seg" role="group" aria-label={`Исход для скриншота ${formatMoment(item.received_at)}`}>
           {OUTCOMES.map((value) => (
             <button key={value} type="button" disabled={mutation.isPending} onClick={() => mutation.mutate(value)}>
               {outcomeLabel(value)}

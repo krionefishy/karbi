@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError } from "../../api/http";
 import { uploadSubmission } from "./api";
+import { apiErrorText, isFileRejected } from "./errors";
+import { forgetImage, stableImageUrl } from "./images";
 import {
   addFiles,
   clearFinished,
@@ -18,11 +19,6 @@ import {
 import type { Outcome } from "./types";
 
 const newId = () => crypto.randomUUID();
-
-export function uploadErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message || "Сервер не принял файл";
-  return "Нет связи с сервером";
-}
 
 /** Очередь загрузки: не больше трёх файлов одновременно, повтор с тем же client_submission_id. */
 export function useUploadQueue(limits: UploadLimits | undefined, onUploaded: () => void) {
@@ -49,7 +45,14 @@ export function useUploadQueue(limits: UploadLimits | undefined, onUploaded: () 
           uploaded.current();
         })
         .catch((error: unknown) => {
-          setItems((current) => markItems(current, [item.key], { state: "error", error: uploadErrorMessage(error) }));
+          // Файл, который сервер отверг (размер, тип, битая картинка), повторять бесполезно.
+          setItems((current) =>
+            markItems(current, [item.key], {
+              state: "error",
+              error: apiErrorText(error, "Сервер не принял файл"),
+              invalid: isFileRejected(error),
+            }),
+          );
         })
         .finally(() => started.current.delete(item.key));
     }
@@ -89,4 +92,30 @@ export function useCountdown(until: string | null | undefined): number {
     return () => clearInterval(timer);
   }, [target]);
   return target ? Math.max(0, target - now) : 0;
+}
+
+/**
+ * Картинка по presigned-ссылке: ссылка держится до истечения (см. images.ts). Если картинка не
+ * загрузилась — ссылка протухла, пока ждала прокрутки или открытия: один раз просим свежую через
+ * onExpired и, пока она не пришла, протухшую не показываем; вторая неудача — картинки нет.
+ */
+export function useStableImage(
+  key: string,
+  url: string | null | undefined,
+  options: { expiresAt?: string | null; onExpired?: () => void } = {},
+) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const [broken, setBroken] = useState(false);
+  const candidate = url && url !== failedUrl ? url : null;
+  const src = broken ? null : stableImageUrl(key, candidate, { expiresAt: candidate ? options.expiresAt : null });
+  const onError = () => {
+    forgetImage(key);
+    if (failedUrl) {
+      setBroken(true);
+      return;
+    }
+    setFailedUrl(src);
+    options.onExpired?.();
+  };
+  return { src, onError };
 }

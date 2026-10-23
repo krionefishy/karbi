@@ -95,9 +95,10 @@ describe("screenshot control format", () => {
     expect(statusBadgeClass("rejected")).toBe("status-badge");
   });
 
-  it("polls only while something has no verdict yet", () => {
+  it("polls only while the pipeline is still processing", () => {
     expect(hasPending([{ status: "accepted" }, { status: "processing" }])).toBe(true);
-    expect(hasPending([{ status: "awaiting_outcome" }])).toBe(true);
+    // «Нужен исход» ждёт менеджера до суток: опрашивать сервер ради него незачем.
+    expect(hasPending([{ status: "awaiting_outcome" }])).toBe(false);
     expect(hasPending([{ status: "accepted" }, { status: "duplicate" }])).toBe(false);
     expect(hasPending([])).toBe(false);
   });

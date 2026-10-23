@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, KeyRound } from "lucide-react";
 import { useState } from "react";
 
-import { ApiError } from "../api/http";
 import { createPairingCode, getInstalls, revokeInstall } from "../features/screenshotControl/api";
+import { apiErrorText } from "../features/screenshotControl/errors";
 import { formatCountdown } from "../features/screenshotControl/format";
 import { useCountdown } from "../features/screenshotControl/hooks";
 import type { ManagerConfig, PairingCode } from "../features/screenshotControl/types";
@@ -45,7 +45,7 @@ function ExtensionPanel({ config }: { config: ManagerConfig | undefined }) {
   const pairing = useMutation({
     mutationFn: createPairingCode,
     onSuccess: () => setError(""),
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Не удалось выпустить код"),
+    onError: (err) => setError(apiErrorText(err, "Не удалось выпустить код")),
   });
   const revoke = useMutation({
     mutationFn: revokeInstall,
@@ -53,7 +53,7 @@ function ExtensionPanel({ config }: { config: ManagerConfig | undefined }) {
       setError("");
       return queryClient.invalidateQueries({ queryKey: [INSTALLS_KEY] });
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : "Не удалось отозвать установку"),
+    onError: (err) => setError(apiErrorText(err, "Не удалось отозвать установку")),
   });
 
   return (
@@ -81,8 +81,8 @@ function ExtensionPanel({ config }: { config: ManagerConfig | undefined }) {
           </span>
         </li>
         <li>
-          <button className="primary-button" disabled={pairing.isPending} onClick={() => pairing.mutate()}>
-            <KeyRound size={15} />
+          <button type="button" className="primary-button" disabled={pairing.isPending} onClick={() => pairing.mutate()}>
+            <KeyRound size={15} aria-hidden="true" />
             {pairing.isPending ? "Готовим…" : "Получить код"}
           </button>
           <span>Введите код в попапе расширения. Один код — одна установка.</span>
@@ -97,8 +97,8 @@ function ExtensionPanel({ config }: { config: ManagerConfig | undefined }) {
         <div className="inline-error" role="alert">
           <div>
             <strong>Не удалось загрузить установки</strong>
-            {installs.error instanceof ApiError ? installs.error.message : "Сервер не ответил."}{" "}
-            <button className="secondary-button docs-retry" onClick={() => void installs.refetch()}>
+            {apiErrorText(installs.error)}{" "}
+            <button type="button" className="secondary-button docs-retry" onClick={() => void installs.refetch()}>
               Повторить
             </button>
           </div>
@@ -127,7 +127,9 @@ function ExtensionPanel({ config }: { config: ManagerConfig | undefined }) {
                 <td>{stamp(install.last_seen_at)}</td>
                 <td className="sc-installs-action">
                   <button
+                    type="button"
                     className="secondary-button sc-small-button"
+                    aria-label={`Отозвать установку: ${install.browser || "браузер"}`}
                     title="Токен этой установки перестанет работать"
                     disabled={revoke.isPending}
                     onClick={() => revoke.mutate(install.id)}

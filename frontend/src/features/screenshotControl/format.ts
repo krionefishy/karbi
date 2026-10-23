@@ -73,8 +73,7 @@ export const statusLabel = (status: Status): string => STATUS[status].label;
 export const statusTone = (status: Status): Tone => STATUS[status].tone;
 
 /** Классы status-badge из ui.css по тону; нейтральный — базовый серый бейдж. */
-export function statusBadgeClass(status: Status): string {
-  const tone = statusTone(status);
+export function toneBadgeClass(tone: Tone): string {
   const extra = {
     accent: "status-running",
     positive: "status-active",
@@ -85,6 +84,8 @@ export function statusBadgeClass(status: Status): string {
   return extra ? `status-badge ${extra}` : "status-badge";
 }
 
+export const statusBadgeClass = (status: Status): string => toneBadgeClass(statusTone(status));
+
 export const STATUS_FILTERS: Status[] = [
   "processing",
   "awaiting_outcome",
@@ -94,9 +95,11 @@ export const STATUS_FILTERS: Status[] = [
   "rejected",
 ];
 
-/** Опрашивать список и сводку, пока что-то ещё не получило вердикт. */
-export const hasPending = (items: Pick<Submission, "status">[]): boolean =>
-  items.some((item) => item.status === "processing" || item.status === "awaiting_outcome");
+/**
+ * Опрашивать список, пока конвейер что-то распознаёт. «Нужен исход» ждёт менеджера до суток —
+ * опрос ему не поможет, а исход менеджер ставит сам и список обновляется после этого.
+ */
+export const hasPending = (items: Pick<Submission, "status">[]): boolean => items.some((item) => item.status === "processing");
 
 const timeFormatter = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
 const dayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" });

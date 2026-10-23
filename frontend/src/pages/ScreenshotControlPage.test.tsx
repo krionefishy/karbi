@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { periodRange } from "../features/screenshotControl/format";
+import { clearImageCache } from "../features/screenshotControl/images";
 import type {
   ExtensionInstall,
   ManagerConfig,
@@ -19,6 +20,7 @@ vi.mock("../components/Shell", () => ({ Shell: ({ children }: { children: React.
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  clearImageCache();
 });
 
 const root = "/api/v1/wb/screenshot-control";
@@ -323,6 +325,118 @@ describe("ScreenshotControlPage", () => {
     expect(calls).toBe(settled);
   });
 
+  it("does not poll screenshots that wait for the manager's outcome", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let lists = 0;
+    let summaries = 0;
+    renderPage((url, init) => {
+      if (url.startsWith(`${root}/summary`)) {
+        summaries += 1;
+        return json(summary({ awaiting_outcome: 2, processing: 0 }));
+      }
+      if (!url.startsWith(`${root}/submissions`) || init?.method) return undefined;
+      lists += 1;
+      return json(page([submission("s1", { status: "awaiting_outcome", outcome: null })]));
+    });
+
+    expect(await screen.findByText("Нужен исход", { selector: ".status-badge" })).toBeInTheDocument();
+    await screen.findByLabelText("Положительные: 12");
+    const before = [lists, summaries];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect([lists, summaries]).toEqual(before);
+  });
+
+  it("keeps the thumbnail url while polling re-signs it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    renderPage((url, init) => {
+      if (!url.startsWith(`${root}/submissions`) || init?.method) return undefined;
+      calls += 1;
+      return json(
+        page([
+          submission("s1", {
+            status: calls < 3 ? "processing" : "accepted",
+            thumb_url: `https://s3.example/thumb/s1.jpg?sig=${calls}`,
+          }),
+        ]),
+      );
+    });
+
+    const list = await screen.findByRole("region", { name: "Последние отправки" });
+    await within(list).findByText("В обработке", { selector: ".status-badge" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(await within(list).findByText("Принят", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(calls).toBeGreaterThanOrEqual(3);
+    expect(list.querySelector("img")).toHaveAttribute("src", "https://s3.example/thumb/s1.jpg?sig=1");
+  });
+
+  it("takes a fresh thumbnail url once when the old one has expired", async () => {
+    let calls = 0;
+    renderPage((url, init) => {
+      if (!url.startsWith(`${root}/submissions`) || init?.method) return undefined;
+      calls += 1;
+      return json(page([submission("s1", { thumb_url: `https://s3.example/thumb/s1.jpg?sig=${calls}` })]));
+    });
+
+    const list = await screen.findByRole("region", { name: "Последние отправки" });
+    await within(list).findByText("Принят", { selector: ".status-badge" });
+    fireEvent.error(list.querySelector("img")!);
+    await waitFor(() => expect(list.querySelector("img")).toHaveAttribute("src", "https://s3.example/thumb/s1.jpg?sig=2"));
+    fireEvent.error(list.querySelector("img")!);
+    await waitFor(() => expect(list.querySelector("img")).toBeNull());
+    expect(calls).toBe(2);
+  });
+
+  it("does not offer a retry for a file the server rejected", async () => {
+    renderPage((url, init) =>
+      url === `${root}/submissions` && init?.method === "POST"
+        ? new Response(JSON.stringify({ detail: "Файл больше 15 МБ" }), {
+            status: 413,
+            headers: { "Content-Type": "application/json", "X-Error-Code": "file_too_large" },
+          })
+        : undefined,
+    );
+    await userEvent.upload(screen.getByLabelText("Выбрать файлы"), png("big.png"));
+    await userEvent.click(within(screen.getByRole("group", { name: "Исход" })).getByRole("button", { name: "Полож" }));
+    await userEvent.click(screen.getByRole("button", { name: "Отправить" }));
+
+    expect(await screen.findByText(/Файл больше 15 МБ/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Повторить" })).not.toBeInTheDocument();
+  });
+
+  it("does not ask for the summary when the module is off", async () => {
+    const request = renderPage((url) => (url === `${root}/config` ? json({ ...config, mode: "off" }) : undefined));
+
+    expect(await screen.findByText("Контроль скриншотов выключен")).toBeInTheDocument();
+    expect(request.mock.calls.some(([url]) => String(url).startsWith(`${root}/summary`))).toBe(false);
+  });
+
+  it("keeps loaded submissions when a background refresh fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    renderPage((url, init) => {
+      if (!url.startsWith(`${root}/submissions`) || init?.method) return undefined;
+      calls += 1;
+      if (calls === 1) return json(page([submission("s1", { status: "processing" })]));
+      return new Response(JSON.stringify({ detail: "Курсор не подходит" }), {
+        status: 422,
+        headers: { "Content-Type": "application/json", "X-Error-Code": "bad_cursor" },
+      });
+    });
+
+    const list = await screen.findByRole("region", { name: "Последние отправки" });
+    await within(list).findByText("В обработке", { selector: ".status-badge" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(await within(list).findByText(/не обновилось: Список изменился/)).toBeInTheDocument();
+    expect(within(list).getByText("В обработке", { selector: ".status-badge" })).toBeInTheDocument();
+  });
+
   it("lets the manager pick an outcome for a screenshot sent without one", async () => {
     const request = renderPage((url, init) => {
       if (url === `${root}/submissions/s1/outcome`) return json(submission("s1", { status: "processing" }));
@@ -332,7 +446,7 @@ describe("ScreenshotControlPage", () => {
       return undefined;
     });
 
-    const picker = await screen.findByRole("group", { name: "Выбрать исход" });
+    const picker = await screen.findByRole("group", { name: /^Исход для скриншота/ });
     await userEvent.click(within(picker).getByRole("button", { name: "Доп" }));
 
     const call = request.mock.calls.find(([url]) => url === `${root}/submissions/s1/outcome`);
@@ -390,7 +504,7 @@ describe("ScreenshotControlPage", () => {
     expect(await screen.findByText("7KQ4M2XZ")).toBeInTheDocument();
     expect(screen.getByRole("timer")).toHaveTextContent(/Действует ещё 1[45]:\d\d/);
 
-    await userEvent.click(await screen.findByRole("button", { name: "Отозвать" }));
+    await userEvent.click(await screen.findByRole("button", { name: /^Отозвать/ }));
     expect(
       request.mock.calls.some(
         ([url, init]) => url === `${root}/extension/installs/inst-1` && init?.method === "DELETE",
