@@ -1,5 +1,6 @@
 // Контракт «Контроля скриншотов ДБС». Источник — backend/modules/wb_screenshot_control/presentation/http/schemas.py;
-// типы повторяют его вручную, при правке схем правится и этот файл. Полная схема:
+// типы повторяют его вручную, при правке схем правится и этот файл (словари union-литералов сверяет
+// backend/tests/wb_screenshot_control/test_frontend_types_contract.py). Полная схема:
 // `just openapi --tag wb-screenshot-control`. Время — ISO-8601 UTC, периоды — даты по Москве (YYYY-MM-DD).
 // Машинный код ошибки приходит заголовком X-Error-Code (ErrorCode), текст — в detail.
 
@@ -91,7 +92,9 @@ export type ErrorCode =
   | "exact_key_conflict"
   | "note_required"
   | "duplicate_target_invalid"
-  | "telegram_disabled";
+  | "telegram_disabled"
+  | "transition_not_allowed"
+  | "bad_cursor";
 
 export interface ErrorResponse {
   detail: string;
