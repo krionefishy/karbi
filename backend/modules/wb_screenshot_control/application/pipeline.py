@@ -290,6 +290,11 @@ class ExtractionService:
             return
         key = object_key(work.sha256, "thumb")
         path = staging_path(key)
+        original = await repository.storage_object(work.file_id, "orig")
+        if original is not None and original.state in ("delete_requested", "deleted"):
+            # Админ стёр файл, пока шло распознавание: миниатюру стёртого не заводим и не выгружаем.
+            await self.staging.delete(path)
+            return
         sha256 = hashlib.sha256(rendered.thumbnail).hexdigest()
         values: dict[str, Any] = {
             "file_id": work.file_id,

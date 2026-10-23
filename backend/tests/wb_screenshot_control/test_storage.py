@@ -14,7 +14,9 @@ import pytest_asyncio
 from botocore.exceptions import ClientError
 from sqlalchemy import select, update
 
+from backend.modules.wb_screenshot_control.application.admin_service import AdminService
 from backend.modules.wb_screenshot_control.application.events import EVENT_DELETE, EVENT_UPLOAD
+from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.inbox import InvalidEventError
 from backend.modules.wb_screenshot_control.application.ingest import IngestResult, IngestService
 from backend.modules.wb_screenshot_control.application.outbox import publish
@@ -178,6 +180,69 @@ async def test_delete_removes_the_object_once(
     assert stored.state == "deleted" and stored.deleted_at is not None and blobs.objects == {}
     await service.delete(retry)
     assert blobs.deleted == [stored.s3_key]
+
+
+class EraseDuringPut(MemoryBlobStore):
+    """S3, во время `put` которого админ стирает файл, а delete-подписчик успевает отработать."""
+
+    def __init__(self, database: Database, staging: StagingStore, submission_id: uuid.UUID) -> None:
+        super().__init__()
+        self.database = database
+        self.staging = staging
+        self.submission_id = submission_id
+        self.fail_deletes = False
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        async with self.database.session() as session:
+            admin = AdminService(session, BASE.screenshot_control, ImageLinks(self, 300), self.staging)
+            await admin.erase_file(self.submission_id)
+        stored = await stored_object(self.database)
+        assert stored.state == "delete_requested", "выгрузка в полёте: стирание только через delete_requested"
+        for row in await take(self.database, EVENT_DELETE):
+            await ObjectStorageService(self.database, self.staging, self).delete(row.payload)
+        assert (await stored_object(self.database)).state == "deleted"  # удалили ключ, которого ещё нет
+        await super().put(key, data, content_type)  # …а put дописал объект после удаления
+        self.down = self.fail_deletes
+
+    async def size(self, key: str) -> int | None:
+        self.down = False
+        size = await super().size(key)
+        self.down = self.fail_deletes
+        return size
+
+
+async def test_a_file_erased_during_upload_does_not_stay_in_s3(database: Database, staging: StagingStore) -> None:
+    result = await accepted(database, staging, 9)
+    payload = await upload_payload(database)
+    blobs = EraseDuringPut(database, staging, result.submission_id)
+
+    await ObjectStorageService(database, staging, blobs).upload(payload)
+
+    stored = await stored_object(database)
+    assert stored.state == "deleted" and stored.deleted_at is not None and stored.staging_path is None
+    assert blobs.objects == {}, "сирота с ПДн в бакете"
+    assert blobs.deleted == [stored.s3_key, stored.s3_key]
+    assert not await staging.exists(payload["staging_path"])
+
+
+async def test_a_failed_late_erase_is_retried_through_the_delete_event(
+    database: Database, staging: StagingStore
+) -> None:
+    result = await accepted(database, staging, 10)
+    payload = await upload_payload(database)
+    blobs = EraseDuringPut(database, staging, result.submission_id)
+    blobs.fail_deletes = True
+
+    await ObjectStorageService(database, staging, blobs).upload(payload)
+    stored = await stored_object(database)
+    assert stored.state == "delete_requested" and "unreachable" in (stored.last_error or "")
+    assert stored.s3_key in blobs.objects
+
+    blobs.fail_deletes = blobs.down = False
+    retry = await take(database, EVENT_DELETE)
+    assert len(retry) == 1
+    await ObjectStorageService(database, staging, blobs).delete(retry[0].payload)
+    assert (await stored_object(database)).state == "deleted" and blobs.objects == {}
 
 
 async def test_delete_skips_an_object_that_came_back(

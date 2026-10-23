@@ -495,7 +495,9 @@ class AdminService:
             if stored.state in ("delete_requested", "deleted"):
                 continue
             stored.updated_at = now
-            if len(stored.bucket) >= 3:
+            # Выгрузка в полёте (`uploading`) — только через delete_requested: `deleted` здесь означал бы,
+            # что объект в S3 точно не появится, а put может записать его следом (сверяет upload-подписчик).
+            if len(stored.bucket) >= 3 or stored.state == "uploading":
                 stored.state = "delete_requested"
                 stored.delete_requested_at = now
                 publish(self.session, delete_event(stored, "admin"))
