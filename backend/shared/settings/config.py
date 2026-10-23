@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass, field
+from dataclasses import replace as replace_fields
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -441,10 +442,11 @@ class ScreenshotControlConfig:
     s3_bucket: str = ""
     staging_root: str = "/data/screenshots-staging"
     staging_max_used_percent: int = 85
+    staging_max_bytes: int = 2_147_483_648
     staging_stale_minutes: int = 15
     max_upload_bytes: int = 15_728_640
     min_side_px: int = 500
-    max_image_pixels: int = 40_000_000
+    max_image_pixels: int = 25_000_000
     retention_original_days: int = 365
     retention_thumb_days: int = 365
     retention_fields_days: int = 1095
@@ -477,6 +479,10 @@ class ScreenshotControlConfig:
     extension_download_path: str = "/extension/marketplace-auto-screenshots.zip"
     extension_min_version: str = "0.1.0"
     allowed_url_prefixes: tuple[str, ...] = ("https://seller.wildberries.ru/chat-with-clients",)
+    # Модуль выключен принудительно (например, `hmac_key_missing`): `mode` уже `off`, а здесь — почему
+    # и какой режим просили. Задаётся при загрузке, в yaml не пишется.
+    disabled_reason: str = ""
+    requested_mode: str = ""
 
     def bucket(self, s3: S3Config) -> str:
         return self.s3_bucket or s3.bucket
@@ -1068,6 +1074,7 @@ class Settings:
                 screens.extension_token_idle_days,
                 screens.link_token_ttl_minutes,
                 screens.staging_stale_minutes,
+                screens.staging_max_bytes,
             )
             < 1
         ):
@@ -1132,8 +1139,8 @@ class Settings:
             invalid.append("egress.verify cannot disable TLS verification in production")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
-        if self.screenshot_control.mode != "off" and len(self.screenshot_control.hmac_key) < 32:
-            invalid.append("screenshot_control.hmac_key (SCREENSHOT_CONTROL_HMAC_KEY, 32+ characters)")
+        # Ключ HMAC скриншотов здесь не проверяется: без него выключается только сам модуль
+        # (`_screenshot_control`), а api и остальные воркеры стартуют.
         if invalid:
             raise ValueError(f"Unsafe or missing production settings: {', '.join(invalid)}")
 
@@ -1175,7 +1182,20 @@ def _screenshot_control(raw: dict[str, Any]) -> ScreenshotControlConfig:
             config[key] = "" if value is None else str(value)
         else:
             config[key] = int(value)
-    return ScreenshotControlConfig(**config)
+    return without_weak_hmac_key(ScreenshotControlConfig(**config))
+
+
+SCREENSHOT_HMAC_MIN_LENGTH = 32
+
+
+def without_weak_hmac_key(screens: ScreenshotControlConfig) -> ScreenshotControlConfig:
+    """Без ключа HMAC (32+ символов) модуль скриншотов работать не должен: имена покупателей пошли бы
+    в базу хешем без секрета. Раньше это роняло api и все воркеры; теперь выключается только модуль —
+    эффективный режим `off` с причиной, о которой процессы пишут ERROR при старте, а HTTP модуля
+    отвечает 503 `module_off`."""
+    if screens.mode == "off" or len(screens.hmac_key) >= SCREENSHOT_HMAC_MIN_LENGTH:
+        return screens
+    return replace_fields(screens, mode="off", disabled_reason="hmac_key_missing", requested_mode=screens.mode)
 
 
 def _default_config_path() -> Path:

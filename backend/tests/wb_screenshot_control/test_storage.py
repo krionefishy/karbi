@@ -27,6 +27,7 @@ from backend.modules.wb_screenshot_control.application.storage import (
 from backend.modules.wb_screenshot_control.infrastructure import wiring
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import StorageObjectModel
 from backend.modules.wb_screenshot_control.infrastructure.storage import S3BlobStore, StagingStore
+from backend.modules.wb_screenshot_control.infrastructure.storage import staging as staging_module
 from backend.storage.pg import Database
 from backend.storage.s3 import S3Client
 from backend.tests.wb_screenshot_control.fakes import (
@@ -261,6 +262,34 @@ async def test_staging_writes_atomically_and_stays_inside_its_root(staging: Stag
         with pytest.raises(ValueError):
             staging.resolve(bad)
     assert not StagingStore(staging.root, max_used_percent=0).has_room()
+
+
+async def test_the_staging_cap_counts_the_directory_not_the_disk(tmp_path: Path) -> None:
+    """Без S3 файлы копятся в staging: предел каталога срабатывает задолго до заполнения тома."""
+    capped = StagingStore(tmp_path / "capped", max_used_percent=100, max_bytes=1000)
+    assert capped.has_room() and capped.used_bytes() == 0
+    await capped.write("orig/aa/one.png", b"x" * 600)
+    assert capped.has_room() and capped.used_bytes() == 600  # кэш размера дополняется записью
+    await capped.write("orig/bb/two.png", b"x" * 500)
+    assert not capped.has_room()
+    percent = capped.used_percent()
+    assert percent is not None and percent >= 110.0
+
+    other = StagingStore(tmp_path / "capped", max_used_percent=100, max_bytes=10_000)
+    assert other.has_room(), "предел — у каждого хранилища свой, размер каталога общий"
+
+
+def test_the_staging_size_is_measured_again_after_the_cache_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "measured"
+    store = StagingStore(root, max_used_percent=100, max_bytes=100)
+    assert store.used_bytes() == 0
+    (root / "orig").mkdir(parents=True)
+    (root / "orig" / "late.png").write_bytes(b"y" * 150)  # записал другой процесс (воркер)
+    assert store.used_bytes() == 0
+    monkeypatch.setattr(staging_module, "SIZE_TTL_SECONDS", 0.0)
+    assert store.used_bytes() == 150 and not store.has_room()
 
 
 def s3_client() -> S3Client:

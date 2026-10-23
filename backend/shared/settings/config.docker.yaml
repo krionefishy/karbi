@@ -160,10 +160,13 @@ screenshot_control:
   s3_bucket: ${SCREENSHOT_CONTROL_S3_BUCKET:-}
   staging_root: ${SCREENSHOT_CONTROL_STAGING:-/data/screenshots-staging}
   staging_max_used_percent: 85
+  # Предел самого каталога staging (2 ГБ): без S3 файлы копятся здесь, а том общий с базой.
+  staging_max_bytes: 2147483648
   staging_stale_minutes: 15
   max_upload_bytes: 15728640
   min_side_px: 500
-  max_image_pixels: 40000000
+  # Реальные скрины до 6K Retina — около 20 Мпикс; больше — память api (512 МБ) под угрозой.
+  max_image_pixels: 25000000
   retention_original_days: 365
   retention_thumb_days: 365
   retention_fields_days: 1095

@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from backend.modules.wb_screenshot_control.infrastructure.wiring import log_startup_state
 from backend.shared.kafka_streams.topics import ScreenshotControlTopics, StorageTopics
 from backend.shared.worker import WorkerApplication, run_application
 from backend.workers.wb_screenshot_control.consumers import EventConsumer, Handler, PoisonHandler
@@ -21,6 +22,10 @@ class ScreenshotControlWorkerApplication(WorkerApplication[ScreenshotControlWork
 
     def build_worker(self) -> ScreenshotControlWorker:
         return ScreenshotControlWorker(self.database, self.settings)
+
+    async def run(self) -> None:
+        log_startup_state(self.settings, worker=True)
+        await super().run()
 
     def consumers(self) -> dict[str, Callable[[], Awaitable[None]]]:
         if not self.settings.kafka.enabled or self.settings.screenshot_control.mode == "off":

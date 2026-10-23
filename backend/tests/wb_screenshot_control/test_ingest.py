@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import threading
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
@@ -19,7 +21,13 @@ from backend.modules.wb_screenshot_control.application.events import (
     EVENT_UPLOAD,
     EVENT_VERDICT_READY,
 )
-from backend.modules.wb_screenshot_control.application.ingest import IngestError, IngestResult, IngestService
+from backend.modules.wb_screenshot_control.application.ingest import (
+    DECODE_SLOTS,
+    IngestError,
+    IngestResult,
+    IngestService,
+    inspect_image,
+)
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     FileModel,
     StorageObjectModel,
@@ -280,3 +288,40 @@ async def test_two_parallel_uploads_of_one_file_share_it(database: Database, sta
     assert len(await take(database, EVENT_UPLOAD)) == 1
     verdicts = sorted([first.verdict or "", second.verdict or ""])
     assert verdicts == ["", "duplicate"]  # вторая транзакция дождалась первой и увидела точную копию
+
+
+def test_the_default_pixel_limit_fits_real_screens_and_refuses_more() -> None:
+    limit = BASE.screenshot_control.max_image_pixels
+    assert limit == 25_000_000
+    six_k = encode(Image.new("1", (6016, 3384)))  # Pro Display XDR — 20,4 Мпикс
+    assert inspect_image(six_k, "image/png", max_pixels=limit, min_side=500).width == 6016
+    with pytest.raises(IngestError) as large:
+        inspect_image(encode(Image.new("1", (6000, 5000))), "image/png", max_pixels=limit, min_side=500)
+    assert large.value.code == "file_too_large"
+
+
+async def test_full_decodes_go_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Память api: полное декодирование — одно на процесс, параллельные приёмы ждут."""
+    assert DECODE_SLOTS == 1
+    active = peak = 0
+    lock = threading.Lock()
+    original = Image.Image.load
+
+    def slow_load(self: Image.Image) -> Any:
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.05)
+        try:
+            return original(self)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(Image.Image, "load", slow_load)
+    images = [screen(seed) for seed in range(4)]
+    await asyncio.gather(
+        *(asyncio.to_thread(inspect_image, data, "image/png", max_pixels=25_000_000, min_side=500) for data in images)
+    )
+    assert peak == 1

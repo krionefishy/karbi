@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_screenshot_control.application.ingest import IngestService
@@ -40,6 +41,31 @@ def _load(target: str) -> Any:
         raise ScreenshotControlConfigError(f"Контроль скриншотов: нет реализации {target} ({error})") from error
 
 
+def log_startup_state(settings: Settings, *, worker: bool) -> list[str]:
+    """ERROR/WARNING при старте процесса, если модуль выключен принудительно или работать ему нечем.
+
+    Возвращает коды записанных событий (для тестов). Остальные автоматизации это не останавливает.
+    """
+    logger = structlog.get_logger("wb_screenshot_control")
+    screens = settings.screenshot_control
+    events: list[str] = []
+    if screens.disabled_reason:
+        logger.error(
+            "screenshot_control_disabled",
+            reason=screens.disabled_reason,
+            requested_mode=screens.requested_mode,
+            hint="задайте SCREENSHOT_CONTROL_HMAC_KEY (32+ символов) и перезапустите api и воркер скринов",
+        )
+        events.append("screenshot_control_disabled")
+    if worker and screens.mode != "off" and not settings.vision.api_key:
+        logger.warning(
+            "screenshot_control_model_key_missing",
+            hint="без FOUNDATION_MODELS_API_KEY распознавание падает, скрины уходят на ручную проверку",
+        )
+        events.append("screenshot_control_model_key_missing")
+    return events
+
+
 def build_extractor(settings: Settings) -> Extractor:
     """`application.extractor.build_extractor(settings)` — VLM + OCR + нормализация."""
     factory = _load(EXTRACTOR_FACTORY)
@@ -71,7 +97,9 @@ def storage_bucket(settings: Settings) -> str:
 
 def build_staging(settings: Settings) -> StagingStore:
     screens = settings.screenshot_control
-    return StagingStore(screens.staging_root, max_used_percent=screens.staging_max_used_percent)
+    return StagingStore(
+        screens.staging_root, max_used_percent=screens.staging_max_used_percent, max_bytes=screens.staging_max_bytes
+    )
 
 
 def build_blob_store(settings: Settings) -> BlobStore | None:
