@@ -26,6 +26,7 @@ def decide_system(
     matches: Sequence[dict[str, Any]] = (),
     duplicate_of: uuid.UUID | None = None,
     audit_requested: bool = False,
+    note: str | None = None,
 ) -> None:
     """Автоматический вердикт: строка, журнал (только при смене) и событие для ответа менеджеру."""
     previous = submission.verdict
@@ -40,7 +41,7 @@ def decide_system(
     submission.updated_at = now
     if previous != verdict:
         ScreenshotRepository(session).add_verdict_event(
-            submission.id, actor="system", from_verdict=previous, to_verdict=verdict, reasons=reasons
+            submission.id, actor="system", from_verdict=previous, to_verdict=verdict, reasons=reasons, note=note
         )
     publish(
         session,

@@ -122,6 +122,36 @@ def case_keys(fields: ExtractedFields) -> dict[str, Any]:
     }
 
 
+PARKED_NOTE = "ошибка конвейера: сообщение отложено после повторов"
+
+
+async def park_failed_event(database: Database, payload: dict[str, Any], error: str, *, now: datetime) -> bool:
+    """Сообщение конвейера падает при каждой обработке: скрин без вердикта — на ручную проверку.
+
+    Сбой нашей стороны менеджера не штрафует, поэтому `needs_review/extraction_failed`, а не отказ. Уже
+    решённый скрин не трогаем. `True` — вердикт поставлен.
+    """
+    try:
+        submission_id = uuid.UUID(str(payload.get("submission_id")))
+    except ValueError:
+        return False
+    async with database.session() as session:
+        submission = await ScreenshotRepository(session).submission(submission_id, for_update=True)
+        if submission is None or submission.verdict is not None:
+            return False
+        submission.last_error = error[:500]
+        decide_system(
+            session,
+            submission,
+            "needs_review",
+            [reason("extraction_failed", "warn", pipeline_error=error[:200])],
+            now=now,
+            note=PARKED_NOTE,
+        )
+        await session.commit()
+    return True
+
+
 @dataclass(frozen=True, slots=True)
 class _Work:
     submission_id: uuid.UUID

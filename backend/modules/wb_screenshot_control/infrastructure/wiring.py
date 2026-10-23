@@ -4,12 +4,17 @@
 
 import importlib
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_screenshot_control.application.ingest import IngestService
-from backend.modules.wb_screenshot_control.application.pipeline import DecisionService, ExtractionService
+from backend.modules.wb_screenshot_control.application.pipeline import (
+    DecisionService,
+    ExtractionService,
+    park_failed_event,
+)
 from backend.modules.wb_screenshot_control.application.reconcile import StorageReconciler
 from backend.modules.wb_screenshot_control.application.storage import ObjectReader, ObjectStorageService
 from backend.modules.wb_screenshot_control.domain.pipeline_types import Candidate, Decision, DecisionInput
@@ -118,6 +123,10 @@ class ScreenshotControlServices:
 
     def decision(self, decider: Decider | None = None) -> DecisionService:
         return DecisionService(self.database, decider or build_decider(self.settings), self.config)
+
+    async def park(self, payload: dict[str, Any], error: str) -> None:
+        """Ядовитое сообщение конвейера: затронутый скрин — на ручную проверку (`EventConsumer.on_poison`)."""
+        await park_failed_event(self.database, payload, error, now=datetime.now(UTC))
 
     def object_storage(self) -> ObjectStorageService | None:
         if self.blobs is None:

@@ -1,5 +1,6 @@
 """Цепочка приём → распознавание → решение на PostgreSQL с фейками распознавания, решения и S3."""
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
@@ -25,8 +26,10 @@ from backend.modules.wb_screenshot_control.application.ingest import IngestResul
 from backend.modules.wb_screenshot_control.application.outcomes import expire_outcomes
 from backend.modules.wb_screenshot_control.application.pipeline import (
     MAX_DEFERRALS,
+    PARKED_NOTE,
     RETRY_DELAYS,
     case_keys,
+    park_failed_event,
     queued_at,
 )
 from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
@@ -53,6 +56,7 @@ from backend.tests.wb_screenshot_control.fakes import (
     settings_for,
     take,
 )
+from backend.workers.wb_screenshot_control.consumers import MAX_ATTEMPTS, EventConsumer
 
 USER = uuid.UUID("00000000-0000-4000-8000-000000000021")
 OTHER = uuid.UUID("00000000-0000-4000-8000-000000000022")
@@ -432,6 +436,65 @@ def test_case_keys_carry_the_text_minhash() -> None:
     keys = case_keys(fields)
     assert keys["text_minhash"] == list(text_minhash(fields.text_norm) or ())
     assert case_keys(replace(fields, text_norm="брак"))["text_minhash"] is None
+
+
+class PoisonDecider(FakeDecider):
+    """Падает на одном скрине при каждой попытке — как баг или нарушение ограничения БД."""
+
+    def __init__(self, poisoned: uuid.UUID) -> None:
+        super().__init__()
+        self.poisoned = poisoned
+
+    def decide(self, inp: Any, candidates: Any) -> Any:
+        if inp.submission_id == self.poisoned:
+            raise RuntimeError("constraint violated")
+        return super().decide(inp, candidates)
+
+
+async def test_a_poison_message_is_parked_and_other_decisions_go_on(pipeline: Pipeline) -> None:
+    pipeline.extractor.script = [ok_result(desktop_fields(chat_id=str(uuid.uuid4())))] * 2
+    poisoned = await pipeline.ingest(31)
+    healthy = await pipeline.ingest(32, user=OTHER)
+    for row in await take(pipeline.database, EVENT_SUBMITTED):
+        await pipeline.extract(row.payload)
+    pipeline.decider = PoisonDecider(poisoned.submission_id)
+    slept: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    consumer = EventConsumer(
+        topic="extracted",
+        bootstrap_servers="",
+        group_id="test",
+        handler=pipeline.decide,
+        on_poison=pipeline.services.park,
+        sleep=sleep,
+    )
+    rows = await take(pipeline.database, EVENT_EXTRACTED)
+    assert len(rows) == 2
+    first, second = (json.dumps(row.payload).encode() for row in rows)
+
+    outcomes = [await consumer.handle(first, position="0:1") for _ in range(MAX_ATTEMPTS)]
+    assert outcomes == [False] * (MAX_ATTEMPTS - 1) + [True], "после пятой неудачи оффсет коммитится"
+    assert len(slept) == MAX_ATTEMPTS - 1 and consumer.failures == {}
+    assert await consumer.handle(second, position="0:2") is True
+
+    parked = await pipeline.submission(poisoned.submission_id)
+    assert (parked.verdict, parked.stage) == ("needs_review", "decided")
+    assert parked.reasons[0]["code"] == "extraction_failed"
+    assert "constraint" in parked.reasons[0]["detail"]["pipeline_error"]
+    async with pipeline.database.session() as session:
+        event = await session.scalar(
+            select(VerdictEventModel).where(VerdictEventModel.submission_id == poisoned.submission_id)
+        )
+    assert event is not None and event.actor == "system" and event.note == PARKED_NOTE
+    assert (await pipeline.submission(healthy.submission_id)).verdict == "accepted"
+
+    # уже решённый скрин ядовитое сообщение не трогает
+    now = pipeline.clock.now
+    assert not await park_failed_event(pipeline.database, {"submission_id": str(healthy.submission_id)}, "x", now=now)
+    assert not await park_failed_event(pipeline.database, {"submission_id": "not-a-uuid"}, "x", now=now)
 
 
 def test_a_capture_from_the_future_is_a_clock_problem_not_a_queue() -> None:
