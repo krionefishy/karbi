@@ -12,6 +12,7 @@ import pytest_asyncio
 from sqlalchemy import cast, select, update
 from sqlalchemy.types import String
 
+from backend.modules.wb_screenshot_control.application.errors import ServiceError
 from backend.modules.wb_screenshot_control.application.events import (
     DECIDE_PARTITION_KEY,
     EVENT_EXTRACTED,
@@ -19,9 +20,11 @@ from backend.modules.wb_screenshot_control.application.events import (
     EVENT_UPLOAD,
     EVENT_VERDICT_READY,
 )
+from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.ingest import IngestResult
 from backend.modules.wb_screenshot_control.application.outcomes import expire_outcomes
 from backend.modules.wb_screenshot_control.application.pipeline import MAX_DEFERRALS, RETRY_DELAYS, case_keys
+from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
 from backend.modules.wb_screenshot_control.domain.pipeline_types import ExtractionResult
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtractionModel,
@@ -91,6 +94,13 @@ class Pipeline:
         service = self.services.decision(self.decider)
         service.now = self.clock
         await service.handle(payload)
+
+    async def choose_outcome(self, submission_id: uuid.UUID, outcome: str = "positive", user: uuid.UUID = USER) -> str:
+        """Как `PATCH …/outcome`: исход от менеджера, ответ — статус карточки."""
+        async with self.database.session() as session:
+            service = SubmissionsService(session, self.services.config, ImageLinks(None, 300), now=self.clock)
+            view = await service.change_outcome(user, submission_id, outcome)
+        return str(view["status"])
 
     async def submission(self, submission_id: uuid.UUID) -> SubmissionModel:
         async with self.database.session() as session:
@@ -284,6 +294,122 @@ async def test_a_screen_without_outcome_expires_as_rejected(pipeline: Pipeline) 
 
     await pipeline.extract(payload)  # распознавание опоздало: решение уже есть
     assert pipeline.extractor.calls == []
+
+
+async def test_a_screen_without_outcome_waits_for_it_and_then_is_decided(pipeline: Pipeline) -> None:
+    result = await pipeline.ingest(9, outcome=None)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+    row = await pipeline.submission(result.submission_id)
+    assert (row.stage, row.verdict, row.decided_at) == ("extracted", None, None)
+    assert pipeline.decider.calls == [] and await take(pipeline.database, EVENT_VERDICT_READY) == []
+
+    assert await pipeline.choose_outcome(result.submission_id, "amended") == "processing"
+    extracted = await one(pipeline.database, EVENT_EXTRACTED)
+    assert extracted["submission_id"] == str(result.submission_id) and extracted["status"] == "ok"
+    await pipeline.decide(extracted)
+    row = await pipeline.submission(result.submission_id)
+    assert (row.stage, row.verdict, row.outcome, row.outcome_source) == ("decided", "accepted", "amended", "form")
+    assert pipeline.decider.calls[0][0].outcome == "amended"
+    assert (await one(pipeline.database, EVENT_VERDICT_READY))["verdict"] == "accepted"
+
+    with pytest.raises(ServiceError) as locked:
+        await pipeline.choose_outcome(result.submission_id, "deleted")
+    assert locked.value.code == "outcome_locked"
+
+
+async def test_an_outcome_chosen_during_recognition_is_used_without_a_second_event(pipeline: Pipeline) -> None:
+    result = await pipeline.ingest(10, outcome=None)
+    submitted = await one(pipeline.database, EVENT_SUBMITTED)
+    assert await pipeline.choose_outcome(result.submission_id, "deleted") == "processing"
+    assert await take(pipeline.database, EVENT_EXTRACTED) == []  # распознавание ещё идёт
+
+    await pipeline.extract(submitted)
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+    row = await pipeline.submission(result.submission_id)
+    assert (row.verdict, row.outcome) == ("accepted", "deleted")
+
+
+async def test_a_waiting_screen_expires_and_a_late_event_changes_nothing(pipeline: Pipeline) -> None:
+    result = await pipeline.ingest(11, outcome=None)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    extracted = await one(pipeline.database, EVENT_EXTRACTED)
+    await pipeline.decide(extracted)
+
+    later = datetime.now(UTC) + timedelta(hours=BASE.screenshot_control.outcome_ttl_hours, minutes=1)
+    assert await expire_outcomes(pipeline.database, BASE.screenshot_control, later) == 1
+    row = await pipeline.submission(result.submission_id)
+    assert (row.stage, row.verdict, [item["code"] for item in row.reasons]) == ("decided", "rejected", ["no_outcome"])
+    with pytest.raises(ServiceError):
+        await pipeline.choose_outcome(result.submission_id)
+
+    await pipeline.decide({**extracted, "event_id": str(uuid.uuid4())})
+    assert pipeline.decider.calls == [] and (await pipeline.submission(result.submission_id)).verdict == "rejected"
+
+
+async def test_an_overdue_screen_without_outcome_is_decided_by_the_rules(pipeline: Pipeline) -> None:
+    """После срока решает `decide` (строка 1 таблицы 8.2), а не ожидание."""
+    result = await pipeline.ingest(12, outcome=None)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    pipeline.clock.advance(timedelta(hours=BASE.screenshot_control.outcome_ttl_hours, minutes=1))
+    pipeline.decider.verdict = "rejected"
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+    assert pipeline.decider.calls[0][0].outcome is None
+    assert (await pipeline.submission(result.submission_id)).verdict == "rejected"
+
+
+async def test_failed_recognition_without_outcome_waits_too(pipeline: Pipeline) -> None:
+    pipeline.extractor.script = [ExtractionResult(status="failed", error="invalid json")]
+    result = await pipeline.ingest(13, outcome=None)
+    payload = await one(pipeline.database, EVENT_SUBMITTED)
+    for attempt in range(BASE.screenshot_control.extraction_max_attempts):
+        await pipeline.extract(payload)
+        if rows := await take(pipeline.database, EVENT_SUBMITTED):
+            payload = rows[0].payload
+            pipeline.clock.advance(RETRY_DELAYS[attempt])
+    row = await pipeline.submission(result.submission_id)
+    assert (row.stage, row.verdict) == ("extracted", None)
+    assert await take(pipeline.database, EVENT_VERDICT_READY) == []
+
+    await pipeline.choose_outcome(result.submission_id, "positive")
+    extracted = await one(pipeline.database, EVENT_EXTRACTED)
+    assert extracted["status"] == "failed"
+    pipeline.decider.verdict = "needs_review"
+    await pipeline.decide(extracted)
+    inp, _ = pipeline.decider.calls[0]
+    assert inp.extraction.status == "failed" and inp.extraction.error == "invalid json"
+    assert (await pipeline.submission(result.submission_id)).verdict == "needs_review"
+
+
+async def test_a_screen_without_outcome_does_not_hold_others(pipeline: Pipeline) -> None:
+    """Неподписанный скрин не задерживает решения других и не становится их оригиналом."""
+    pipeline.decider.verdict = "duplicate"
+    waiting = await pipeline.ingest(14, outcome=None)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+
+    same_file = await pipeline.ingest(14, user=OTHER)
+    assert same_file.verdict is None  # не дубль при приёме: оригинал без исхода не заявлен
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+    assert (await pipeline.submission(same_file.submission_id)).verdict == "accepted"
+    _, candidates = pipeline.decider.calls[-1]
+    assert candidates == []  # ни отсрочки, ни кандидата из ждущего
+
+    await pipeline.choose_outcome(waiting.submission_id)
+    await pipeline.decide(await one(pipeline.database, EVENT_EXTRACTED))
+    _, candidates = pipeline.decider.calls[-1]
+    assert [item.submission_id for item in candidates] == [same_file.submission_id]  # теперь оригинал — он
+
+
+async def test_expiry_leaves_decided_screens_alone(pipeline: Pipeline) -> None:
+    """Точная копия без исхода решена при приёме: срок исхода её не переписывает."""
+    await pipeline.ingest(15)
+    copy = await pipeline.ingest(15, user=OTHER, outcome=None)
+    assert copy.verdict == "duplicate"
+    later = datetime.now(UTC) + timedelta(hours=BASE.screenshot_control.outcome_ttl_hours, minutes=1)
+    assert await expire_outcomes(pipeline.database, BASE.screenshot_control, later) == 0
+    assert (await pipeline.submission(copy.submission_id)).verdict == "duplicate"
 
 
 @pytest.mark.parametrize("precision", ["minute", "day"])

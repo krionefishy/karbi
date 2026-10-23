@@ -142,7 +142,8 @@ async def change_outcome(
 ) -> SubmissionOut:
     """Исход меняется, пока нет вердикта; после — 409 outcome_locked, дальше только админ.
 
-    Отказ «не выбран исход» в пределах `outcome_ttl_hours` исправляется так же: решение пересчитается.
+    Скрин без исхода не решается до `outcome_ttl_hours` (статус `awaiting_outcome`): выбор исхода
+    запускает решение, без исхода к сроку — `rejected/no_outcome`.
     """
     ensure_enabled(settings)
     try:

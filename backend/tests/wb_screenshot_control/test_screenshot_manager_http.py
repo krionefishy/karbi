@@ -145,31 +145,26 @@ async def test_outcome_changes_until_the_verdict(stand: Stand) -> None:
     assert bad.status_code == 422
 
 
-async def test_rejection_for_a_missing_outcome_is_fixed_by_choosing_one(stand: Stand) -> None:
-    """Конвейер решает сразу и без исхода отклоняет; в пределах срока исход это исправляет."""
+async def test_choosing_an_outcome_starts_the_decision(stand: Stand) -> None:
+    """Распознанный скрин без исхода ждёт; исход запускает решение, а отказ `no_outcome` окончателен."""
     manager = await stand.sign_in("manager")
     submission = (await stand.upload(manager, outcome=None)).json()["id"]
-    await stand.decide(
-        submission,
-        "rejected",
-        reasons=[{"code": "no_outcome", "severity": "info", "detail": {}}],
-        fields=desktop_fields(),
-    )
+    await stand.recognised(submission, desktop_fields())
     card = (await stand.client.get(f"{MANAGER}/submissions/{submission}", headers=manager)).json()
-    assert (card["status"], card["reason_code"]) == ("rejected", "no_outcome")
+    assert (card["status"], card["reason_code"]) == ("awaiting_outcome", None)
 
-    fixed = await stand.client.patch(
+    chosen = await stand.client.patch(
         f"{MANAGER}/submissions/{submission}/outcome", json={"outcome": "amended"}, headers=manager
     )
-    assert (fixed.status_code, fixed.json()["status"]) == (200, "processing")
+    assert (chosen.status_code, chosen.json()["status"]) == (200, "processing")
     row = await stand.submission(submission)
     assert (row.stage, row.verdict, row.outcome) == ("extracted", None, "amended")
-    assert any(event["submission_id"] == submission for event in await stand.outbox(EVENT_EXTRACTED))
+    assert [event["submission_id"] for event in await stand.outbox(EVENT_EXTRACTED)] == [submission]
 
-    await stand.decide(submission, "rejected", reasons=[{"code": "no_outcome", "severity": "info", "detail": {}}])
-    await stand.set_received(submission, datetime.now(UTC) - timedelta(hours=25))
+    expired = (await stand.upload(manager, seed=3, outcome=None)).json()["id"]
+    await stand.decide(expired, "rejected", reasons=[{"code": "no_outcome", "severity": "info", "detail": {}}])
     late = await stand.client.patch(
-        f"{MANAGER}/submissions/{submission}/outcome", json={"outcome": "amended"}, headers=manager
+        f"{MANAGER}/submissions/{expired}/outcome", json={"outcome": "amended"}, headers=manager
     )
     assert (late.status_code, late.headers["X-Error-Code"]) == (409, "outcome_locked")
 

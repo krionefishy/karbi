@@ -149,6 +149,28 @@ class Stand:
             )
             await session.commit()
 
+    async def recognised(self, submission_id: uuid.UUID | str, fields: ExtractedFields) -> None:
+        """Как консьюмер распознавания: распознано, ключи кейса записаны, решения ещё нет."""
+        async with self.database.session() as session:
+            repository = ScreenshotRepository(session)
+            submission = await repository.submission(uuid.UUID(str(submission_id)), for_update=True)
+            assert submission is not None
+            await repository.upsert_extraction(
+                {
+                    "file_id": submission.file_id,
+                    "pipeline_version": "v1",
+                    "is_current": True,
+                    "status": "ok",
+                    "layout": fields.layout,
+                    "fields": fields_to_json(fields),
+                },
+                keep_ok=False,
+            )
+            for name, value in case_keys(fields).items():
+                setattr(submission, name, value)
+            submission.stage = "extracted"
+            await session.commit()
+
     async def store(self, submission_id: uuid.UUID | str, *kinds: str) -> None:
         """Объекты файла выгружены в S3 (как после подписчика upload)."""
         submission = await self.submission(submission_id)

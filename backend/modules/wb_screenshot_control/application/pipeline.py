@@ -73,6 +73,15 @@ def _error(error: BaseException) -> str:
     return f"{type(error).__name__}: {error}"[:500]
 
 
+def awaits_outcome(submission: SubmissionModel, now: datetime, config: ScreenshotControlConfig) -> bool:
+    """Исход не выбран, а срок `outcome_ttl_hours` не вышел: вердикта нет, менеджер видит `awaiting_outcome`.
+
+    Скрин без подписи — ещё не заявка (единица работы — скрин + исход), поэтому до исхода он не решается
+    и не занимает место оригинала для чужих скринов (`candidates`, `exact_original`).
+    """
+    return submission.outcome is None and submission.received_at > now - timedelta(hours=config.outcome_ttl_hours)
+
+
 def case_keys(fields: ExtractedFields) -> dict[str, Any]:
     """Ключи кейса для индексов `submissions`; `text_key` = sha1(минута|text_norm) только при точности до минуты."""
     key_time = fields.review_at
@@ -340,6 +349,10 @@ class ExtractionService:
             },
             keep_ok=True,
         )
+        if awaits_outcome(submission, now, self.config):
+            # Решение (needs_review/extraction_failed) — когда выберут исход; без исхода к сроку — отказ.
+            submission.stage = STAGE_EXTRACTED
+            return
         # Сбой нашей стороны менеджера не штрафует: на ручную проверку, а не в отказ.
         decide_system(
             session,
@@ -373,7 +386,8 @@ class DecisionService:
             if await repository.inbox_processed(event_id):
                 return
             submission = await repository.submission(event.submission_id, for_update=True)
-            if submission is None or submission.stage != STAGE_EXTRACTED:
+            if submission is None or submission.stage != STAGE_EXTRACTED or self._awaits_outcome(submission, now):
+                # Без исхода не решаем до срока: исход запустит решение заново, срок — `expire_outcomes`.
                 repository.mark_inbox(event_id, EVENT_EXTRACTED)
                 await session.commit()
                 return
@@ -404,6 +418,9 @@ class DecisionService:
             "screenshot_decided",
             extra={"submission_id": str(event.submission_id), "verdict": decision.verdict, "candidates": len(rows)},
         )
+
+    def _awaits_outcome(self, submission: SubmissionModel, now: datetime) -> bool:
+        return awaits_outcome(submission, now, self.config)
 
     async def _input(
         self, repository: ScreenshotRepository, submission: SubmissionModel, extraction: ExtractionModel | None

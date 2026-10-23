@@ -6,7 +6,7 @@
 
 import uuid
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from backend.modules.wb_screenshot_control.application.events import ScreenshotE
 from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.ingest import IngestError, IngestService
 from backend.modules.wb_screenshot_control.application.outbox import publish
-from backend.modules.wb_screenshot_control.domain import STAGE_DECIDED, STAGE_EXTRACTED, STAGE_PROCESSING
+from backend.modules.wb_screenshot_control.domain import STAGE_EXTRACTED, STAGE_PROCESSING
 from backend.modules.wb_screenshot_control.domain.manager_reasons import manager_reason
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtractionModel,
@@ -129,73 +129,55 @@ class SubmissionsService:
         return (await self.views([submission]))[0]
 
     async def change_outcome(self, user_id: uuid.UUID, submission_id: uuid.UUID, outcome: str) -> dict[str, Any]:
-        """Исход меняется, пока вердикта нет.
+        """Исход меняется, пока вердикта нет; дальше только админ.
 
-        Исключение — отказ «не выбран исход» в пределах `outcome_ttl_hours`: конвейер решает сразу
-        и без исхода ставит `rejected/no_outcome`, не дожидаясь срока. Тогда исход принимается, а
-        решение пересчитывается тем же консьюмером (stage=extracted и новое `screenshot.extracted`).
+        Распознанный скрин без исхода ждёт решения (`awaiting_outcome`): выбор исхода запускает решение
+        тем же консьюмером (новое `screenshot.extracted`). Пока идёт распознавание, исход просто
+        записывается — решение возьмёт его само.
         """
         now = self.now()
         submission = await self.queries.own_submission(user_id, submission_id, for_update=True)
         if submission is None:
             raise not_found()
-        rerun = self._waits_for_outcome(submission, now)
-        if submission.verdict is not None and not rerun:
+        if submission.verdict is not None:
             raise ServiceError("outcome_locked", "Исход уже не поменять: решение по скриншоту принято")
+        waiting = submission.outcome is None and submission.stage == STAGE_EXTRACTED
         submission.outcome = outcome
         submission.outcome_source = "form"
         submission.outcome_set_at = now
         submission.updated_at = now
-        if rerun:
-            await self._decide_again(submission, f"user:{user_id}")
+        if waiting:
+            await self._decide_now(submission)
         await self.session.commit()
         return (await self.views([submission]))[0]
 
-    def _waits_for_outcome(self, submission: SubmissionModel, now: datetime) -> bool:
-        return (
-            submission.verdict == "rejected"
-            and submission.reviewed_by is None
-            and submission.stage == STAGE_DECIDED
-            and "no_outcome" in reason_codes(submission)
-            and submission.received_at > now - timedelta(hours=self.config.outcome_ttl_hours)
+    async def _decide_now(self, submission: SubmissionModel) -> None:
+        extraction = await ScreenshotRepository(self.session).extraction(
+            submission.file_id, self.config.pipeline_version
         )
-
-    async def _decide_again(self, submission: SubmissionModel, actor: str) -> None:
-        repository = ScreenshotRepository(self.session)
-        repository.add_verdict_event(
-            submission.id,
-            actor=actor,
-            from_verdict=submission.verdict,
-            to_verdict=None,
-            reasons=[],
-            note="исход выбран, решение пересчитывается",
-        )
-        reset_verdict(submission)
-        extraction = await repository.extraction(submission.file_id, self.config.pipeline_version)
-        if extraction is not None:
-            submission.stage = STAGE_EXTRACTED
+        if extraction is None:  # распознавание сменило версию: пусть пройдёт заново
+            file = await ScreenshotRepository(self.session).file(submission.file_id)
+            assert file is not None
+            submission.stage = STAGE_PROCESSING
             publish(
                 self.session,
-                ScreenshotExtracted(
+                ScreenshotSubmitted(
                     submission_id=submission.id,
                     file_id=submission.file_id,
-                    extraction_id=extraction.id,
-                    pipeline_version=self.config.pipeline_version,
-                    status=extraction.status,  # type: ignore[arg-type]
+                    sha256=file.sha256,
+                    channel=submission.channel,  # type: ignore[arg-type]
+                    received_at=submission.received_at,
                 ),
             )
             return
-        file = await repository.file(submission.file_id)
-        assert file is not None
-        submission.stage = STAGE_PROCESSING
         publish(
             self.session,
-            ScreenshotSubmitted(
+            ScreenshotExtracted(
                 submission_id=submission.id,
                 file_id=submission.file_id,
-                sha256=file.sha256,
-                channel=submission.channel,  # type: ignore[arg-type]
-                received_at=submission.received_at,
+                extraction_id=extraction.id,
+                pipeline_version=self.config.pipeline_version,
+                status=extraction.status,  # type: ignore[arg-type]
             ),
         )
 

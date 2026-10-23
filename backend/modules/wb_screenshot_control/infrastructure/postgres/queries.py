@@ -126,6 +126,11 @@ def _count(condition: ColumnElement[bool] | None = None) -> Any:
 
 
 _ACCEPTED = SubmissionModel.verdict == "accepted"
+_IN_PIPELINE = and_(
+    SubmissionModel.stage != "decided",
+    or_(SubmissionModel.stage != "extracted", SubmissionModel.outcome.is_not(None)),
+)
+"""Ещё в работе у конвейера: распознанный скрин без исхода ждёт менеджера, а не конвейер."""
 _COUNT_COLUMNS = (
     _count(),
     _count(_ACCEPTED),
@@ -369,19 +374,23 @@ class ScreenshotQueries:
 
     async def stage_counts(self) -> dict[str, int]:
         rows = await self.session.execute(
-            select(SubmissionModel.stage, func.count())
-            .where(SubmissionModel.stage != "decided")
-            .group_by(SubmissionModel.stage)
+            select(SubmissionModel.stage, func.count()).where(_IN_PIPELINE).group_by(SubmissionModel.stage)
         )
         return {stage: int(count) for stage, count in rows.all()}
 
     async def oldest_undecided(self) -> datetime | None:
-        return await self.session.scalar(
-            select(func.min(SubmissionModel.received_at)).where(SubmissionModel.stage != "decided")
-        )
+        return await self.session.scalar(select(func.min(SubmissionModel.received_at)).where(_IN_PIPELINE))
 
     async def decision_latency(self, since: datetime) -> tuple[float | None, float | None]:
-        seconds = func.extract("epoch", SubmissionModel.decided_at - SubmissionModel.received_at)
+        # Ожидание исхода — время менеджера, не конвейера: отсчёт от выбора исхода, если он был позже приёма.
+        start = case(
+            (
+                SubmissionModel.outcome_set_at < SubmissionModel.decided_at,
+                func.greatest(SubmissionModel.received_at, SubmissionModel.outcome_set_at),
+            ),
+            else_=SubmissionModel.received_at,
+        )
+        seconds = func.extract("epoch", SubmissionModel.decided_at - start)
         row = (
             await self.session.execute(
                 select(

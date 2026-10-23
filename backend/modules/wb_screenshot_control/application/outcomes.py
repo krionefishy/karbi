@@ -9,7 +9,11 @@ BATCH = 200
 
 
 async def expire_outcomes(database: Database, config: ScreenshotControlConfig, now: datetime) -> int:
-    """Скрин без исхода дольше `outcome_ttl_hours` — отказ `no_outcome`, что бы ни решил конвейер."""
+    """Скрин без исхода и без вердикта дольше `outcome_ttl_hours` — отказ `no_outcome` (строка 1 таблицы 8.2).
+
+    Решённые не трогаются: вердикт без исхода бывает только у точной копии при приёме (дубль и так не
+    засчитан) и у решения админа, которое срок не отменяет.
+    """
     cutoff = now - timedelta(hours=config.outcome_ttl_hours)
     async with database.session() as session:
         expired = await ScreenshotRepository(session).expired_without_outcome(cutoff, BATCH)

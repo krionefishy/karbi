@@ -20,6 +20,8 @@ from backend.modules.wb_screenshot_control.infrastructure.postgres.models import
 CANDIDATE_LIMIT = 500
 KEY_TIME_SLACK = timedelta(minutes=2)
 DAY_SLACK = timedelta(days=1)
+CLAIMED = or_(SubmissionModel.verdict.is_not(None), SubmissionModel.outcome.is_not(None))
+"""Скрин заявлен: есть исход или уже вердикт. Скрин без исхода и вердикта не оригинал ни для кого."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,10 +111,10 @@ class ScreenshotRepository:
         return await self.submission(inserted)
 
     async def exact_original(self, file_id: uuid.UUID, exclude: uuid.UUID | None = None) -> SubmissionModel | None:
-        """Самый ранний не отклонённый скрин этого же файла; ещё не решённый тоже считается."""
+        """Самый ранний не отклонённый скрин этого же файла; ещё не решённый тоже считается, если у него есть исход."""
         query = (
             select(SubmissionModel)
-            .where(SubmissionModel.file_id == file_id, SubmissionModel.verdict.is_distinct_from("rejected"))
+            .where(SubmissionModel.file_id == file_id, SubmissionModel.verdict.is_distinct_from("rejected"), CLAIMED)
             .order_by(SubmissionModel.received_at, SubmissionModel.id)
             .limit(1)
         )
@@ -157,6 +159,7 @@ class ScreenshotRepository:
                 select(
                     exists().where(
                         SubmissionModel.stage != "decided",
+                        SubmissionModel.outcome.is_not(None),  # без исхода решения не будет до срока
                         SubmissionModel.received_at >= since,
                         tuple_(SubmissionModel.received_at, SubmissionModel.id)
                         < tuple_(literal(submission.received_at), literal(submission.id)),
@@ -186,7 +189,7 @@ class ScreenshotRepository:
                 .where(
                     SubmissionModel.outcome.is_(None),
                     SubmissionModel.received_at < cutoff,
-                    SubmissionModel.verdict.is_distinct_from("rejected"),
+                    SubmissionModel.verdict.is_(None),
                 )
                 .order_by(SubmissionModel.received_at)
                 .limit(limit)
@@ -259,6 +262,7 @@ class ScreenshotRepository:
             .where(
                 SubmissionModel.id != query.submission_id,
                 SubmissionModel.verdict.is_distinct_from("rejected"),
+                CLAIMED,
                 SubmissionModel.received_at >= query.since,
                 or_(*conditions),
             )

@@ -47,6 +47,7 @@ async def add(
     dhash: int | None = None,
     received_at: datetime = NOW - timedelta(days=1),
     verdict: str | None = "accepted",
+    outcome: str | None = "positive",
     fields: dict | None = None,
     **keys: object,
 ) -> uuid.UUID:
@@ -67,6 +68,7 @@ async def add(
             received_at=received_at,
             stage="decided" if verdict else "extracted",
             verdict=verdict,
+            outcome=outcome,
             **keys,
         )
         session.add(submission)
@@ -100,6 +102,8 @@ async def test_each_key_finds_its_candidate_and_only_it(database: Database) -> N
     await add(database, "rejected", chat_id_norm=chat, verdict="rejected")
     await add(database, "too-old", chat_id_norm=chat, received_at=NOW - timedelta(days=200))
     undecided = await add(database, "undecided", chat_id_norm=chat, verdict=None)
+    await add(database, "no-outcome", chat_id_norm=chat, verdict=None, outcome=None)  # ещё не заявка
+    decided_without_outcome = await add(database, "decided-no-outcome", chat_id_norm=chat, outcome=None)
 
     me = await add(database, "me", chat_id_norm=chat, text_key="a" * 40, key_time=KEY_TIME, verdict=None)
     async with database.session() as session:
@@ -117,7 +121,7 @@ async def test_each_key_finds_its_candidate_and_only_it(database: Database) -> N
             dhash_max_distance=12,
         ),
     )
-    assert candidates == {by_chat, by_text, by_time, near_image, undecided}
+    assert candidates == {by_chat, by_text, by_time, near_image, undecided, decided_without_outcome}
     assert far_time not in candidates and far_image not in candidates
 
     day_wide = await found(
