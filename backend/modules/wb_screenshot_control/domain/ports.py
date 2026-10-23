@@ -40,7 +40,13 @@ class Staging(Protocol):
 
     async def exists(self, path: str) -> bool: ...
 
-    def has_room(self) -> bool: ...
+    def has_room(self) -> bool:
+        """Место есть и на томе, и в пределе самого каталога. Синхронный: из event loop — через поток."""
+        ...
+
+    def used_percent(self) -> float | None:
+        """Заполненность для экрана «Конвейер»: большее из «каталог / предел» и «занято на томе»."""
+        ...
 
     async def older_than(self, seconds: float) -> list[tuple[str, float]]:
         """Файлы старше `seconds`: относительный путь и возраст в секундах."""

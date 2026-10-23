@@ -13,9 +13,11 @@ from sqlalchemy import select, update
 
 from backend.modules.wb_screenshot_control.application.events import EVENT_DELETE, EVENT_UPLOAD
 from backend.modules.wb_screenshot_control.application.ingest import IngestService
-from backend.modules.wb_screenshot_control.application.purge import purge_expired
+from backend.modules.wb_screenshot_control.application.purge import purge_expired, purge_texts
+from backend.modules.wb_screenshot_control.application.serialization import fields_from_json
 from backend.modules.wb_screenshot_control.application.storage import ObjectStorageService
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
+    ExtractionModel,
     FileModel,
     StorageObjectModel,
     SubmissionModel,
@@ -129,8 +131,13 @@ async def test_the_worker_runs_each_step_on_its_own_schedule(
         steps.append("purge")
         return {}
 
+    async def purge_texts(*args: object) -> dict:
+        steps.append("purge_texts")
+        return {}
+
     monkeypatch.setattr(worker_module, "expire_outcomes", expire)
     monkeypatch.setattr(worker_module, "purge_expired", purge)
+    monkeypatch.setattr(worker_module, "purge_texts", purge_texts)
     settings = settings_for(tmp_path)
     services = ScreenshotControlServices(database, settings, blobs=MemoryBlobStore())
 
@@ -149,13 +156,105 @@ async def test_the_worker_runs_each_step_on_its_own_schedule(
     assert steps == ["expire", "reconcile"]
     clock["now"] = datetime(2026, 10, 23, 4, 11, tzinfo=MOSCOW)
     await worker.tick()
-    assert steps[-2:] == ["expire", "purge"]
+    assert steps[-3:] == ["expire", "purge", "purge_texts"]
     clock["now"] = datetime(2026, 10, 23, 5, 12, tzinfo=MOSCOW)
     await worker.tick()
     assert steps[-2:] == ["expire", "reconcile"]  # чистка раз в сутки
     clock["now"] = datetime(2026, 10, 24, 4, 10, tzinfo=MOSCOW)
     await worker.tick()
-    assert steps[-1] == "purge"
+    assert steps[-1] == "purge_texts"
 
-    without_s3 = ScreenshotControlWorker(database, settings, services=ScreenshotControlServices(database, settings))
-    assert without_s3.services.blobs is None and not without_s3.purge_due(clock["now"])
+    # без S3 файлы чистить негде, а тексты в базе — по сроку всё равно
+    without_s3 = ScreenshotControlWorker(
+        database, settings, services=ScreenshotControlServices(database, settings), now=lambda: clock["now"]
+    )
+    monkeypatch.setattr(without_s3.services, "reconciler", Reconciler)
+    clock["now"] = datetime(2026, 10, 25, 4, 10, tzinfo=MOSCOW)
+    steps.clear()
+    await without_s3.tick()
+    assert without_s3.services.blobs is None and steps == ["expire", "reconcile", "purge_texts"]
+
+
+def test_fields_retention_must_outlive_the_dedupe_window() -> None:
+    broken = replace(BASE, screenshot_control=replace(CONFIG, retention_fields_days=400, dedupe_window_days=400))
+    with pytest.raises(ValueError, match="dedupe_window_days"):
+        broken.validate_values()
+    assert CONFIG.retention_fields_days == 1095 and CONFIG.dedupe_window_days == 90
+
+
+async def test_texts_older_than_the_retention_are_erased_and_counts_stay(database: Database, tmp_path: Path) -> None:
+    now = datetime.now(UTC)
+    old_at = now - timedelta(days=CONFIG.retention_fields_days + 1)
+    fresh_at = now - timedelta(days=10)
+    fields = {
+        "layout": "mobile_app",
+        "is_wb_seller_chat": True,
+        "review_text": "Размер маломерит, вернула",
+        "text_norm": "размер маломерит вернула",
+        "stars": 2,
+        "chat_id": "c" * 36,
+        "buyer_hmac": "h" * 16,
+        "messages": [{"text_norm": "когда вернете деньги", "hour": 10, "minute": 5, "side": "client"}],
+    }
+    ids = {}
+    for name, received_at in (("old", old_at), ("fresh", fresh_at)):
+        async with database.session() as session:
+            file = FileModel(sha256=(name * 64)[:64], size_bytes=10, mime="image/png", width=800, height=600)
+            session.add(file)
+            await session.flush()
+            session.add(
+                ExtractionModel(
+                    file_id=file.id,
+                    pipeline_version="v1",
+                    status="ok",
+                    fields=fields,
+                    vlm_json={"review": {"text": "Размер маломерит"}},
+                    ocr_json={"text": "Размер маломерит"},
+                )
+            )
+            submission = SubmissionModel(
+                user_id=uuid.uuid4(),
+                channel="web",
+                client_submission_id=name,
+                file_id=file.id,
+                received_at=received_at,
+                stage="decided",
+                verdict="accepted",
+                outcome="positive",
+                caption_raw="полож",
+                text_norm="размер маломерит вернула",
+                text_len=24,
+                text_key="k" * 40,
+                text_minhash=[1, 2, 3],
+                chat_id_norm="c" * 36,
+            )
+            session.add(submission)
+            await session.commit()
+            ids[name] = submission.id
+
+    first = await purge_texts(database, CONFIG, now)
+    again = await purge_texts(database, CONFIG, now)
+
+    assert first == {"submissions": 1, "extractions": 1} and again == {"submissions": 0, "extractions": 0}
+    async with database.session() as session:
+        old = await session.get(SubmissionModel, ids["old"])
+        fresh = await session.get(SubmissionModel, ids["fresh"])
+        extractions = {row.file_id: row for row in await session.scalars(select(ExtractionModel))}
+    assert old is not None and fresh is not None
+    assert (old.text_norm, old.caption_raw, old.text_minhash) == (None, None, None)
+    assert (old.verdict, old.outcome, old.text_key, old.text_len, old.chat_id_norm) == (
+        "accepted",
+        "positive",
+        "k" * 40,
+        24,
+        "c" * 36,
+    )
+    assert fresh.text_norm and fresh.caption_raw == "полож" and fresh.text_minhash == [1, 2, 3]
+    erased = extractions[old.file_id]
+    assert erased.vlm_json is None and erased.ocr_json is None and erased.fields is not None
+    assert erased.fields["text_norm"] is None and erased.fields["review_text"] is None
+    assert erased.fields["messages"][0]["text_norm"] == "" and erased.fields["texts_purged"] is True
+    assert erased.fields["stars"] == 2 and erased.fields["buyer_hmac"] == "h" * 16
+    assert fields_from_json(erased.fields).text_norm is None  # решение по старым полям всё ещё читается
+    kept = extractions[fresh.file_id]
+    assert kept.vlm_json and kept.fields and kept.fields["text_norm"]

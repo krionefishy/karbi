@@ -9,6 +9,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.modules.wb_screenshot_control.application.events import (
     EVENT_DELETE,
     EVENT_UPLOAD,
@@ -16,6 +18,7 @@ from backend.modules.wb_screenshot_control.application.events import (
     ScreenshotObjectUpload,
 )
 from backend.modules.wb_screenshot_control.application.inbox import parse_event
+from backend.modules.wb_screenshot_control.application.outbox import publish
 from backend.modules.wb_screenshot_control.domain.ports import BlobStore, Staging
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import StorageObjectModel
 from backend.modules.wb_screenshot_control.infrastructure.postgres.repository import ScreenshotRepository
@@ -23,6 +26,7 @@ from backend.storage.pg import Database
 
 MAX_UPLOAD_ATTEMPTS = 24
 UPLOADABLE = ("staged", "uploading")
+ERASED = ("delete_requested", "deleted")
 
 
 def _error(error: BaseException) -> str:
@@ -85,7 +89,12 @@ class ObjectStorageService:
         async with self.database.session() as session:
             repository = ScreenshotRepository(session)
             stored = await repository.storage_object(event.file_id, event.kind, for_update=True)
-            if stored is not None and stored.state == "uploading":
+            if stored is not None and stored.state in ERASED and stored.s3_key == event.key:
+                # Файл стёрли, пока шла выгрузка: delete-подписчик удалил ещё не записанный ключ, а put
+                # записал его после. Удаляем сразу под той же блокировкой, иначе в S3 останется сирота с ПДн.
+                leftover = await self._erase_late_upload(session, stored)
+                state, error = stored.state, stored.last_error
+            elif stored is not None and stored.state == "uploading":
                 now = datetime.now(UTC)
                 if state == "staged" and stored.attempts >= MAX_UPLOAD_ATTEMPTS:
                     state = "failed"
@@ -98,10 +107,31 @@ class ObjectStorageService:
                     stored.stored_at = now
             repository.mark_inbox(event_id, EVENT_UPLOAD)
             await session.commit()
-        if state == "stored" and leftover:
+        if state in ("stored", "deleted") and leftover:
             await self.staging.delete(leftover)
         if error:
             self.logger.warning("screenshot_upload_failed", extra={"file_id": str(event.file_id), "error": error})
+
+    async def _erase_late_upload(self, session: AsyncSession, stored: StorageObjectModel) -> str | None:
+        """Объект стёрт во время выгрузки: удалить из S3 сразу; не вышло — снова `delete_requested`
+        с событием удаления, повтор доведёт дело. Возвращает путь staging, который можно убрать."""
+        now = datetime.now(UTC)
+        stored.updated_at = now
+        try:
+            await self.blobs.delete(stored.s3_key)
+        except Exception as error:
+            stored.state = "delete_requested"
+            stored.delete_requested_at = stored.delete_requested_at or now
+            stored.last_error = _error(error)
+            publish(session, delete_event(stored, "admin"))
+            return None
+        leftover = stored.staging_path
+        stored.state = "deleted"
+        stored.deleted_at = now
+        stored.last_error = None
+        stored.staging_path = None
+        self.logger.info("screenshot_late_upload_erased", extra={"file_id": str(stored.file_id)})
+        return leftover
 
     async def _put(self, event: ScreenshotObjectUpload) -> tuple[str, str | None]:
         """Новое состояние объекта и причина неудачи."""

@@ -5,13 +5,12 @@
 `screenshot.verdict-ready` с actor=admin. Имя покупателя не хранится и не отдаётся.
 """
 
+import asyncio
 import json
-import shutil
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -496,7 +495,9 @@ class AdminService:
             if stored.state in ("delete_requested", "deleted"):
                 continue
             stored.updated_at = now
-            if len(stored.bucket) >= 3:
+            # Выгрузка в полёте (`uploading`) — только через delete_requested: `deleted` здесь означал бы,
+            # что объект в S3 точно не появится, а put может записать его следом (сверяет upload-подписчик).
+            if len(stored.bucket) >= 3 or stored.state == "uploading":
                 stored.state = "delete_requested"
                 stored.delete_requested_at = now
                 publish(self.session, delete_event(stored, "admin"))
@@ -536,8 +537,9 @@ class AdminService:
             "storage": {
                 "objects": {state: states.get(state, 0) for state in STORAGE_STATES},
                 "stored_bytes": stored_bytes,
-                "oldest_staged_age_s": _age(now, oldest_staged),
-                "staging_used_percent": staging_used_percent(self.config.staging_root),
+                # Без S3 файлы ждут выгрузки по замыслу, а не из-за сбоя: возраст очереди не показываем.
+                "oldest_staged_age_s": _age(now, oldest_staged) if self.images.blobs is not None else None,
+                "staging_used_percent": await asyncio.to_thread(self.staging.used_percent),
             },
             "channels_today": {name: channels.get(name, 0) for name in ("extension", "telegram", "web")},
         }
@@ -574,18 +576,6 @@ _QUALITY = (
 
 def _age(now: datetime, since: datetime | None) -> int | None:
     return max(0, int((now - since).total_seconds())) if since is not None else None
-
-
-def staging_used_percent(root: str) -> float | None:
-    """Заполненность тома staging; каталога может ещё не быть — меряем ближайшего предка."""
-    probe = Path(root)
-    while not probe.exists() and probe != probe.parent:
-        probe = probe.parent
-    try:
-        usage = shutil.disk_usage(probe)
-    except OSError:
-        return None
-    return round(usage.used * 100 / usage.total, 1) if usage.total else None
 
 
 def _user_ref(user_id: uuid.UUID | None, users: dict[uuid.UUID, str]) -> dict[str, Any] | None:

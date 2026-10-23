@@ -68,7 +68,10 @@ def http_error(error: ServiceError) -> HTTPException:
 
 
 def ensure_enabled(settings: Settings) -> None:
-    if settings.screenshot_control.mode == "off":
+    screens = settings.screenshot_control
+    if screens.mode == "off":
+        if screens.disabled_reason == "hmac_key_missing":
+            raise api_error(503, "module_off", "Контроль скриншотов выключен: на сервере не задан ключ HMAC")
         raise api_error(503, "module_off", "Контроль скриншотов выключен")
 
 

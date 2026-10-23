@@ -14,7 +14,9 @@ import pytest_asyncio
 from botocore.exceptions import ClientError
 from sqlalchemy import select, update
 
+from backend.modules.wb_screenshot_control.application.admin_service import AdminService
 from backend.modules.wb_screenshot_control.application.events import EVENT_DELETE, EVENT_UPLOAD
+from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.inbox import InvalidEventError
 from backend.modules.wb_screenshot_control.application.ingest import IngestResult, IngestService
 from backend.modules.wb_screenshot_control.application.outbox import publish
@@ -27,6 +29,7 @@ from backend.modules.wb_screenshot_control.application.storage import (
 from backend.modules.wb_screenshot_control.infrastructure import wiring
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import StorageObjectModel
 from backend.modules.wb_screenshot_control.infrastructure.storage import S3BlobStore, StagingStore
+from backend.modules.wb_screenshot_control.infrastructure.storage import staging as staging_module
 from backend.storage.pg import Database
 from backend.storage.s3 import S3Client
 from backend.tests.wb_screenshot_control.fakes import (
@@ -179,6 +182,69 @@ async def test_delete_removes_the_object_once(
     assert blobs.deleted == [stored.s3_key]
 
 
+class EraseDuringPut(MemoryBlobStore):
+    """S3, во время `put` которого админ стирает файл, а delete-подписчик успевает отработать."""
+
+    def __init__(self, database: Database, staging: StagingStore, submission_id: uuid.UUID) -> None:
+        super().__init__()
+        self.database = database
+        self.staging = staging
+        self.submission_id = submission_id
+        self.fail_deletes = False
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        async with self.database.session() as session:
+            admin = AdminService(session, BASE.screenshot_control, ImageLinks(self, 300), self.staging)
+            await admin.erase_file(self.submission_id)
+        stored = await stored_object(self.database)
+        assert stored.state == "delete_requested", "выгрузка в полёте: стирание только через delete_requested"
+        for row in await take(self.database, EVENT_DELETE):
+            await ObjectStorageService(self.database, self.staging, self).delete(row.payload)
+        assert (await stored_object(self.database)).state == "deleted"  # удалили ключ, которого ещё нет
+        await super().put(key, data, content_type)  # …а put дописал объект после удаления
+        self.down = self.fail_deletes
+
+    async def size(self, key: str) -> int | None:
+        self.down = False
+        size = await super().size(key)
+        self.down = self.fail_deletes
+        return size
+
+
+async def test_a_file_erased_during_upload_does_not_stay_in_s3(database: Database, staging: StagingStore) -> None:
+    result = await accepted(database, staging, 9)
+    payload = await upload_payload(database)
+    blobs = EraseDuringPut(database, staging, result.submission_id)
+
+    await ObjectStorageService(database, staging, blobs).upload(payload)
+
+    stored = await stored_object(database)
+    assert stored.state == "deleted" and stored.deleted_at is not None and stored.staging_path is None
+    assert blobs.objects == {}, "сирота с ПДн в бакете"
+    assert blobs.deleted == [stored.s3_key, stored.s3_key]
+    assert not await staging.exists(payload["staging_path"])
+
+
+async def test_a_failed_late_erase_is_retried_through_the_delete_event(
+    database: Database, staging: StagingStore
+) -> None:
+    result = await accepted(database, staging, 10)
+    payload = await upload_payload(database)
+    blobs = EraseDuringPut(database, staging, result.submission_id)
+    blobs.fail_deletes = True
+
+    await ObjectStorageService(database, staging, blobs).upload(payload)
+    stored = await stored_object(database)
+    assert stored.state == "delete_requested" and "unreachable" in (stored.last_error or "")
+    assert stored.s3_key in blobs.objects
+
+    blobs.fail_deletes = blobs.down = False
+    retry = await take(database, EVENT_DELETE)
+    assert len(retry) == 1
+    await ObjectStorageService(database, staging, blobs).delete(retry[0].payload)
+    assert (await stored_object(database)).state == "deleted" and blobs.objects == {}
+
+
 async def test_delete_skips_an_object_that_came_back(
     database: Database, staging: StagingStore, blobs: MemoryBlobStore
 ) -> None:
@@ -261,6 +327,34 @@ async def test_staging_writes_atomically_and_stays_inside_its_root(staging: Stag
         with pytest.raises(ValueError):
             staging.resolve(bad)
     assert not StagingStore(staging.root, max_used_percent=0).has_room()
+
+
+async def test_the_staging_cap_counts_the_directory_not_the_disk(tmp_path: Path) -> None:
+    """Без S3 файлы копятся в staging: предел каталога срабатывает задолго до заполнения тома."""
+    capped = StagingStore(tmp_path / "capped", max_used_percent=100, max_bytes=1000)
+    assert capped.has_room() and capped.used_bytes() == 0
+    await capped.write("orig/aa/one.png", b"x" * 600)
+    assert capped.has_room() and capped.used_bytes() == 600  # кэш размера дополняется записью
+    await capped.write("orig/bb/two.png", b"x" * 500)
+    assert not capped.has_room()
+    percent = capped.used_percent()
+    assert percent is not None and percent >= 110.0
+
+    other = StagingStore(tmp_path / "capped", max_used_percent=100, max_bytes=10_000)
+    assert other.has_room(), "предел — у каждого хранилища свой, размер каталога общий"
+
+
+def test_the_staging_size_is_measured_again_after_the_cache_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "measured"
+    store = StagingStore(root, max_used_percent=100, max_bytes=100)
+    assert store.used_bytes() == 0
+    (root / "orig").mkdir(parents=True)
+    (root / "orig" / "late.png").write_bytes(b"y" * 150)  # записал другой процесс (воркер)
+    assert store.used_bytes() == 0
+    monkeypatch.setattr(staging_module, "SIZE_TTL_SECONDS", 0.0)
+    assert store.used_bytes() == 150 and not store.has_room()
 
 
 def s3_client() -> S3Client:

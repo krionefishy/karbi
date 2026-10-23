@@ -1,9 +1,12 @@
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from backend.shared.settings import load_settings
+from backend.modules.wb_screenshot_control.infrastructure.wiring import log_startup_state
+from backend.shared.settings import Settings, load_settings
 
 
 def test_test_settings_are_loaded_from_yaml() -> None:
@@ -127,16 +130,42 @@ def test_broken_screenshot_settings_are_refused(field: str, value: Any, message:
         broken.validate_values()
 
 
-def test_production_needs_the_hmac_key_only_while_the_module_is_on() -> None:
-    settings = load_settings("backend/shared/settings/config.test.yaml")
-    production = replace(settings, app=replace(settings.app, environment="production"))
-    keyless = replace(production.screenshot_control, hmac_key="")
+def _raw_test_config() -> dict[str, Any]:
+    raw = yaml.safe_load(Path("backend/shared/settings/config.test.yaml").read_text(encoding="utf-8"))
+    return dict(raw)
 
-    with pytest.raises(ValueError, match="screenshot_control.hmac_key"):
-        replace(production, screenshot_control=keyless).validate_runtime_secrets()
-    with pytest.raises(ValueError) as error:
-        replace(production, screenshot_control=replace(keyless, mode="off")).validate_runtime_secrets()
-    assert "screenshot_control" not in str(error.value)
+
+@pytest.mark.parametrize("mode", ["shadow", "enforce"])
+@pytest.mark.parametrize("key", ["", "short-key"])
+def test_without_the_hmac_key_only_the_screenshot_module_turns_off(mode: str, key: str) -> None:
+    raw = _raw_test_config()
+    raw["screenshot_control"] = {**raw["screenshot_control"], "mode": mode, "hmac_key": key}
+
+    settings = Settings.from_dict(raw)
+
+    screens = settings.screenshot_control
+    assert (screens.mode, screens.disabled_reason, screens.requested_mode) == ("off", "hmac_key_missing", mode)
+    production = replace(settings, app=replace(settings.app, environment="production"))
+    with pytest.raises(ValueError) as error:  # тестовый конфиг небезопасен для прода по другим причинам
+        production.validate_runtime_secrets()
+    assert "screenshot_control" not in str(error.value) and "hmac" not in str(error.value)
+    assert log_startup_state(settings, worker=True) == ["screenshot_control_disabled"]
+
+
+def test_a_long_hmac_key_keeps_the_requested_mode() -> None:
+    raw = _raw_test_config()
+    raw["screenshot_control"] = {**raw["screenshot_control"], "mode": "enforce", "hmac_key": "k" * 32}
+    screens = Settings.from_dict(raw).screenshot_control
+    assert (screens.mode, screens.disabled_reason) == ("enforce", "")
+
+
+def test_the_worker_warns_without_the_model_key() -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    keyless = replace(settings, vision=replace(settings.vision, api_key=""))
+    assert log_startup_state(keyless, worker=True) == ["screenshot_control_model_key_missing"]
+    assert log_startup_state(keyless, worker=False) == []
+    off = replace(keyless, screenshot_control=replace(keyless.screenshot_control, mode="off"))
+    assert log_startup_state(off, worker=True) == []
 
 
 def test_an_empty_vision_model_from_compose_keeps_the_chosen_model(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,6 +45,7 @@ from backend.modules.wb_screenshot_control.domain.pipeline_types import (
     ExtractionResult,
 )
 from backend.modules.wb_screenshot_control.domain.ports import Decider, Extractor, Staging
+from backend.modules.wb_screenshot_control.domain.similarity import text_minhash
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import ExtractionModel, SubmissionModel
 from backend.modules.wb_screenshot_control.infrastructure.postgres.repository import (
     CandidateQuery,
@@ -95,7 +96,8 @@ def queued_at(captured_at: datetime | None, received_at: datetime) -> datetime |
 
 
 def case_keys(fields: ExtractedFields) -> dict[str, Any]:
-    """Ключи кейса для индексов `submissions`; `text_key` = sha1(минута|text_norm) только при точности до минуты."""
+    """Ключи кейса для индексов `submissions`; `text_key` = sha1(минута|text_norm) только при точности до минуты,
+    `text_minhash` — MinHash текста без чата и времени (кандидаты при подмене chatId вместе с правкой)."""
     key_time = fields.review_at
     precision = fields.review_time_precision if key_time is not None else None
     text_norm = fields.text_norm[:4000] if fields.text_norm else None
@@ -104,6 +106,7 @@ def case_keys(fields: ExtractedFields) -> dict[str, Any]:
         minute = key_time.astimezone(UTC).strftime("%Y-%m-%dT%H:%M")
         text_key = hashlib.sha1(f"{minute}|{text_norm}".encode()).hexdigest()
     chat_id = fields.chat_id.lower() if fields.chat_id and len(fields.chat_id) == 36 else None
+    minhash = text_minhash(text_norm)
     return {
         "case_kind": fields.case_kind,
         "chat_id_norm": chat_id,
@@ -113,9 +116,40 @@ def case_keys(fields: ExtractedFields) -> dict[str, Any]:
         "text_norm": text_norm,
         "text_len": min(len(text_norm), 32_767) if text_norm else None,
         "text_key": text_key,
+        "text_minhash": list(minhash) if minhash is not None else None,
         "buyer_hmac": fields.buyer_hmac[:16] if fields.buyer_hmac else None,
         "article_norm": fields.article_norm[:32] if fields.article_norm else None,
     }
+
+
+PARKED_NOTE = "ошибка конвейера: сообщение отложено после повторов"
+
+
+async def park_failed_event(database: Database, payload: dict[str, Any], error: str, *, now: datetime) -> bool:
+    """Сообщение конвейера падает при каждой обработке: скрин без вердикта — на ручную проверку.
+
+    Сбой нашей стороны менеджера не штрафует, поэтому `needs_review/extraction_failed`, а не отказ. Уже
+    решённый скрин не трогаем. `True` — вердикт поставлен.
+    """
+    try:
+        submission_id = uuid.UUID(str(payload.get("submission_id")))
+    except ValueError:
+        return False
+    async with database.session() as session:
+        submission = await ScreenshotRepository(session).submission(submission_id, for_update=True)
+        if submission is None or submission.verdict is not None:
+            return False
+        submission.last_error = error[:500]
+        decide_system(
+            session,
+            submission,
+            "needs_review",
+            [reason("extraction_failed", "warn", pipeline_error=error[:200])],
+            now=now,
+            note=PARKED_NOTE,
+        )
+        await session.commit()
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +290,11 @@ class ExtractionService:
             return
         key = object_key(work.sha256, "thumb")
         path = staging_path(key)
+        original = await repository.storage_object(work.file_id, "orig")
+        if original is not None and original.state in ("delete_requested", "deleted"):
+            # Админ стёр файл, пока шло распознавание: миниатюру стёртого не заводим и не выгружаем.
+            await self.staging.delete(path)
+            return
         sha256 = hashlib.sha256(rendered.thumbnail).hexdigest()
         values: dict[str, Any] = {
             "file_id": work.file_id,
@@ -486,12 +525,19 @@ class DecisionService:
             pipeline_version=self.config.pipeline_version,
             chat_id=submission.chat_id_norm,
             text_key=submission.text_key,
+            text_minhash=self._minhash(submission),
             key_time=submission.key_time,
             day_precision=submission.key_time_precision == "day",
             dhash_bits=to_bits(inp.dhash) if inp.dhash is not None else None,
             dhash_max_distance=self.config.thresholds.near_dhash_soft,
             message_texts=texts,
         )
+
+    def _minhash(self, submission: SubmissionModel) -> tuple[int, ...]:
+        """Короткий текст ключом кейса не служит: по нему кандидатов без чата и времени не ищем."""
+        if not submission.text_minhash or (submission.text_len or 0) < self.config.thresholds.min_text_len:
+            return ()
+        return tuple(submission.text_minhash)
 
     @staticmethod
     def _candidate(row: CandidateRow) -> Candidate:

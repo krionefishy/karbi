@@ -5,6 +5,10 @@ Cloud.ru) → `Extractor` с нормализацией chatId, времени �
 Модель здесь — фейк, отдающий заранее заготовленный JSON: проверяется не зрение, а то, что делают правила
 с тем, что зрение прочитало. dHash считается по настоящим синтетическим картинкам (Pillow).
 
+Кандидатов здесь подбирает не SQL, а in-memory `Ledger` (все прежние скрины). Что нужные кандидаты находит
+и `repository.candidates` — проверяют `test_repository.py` (каждый признак, в том числе MinHash текста, и
+шум из сотен строк) и сквозной `test_end_to_end.py` (подмена chatId + время + слово на живой БД).
+
 Что НЕ ловится (закреплено тестами `test_hole_*` с `xfail(strict=True)`: отчёт pytest показывает их как
 XFAIL, а если дыру закроют — тест упадёт и напомнит обновить этот список):
 
@@ -159,6 +163,7 @@ def codes(decision: Decision) -> list[str]:
 
 
 ORIGINAL_IMAGE = screen(1)
+THREE_WORDS = REVIEW.replace("кривые", "неровные").replace("тонкая", "плотная").replace("просвечивает", "мнётся")
 
 
 def original() -> Shot:
@@ -286,6 +291,43 @@ def cases() -> list[Case]:
             ),
             "needs_review",
             "url_not_chat",
+        ),
+        # Подмена chatId вместе со второй правкой: ловит ключ без чата и времени (MinHash текста в SQL)
+        (
+            "расширение: чужой chatId и время сдвинуто на 3 часа",
+            Shot(desktop(None, REVIEW, at(9, 39)), channel="extension", url=chat_url(OTHER_CHAT), captured_at=NOW),
+            "needs_review",
+            "same_text_other_time",
+        ),
+        (
+            "чужой chatId, одно слово и время на минуту",
+            Shot(desktop(OTHER_CHAT, REVIEW.replace("кривые", "неровные"), at(6, 40)), address(OTHER_CHAT)),
+            "needs_review",
+            "same_text_other_time",
+        ),
+        (
+            "чужой chatId и три слова в ту же минуту",
+            Shot(desktop(OTHER_CHAT, THREE_WORDS, text_moment), address(OTHER_CHAT)),
+            "needs_review",
+            "same_text_other_time",
+        ),
+        (
+            "веб: чужой chatId на картинке и время сдвинуто",
+            Shot(desktop(OTHER_CHAT, REVIEW, at(11, 5)), address(OTHER_CHAT)),
+            "needs_review",
+            "same_text_other_time",
+        ),
+        (
+            "чужой chatId и время другим менеджером",
+            Shot(desktop(OTHER_CHAT, REVIEW, at(11, 5)), address(OTHER_CHAT), user=MANAGER_B),
+            "needs_review",
+            "cross_user_duplicate",
+        ),
+        (
+            "чужой chatId, три слова и другой день",
+            Shot(desktop(OTHER_CHAT, THREE_WORDS, at(14, 0, days_ago=3)), address(OTHER_CHAT), user=MANAGER_B),
+            "needs_review",
+            "same_text_other_time",
         ),
         (
             "адресная строка спрятана (нет chatId)",
@@ -541,6 +583,25 @@ async def test_a_phone_screen_of_another_buyer_with_the_same_words_is_a_new_case
     other = Shot(mobile(MOBILE_OPENING, buyer="Ольга Смирнова"), user=MANAGER_B)
     decision = await after_original(other, first=Shot(mobile(MOBILE_OPENING)))
     assert decision.verdict != "duplicate", codes(decision)
+
+
+async def test_a_dom_edit_next_to_an_original_under_review_goes_to_review() -> None:
+    """Оригинал на проверке (фото экрана), рядом правка DOM: три слова и время в том же чате."""
+    first = Shot(flags(desktop(CHAT, REVIEW, at(6, 39)), photo_of_screen=True), address(CHAT))
+    ledger = Ledger()
+    assert (await ledger.submit(first)).verdict == "needs_review"
+    decision = await ledger.submit(Shot(desktop(CHAT, THREE_WORDS, at(13, 20)), address(CHAT)))
+    assert (decision.verdict, "same_chat_similar_text" in codes(decision)) == ("needs_review", True), codes(decision)
+
+
+async def test_a_long_template_phrase_from_another_buyer_is_reviewed_not_counted_twice() -> None:
+    """Ложное срабатывание, которое мы принимаем: длинный одинаковый текст в другом чате в другое время
+    уходит на проверку (а не в дубль). Короче 2 × min_text_len — новый кейс."""
+    short = "Не соответствует описанию, верну"
+    ledger = Ledger()
+    assert (await ledger.submit(Shot(desktop(CHAT, short, at(6, 39)), address(CHAT)))).verdict != "rejected"
+    decision = await ledger.submit(Shot(desktop(OTHER_CHAT, short, at(18, 2)), address(OTHER_CHAT)))
+    assert decision.verdict == "accepted", codes(decision)
 
 
 async def test_an_honest_second_review_in_the_same_chat_is_accepted() -> None:

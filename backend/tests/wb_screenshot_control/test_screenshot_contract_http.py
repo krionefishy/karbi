@@ -160,6 +160,16 @@ async def test_manager_basics_answer_with_the_contract(stand: Stand) -> None:
     assert (await stand.client.delete(f"{MANAGER}/telegram", headers=manager)).status_code == 204
 
 
+async def test_a_module_off_for_a_missing_hmac_key_says_why_and_the_rest_of_the_api_works(tmp_path: Path) -> None:
+    async with open_stand(tmp_path, mode="off", disabled_reason="hmac_key_missing", requested_mode="shadow") as stand:
+        manager = await stand.sign_in("manager")
+        upload = await stand.upload(manager, synthetic_png())
+        assert (upload.status_code, upload.headers.get("X-Error-Code")) == (503, "module_off")
+        assert "HMAC" in upload.text
+        automations = await stand.client.get("/api/v1/automations", headers=manager)
+        assert automations.status_code == 200
+
+
 async def test_mode_off_closes_manager_and_extension_but_not_admin(tmp_path: Path) -> None:
     async with open_stand(tmp_path, mode="off") as stand:
         manager = await stand.sign_in("manager")

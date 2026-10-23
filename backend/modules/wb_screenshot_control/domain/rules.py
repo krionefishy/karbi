@@ -19,6 +19,7 @@ from backend.modules.wb_screenshot_control.domain.pipeline_types import (
 )
 from backend.modules.wb_screenshot_control.domain.similarity import (
     CHAT_CONFUSED,
+    PREFIX_MIN_FACTOR,
     TIME_CONFUSED,
     TIME_SAME_DAY,
     chat_similarity,
@@ -79,7 +80,7 @@ SEVERITY: dict[str, Severity] = {
     "same_chat_same_text_other_time": "high",
     "same_chat_similar_text": "high",
     "same_text_time_other_chat": "high",
-    "same_text_other_time": "warn",
+    "same_text_other_time": "high",
     "messages_overlap": "info",
     "possible_duplicate": "warn",
     "order_conflict": "warn",
@@ -107,8 +108,10 @@ SEVERITY: dict[str, Severity] = {
 AGREEMENT_MIN = 0.8
 """Согласие VLM и OCR по chat_id и времени ниже этого — поле неуверенное (раздел 6.4)."""
 
-VERDICT_HOLDERS = ("accepted", "duplicate")
-"""Кандидаты, которые уже «держат» кейс: с ними похожий текст в том же чате — повод для проверки."""
+VERDICT_HOLDERS = ("accepted", "duplicate", "needs_review", None)
+"""Кандидаты, которые «держат» кейс: с ними похожий текст в том же чате — повод для проверки. Скрин на
+проверке (и заявленный, но ещё не решённый) тоже держит: иначе правка DOM рядом с ним проходит, а после
+одобрения засчитываются оба. Отклонённые в кандидаты не попадают вовсе."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +240,28 @@ def _compare_with_chats(
         return _hit(
             candidate, "same_text_time_other_chat", "needs_review", "messages", 1.0, s_chat=s_chat, messages=len(pairs)
         )
+    return _same_text_any_time(x, y, candidate, cfg, s_text, scores)
+
+
+def _same_text_any_time(
+    x: ExtractedFields,
+    y: ExtractedFields,
+    candidate: Candidate,
+    cfg: ScreenshotControlConfig,
+    s_text: float,
+    scores: dict[str, float],
+) -> CaseHit | None:
+    """Чат другой или неизвестен, а длинный текст тот же или почти тот же — при любом времени.
+
+    Ловит подмену chatId вместе со второй правкой (сдвиг времени, замена слов): по отдельности их
+    ловят ключи выше, вместе — только текст. Без чата и времени текст должен быть вдвое длиннее
+    `min_text_len` (как у префиксного сравнения): шаблонные фразы вроде «не соответствует описанию»
+    совпадают у разных покупателей и в разных чатах (коллизия 12 из 7.6).
+    """
+    t = cfg.thresholds
+    text_len = min(len(x.text_norm or ""), len(y.text_norm or ""))
+    if s_text >= t.text_maybe and text_len >= PREFIX_MIN_FACTOR * t.min_text_len:
+        return _hit(candidate, "same_text_other_time", "needs_review", "text_time", s_text, **scores)
     return None
 
 
@@ -281,7 +306,7 @@ def _compare_without_chat(
         if s_time == TIME_SAME_DAY:
             return _hit(candidate, "possible_duplicate", "needs_review", "text_time", s_text, **scores)
         return _hit(candidate, "same_text_other_time", "needs_review", "text_time", s_text, **scores)
-    return None
+    return _same_text_any_time(x, y, candidate, cfg, s_text, scores)
 
 
 def keys_contradict(x: ExtractedFields, y: ExtractedFields | None, cfg: ScreenshotControlConfig, tz: tzinfo) -> bool:

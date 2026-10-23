@@ -375,6 +375,26 @@ async def test_a_swapped_chat_id_goes_to_review(world: World) -> None:
     assert card["id"] in await world.queue("review")
 
 
+async def test_a_swapped_chat_id_with_time_and_word_edits_goes_to_review(world: World) -> None:
+    """Подмена chatId + сдвиг времени + замена слова другим менеджером: ни чат, ни минута не совпадают,
+    кандидата находит только MinHash текста в `repository.candidates`."""
+    first = world.vlm.register(
+        screen(11), desktop(CHAT, REVIEW, yesterday(6, 39)), {"url": chat_url(CHAT), "chat_id": CHAT}
+    )
+    original = await world.web("manager", first)
+    assert original["status"] == "accepted"
+
+    edited = REVIEW.replace("кривые", "неровные")
+    spoof = world.vlm.register(screen(12), desktop(None, edited, yesterday(10, 2)))
+    card = await world.extension("other", spoof, chat_url(OTHER_CHAT))
+
+    assert card["status"] == "needs_review"
+    detail = await world.admin(card["id"])
+    assert {"same_text_other_time", "cross_user_duplicate"} <= set(codes(detail)), codes(detail)
+    assert detail["suspicion"] == "high"
+    assert any(match["other_id"] == original["id"] for match in detail["matches"])
+
+
 async def test_a_dom_edit_of_a_counted_case_goes_to_review(world: World) -> None:
     """Тот же чат, текст с заменой слова, другое время — повторно кейс не засчитывается."""
     first = world.vlm.register(screen(5), desktop(None, REVIEW, yesterday(6, 39)))

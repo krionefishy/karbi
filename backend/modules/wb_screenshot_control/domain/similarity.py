@@ -4,6 +4,7 @@
 Python: на текстах до 4000 символов это миллисекунды, а не секунды обычной таблицы.
 """
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
@@ -87,6 +88,47 @@ def text_similarity(
         if shorter >= PREFIX_MIN_FACTOR * min_text_len:
             return ratio(a[:shorter], b[:shorter])
     return ratio(a, b)
+
+
+MINHASH_SHINGLE = 3
+"""Шингл — три подряд идущих слова `text_norm`: замена слова гасит не больше трёх шинглов."""
+
+_MERSENNE = (1 << 61) - 1
+_SLOT_BITS = 58
+# Восемь фиксированных перестановок `(a·h + b) mod (2^61 − 1)`. Менять нельзя без пересчёта колонки
+# `submissions.text_minhash` новой миграцией: старые и новые значения перестанут совпадать.
+_PERMUTATIONS = (
+    (0x1F3D_5B79_A2C4_E681, 0x0123_4567_89AB_CDEF),
+    (0x0A5A_5A5A_C3C3_C3C5, 0x1BAD_B002_DEAD_BEEF),
+    (0x1357_9BDF_2468_ACE1, 0x0FED_CBA9_8765_4321),
+    (0x0DEC_AF00_C0FF_EE01, 0x1A2B_3C4D_5E6F_7081),
+    (0x1C0D_E5EE_D5EE_D5ED, 0x0F00_DBA5_E5EE_D001),
+    (0x0B1A_5ED0_DD5E_ED07, 0x1357_0246_8ACE_9BDF),
+    (0x17E5_7ED5_EED5_1E09, 0x0ABC_DEF0_1234_5678),
+    (0x0F1E_2D3C_4B5A_6979, 0x1876_5432_10FE_DCBA),
+)
+MINHASH_SIZE = len(_PERMUTATIONS)
+
+
+def text_minhash(text_norm: str | None) -> tuple[int, ...] | None:
+    """MinHash по 3-словным шинглам: ключ кандидатов, не зависящий ни от чата, ни от времени.
+
+    Два текста с долей общих шинглов J совпадают хотя бы в одной из восьми позиций с вероятностью
+    `1 − (1 − J)^8`: замена слова в отзыве из 15 слов (J ≈ 0,7) находится почти наверняка, трёх
+    слов (J ≈ 0,4) — в 98 % случаев. В значение вшит номер позиции (старшие биты), поэтому
+    пересечение массивов (`&&` в PostgreSQL) — это совпадение именно в одной позиции. Меньше трёх
+    слов — ключа нет: такой текст ключом кейса и так не служит.
+    """
+    words = text_norm.split() if text_norm else []
+    if len(words) < MINHASH_SHINGLE:
+        return None
+    shingles = {" ".join(words[i : i + MINHASH_SHINGLE]) for i in range(len(words) - MINHASH_SHINGLE + 1)}
+    hashes = [int.from_bytes(hashlib.blake2b(item.encode(), digest_size=8).digest(), "big") for item in shingles]
+    low_bits = (1 << _SLOT_BITS) - 1
+    return tuple(
+        (slot << _SLOT_BITS) | (min((a * value + b) % _MERSENNE for value in hashes) & low_bits)
+        for slot, (a, b) in enumerate(_PERMUTATIONS)
+    )
 
 
 def _clock(value: datetime, tz: tzinfo) -> str:

@@ -4,8 +4,23 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Select, String, and_, cast, column, exists, func, literal, or_, select, tuple_, update
-from sqlalchemy.dialects.postgresql import BIT, JSONB, insert
+from sqlalchemy import (
+    BigInteger,
+    Select,
+    String,
+    and_,
+    cast,
+    column,
+    exists,
+    extract,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+    update,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, BIT, JSONB, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.infrastructure.postgres.models import InboxEventModel
@@ -17,7 +32,9 @@ from backend.modules.wb_screenshot_control.infrastructure.postgres.models import
     VerdictEventModel,
 )
 
-CANDIDATE_LIMIT = 500
+LIMITS = {"file": 50, "chat": 200, "text_key": 100, "minhash": 200, "key_time": 200, "dhash": 100, "messages": 100}
+"""Сколько кандидатов берёт каждый признак. Сильные ключи (файл, чат, текст с минутой) — свежие первыми,
+слабые — ближайшие по своей мере: шум одного признака не вытесняет совпадение по другому."""
 KEY_TIME_SLACK = timedelta(minutes=2)
 DAY_SLACK = timedelta(days=1)
 CLAIMED = or_(SubmissionModel.verdict.is_not(None), SubmissionModel.outcome.is_not(None))
@@ -34,6 +51,7 @@ class CandidateQuery:
     pipeline_version: str
     chat_id: str | None = None
     text_key: str | None = None
+    text_minhash: tuple[int, ...] = ()
     key_time: datetime | None = None
     day_precision: bool = False
     dhash_bits: str | None = None
@@ -225,29 +243,19 @@ class ScreenshotRepository:
         return extraction_id
 
     async def candidates(self, query: CandidateQuery) -> list[CandidateRow]:
-        conditions: list[Any] = [SubmissionModel.file_id == query.file_id]
-        if query.chat_id:
-            conditions.append(SubmissionModel.chat_id_norm == query.chat_id)
-        if query.text_key:
-            conditions.append(SubmissionModel.text_key == query.text_key)
-        if query.key_time is not None:
-            slack = DAY_SLACK if query.day_precision else KEY_TIME_SLACK
-            conditions.append(SubmissionModel.key_time.between(query.key_time - slack, query.key_time + slack))
-        if query.dhash_bits is not None:
-            distance = func.bit_count(FileModel.dhash.op("#")(cast(literal(query.dhash_bits), BIT(64))))
-            conditions.append(and_(FileModel.dhash.is_not(None), distance <= query.dhash_max_distance))
-        if query.message_texts:
-            message = func.jsonb_array_elements(ExtractionModel.fields["messages"]).table_valued(column("value", JSONB))
-            conditions.append(
-                and_(
-                    SubmissionModel.case_kind == "mobile",
-                    exists(
-                        select(1)
-                        .select_from(message)
-                        .where(message.c.value["text_norm"].astext.in_(query.message_texts))
-                    ),
-                )
-            )
+        """Кандидаты по каждому признаку отдельным ограниченным запросом, затем объединение по id.
+
+        Один `OR` с общим лимитом терял настоящий дубль, когда слабый признак (минута, dHash кадра)
+        совпадал у сотен несвязанных скринов. Здесь у каждого признака свой лимит и свой порядок:
+        сильные ключи — свежие первыми, время — ближайшие, картинка — по расстоянию, текст — по числу
+        совпавших позиций MinHash.
+        """
+        ids: dict[uuid.UUID, None] = {}
+        for lookup in self._candidate_lookups(query):
+            for submission_id in await self.session.scalars(lookup):
+                ids.setdefault(submission_id, None)
+        if not ids:
+            return []
         statement: Select[Any] = (
             select(SubmissionModel, FileModel.sha256, cast(FileModel.dhash, String), ExtractionModel.fields)
             .join(FileModel, FileModel.id == SubmissionModel.file_id)
@@ -259,18 +267,78 @@ class ScreenshotRepository:
                     ExtractionModel.status == "ok",
                 ),
             )
-            .where(
+            .where(SubmissionModel.id.in_(list(ids)))
+            .order_by(SubmissionModel.received_at, SubmissionModel.id)
+        )
+        rows = (await self.session.execute(statement)).all()
+        return [CandidateRow(row[0], row[1], row[2], row[3]) for row in rows]
+
+    @staticmethod
+    def _candidate_lookups(query: CandidateQuery) -> list[Select[Any]]:
+        def base(*conditions: Any) -> Select[Any]:
+            return select(SubmissionModel.id).where(
                 SubmissionModel.id != query.submission_id,
                 SubmissionModel.verdict.is_distinct_from("rejected"),
                 CLAIMED,
                 SubmissionModel.received_at >= query.since,
-                or_(*conditions),
+                *conditions,
             )
-            .order_by(SubmissionModel.received_at, SubmissionModel.id)
-            .limit(CANDIDATE_LIMIT)
-        )
-        rows = (await self.session.execute(statement)).all()
-        return [CandidateRow(row[0], row[1], row[2], row[3]) for row in rows]
+
+        fresh = (SubmissionModel.received_at.desc(), SubmissionModel.id)
+        earliest = (SubmissionModel.received_at, SubmissionModel.id)  # корень цепочки — самый ранний
+        lookups = [base(SubmissionModel.file_id == query.file_id).order_by(*earliest).limit(LIMITS["file"])]
+        if query.chat_id:
+            lookups.append(base(SubmissionModel.chat_id_norm == query.chat_id).order_by(*fresh).limit(LIMITS["chat"]))
+        if query.text_key:
+            lookups.append(base(SubmissionModel.text_key == query.text_key).order_by(*fresh).limit(LIMITS["text_key"]))
+        if query.text_minhash:
+            mine = cast(literal(list(query.text_minhash), ARRAY(BigInteger)), ARRAY(BigInteger))
+            slots = func.unnest(SubmissionModel.text_minhash).table_valued(column("value", BigInteger)).render_derived()
+            shared = select(func.count()).select_from(slots).where(slots.c.value == func.any(mine)).scalar_subquery()
+            lookups.append(
+                base(SubmissionModel.text_minhash.op("&&")(mine))
+                .order_by(shared.desc(), *fresh)
+                .limit(LIMITS["minhash"])
+            )
+        if query.key_time is not None:
+            slack = DAY_SLACK if query.day_precision else KEY_TIME_SLACK
+            gap = func.abs(extract("epoch", SubmissionModel.key_time - query.key_time))
+            lookups.append(
+                base(SubmissionModel.key_time.between(query.key_time - slack, query.key_time + slack))
+                .order_by(gap, *fresh)
+                .limit(LIMITS["key_time"])
+            )
+        if query.dhash_bits is not None:
+            distance = func.bit_count(FileModel.dhash.op("#")(cast(literal(query.dhash_bits), BIT(64))))
+            lookups.append(
+                base(FileModel.dhash.is_not(None), distance <= query.dhash_max_distance)
+                .join(FileModel, FileModel.id == SubmissionModel.file_id)
+                .order_by(distance, *fresh)
+                .limit(LIMITS["dhash"])
+            )
+        if query.message_texts:
+            message = func.jsonb_array_elements(ExtractionModel.fields["messages"]).table_valued(column("value", JSONB))
+            lookups.append(
+                base(
+                    SubmissionModel.case_kind == "mobile",
+                    exists(
+                        select(1)
+                        .select_from(message)
+                        .where(message.c.value["text_norm"].astext.in_(query.message_texts))
+                    ),
+                )
+                .join(
+                    ExtractionModel,
+                    and_(
+                        ExtractionModel.file_id == SubmissionModel.file_id,
+                        ExtractionModel.pipeline_version == query.pipeline_version,
+                        ExtractionModel.status == "ok",
+                    ),
+                )
+                .order_by(*fresh)
+                .limit(LIMITS["messages"])
+            )
+        return lookups
 
     # хранилище
     async def storage_object(
@@ -355,6 +423,59 @@ class ScreenshotRepository:
             )
             query = query.where(~unresolved)
         return (await self.session.scalars(query)).all()
+
+    # срок хранения текстов (ПДн)
+    async def strip_submission_texts(self, cutoff: datetime, limit: int) -> int:
+        """Обнулить тексты у скринов старше `cutoff`: `text_norm`, MinHash и подпись. Вердикт, исход,
+        ключи (`text_key`, `chat_id_norm`, `key_time`) и длина текста остаются для KPI и журнала."""
+        ids = (
+            select(SubmissionModel.id)
+            .where(
+                SubmissionModel.received_at < cutoff,
+                or_(
+                    SubmissionModel.text_norm.is_not(None),
+                    SubmissionModel.caption_raw.is_not(None),
+                    SubmissionModel.text_minhash.is_not(None),
+                ),
+            )
+            .limit(limit)
+            .scalar_subquery()
+        )
+        result = await self.session.execute(
+            update(SubmissionModel)
+            .where(SubmissionModel.id.in_(ids))
+            .values(text_norm=None, caption_raw=None, text_minhash=None)
+            .returning(SubmissionModel.id)
+        )
+        return len(result.all())
+
+    async def extractions_with_texts(self, cutoff: datetime, limit: int) -> Sequence[ExtractionModel]:
+        """Распознавания файлов, последний скрин с которыми старше `cutoff`, а тексты ещё не стёрты."""
+        last_received = (
+            select(func.max(SubmissionModel.received_at))
+            .where(SubmissionModel.file_id == ExtractionModel.file_id)
+            .scalar_subquery()
+        )
+        return (
+            await self.session.scalars(
+                select(ExtractionModel)
+                .where(
+                    last_received < cutoff,
+                    or_(
+                        # JSON `null` и SQL NULL — оба «пусто»: jsonb_typeof(NULL) даёт NULL, а не 'null'
+                        func.jsonb_typeof(ExtractionModel.vlm_json) != "null",
+                        func.jsonb_typeof(ExtractionModel.ocr_json) != "null",
+                        and_(
+                            ExtractionModel.fields.is_not(None),
+                            ExtractionModel.fields["texts_purged"].astext.is_(None),
+                        ),
+                    ),
+                )
+                .order_by(ExtractionModel.created_at)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
 
     async def stored_to_verify(self, limit: int) -> Sequence[StorageObjectModel]:
         """Выгруженные объекты по кругу: давно не проверенные первыми."""

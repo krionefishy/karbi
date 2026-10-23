@@ -23,7 +23,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import BIT, CHAR, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, BIT, CHAR, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from backend.modules.wb_screenshot_control.domain import (
@@ -123,6 +123,8 @@ class SubmissionModel(WBScreenshotControlBase):
     text_norm: Mapped[str | None] = mapped_column(String(4000), nullable=True)
     text_len: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     text_key: Mapped[str | None] = mapped_column(CHAR(40), nullable=True)
+    # MinHash 3-словных шинглов `text_norm` (`domain.similarity.text_minhash`): кандидаты без чата и времени.
+    text_minhash: Mapped[list[int] | None] = mapped_column(ARRAY(BigInteger), nullable=True)
     buyer_hmac: Mapped[str | None] = mapped_column(CHAR(16), nullable=True)
     article_norm: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
@@ -161,6 +163,12 @@ class SubmissionModel(WBScreenshotControlBase):
         Index("ix_sc_sub_chat", "chat_id_norm", postgresql_where=text("chat_id_norm IS NOT NULL")),
         Index("ix_sc_sub_key_time", "key_time", postgresql_where=text("key_time IS NOT NULL")),
         Index("ix_sc_sub_text_key", "text_key", postgresql_where=text("text_key IS NOT NULL")),
+        Index(
+            "ix_sc_sub_text_minhash",
+            "text_minhash",
+            postgresql_using="gin",
+            postgresql_where=text("text_minhash IS NOT NULL"),
+        ),
         Index("ix_sc_sub_file", "file_id"),
         Index("ix_sc_sub_review", "received_at", postgresql_where=text("verdict = 'needs_review'")),
         Index(

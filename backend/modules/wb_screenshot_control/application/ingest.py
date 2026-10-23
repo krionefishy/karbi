@@ -35,8 +35,10 @@ from backend.shared.settings.config import ScreenshotControlConfig
 RESTAGE_STATES = ("delete_requested", "deleted", "failed")
 MAX_SIDE = 32_767  # smallint в files.width/height
 _PILLOW_FORMATS = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}
-# Полное декодирование держит кадр в памяти api целиком: не больше двух сразу на процесс.
-_DECODE_SLOTS = threading.BoundedSemaphore(2)
+# Полное декодирование держит кадр в памяти api целиком (25 Мпикс RGBA — 100 МБ): одно за раз на процесс,
+# остальные ждут в своих потоках. При `mem_limit 512m` у api два параллельных кадра — уже риск OOM всего API.
+DECODE_SLOTS = 1
+_DECODE_SLOTS = threading.BoundedSemaphore(DECODE_SLOTS)
 _EXIF_SOFTWARE = 0x0131
 
 
@@ -213,7 +215,7 @@ class IngestService:
         stored = await self.repository.storage_object(file_id, "orig", for_update=True)
         restage = stored is None or stored.state in RESTAGE_STATES
         if restage:
-            if not self.staging.has_room():
+            if not await asyncio.to_thread(self.staging.has_room):
                 raise IngestError("storage_full", "Хранилище временно переполнено, повторите позже")
             await self.staging.write(path, data)
 

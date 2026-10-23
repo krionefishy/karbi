@@ -40,6 +40,9 @@ Verdict = Literal["accepted", "duplicate", "needs_review", "rejected"]
 _ROOT_VERDICTS = ("accepted", "needs_review", None)
 """Корнем цепочки становится сабмишен, который сам не дубль (отклонённые в кандидаты не попадают)."""
 
+_OTHER_CHAT_CODES: frozenset[ReasonCode] = frozenset({"same_text_time_other_chat", "same_text_other_time"})
+"""Совпадения текста без совпадения чата: у другого менеджера это ещё и `cross_user_duplicate`."""
+
 
 def decide(
     inp: DecisionInput,
@@ -101,6 +104,9 @@ def decide(
     for hit in hits:
         if hit.impact == "needs_review":
             findings.append(Finding(hit.code, "needs_review", _other(hit.candidate, hit.match.details)))
+            if hit.code in _OTHER_CHAT_CODES and hit.candidate.user_id != inp.user_id:
+                # Тот же текст у другого менеджера под другим чатом — перенос кейса с подменой chatId.
+                findings.append(Finding("cross_user_duplicate", None, _other(hit.candidate)))
     for candidate, distance in near_conflicts:
         findings.append(
             Finding("near_image_conflict", "needs_review", {**_other(candidate), "dhash_distance": distance})

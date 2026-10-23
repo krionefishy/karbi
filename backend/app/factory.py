@@ -9,6 +9,9 @@ from backend.app.api.router import router
 from backend.app.http.setup import setup_http_middleware
 from backend.infrastructure.logging import configure_logging
 from backend.modules.platform.application import TokenService
+from backend.modules.wb_screenshot_control.infrastructure.wiring import (
+    log_startup_state as log_screenshot_control_state,
+)
 from backend.shared.di import ALL_PROVIDERS
 from backend.shared.kafka_streams.kafka import start_kafka, stop_kafka
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
@@ -72,6 +75,7 @@ class Application:
 
     async def _on_startup(self) -> None:
         self.settings.validate_runtime_secrets()
+        log_screenshot_control_state(self.settings, worker=False)
         await self.database.connect(
             self.settings.database.url,
             echo=self.settings.database.echo,

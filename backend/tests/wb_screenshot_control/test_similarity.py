@@ -14,6 +14,7 @@ from backend.modules.wb_screenshot_control.domain.similarity import (
     levenshtein,
     matched_messages,
     ratio,
+    text_minhash,
     text_similarity,
     time_similarity,
 )
@@ -173,3 +174,58 @@ def test_matched_messages_respect_visible_dates() -> None:
 def test_matched_messages_accept_a_confused_digit() -> None:
     pairs = matched_messages((message("пришел брак", 6, 39),), (message("пришел брак", 8, 39),), text_threshold=0.9)
     assert pairs[0].score == 1.0
+
+
+REVIEW_NORM = "размер маломерит ткань тонкая и просвечивает швы кривые пришлось вернуть товар продавцу"
+
+
+def shared_slots(a: str, b: str) -> int:
+    left, right = text_minhash(a), text_minhash(b)
+    assert left is not None and right is not None
+    return len(set(left) & set(right))
+
+
+def test_minhash_is_deterministic_and_fits_bigint() -> None:
+    first = text_minhash(REVIEW_NORM)
+    assert first == text_minhash(REVIEW_NORM) and first is not None and len(first) == 8
+    assert all(0 <= value < 2**63 for value in first)
+    assert [value >> 58 for value in first] == list(range(8)), "номер позиции вшит в старшие биты"
+    # Пинним значения: смена функции без миграции, пересчитывающей колонку, сломает подбор кандидатов.
+    assert first[:2] == (95069487981774673, 294821068246254584)
+
+
+def test_minhash_needs_three_words() -> None:
+    assert text_minhash(None) is None and text_minhash("") is None and text_minhash("два слова") is None
+    assert text_minhash("ровно три слова") is not None
+
+
+@pytest.mark.parametrize(
+    "edited",
+    [
+        REVIEW_NORM.replace("кривые", "неровные"),
+        REVIEW_NORM.replace("кривые", "неровные").replace("тонкая", "плотная"),
+        REVIEW_NORM.replace("кривые", "неровные").replace("тонкая", "плотная").replace("просвечивает", "мнется"),
+        REVIEW_NORM[:60],
+    ],
+)
+def test_minhash_keeps_an_edited_text_as_a_candidate(edited: str) -> None:
+    assert shared_slots(REVIEW_NORM, edited) >= 1
+
+
+def test_minhash_separates_unrelated_texts() -> None:
+    other = "курьер опоздал на два дня коробка помята но сама куртка целая и теплая спасибо"
+    assert shared_slots(REVIEW_NORM, other) == 0
+
+
+def test_minhash_finds_random_word_edits_almost_always() -> None:
+    """Оценка вероятности на случайных заменах: одно слово — всегда, три слова — почти всегда."""
+    words = (REVIEW_NORM + " деньги вернули через неделю после отправки").split()
+    rng = random.Random(7)
+    found = {1: 0, 3: 0}
+    for replaced in found:
+        for _ in range(200):
+            edited = list(words)
+            for index in rng.sample(range(len(words)), replaced):
+                edited[index] = f"слово{rng.randrange(10**6)}"
+            found[replaced] += shared_slots(" ".join(words), " ".join(edited)) >= 1
+    assert found[1] == 200 and found[3] >= 190, found
