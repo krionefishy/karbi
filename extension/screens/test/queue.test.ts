@@ -4,26 +4,33 @@ import { ApiError, type SubmissionOut } from "../src/api";
 import {
   MAX_RETRY_WINDOW_MS,
   afterFailure,
+  foreignQueueText,
   idbStore,
   newItem,
   nextWakeAt,
+  ownerKey,
   processQueue,
+  removeForeign,
   resetForRetry,
   retryDelay,
   type ProcessDeps,
   type QueueItem,
   type SendOutcome,
 } from "../src/queue";
-import { loadSettings, pauseFor, saveSettings } from "../src/settings";
+import { loadSettings, pauseFor, savePairing, saveSettings } from "../src/settings";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const T0 = Date.parse("2026-10-23T09:00:00Z");
+const BACKEND = "https://ma.example.ru";
+const ANNA = ownerKey(BACKEND, "anna");
+const BORIS = ownerKey(BACKEND, "boris");
 
-function item(id: string, now = T0): QueueItem {
+function item(id: string, now = T0, owner = ANNA): QueueItem {
   return newItem(
     {
       id,
+      owner,
       blob: new Blob([`png-${id}`], { type: "image/png" }),
       filename: "tab.png",
       outcome: "positive",
@@ -53,7 +60,11 @@ function submission(id: string): SubmissionOut {
   };
 }
 
-function harness(items: QueueItem[], responses: SendOutcome[], options: { paused?: boolean; now?: number } = {}) {
+function harness(
+  items: QueueItem[],
+  responses: SendOutcome[],
+  options: { paused?: boolean; now?: number; owner?: string | null } = {},
+) {
   const store = idbStore(new IDBFactory());
   let clock = options.now ?? T0;
   const send = vi.fn(async (_item: QueueItem): Promise<SendOutcome> => responses.shift() ?? { ok: true, submission: submission("s") });
@@ -61,6 +72,7 @@ function harness(items: QueueItem[], responses: SendOutcome[], options: { paused
     store,
     now: () => clock,
     isPaused: async () => Boolean(options.paused),
+    owner: async () => (options.owner === undefined ? ANNA : options.owner),
     send,
     pause: vi.fn(async () => undefined),
     onSent: vi.fn(),
@@ -114,7 +126,7 @@ describe("расписание повторов", () => {
     expect(current.state).toBe("failed");
     expect(now - T0).toBeLessThanOrEqual(MAX_RETRY_WINDOW_MS);
     expect(now - T0).toBeGreaterThan(MAX_RETRY_WINDOW_MS - 2 * HOUR);
-    expect(nextWakeAt([current])).toBeNull();
+    expect(nextWakeAt([current], ANNA)).toBeNull();
   });
 
   it("Retry-After больше шага расписания — ждём сколько сказали", () => {
@@ -184,7 +196,7 @@ describe("processQueue", () => {
     expect((await processQueue(h.deps))[0].state).toBe("queued");
     const [stored] = await h.store.all();
     expect([stored.attempts, stored.nextAttemptAt]).toEqual([1, T0 + MINUTE]);
-    expect(nextWakeAt(await h.store.all())).toBe(T0 + MINUTE);
+    expect(nextWakeAt(await h.store.all(), ANNA)).toBe(T0 + MINUTE);
 
     h.setNow(T0 + 30_000);
     expect(await processQueue(h.deps)).toEqual([]);
@@ -214,6 +226,77 @@ describe("processQueue", () => {
     const [stored] = await h.store.all();
     expect(stored.state).toBe("failed");
     expect(await processQueue(h.deps)).toEqual([]);
+  });
+});
+
+describe("очередь и сотрудник", () => {
+  it("отправляются только записи подключённого сотрудника", async () => {
+    const legacy = { ...item("old", T0 - 3) };
+    delete legacy.owner;
+    const h = harness([legacy, item("a", T0 - 2, ANNA), item("b", T0 - 1, BORIS)], [], { owner: BORIS });
+    await h.seed();
+    const results = await processQueue(h.deps);
+    expect(results.map((r) => [r.id, r.state])).toEqual([["b", "sent"]]);
+    expect(h.send.mock.calls.map(([sent]) => sent.id)).toEqual(["b"]);
+    expect((await h.store.all()).map((entry) => entry.id)).toEqual(["old", "a"]);
+  });
+
+  it("без подключённого сотрудника не уходит ничего, будить незачем", async () => {
+    const h = harness([item("a")], [], { owner: null });
+    await h.seed();
+    expect(await processQueue(h.deps)).toEqual([]);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(nextWakeAt(await h.store.all(), null)).toBeNull();
+    expect(nextWakeAt(await h.store.all(), BORIS)).toBeNull();
+    expect(nextWakeAt(await h.store.all(), ANNA)).toBe(T0);
+  });
+
+  it("смена сотрудника: записи прежнего остаются за ним, новый их не отправляет", async () => {
+    const pairReply = (username: string) => ({ token: `mas_${username}`, username, min_version: "0.1.0", allowed_url_prefixes: [] });
+    expect(await savePairing(BACKEND, pairReply("anna"))).toEqual({ owner: ANNA, changed: false });
+    await saveSettings({ recent: [{ id: "a", outcome: "positive", capturedAt: "x", state: "queued", serverId: null, status: null, reasonText: null, error: null }] });
+
+    // «Отключить» стирает токен, но не владельца: тот же сотрудник продолжит свою очередь.
+    await saveSettings({ token: "", username: "", pause: null });
+    expect((await loadSettings()).owner).toBe(ANNA);
+    expect(await savePairing(BACKEND, pairReply("anna"))).toEqual({ owner: ANNA, changed: false });
+    expect((await loadSettings()).recent).toHaveLength(1);
+
+    const result = await savePairing(BACKEND, pairReply("boris"));
+    expect(result).toEqual({ owner: BORIS, changed: true });
+    const settings = await loadSettings();
+    expect([settings.owner, settings.token, settings.recent]).toEqual([BORIS, "mas_boris", []]);
+
+    const h = harness([item("a", T0 - 1, ANNA)], [], { owner: settings.owner });
+    await h.seed();
+    expect(await processQueue(h.deps)).toEqual([]);
+    expect(h.send).not.toHaveBeenCalled();
+  });
+
+  it("тот же логин на другом сервисе — другой сотрудник", () => {
+    expect(ownerKey("https://a.example.ru", "anna")).not.toBe(ownerKey("https://b.example.ru", "anna"));
+  });
+
+  it("сопряжение старой версии без владельца: владелец — сохранённый сотрудник", async () => {
+    await saveSettings({ backendUrl: BACKEND, token: "mas_x", username: "anna" });
+    expect((await loadSettings()).owner).toBe(ANNA);
+  });
+
+  it("«Удалить» убирает только чужие записи", async () => {
+    const store = idbStore(new IDBFactory());
+    for (const entry of [item("a", T0, ANNA), item("b", T0 + 1, BORIS), item("c", T0 + 2, ANNA)]) await store.put(entry);
+    expect(await removeForeign(store, BORIS)).toBe(2);
+    expect((await store.all()).map((entry) => entry.id)).toEqual(["b"]);
+  });
+
+  it("текст про чужие записи склоняется", () => {
+    expect([1, 2, 5, 11, 21].map(foreignQueueText)).toEqual([
+      "В очереди 1 скриншот другого сотрудника",
+      "В очереди 2 скриншота другого сотрудника",
+      "В очереди 5 скриншотов другого сотрудника",
+      "В очереди 11 скриншотов другого сотрудника",
+      "В очереди 21 скриншот другого сотрудника",
+    ]);
   });
 });
 

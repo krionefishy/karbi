@@ -3,7 +3,7 @@
  * Засыпает между событиями, поэтому состояние только в IndexedDB и chrome.storage.
  */
 import { ApiError, submit } from "./api";
-import { idbStore, nextWakeAt, processQueue, type ItemResult, type QueueItem } from "./queue";
+import { idbStore, nextWakeAt, processQueue, splitByOwner, type ItemResult, type QueueItem } from "./queue";
 import { extensionVersion, loadSettings, pauseFor, setPause, upsertRecent } from "./settings";
 import type { Message } from "./messages";
 
@@ -41,11 +41,16 @@ async function isPaused(): Promise<boolean> {
   return Boolean(settings.pause) || !settings.token || !settings.backendUrl;
 }
 
+async function currentOwner(): Promise<string | null> {
+  return (await loadSettings()).owner || null;
+}
+
 async function runFlush(): Promise<ItemResult[]> {
   const results = await processQueue({
     store,
     now: Date.now,
     isPaused,
+    owner: currentOwner,
     send,
     pause: async (error) => {
       await pauseFor(error);
@@ -70,7 +75,7 @@ function flush(): Promise<ItemResult[]> {
 
 async function schedule(): Promise<void> {
   // На паузе будить незачем: очередь продолжат новое сопряжение или обновление расширения.
-  const wake = (await isPaused()) ? null : nextWakeAt(await store.all());
+  const wake = (await isPaused()) ? null : nextWakeAt(await store.all(), await currentOwner());
   if (wake === null) {
     await chrome.alarms.clear(FLUSH_ALARM);
     return;
@@ -80,7 +85,9 @@ async function schedule(): Promise<void> {
 }
 
 async function refreshBadge(): Promise<void> {
-  const [settings, items] = await Promise.all([loadSettings(), store.all()]);
+  const [settings, all] = await Promise.all([loadSettings(), store.all()]);
+  // Чужие записи на бейдж не влияют: их видно только в настройках.
+  const items = splitByOwner(all, settings.owner || null).own;
   if (settings.pause || !settings.token) {
     await chrome.action.setBadgeBackgroundColor({ color: "#cf3434" });
     await chrome.action.setBadgeText({ text: "!" });
@@ -128,5 +135,5 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && ("pause" in changes || "token" in changes)) void refreshBadge();
+  if (area === "local" && ("pause" in changes || "token" in changes || "owner" in changes)) void refreshBadge();
 });

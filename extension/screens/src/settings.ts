@@ -1,6 +1,7 @@
 import { browserName, normalizeBackendUrl } from "../../src/shared";
 import { DEFAULT_ALLOWED_PREFIXES } from "./capture";
-import type { ApiError, Outcome, Status } from "./api";
+import type { ApiError, Outcome, PairOut, Status } from "./api";
+import { ownerKey } from "./queue";
 
 /** Почему очередь стоит: без токена, отозван, сотрудник заблокирован, версия ниже минимальной. */
 export type PauseKind = "auth" | "blocked" | "upgrade";
@@ -27,6 +28,11 @@ export interface Settings {
   backendUrl: string;
   token: string;
   username: string;
+  /**
+   * Чья очередь: ownerKey последнего подключённого сотрудника. «Отключить» и 401 его не стирают,
+   * поэтому повторное подключение того же сотрудника продолжает очередь, а другого — нет.
+   */
+  owner: string;
   installId: string;
   allowedUrlPrefixes: string[];
   minVersion: string;
@@ -42,6 +48,7 @@ export const DEFAULTS: Settings = {
   backendUrl: DEFAULT_BACKEND_URL,
   token: "",
   username: "",
+  owner: "",
   installId: "",
   allowedUrlPrefixes: [...DEFAULT_ALLOWED_PREFIXES],
   minVersion: "",
@@ -58,6 +65,11 @@ export async function loadSettings(): Promise<Settings> {
   const settings: Settings = { ...DEFAULTS, ...stored };
   settings.backendUrl ||= DEFAULT_BACKEND_URL;
   if (!settings.allowedUrlPrefixes?.length) settings.allowedUrlPrefixes = [...DEFAULT_ALLOWED_PREFIXES];
+  if (!settings.owner && settings.token && settings.username) {
+    // Сопряжение версии без владельца очереди: владелец — тот, чей токен сохранён.
+    settings.owner = ownerKey(settings.backendUrl, settings.username);
+    await chrome.storage.local.set({ owner: settings.owner });
+  }
   if (!settings.installId) {
     // Токен привязан к установке: новая пара того же install_id отзывает прежний токен на сервере.
     settings.installId = `${browserName().toLowerCase().replace(/\s+/g, "-")}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
@@ -68,6 +80,27 @@ export async function loadSettings(): Promise<Settings> {
 
 export async function saveSettings(patch: Partial<Settings>): Promise<void> {
   await chrome.storage.local.set(patch);
+}
+
+/**
+ * Сохраняет новое сопряжение. Если подключился другой сотрудник, его очередь начинается с чистого
+ * листа: записи прежнего остаются за прежним и с новым токеном не уходят, последние отправки стираются.
+ */
+export async function savePairing(backendUrl: string, reply: PairOut): Promise<{ owner: string; changed: boolean }> {
+  const before = await loadSettings();
+  const owner = ownerKey(backendUrl, reply.username);
+  const changed = Boolean(before.owner) && before.owner !== owner;
+  await saveSettings({
+    backendUrl,
+    token: reply.token,
+    username: reply.username,
+    owner,
+    minVersion: reply.min_version,
+    allowedUrlPrefixes: reply.allowed_url_prefixes,
+    pause: null,
+    ...(changed ? { recent: [] } : {}),
+  });
+  return { owner, changed };
 }
 
 export async function setPause(pause: Pause | null): Promise<void> {

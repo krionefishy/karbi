@@ -68,7 +68,7 @@
       <label for="code">Код со страницы «Контроль скриншотов» → «Расширение»</label>
       <input id="code" class="code" maxlength="9" placeholder="XXXXXXXX" autocomplete="off" spellcheck="false" />
       <button id="pair" class="primary">Подключить</button>
-      <div id="message"></div>
+      <div id="message" role="status" aria-live="polite"></div>
     </section>
 
     <section>
@@ -85,6 +85,11 @@
 
     <section>
       <h2>Очередь отправки</h2>
+      <div id="foreign" hidden>
+        <p id="foreign-text" class="warn"></p>
+        <p class="muted">Они сняты под другим сотрудником и с вашим подключением не отправляются.</p>
+        <button id="foreign-delete" aria-describedby="foreign-text">Удалить</button>
+      </div>
       <p id="queue-empty" class="muted">Пусто: всё отправлено.</p>
       <table id="queue" hidden>
         <thead><tr><th>Снято</th><th>Исход</th><th>Состояние</th><th></th></tr></thead>
