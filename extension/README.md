@@ -59,3 +59,22 @@ wildberries.ru держит открытой менеджер, а после о�
 - **Код:** `screens/src/` — `popup.ts` (захват, исход, опрос статуса), `background.ts` (очередь,
   будильники, бейдж), `queue.ts`, `api.ts`, `capture.ts`, `settings.ts`, `options.ts`;
   сборка — `vite.screens.config.ts`, тесты — `screens/test/`.
+
+### Раздача и обновление
+
+- **Где взять:** образ фронта собирает `marketplace-auto-screenshots.zip` сам
+  (`deploy/frontend.Dockerfile`, `npm run pack:screens` с `VITE_BACKEND_URL=https://$PUBLIC_DOMAIN`)
+  и раздаёт по `/extension/marketplace-auto-screenshots.zip`; ссылку страница «Контроль
+  скриншотов» берёт из `GET /wb/screenshot-control/config`. Расширение не в Chrome Web Store:
+  менеджер распаковывает архив и загружает папку через «Режим разработчика». Архивы и `dist*` в
+  репозиторий не кладутся.
+- **Новая версия:** поднять `version` в `screens/manifest.json` (её расширение шлёт в
+  `X-Extension-Version`), собрать, задеплоить фронт. Chrome распакованное расширение сам не
+  обновляет: менеджер скачивает архив заново, заменяет папку и жмёт «Обновить» на
+  `chrome://extensions`. Токен и очередь в `chrome.storage`/IndexedDB при этом сохраняются, если
+  папка заменена на месте (тот же id расширения).
+- **Принудительное обновление:** `screenshot_control.extension_min_version` в конфиге бэкенда.
+  Версия ниже — сервер отвечает 426 `upgrade_required`, очередь встаёт на паузу с «обновите
+  расширение» на значке, снимки не теряются; после обновления очередь продолжает сама.
+  Поднимайте `min_version` только после того, как новый архив уже раздаётся, иначе обновиться
+  будет не на что.
