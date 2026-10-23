@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  actorText,
   agreementBadge,
   buildResolve,
   comparePair,
@@ -9,15 +10,16 @@ import {
   formatAge,
   formatStorage,
   keyAction,
-  managersCsv,
   managerSignals,
   noteRequired,
   pairTarget,
   pipelineAlerts,
   queuePeriodRange,
   selectAfterRemoval,
+  sourceUrl,
   stepSelection,
   suspicionBadge,
+  transitionText,
 } from "./admin";
 import type { AdminSubmission, ManagerStats, Match, Pipeline } from "./types";
 
@@ -183,14 +185,29 @@ describe("менеджеры", () => {
     ]);
     expect(managerSignals(stats({ flags: ["high_review_rate"], review_rate: 0.17 }))[0].label).toBe("Ревью 17%");
   });
+});
 
-  it("exports CSV for Excel with quoting", () => {
-    const csv = managersCsv([stats({ user: { id: "u2", username: 'Анна; "старшая"' }, flags: ["high_duplicate_rate"] })], {
-      from: "2026-10-01",
-      to: "2026-10-23",
+describe("журнал решений", () => {
+  it("names who decided", () => {
+    expect(actorText({ kind: "system", user: null })).toBe("Конвейер");
+    expect(actorText({ kind: "admin", user: { id: "a", username: "olga" } })).toBe("Админ olga");
+    expect(actorText({ kind: "user", user: { id: "u", username: "" } })).toBe("удалённый сотрудник");
+  });
+
+  it("describes the verdict change", () => {
+    expect(transitionText("needs_review", "accepted")).toBe("Проверяется → Принят");
+    expect(transitionText("accepted", null)).toBe("Принят → В обработке");
+    expect(transitionText("duplicate", "duplicate")).toBe("Дубль");
+  });
+
+  it("shows only http(s) source urls without the scheme", () => {
+    expect(sourceUrl("https://seller.wildberries.ru/chat-with-clients?chatId=42")).toEqual({
+      href: "https://seller.wildberries.ru/chat-with-clients?chatId=42",
+      text: "seller.wildberries.ru/chat-with-clients?chatId=42",
     });
-    expect(csv.startsWith("﻿Менеджер;Всего;")).toBe(true);
-    expect(csv).toContain('"Анна; ""старшая""";44;30;12;7;11;9;5;0;20%;11%;Дублей 20%;2026-10-01 — 2026-10-23');
+    expect(sourceUrl("javascript:alert(1)")).toBeNull();
+    expect(sourceUrl("not a url")).toBeNull();
+    expect(sourceUrl(null)).toBeNull();
   });
 });
 

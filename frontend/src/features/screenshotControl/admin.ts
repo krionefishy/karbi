@@ -1,8 +1,9 @@
 // Чистая логика админки «Контроль скриншотов ДБС»: бейджи, решения, клавиши, сравнение пары,
-// сигналы по менеджерам, CSV, предупреждения конвейера. Вёрстка — в components/ScreenshotAdmin*.tsx.
+// сигналы по менеджерам, журнал решений, предупреждения конвейера. Вёрстка — в components/ScreenshotAdmin*.tsx.
 
-import { formatBytes, moscowToday, periodRange, type PeriodRange, type Tone } from "./format";
+import { formatBytes, outcomeLabel, periodRange, type PeriodRange, type Tone } from "./format";
 import type {
+  Actor,
   AdminSubmission,
   ManagerStats,
   MatchKind,
@@ -17,18 +18,6 @@ import type {
 } from "./types";
 
 export type QueueTab = Exclude<QueueKind, "all">;
-
-/** Классы status-badge из ui.css по тону; нейтральный — базовый серый бейдж. */
-export function toneBadgeClass(tone: Tone): string {
-  const extra = {
-    accent: "status-running",
-    positive: "status-active",
-    warning: "status-degraded",
-    negative: "status-failed",
-    neutral: "",
-  }[tone];
-  return extra ? `status-badge ${extra}` : "status-badge";
-}
 
 export interface Badge {
   label: string;
@@ -53,8 +42,7 @@ const VERDICT: Record<Verdict, Badge> = {
 export const verdictBadge = (verdict: Verdict | null): Badge =>
   verdict ? VERDICT[verdict] : { label: "В обработке", tone: "accent" };
 
-const OUTCOME: Record<Outcome, string> = { positive: "Полож", amended: "Доп", deleted: "Удален" };
-export const outcomeText = (outcome: Outcome | null): string => (outcome ? OUTCOME[outcome] : "без подписи");
+export const outcomeText = (outcome: Outcome | null): string => (outcome ? outcomeLabel(outcome) : "без подписи");
 
 const MODE: Record<Mode, Badge> = {
   off: { label: "Выключен", tone: "neutral" },
@@ -283,6 +271,33 @@ export function formatReviewAt(iso: string | null, precision: "minute" | "day" |
   return (precision === "day" ? reviewDayFormatter : reviewFormatter).format(new Date(iso)).replace(".", "");
 }
 
+// --- журнал решений ---
+
+/** Кто принял решение: конвейер, админ или сам менеджер (смена исхода). */
+export function actorText(actor: Actor): string {
+  if (actor.kind === "system") return "Конвейер";
+  const name = actor.user?.username || "удалённый сотрудник";
+  return actor.kind === "admin" ? `Админ ${name}` : name;
+}
+
+/** «Проверяется → Принят»; без смены вердикта — один ярлык. */
+export function transitionText(from: Verdict | null, to: Verdict | null): string {
+  const label = (verdict: Verdict | null) => verdictBadge(verdict).label;
+  return from === to ? label(to) : `${label(from)} → ${label(to)}`;
+}
+
+/** Адрес, с которого снят скриншот: показываем только http(s), без схемы. */
+export function sourceUrl(raw: string | null): { href: string; text: string } | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return { href: url.href, text: `${url.host}${url.pathname}${url.search}` };
+  } catch {
+    return null;
+  }
+}
+
 // --- менеджеры ---
 
 export const formatShare = (rate: number): string => `${Math.round(rate * 100)}%`;
@@ -298,51 +313,6 @@ export function managerSignals(stats: ManagerStats): Badge[] {
   }
   return badges.length ? badges : [{ label: "Норма", tone: "positive" }];
 }
-
-function csvCell(value: string | number): string {
-  const text = String(value);
-  return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-/** CSV для Excel: «;» и BOM, доли — целые проценты. */
-export function managersCsv(items: ManagerStats[], period: PeriodRange): string {
-  const head = [
-    "Менеджер",
-    "Всего",
-    "Засчитано",
-    "Полож",
-    "Доп",
-    "Удален",
-    "Дубли",
-    "На ревью",
-    "Отклонено",
-    "Доля дублей",
-    "Доля ревью",
-    "Сигналы",
-    "Период",
-  ];
-  const rows = items.map((stats) => [
-    stats.user.username || "удалённый сотрудник",
-    stats.total,
-    stats.accepted,
-    stats.positive,
-    stats.amended,
-    stats.deleted,
-    stats.duplicate,
-    stats.needs_review,
-    stats.rejected,
-    formatShare(stats.duplicate_rate),
-    formatShare(stats.review_rate),
-    managerSignals(stats)
-      .map((badge) => badge.label)
-      .join(", "),
-    `${period.from} — ${period.to}`,
-  ]);
-  return `﻿${[head, ...rows].map((row) => row.map(csvCell).join(";")).join("\r\n")}\r\n`;
-}
-
-export const managersCsvName = (period: PeriodRange = { from: moscowToday(), to: moscowToday() }) =>
-  `screenshots-managers-${period.from}_${period.to}.csv`;
 
 // --- конвейер ---
 

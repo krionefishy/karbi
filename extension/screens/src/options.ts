@@ -1,8 +1,17 @@
 import { browserName } from "../../src/shared";
 import { ApiError, OUTCOME_CAPTIONS, normalizePairingCode, pair } from "./api";
 import { sendToWorker } from "./messages";
-import { idbStore, resetForRetry, type QueueItem } from "./queue";
-import { backendOrigin, downloadUrl, extensionVersion, loadSettings, pauseText, saveSettings, type Settings } from "./settings";
+import { foreignQueueText, idbStore, removeForeign, resetForRetry, splitByOwner, type QueueItem } from "./queue";
+import {
+  backendOrigin,
+  downloadUrl,
+  extensionVersion,
+  loadSettings,
+  pauseText,
+  savePairing,
+  saveSettings,
+  type Settings,
+} from "./settings";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const store = idbStore();
@@ -36,9 +45,10 @@ function queueState(item: QueueItem): [string, string] {
   return [`повтор ${stamp.format(item.nextAttemptAt)} (попыток: ${item.attempts}${item.lastError ? `, ${item.lastError}` : ""})`, "warn"];
 }
 
-function actionButton(label: string, onClick: () => Promise<void>): HTMLButtonElement {
+function actionButton(label: string, context: string, onClick: () => Promise<void>): HTMLButtonElement {
   const button = document.createElement("button");
   button.textContent = label;
+  button.setAttribute("aria-label", `${label}: ${context}`);
   button.addEventListener("click", async () => {
     button.disabled = true;
     try {
@@ -50,8 +60,11 @@ function actionButton(label: string, onClick: () => Promise<void>): HTMLButtonEl
   return button;
 }
 
-async function renderQueue(): Promise<void> {
-  const items = await store.all();
+async function renderQueue(settings: Settings): Promise<void> {
+  // Чужие записи (другой сотрудник в этом браузере) не показываем построчно и не отправляем.
+  const { own: items, foreign } = splitByOwner(await store.all(), settings.owner || null);
+  $("foreign").hidden = foreign.length === 0;
+  $("foreign-text").textContent = foreign.length ? foreignQueueText(foreign.length) : "";
   $("queue-empty").hidden = items.length > 0;
   $("queue").hidden = items.length === 0;
   const rows = items.map((item) => {
@@ -64,14 +77,15 @@ async function renderQueue(): Promise<void> {
       return cell;
     });
     const actions = document.createElement("td");
+    const context = `снимок ${stamp.format(new Date(item.capturedAt))}`;
     actions.append(
-      actionButton("Повторить", async () => {
+      actionButton("Повторить", context, async () => {
         const current = await store.get(item.id);
         if (!current) return;
         await store.put(resetForRetry(current, Date.now()));
         await sendToWorker({ type: "flush" });
       }),
-      actionButton("Удалить", async () => {
+      actionButton("Удалить", context, async () => {
         if (!confirm("Удалить скриншот из очереди? Он не будет отправлен.")) return;
         await store.remove(item.id);
         await sendToWorker({ type: "badge" });
@@ -84,8 +98,9 @@ async function renderQueue(): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  renderSettings(await loadSettings());
-  await renderQueue();
+  const settings = await loadSettings();
+  renderSettings(settings);
+  await renderQueue(settings);
 }
 
 $("pair").addEventListener("click", async () => {
@@ -104,16 +119,16 @@ $("pair").addEventListener("click", async () => {
       { backendUrl, version: extensionVersion() },
       { code, install_id: settings.installId, browser: browserName(), ext_version: extensionVersion() },
     );
-    await saveSettings({
-      backendUrl,
-      token: reply.token,
-      username: reply.username,
-      minVersion: reply.min_version,
-      allowedUrlPrefixes: reply.allowed_url_prefixes,
-      pause: null,
-    });
+    const { owner } = await savePairing(backendUrl, reply);
+    const foreign = splitByOwner(await store.all(), owner).foreign.length;
     $<HTMLInputElement>("code").value = "";
-    message(`Подключено${reply.username ? `: ${reply.username}` : ""}. Очередь отправки продолжена.`, "ok");
+    const who = `Подключено${reply.username ? `: ${reply.username}` : ""}.`;
+    message(
+      foreign
+        ? `${who} ${foreignQueueText(foreign)}: от вашего имени они не уйдут.`
+        : `${who} Очередь отправки продолжена.`,
+      "ok",
+    );
     await sendToWorker({ type: "flush" }).catch(() => undefined);
   } catch (error) {
     if (error instanceof ApiError && error.kind === "rate") {
@@ -129,11 +144,26 @@ $("pair").addEventListener("click", async () => {
 });
 
 $("unpair").addEventListener("click", async () => {
-  // Очередь не трогаем: после нового подключения она уйдёт.
+  // Очередь не трогаем и владельца не стираем: записи уйдут, только когда подключится тот же сотрудник.
   await saveSettings({ token: "", username: "", pause: null });
-  message("Отключено. Скриншоты в очереди остаются до нового подключения или удаления.");
+  message("Отключено. Скриншоты в очереди остаются за вами до нового подключения или удаления.");
   await sendToWorker({ type: "badge" }).catch(() => undefined);
   await refresh();
+});
+
+$("foreign-delete").addEventListener("click", async () => {
+  const button = $<HTMLButtonElement>("foreign-delete");
+  if (!confirm("Удалить скриншоты другого сотрудника из очереди? Они не будут отправлены.")) return;
+  button.disabled = true;
+  try {
+    const settings = await loadSettings();
+    const removed = await removeForeign(store, settings.owner || null);
+    message(removed ? `Удалено из очереди: ${removed}` : "", "");
+    await sendToWorker({ type: "badge" }).catch(() => undefined);
+  } finally {
+    button.disabled = false;
+    await refresh();
+  }
 });
 
 void refresh();

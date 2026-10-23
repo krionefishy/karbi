@@ -13,6 +13,12 @@ export const MAX_RETRY_WINDOW_MS = 72 * 60 * MINUTE;
 
 export interface QueueItem {
   id: string;
+  /**
+   * Чей это скриншот: ownerKey(адрес сервиса, сотрудник) на момент захвата. Отправляется только
+   * с токеном того же сотрудника, иначе KPI достанется тому, кто подключился в браузере позже.
+   * У записей старых версий поля нет — они считаются чужими.
+   */
+  owner?: string;
   blob: Blob;
   filename: string;
   outcome: Outcome;
@@ -31,7 +37,36 @@ export interface QueueItem {
   lastError: string | null;
 }
 
-export type NewItem = Omit<QueueItem, "createdAt" | "windowStart" | "attempts" | "nextAttemptAt" | "state" | "lastError">;
+export type NewItem = Omit<QueueItem, "owner" | "createdAt" | "windowStart" | "attempts" | "nextAttemptAt" | "state" | "lastError"> & {
+  owner: string;
+};
+
+/** Ключ владельца очереди: один и тот же логин на разных сервисах — разные сотрудники. */
+export function ownerKey(backendUrl: string, username: string): string {
+  return `${backendUrl}|${username}`;
+}
+
+/** Имя сотрудника из ключа владельца; для записей без владельца — пусто. */
+export function ownerName(owner: string | undefined): string {
+  return owner ? owner.slice(owner.lastIndexOf("|") + 1) : "";
+}
+
+/** Делит очередь на записи текущего сотрудника и чужие (в том числе без владельца). */
+export function splitByOwner(items: QueueItem[], owner: string | null): { own: QueueItem[]; foreign: QueueItem[] } {
+  const own: QueueItem[] = [];
+  const foreign: QueueItem[] = [];
+  for (const item of items) (owner && item.owner === owner ? own : foreign).push(item);
+  return { own, foreign };
+}
+
+/** «В очереди 3 скриншота другого сотрудника». */
+export function foreignQueueText(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  const word =
+    mod100 >= 11 && mod100 <= 14 ? "скриншотов" : mod10 === 1 ? "скриншот" : mod10 >= 2 && mod10 <= 4 ? "скриншота" : "скриншотов";
+  return `В очереди ${count} ${word} другого сотрудника`;
+}
 
 export function newItem(fields: NewItem, now: number): QueueItem {
   return { ...fields, createdAt: now, windowStart: now, attempts: 0, nextAttemptAt: now, state: "pending", lastError: null };
@@ -113,6 +148,13 @@ export function idbStore(factory: IDBFactory = indexedDB): QueueStore {
   };
 }
 
+/** Удаляет из очереди записи не текущего сотрудника; возвращает, сколько удалено. */
+export async function removeForeign(store: QueueStore, owner: string | null): Promise<number> {
+  const { foreign } = splitByOwner(await store.all(), owner);
+  for (const item of foreign) await store.remove(item.id);
+  return foreign.length;
+}
+
 // --- обработка ---
 
 export type SendOutcome = { ok: true; submission: SubmissionOut } | { ok: false; error: ApiError };
@@ -122,6 +164,8 @@ export interface ProcessDeps {
   now: () => number;
   /** Очередь на паузе (нет токена, 401/403/426) — ничего не отправляем. */
   isPaused: () => Promise<boolean>;
+  /** Ключ подключённого сотрудника; отправляются только его записи, null — ничьи. */
+  owner: () => Promise<string | null>;
   send: (item: QueueItem) => Promise<SendOutcome>;
   pause: (error: ApiError) => Promise<void>;
   onSent?: (item: QueueItem, submission: SubmissionOut) => Promise<void> | void;
@@ -137,14 +181,14 @@ export interface ItemResult {
 }
 
 /**
- * Отправляет всё, чему подошёл срок. 401/403/426 ставят очередь на паузу без траты попытки;
+ * Отправляет записи текущего сотрудника, которым подошёл срок; чужие не трогает. 401/403/426 ставят очередь на паузу без траты попытки;
  * прочие 4xx удаляют запись (повтор бесполезен); сеть, 5xx и 429 — повтор по расписанию,
  * 429 сдвигает и остальные записи на Retry-After.
  */
 export async function processQueue(deps: ProcessDeps): Promise<ItemResult[]> {
   const results: ItemResult[] = [];
   if (await deps.isPaused()) return results;
-  const items = await deps.store.all();
+  const { own: items } = splitByOwner(await deps.store.all(), await deps.owner());
   let holdUntil = 0;
   for (const item of items) {
     if (item.state !== "pending") continue;
@@ -190,8 +234,10 @@ export async function processQueue(deps: ProcessDeps): Promise<ItemResult[]> {
   return results;
 }
 
-/** Когда будить worker в следующий раз: ближайшая попытка среди ожидающих. */
-export function nextWakeAt(items: QueueItem[]): number | null {
-  const pending = items.filter((item) => item.state === "pending").map((item) => item.nextAttemptAt);
+/** Когда будить worker в следующий раз: ближайшая попытка среди ожидающих записей сотрудника. */
+export function nextWakeAt(items: QueueItem[], owner: string | null): number | null {
+  const pending = splitByOwner(items, owner)
+    .own.filter((item) => item.state === "pending")
+    .map((item) => item.nextAttemptAt);
   return pending.length ? Math.min(...pending) : null;
 }

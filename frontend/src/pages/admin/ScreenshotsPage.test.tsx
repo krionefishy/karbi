@@ -4,9 +4,12 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { clearImageCache } from "../../features/screenshotControl/images";
 import type {
+  AdminConfig,
   AdminQueuePage,
   AdminSubmission,
+  AdminSubmissionDetail,
   Managers,
   Match,
   Pipeline,
@@ -17,6 +20,8 @@ vi.mock("../../components/Shell", () => ({ Shell: ({ children }: { children: Rea
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  clearImageCache();
 });
 
 const adminRoot = "/api/v1/admin/screenshot-control";
@@ -112,6 +117,40 @@ const pipeline: Pipeline = {
   channels_today: { extension: 30, telegram: 0, web: 4 },
 };
 
+const adminConfig = { mode: "shadow", kpi_from: null } as Partial<AdminConfig>;
+
+function detailOf(item: AdminSubmission, overrides: Partial<AdminSubmissionDetail> = {}): AdminSubmissionDetail {
+  return {
+    ...item,
+    client_url: "https://seller.wildberries.ru/chat-with-clients?chatId=1b7c2d9a",
+    client_captured_at: null,
+    client_tz_offset_min: -180,
+    client_meta: { ext_version: "0.1.0", viewport_w: null, viewport_h: null, dpr: null, user_agent: null, telegram_compressed: false },
+    install_id: null,
+    file: {
+      id: "f-1",
+      sha256: "0".repeat(64),
+      mime: "image/png",
+      size_bytes: 1000,
+      width: 1440,
+      height: 900,
+      meta: { has_exif: false, exif_software: null, has_alpha: false },
+      objects: [
+        { kind: "orig", state: "stored", stored_at: null, deleted_at: null },
+        { kind: "thumb", state: "stored", stored_at: null, deleted_at: null },
+      ],
+      submissions_count: 1,
+    },
+    extraction: null,
+    events: [],
+    decided_at: null,
+    reviewed_by: null,
+    reviewed_at: null,
+    review_note: null,
+    ...overrides,
+  };
+}
+
 function json(body: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
 }
@@ -130,6 +169,15 @@ function renderPage(queue: Partial<Record<string, AdminSubmission[]>> = {}, hand
       return json({ url: `https://s3.example/${parsed.searchParams.get("kind")}.jpg`, expires_at: null, available: true });
     }
     if (parsed.pathname.endsWith("/resolve")) return json({});
+    if (parsed.pathname.endsWith("/reprocess")) return json({ id: "x", stage: "processing" }, 202);
+    if (parsed.pathname.endsWith("/file")) return json({ id: "x", objects: [] }, 202);
+    const detail = parsed.pathname.match(/\/submissions\/([^/]+)$/);
+    if (detail) {
+      const all = Object.values(queue).flatMap((items) => items ?? []);
+      const found = all.find((entry) => entry.id === detail[1]);
+      return found ? json(detailOf(found)) : json({ detail: "Скриншот не найден" }, 404, { "X-Error-Code": "not_found" });
+    }
+    if (parsed.pathname === `${adminRoot}/config`) return json(adminConfig);
     if (parsed.pathname === `${adminRoot}/managers`) return json(managers);
     if (parsed.pathname === `${adminRoot}/pipeline`) return json(pipeline);
     return json({}, 404);
@@ -144,6 +192,12 @@ function renderPage(queue: Partial<Record<string, AdminSubmission[]>> = {}, hand
     </QueryClientProvider>,
   );
   return request;
+}
+
+function callsTo(request: ReturnType<typeof renderPage>, suffix: string) {
+  return request.mock.calls
+    .filter(([url]) => new URL(String(url), "http://x").pathname.endsWith(suffix))
+    .map(([url, init]) => ({ url: String(url), method: init?.method ?? "GET" }));
 }
 
 function resolveCalls(request: ReturnType<typeof renderPage>) {
@@ -330,11 +384,164 @@ describe("ScreenshotsPage", () => {
     expect(await screen.findByText("Дублей 20%")).toBeInTheDocument();
     expect(screen.getByText("Сигналы для разговора, а не санкции")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Выгрузить CSV" })).toBeEnabled();
+    expect(await screen.findByText("Выгрузка предварительная")).toBeInTheDocument();
 
     await user.click(screen.getByRole("tab", { name: "Конвейер" }));
     expect(await screen.findByText("Ошибки распознавания за час: 31%")).toBeInTheDocument();
     expect(screen.getByText("24 с")).toBeInTheDocument();
     expect(screen.getByText("Пробный")).toBeInTheDocument();
+  });
+
+  it("downloads the server CSV for the chosen period instead of building it in the browser", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:kpi");
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const csv = "\ufeffday;user_id;username;total;accepted;positive;amended;deleted;duplicate;needs_review;rejected;processing;preliminary\r\n";
+    const request = renderPage({}, (url) =>
+      url.startsWith(`${adminRoot}/managers/export`)
+        ? new Response(csv, {
+            status: 200,
+            headers: { "Content-Type": "text/csv", "Content-Disposition": 'attachment; filename="screenshot-kpi-2026-10-23-2026-10-23.csv"' },
+          })
+        : undefined,
+    );
+
+    await user.click(await screen.findByRole("tab", { name: "Менеджеры" }));
+    await user.click(await screen.findByRole("button", { name: "День" }));
+    await screen.findByText("Дублей 20%");
+    await user.click(screen.getByRole("button", { name: "Выгрузить CSV" }));
+
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    const exports = request.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/managers/export"));
+    expect(exports).toHaveLength(1);
+    const query = new URL(exports[0], "http://x").searchParams;
+    expect(query.get("from")).toBe(query.get("to"));
+    expect(query.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(createObjectURL.mock.calls[0][0].size).toBe(new Blob([csv]).size);
+    const link = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(link.download).toBe("screenshot-kpi-2026-10-23-2026-10-23.csv");
+    Reflect.deleteProperty(URL, "createObjectURL");
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+  });
+
+  it("does not mark the export preliminary in the enforce mode", async () => {
+    const user = userEvent.setup();
+    renderPage({}, (url) => (url.endsWith("/config") ? json({ mode: "enforce", kpi_from: null }) : undefined));
+    await user.click(await screen.findByRole("tab", { name: "Менеджеры" }));
+    await screen.findByText("Дублей 20%");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Выгрузить CSV" })).toBeEnabled());
+    expect(screen.queryByText("Выгрузка предварительная")).not.toBeInTheDocument();
+  });
+
+  it("shows the decision log from the detail card", async () => {
+    const user = userEvent.setup();
+    renderPage({ review: [igor] }, (url) =>
+      url === `${adminRoot}/submissions/s-igor`
+        ? json(
+            detailOf(igor, {
+              events: [
+                {
+                  at: "2026-10-22T08:16:00Z",
+                  actor: { kind: "system", user: null },
+                  from_verdict: null,
+                  to_verdict: "needs_review",
+                  reasons: igor.reasons,
+                  note: null,
+                },
+                {
+                  at: "2026-10-22T09:00:00Z",
+                  actor: { kind: "admin", user: { id: "a", username: "olga" } },
+                  from_verdict: "needs_review",
+                  to_verdict: "accepted",
+                  reasons: [],
+                  note: "проверила вручную",
+                },
+              ],
+            }),
+          )
+        : undefined,
+    );
+    await screen.findByRole("region", { name: "Скриншот Игорь" });
+
+    const toggle = await within(card()).findByRole("button", { name: /Журнал решений\s*2/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(card()).getByText("seller.wildberries.ru/chat-with-clients?chatId=1b7c2d9a")).toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(within(card()).getByText("В обработке → Проверяется")).toBeInTheDocument();
+    expect(within(card()).getByText("Проверяется → Принят")).toBeInTheDocument();
+    expect(within(card()).getByText("Админ olga")).toBeInTheDocument();
+    expect(within(card()).getByText("«проверила вручную»")).toBeInTheDocument();
+  });
+
+  it("reprocesses only after confirmation and moves on", async () => {
+    const user = userEvent.setup();
+    const request = renderPage({ review: [anna, igor] });
+    await screen.findByRole("region", { name: "Скриншот Анна" });
+
+    await user.click(within(card()).getByRole("button", { name: "Пересчитать" }));
+    let dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Пересчитать скриншот?");
+    // Клавиши очереди при открытом подтверждении не работают.
+    fireEvent.keyDown(window, { code: "KeyA", key: "ф" });
+    await user.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    expect(callsTo(request, "/reprocess")).toHaveLength(0);
+    expect(resolveCalls(request)).toHaveLength(0);
+
+    await user.click(within(card()).getByRole("button", { name: "Пересчитать" }));
+    dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Пересчитать" }));
+
+    await waitFor(() => expect(callsTo(request, "/reprocess")).toEqual([
+      { url: `${adminRoot}/submissions/s-anna/reprocess`, method: "POST" },
+    ]));
+    expect(await screen.findByRole("region", { name: "Скриншот Игорь" })).toBeInTheDocument();
+  });
+
+  it("erases the file after an explained confirmation and keeps the card", async () => {
+    const user = userEvent.setup();
+    const request = renderPage({ review: [anna] });
+    await screen.findByRole("region", { name: "Скриншот Анна" });
+
+    const erase = await within(card()).findByRole("button", { name: "Стереть файл" });
+    await waitFor(() => expect(erase).toBeEnabled());
+    await user.click(erase);
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog).toHaveTextContent("Оригинал и миниатюра будут удалены, вердикт останется.");
+    await user.click(within(dialog).getByRole("button", { name: "Стереть" }));
+
+    await waitFor(() => expect(callsTo(request, "/file")).toEqual([
+      { url: `${adminRoot}/submissions/s-anna/file`, method: "DELETE" },
+    ]));
+    expect(await within(card()).findByRole("status")).toHaveTextContent("Файл стирается");
+    expect(screen.getByRole("region", { name: "Скриншот Анна" })).toBeInTheDocument();
+  });
+
+  it("explains transition_not_allowed in plain words", async () => {
+    const user = userEvent.setup();
+    renderPage({ review: [anna] }, (url) =>
+      url.endsWith("/resolve")
+        ? json({ detail: "Такое решение для этого скриншота недоступно" }, 409, { "X-Error-Code": "transition_not_allowed" })
+        : undefined,
+    );
+    await screen.findByRole("region", { name: "Скриншот Анна" });
+    await user.click(within(card()).getByRole("button", { name: /Засчитать/ }));
+    expect(await within(card()).findByRole("alert")).toHaveTextContent("Это решение для скриншота уже недоступно");
+  });
+
+  it("does not re-download the thumbnail when the server re-signs its url", async () => {
+    let signature = 0;
+    renderPage({ review: [anna] }, (url) => {
+      if (!url.includes("/image-url?kind=thumb")) return undefined;
+      signature += 1;
+      return json({ url: `https://s3.example/thumb.jpg?sig=${signature}`, expires_at: "2099-01-01T00:00:00Z", available: true });
+    });
+    await screen.findByRole("region", { name: "Скриншот Анна" });
+    const image = within(card()).getByRole("img", { name: "Скриншот Анна" });
+    const first = image.getAttribute("src");
+    await waitFor(() => expect(signature).toBeGreaterThan(0));
+    expect(within(card()).getByRole("img", { name: "Скриншот Анна" }).getAttribute("src")).toBe(first);
   });
 
   it("offers a retry when the queue fails to load", async () => {

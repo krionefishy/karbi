@@ -33,11 +33,10 @@ export function ScreenshotControlPage() {
   const summary = useQuery({
     queryKey: [SUMMARY_KEY, period.from, period.to],
     queryFn: () => getSummary(period),
-    enabled: !rangeError,
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return data && data.processing + data.awaiting_outcome > 0 ? POLL_MS : false;
-    },
+    // В выключенном режиме сводку не показываем — и не запрашиваем.
+    enabled: !rangeError && !config.isPending && config.data?.mode !== "off",
+    // Опрос только пока конвейер распознаёт: «нужен исход» ждёт менеджера, а не сервер.
+    refetchInterval: (query) => ((query.state.data?.processing ?? 0) > 0 ? POLL_MS : false),
   });
 
   const onUploaded = () => {
@@ -89,7 +88,11 @@ export function ScreenshotControlPage() {
                   />
                 </div>
               )}
-              {rangeError && <p className="form-error">{rangeError}</p>}
+              {rangeError && (
+                <p className="form-error" role="alert">
+                  {rangeError}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -105,6 +108,8 @@ export function ScreenshotControlPage() {
               key={key}
               type="button"
               role="tab"
+              id={`sc-tab-${key}`}
+              aria-controls="sc-tabpanel"
               aria-selected={tab === key}
               className={tab === key ? "mode-active" : undefined}
               onClick={() => setTab(key)}
@@ -114,6 +119,7 @@ export function ScreenshotControlPage() {
           ))}
         </div>
 
+        <div role="tabpanel" id="sc-tabpanel" aria-labelledby={`sc-tab-${tab}`}>
         {config.data?.mode === "off" ? (
           <div className="empty-state">
             <h2>Контроль скриншотов выключен</h2>
@@ -126,7 +132,7 @@ export function ScreenshotControlPage() {
             {!rangeError && (
               <ScreenshotKpi
                 summary={summary.data}
-                loading={summary.isLoading}
+                loading={summary.isPending}
                 error={summary.error}
                 onRetry={() => void summary.refetch()}
               />
@@ -138,6 +144,7 @@ export function ScreenshotControlPage() {
             </div>
           </>
         )}
+        </div>
       </main>
     </Shell>
   );

@@ -14,7 +14,7 @@ import {
 } from "./api";
 import { captureActiveTab, fileNameFor, fitForUpload, isAllowedUrl, type Capture, type TabsApi } from "./capture";
 import { sendToWorker } from "./messages";
-import { idbStore, newItem } from "./queue";
+import { idbStore, newItem, splitByOwner } from "./queue";
 import {
   downloadUrl,
   extensionVersion,
@@ -95,7 +95,7 @@ let capture: Capture | null = null;
 let decided = false;
 
 function decide(settings: Settings, result: Capture | Error): void {
-  if (!settings.token && !settings.pause) {
+  if ((!settings.token && !settings.pause) || !settings.owner) {
     show("not-paired");
     return;
   }
@@ -156,11 +156,18 @@ async function sendOutcome(outcome: Outcome, button: HTMLButtonElement): Promise
   for (const other of document.querySelectorAll<HTMLButtonElement>("[data-outcome]")) other.disabled = true;
   button.classList.add("chosen");
   setStatus("Отправляем…");
+  // Запись принадлежит тому, кто подключён сейчас: другой сотрудник в этом браузере её не отправит.
+  const { owner } = await loadSettings();
+  if (!owner) {
+    setStatus("Расширение не подключено: снимок не сохранён", "bad");
+    return;
+  }
   try {
     const blob = await fitForUpload(current.blob);
     const item = newItem(
       {
         id: current.id,
+        owner,
         blob,
         filename: fileNameFor(blob),
         outcome,
@@ -226,7 +233,7 @@ function localState(entry: RecentEntry): [string, string] {
 
 async function renderFooter(): Promise<void> {
   const settings = await loadSettings();
-  const items = await store.all();
+  const items = splitByOwner(await store.all(), settings.owner || null).own;
   const pending = items.filter((item) => item.state === "pending").length;
   const failed = items.length - pending;
   $("queue-line").textContent = [pending ? `В очереди: ${pending}` : "", failed ? `не отправлено: ${failed}` : ""].filter(Boolean).join(" · ");

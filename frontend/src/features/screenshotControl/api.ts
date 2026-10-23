@@ -1,9 +1,8 @@
-import { apiRequest } from "../../api/http";
+import { apiDownload, apiRequest } from "../../api/http";
 import type {
   AdminConfig,
   AdminQueuePage,
   AdminSubmissionDetail,
-  AdminTelegramLink,
   ExtensionInstall,
   FileErase,
   ImageKind,
@@ -20,8 +19,6 @@ import type {
   SubmissionFilters,
   SubmissionPage,
   Summary,
-  TelegramLink,
-  TelegramStatus,
   WebSubmission,
 } from "./types";
 
@@ -55,13 +52,8 @@ export function uploadSubmission(submission: WebSubmission) {
 export const getSubmissions = (filters: SubmissionFilters = {}) =>
   apiRequest<SubmissionPage>(withQuery(`${root}/submissions`, { ...filters }));
 
-export const getSubmission = (submissionId: string) => apiRequest<Submission>(`${root}/submissions/${submissionId}`);
-
 export const setOutcome = (submissionId: string, outcome: Outcome) =>
   apiRequest<Submission>(`${root}/submissions/${submissionId}/outcome`, json("PATCH", { outcome }));
-
-export const getThumbUrl = (submissionId: string) =>
-  apiRequest<ImageUrl>(withQuery(`${root}/submissions/${submissionId}/image-url`, { kind: "thumb" }));
 
 export const getSummary = (period: { from?: string; to?: string } = {}) =>
   apiRequest<Summary>(withQuery(`${root}/summary`, period));
@@ -75,12 +67,6 @@ export const getInstalls = () => apiRequest<ExtensionInstall[]>(`${root}/extensi
 
 export const revokeInstall = (installId: string) =>
   apiRequest<void>(`${root}/extension/installs/${installId}`, { method: "DELETE" });
-
-export const createTelegramLink = () => apiRequest<TelegramLink>(`${root}/telegram/link-token`, { method: "POST" });
-
-export const getTelegramStatus = () => apiRequest<TelegramStatus>(`${root}/telegram`);
-
-export const unlinkTelegram = () => apiRequest<void>(`${root}/telegram`, { method: "DELETE" });
 
 // --- админ ---
 
@@ -105,11 +91,10 @@ export const eraseSubmissionFile = (submissionId: string) =>
 export const getManagers = (period: { from?: string; to?: string } = {}) =>
   apiRequest<Managers>(withQuery(`${adminRoot}/managers`, period));
 
+/** CSV для HR/KPI: менеджер × день, с флагом preliminary по каждому дню (см. ManagerDayRow). */
+export const downloadManagersExport = (period: { from?: string; to?: string } = {}) =>
+  apiDownload(withQuery(`${adminRoot}/managers/export`, period));
+
 export const getPipeline = () => apiRequest<Pipeline>(`${adminRoot}/pipeline`);
 
 export const getAdminConfig = () => apiRequest<AdminConfig>(`${adminRoot}/config`);
-
-export const getTelegramLinks = () => apiRequest<AdminTelegramLink[]>(`${adminRoot}/telegram-links`);
-
-export const deleteTelegramLink = (linkId: string) =>
-  apiRequest<void>(`${adminRoot}/telegram-links/${linkId}`, { method: "DELETE" });

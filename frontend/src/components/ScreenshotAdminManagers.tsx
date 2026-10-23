@@ -1,11 +1,17 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useState } from "react";
 
-import { ApiError } from "../api/http";
-import { managersCsv, managersCsvName, managerSignals, toneBadgeClass } from "../features/screenshotControl/admin";
-import { getManagers } from "../features/screenshotControl/api";
-import { customRangeError, periodRange, type PeriodKind, type PeriodRange } from "../features/screenshotControl/format";
+import { managerSignals } from "../features/screenshotControl/admin";
+import { downloadManagersExport, getAdminConfig, getManagers } from "../features/screenshotControl/api";
+import { apiErrorText } from "../features/screenshotControl/errors";
+import {
+  customRangeError,
+  periodRange,
+  toneBadgeClass,
+  type PeriodKind,
+  type PeriodRange,
+} from "../features/screenshotControl/format";
 
 const PERIODS: [PeriodKind, string][] = [
   ["day", "День"],
@@ -14,8 +20,8 @@ const PERIODS: [PeriodKind, string][] = [
   ["custom", "Свой"],
 ];
 
-function download(text: string, filename: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+function save(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -35,6 +41,14 @@ export function ScreenshotAdminManagers() {
     enabled: !rangeError,
   });
   const items = managers.data?.items ?? [];
+  // В shadow и до kpi_from цифры пробные: такие дни сервер помечает в выгрузке preliminary=true.
+  const config = useQuery({ queryKey: ["sca-config"], queryFn: getAdminConfig, staleTime: 5 * 60_000 });
+  const kpiFrom = config.data?.kpi_from ?? null;
+  const preliminary = config.data?.mode === "shadow" || Boolean(kpiFrom && period.from < kpiFrom);
+  const exportCsv = useMutation({
+    mutationFn: () => downloadManagersExport(period),
+    onSuccess: ({ blob, filename }) => save(blob, filename ?? `screenshot-kpi-${period.from}-${period.to}.csv`),
+  });
 
   return (
     <div className="sca-managers">
@@ -73,16 +87,29 @@ export function ScreenshotAdminManagers() {
         )}
         {rangeError && <p className="form-error">{rangeError}</p>}
         <span className="sca-hint">Сигналы для разговора, а не санкции</span>
-        <button
-          type="button"
-          className="secondary-button sca-small sca-push"
-          disabled={items.length === 0}
-          onClick={() => download(managersCsv(items, period), managersCsvName(period))}
-        >
-          <Download size={14} />
-          Выгрузить CSV
-        </button>
+        <span className="sca-export sca-push">
+          {preliminary && (
+            <span className="sca-export-note" id="sca-export-note">
+              Выгрузка предварительная
+            </span>
+          )}
+          <button
+            type="button"
+            className="secondary-button sca-small"
+            disabled={Boolean(rangeError) || items.length === 0 || exportCsv.isPending}
+            aria-describedby={preliminary ? "sca-export-note" : undefined}
+            onClick={() => exportCsv.mutate()}
+          >
+            <Download size={14} aria-hidden="true" />
+            {exportCsv.isPending ? "Готовим CSV…" : "Выгрузить CSV"}
+          </button>
+        </span>
       </div>
+      {exportCsv.isError && (
+        <p className="form-error" role="alert">
+          Выгрузка не получилась: {apiErrorText(exportCsv.error)}
+        </p>
+      )}
 
       {rangeError ? null : managers.isLoading ? (
         <div className="loading-block">Считаем статистику…</div>
@@ -90,7 +117,7 @@ export function ScreenshotAdminManagers() {
         <div className="inline-error" role="alert">
           <div>
             <strong>Статистика не загрузилась</strong>
-            {managers.error instanceof ApiError ? managers.error.message : "Нет связи с сервером"}
+            {apiErrorText(managers.error)}
           </div>
           <button type="button" className="secondary-button sca-retry" onClick={() => void managers.refetch()}>
             Повторить

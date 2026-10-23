@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ApiError } from "../api/http";
 import {
   formatAge,
   formatShare,
@@ -11,10 +10,11 @@ import {
   OLDEST_PROCESSING_WARN_S,
   pipelineAlerts,
   STAGING_WARN_PERCENT,
-  toneBadgeClass,
   VLM_ERROR_WARN,
 } from "../features/screenshotControl/admin";
 import { getPipeline } from "../features/screenshotControl/api";
+import { apiErrorText } from "../features/screenshotControl/errors";
+import { toneBadgeClass } from "../features/screenshotControl/format";
 
 const REFRESH_MS = 15_000;
 const number = new Intl.NumberFormat("ru-RU");
@@ -32,12 +32,12 @@ export function ScreenshotAdminPipeline() {
   const pipeline = useQuery({ queryKey: ["sca-pipeline"], queryFn: getPipeline, refetchInterval: REFRESH_MS });
 
   if (pipeline.isLoading) return <div className="loading-block">Загружаем состояние конвейера…</div>;
-  if (pipeline.isError || !pipeline.data) {
+  if (!pipeline.data) {
     return (
       <div className="inline-error" role="alert">
         <div>
           <strong>Состояние конвейера не загрузилось</strong>
-          {pipeline.error instanceof ApiError ? pipeline.error.message : "Нет связи с сервером"}
+          {apiErrorText(pipeline.error)}
         </div>
         <button type="button" className="secondary-button sca-retry" onClick={() => void pipeline.refetch()}>
           Повторить
@@ -55,10 +55,15 @@ export function ScreenshotAdminPipeline() {
 
   return (
     <div className="sca-pipeline">
+      {pipeline.isError && (
+        <p className="sca-muted-small" role="status">
+          Данные не обновились: {apiErrorText(pipeline.error)}
+        </p>
+      )}
       {pipelineAlerts(data).map((alert) => (
         <div key={alert.key} className="fbs-notice" role="status">
           <span className="fbs-notice-mark">
-            <TriangleAlert size={18} />
+            <TriangleAlert size={18} aria-hidden="true" />
           </span>
           <div>
             <strong>{alert.title}</strong>
