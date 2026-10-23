@@ -11,12 +11,14 @@ import pytest_asyncio
 from backend.modules.wb_screenshot_control.application.serialization import fields_to_json
 from backend.modules.wb_screenshot_control.domain.hashing import to_bits
 from backend.modules.wb_screenshot_control.domain.pipeline_types import ChatMessage
+from backend.modules.wb_screenshot_control.domain.similarity import text_minhash
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtractionModel,
     FileModel,
     SubmissionModel,
 )
 from backend.modules.wb_screenshot_control.infrastructure.postgres.repository import (
+    LIMITS,
     CandidateQuery,
     ScreenshotRepository,
 )
@@ -128,6 +130,83 @@ async def test_each_key_finds_its_candidate_and_only_it(database: Database) -> N
         database, query(me, mine.file_id, key_time=KEY_TIME + timedelta(hours=20), day_precision=True)
     )
     assert by_time in day_wide and far_time in day_wide
+
+
+REVIEW_NORM = "размер маломерит ткань тонкая и просвечивает швы кривые пришлось вернуть товар продавцу"
+
+
+def minhash(text: str) -> list[int]:
+    value = text_minhash(text)
+    assert value is not None
+    return list(value)
+
+
+async def test_the_text_minhash_finds_a_swapped_chat_at_another_time(database: Database) -> None:
+    """Ни чат, ни минута, ни картинка не совпали — кандидата находит только MinHash текста."""
+    original = await add(
+        database,
+        "original",
+        chat_id_norm=str(uuid.uuid4()),
+        key_time=KEY_TIME - timedelta(days=2),
+        text_minhash=minhash(REVIEW_NORM),
+    )
+    await add(database, "unrelated", text_minhash=minhash("курьер опоздал на два дня коробка помята но куртка целая"))
+    edited = REVIEW_NORM.replace("кривые", "неровные")
+    me = await add(database, "me", verdict=None, text_minhash=minhash(edited))
+    async with database.session() as session:
+        mine = await session.get(SubmissionModel, me)
+    assert mine is not None
+    assert await found(database, query(me, mine.file_id, text_minhash=tuple(minhash(edited)))) == {original}
+
+
+async def test_a_real_duplicate_survives_hundreds_of_noisy_matches(database: Database) -> None:
+    """Сотни несвязанных скринов в ту же минуту и с похожим кадром — раньше `OR … LIMIT 500` по самым
+    старым отрезал настоящий дубль того же чата. Теперь у каждого признака свой лимит."""
+    chat = str(uuid.uuid4())
+    async with database.session() as session:
+        repository = ScreenshotRepository(session)
+        for n in range(520):
+            sha = hashlib.sha256(f"noise-{n}".encode()).hexdigest()
+            file = FileModel(sha256=sha, size_bytes=10, mime="image/png", width=800, height=600)
+            session.add(file)
+            await session.flush()
+            await repository.set_dhash(file.id, to_bits(BASE_HASH ^ (1 << (n % 8))))
+            session.add(
+                SubmissionModel(
+                    user_id=uuid.uuid4(),
+                    channel="web",
+                    client_submission_id=f"noise-{n}",
+                    file_id=file.id,
+                    received_at=NOW - timedelta(days=30, minutes=n),
+                    stage="decided",
+                    verdict="accepted",
+                    outcome="positive",
+                    key_time=KEY_TIME + timedelta(seconds=n % 100),
+                    text_minhash=minhash(f"совсем другой отзыв номер {n} про другой товар и другую доставку"),
+                )
+            )
+        await session.commit()
+    same_chat = await add(database, "same-chat", chat_id_norm=chat, received_at=NOW - timedelta(days=1))
+    same_text = await add(database, "same-text", text_minhash=minhash(REVIEW_NORM), received_at=NOW - timedelta(days=2))
+    me = await add(database, "me", verdict=None, chat_id_norm=chat, key_time=KEY_TIME)
+    async with database.session() as session:
+        mine = await session.get(SubmissionModel, me)
+    assert mine is not None
+
+    candidates = await found(
+        database,
+        query(
+            me,
+            mine.file_id,
+            chat_id=chat,
+            key_time=KEY_TIME,
+            dhash_bits=to_bits(BASE_HASH),
+            dhash_max_distance=12,
+            text_minhash=tuple(minhash(REVIEW_NORM.replace("кривые", "неровные"))),
+        ),
+    )
+    assert {same_chat, same_text} <= candidates
+    assert len(candidates) <= sum(LIMITS.values())
 
 
 async def test_the_same_file_is_always_a_candidate(database: Database) -> None:

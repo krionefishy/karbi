@@ -31,6 +31,7 @@ from backend.modules.wb_screenshot_control.application.pipeline import (
 )
 from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
 from backend.modules.wb_screenshot_control.domain.pipeline_types import ExtractionResult
+from backend.modules.wb_screenshot_control.domain.similarity import text_minhash
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtractionModel,
     FileModel,
@@ -424,6 +425,13 @@ def test_text_key_needs_minute_precision(precision: Literal["minute", "day"]) ->
     assert keys["chat_id_norm"] == "abcdef01-2345-6789-abcd-ef0123456789"
     assert (keys["text_key"] is not None) == (precision == "minute")
     assert case_keys(replace(fields, chat_id="too-short"))["chat_id_norm"] is None
+
+
+def test_case_keys_carry_the_text_minhash() -> None:
+    fields = desktop_fields()
+    keys = case_keys(fields)
+    assert keys["text_minhash"] == list(text_minhash(fields.text_norm) or ())
+    assert case_keys(replace(fields, text_norm="брак"))["text_minhash"] is None
 
 
 def test_a_capture_from_the_future_is_a_clock_problem_not_a_queue() -> None:

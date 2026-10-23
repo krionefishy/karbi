@@ -281,8 +281,9 @@ def test_forged_chat_id_with_overlapping_messages_goes_to_review() -> None:
 DOM_EDITED = "товар пришел с браком коробка порвана продавец не отвечает на вопросы совсем"
 
 
-@pytest.mark.parametrize("held_by", ["accepted", "duplicate"])
-def test_dom_edit_same_chat_slightly_other_text_other_time(held_by: str) -> None:
+@pytest.mark.parametrize("held_by", ["accepted", "duplicate", "needs_review", None])
+def test_dom_edit_same_chat_slightly_other_text_other_time(held_by: str | None) -> None:
+    """Оригинал на проверке тоже держит кейс: иначе после его одобрения засчитались бы оба."""
     decision = run(
         desktop(text_norm=DOM_EDITED, review_at=REVIEW_AT + timedelta(days=3)),
         [make_candidate(1, desktop(), verdict=held_by)],
@@ -291,12 +292,51 @@ def test_dom_edit_same_chat_slightly_other_text_other_time(held_by: str) -> None
     assert "same_chat_similar_text" in codes(decision)
 
 
-def test_dom_edit_against_a_case_still_under_review_is_not_flagged_by_this_rule() -> None:
+LONG_TEXT = "товар пришел с браком упаковка порвана продавец не отвечает на вопросы уже третий день подряд"
+LONG_EDITED = "товар пришел с дефектом коробка порвана продавец не отвечает на вопросы уже четвертый день подряд"
+
+
+@pytest.mark.parametrize("user", [USER_A, USER_B])
+@pytest.mark.parametrize(
+    ("label", "changes"),
+    [
+        ("другой чат и время", {"chat_id": CHAT_2, "review_at": REVIEW_AT + timedelta(hours=3)}),
+        ("другой чат, три слова, та же минута", {"chat_id": CHAT_2, "text_norm": LONG_EDITED}),
+        (
+            "другой чат, три слова и время",
+            {"chat_id": CHAT_2, "text_norm": LONG_EDITED, "review_at": REVIEW_AT + timedelta(days=1)},
+        ),
+        ("чат не прочитан, время другое", {"chat_id": None, "review_at": REVIEW_AT + timedelta(hours=5)}),
+    ],
+)
+def test_a_swapped_chat_with_a_second_edit_goes_to_review(label: str, changes: dict[str, Any], user: uuid.UUID) -> None:
+    original = make_candidate(1, desktop(text_norm=LONG_TEXT))
+    decision = run(desktop(**{"text_norm": LONG_TEXT, **changes}), [original], user_id=user)
+    assert decision.verdict == "needs_review", (label, codes(decision))
+    assert "same_text_other_time" in codes(decision) or "same_text_time_other_chat" in codes(decision)
+    assert ("cross_user_duplicate" in codes(decision)) == (user == USER_B)
+
+
+def test_the_same_text_in_the_same_minute_of_another_chat_keeps_its_own_reason() -> None:
+    decision = run(desktop(chat_id=CHAT_2, text_norm=LONG_TEXT), [make_candidate(1, desktop(text_norm=LONG_TEXT))])
+    assert codes(decision)[0] == "same_text_time_other_chat"
+
+
+def test_a_short_text_in_another_chat_at_another_time_is_a_new_case() -> None:
+    short = "товар пришел с браком коробка порвана"  # длиннее min_text_len, короче двух
     decision = run(
-        desktop(text_norm=DOM_EDITED, review_at=REVIEW_AT + timedelta(days=3)),
-        [make_candidate(1, desktop(), verdict="needs_review")],
+        desktop(chat_id=CHAT_2, text_norm=short, review_at=REVIEW_AT + timedelta(days=2)),
+        [make_candidate(1, desktop(text_norm=short))],
     )
-    assert "same_chat_similar_text" not in codes(decision)
+    assert decision.verdict == "accepted", codes(decision)
+
+
+def test_a_different_long_text_in_another_chat_is_a_new_case() -> None:
+    decision = run(
+        desktop(chat_id=CHAT_2, text_norm=OTHER_TEXT + " и еще раз спасибо за быстрый возврат денег"),
+        [make_candidate(1, desktop(text_norm=LONG_TEXT))],
+    )
+    assert decision.verdict == "accepted", codes(decision)
 
 
 def test_mobile_dialog_continuation_is_the_same_case() -> None:

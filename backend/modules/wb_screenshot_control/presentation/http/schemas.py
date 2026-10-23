@@ -367,8 +367,9 @@ class AdminSubmission(BaseModel):
     reasons: list[ReasonOut]
     suspicion: Suspicion | None = Field(
         description=(
-            "high — cross_user_duplicate, same_chat_same_text_other_time, same_text_time_other_chat, "
-            "possible_tampering; medium — прочие needs_review и дубли своего; low — аудит"
+            "high — cross_user_duplicate, same_chat_same_text_other_time, same_chat_similar_text, "
+            "same_text_time_other_chat, same_text_other_time, possible_tampering; "
+            "medium — прочие needs_review и дубли своего; low — аудит"
         )
     )
     duplicate_of: uuid.UUID | None
