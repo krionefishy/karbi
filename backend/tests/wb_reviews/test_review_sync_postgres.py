@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime, timedelta
 
 from httpx import ASGITransport, AsyncClient
@@ -17,6 +16,7 @@ from backend.modules.wb_reviews.infrastructure.postgres.models import (
 )
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+from backend.tests.operators import operator_token
 
 
 async def test_review_sync_is_persisted_through_postgres_and_outbox() -> None:
@@ -85,7 +85,7 @@ async def test_review_sync_http_endpoints_use_application_dependencies() -> None
             await session.execute(delete(TrackedSellerModel))
             await session.commit()
 
-        token = application.token_service.issue_access(uuid.uuid4())
+        token = await operator_token(application)
         transport = ASGITransport(app=app)
         async with AsyncClient(
             transport=transport,

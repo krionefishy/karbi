@@ -12,7 +12,7 @@ let refreshPromise: Promise<AuthRefreshPayload> | null = null;
 
 interface AuthRefreshPayload {
   access_token: string;
-  user: { id: string; username: string; is_admin: boolean };
+  user: { id: string; username: string; is_admin: boolean; services: string[] };
 }
 
 interface RequestOptions {
@@ -21,6 +21,20 @@ interface RequestOptions {
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
+}
+
+// Сервер отвечает 403 с этим заголовком, когда доступ к сервису сняли, а страница об этом ещё не знает.
+const ACCESS_DENIED_HEADER = "X-Access-Denied";
+let accessDeniedHandler: (() => void) | null = null;
+
+export function setAccessDeniedHandler(handler: (() => void) | null) {
+  accessDeniedHandler = handler;
+}
+
+async function failure(response: Response): Promise<ApiError> {
+  if (response.status === 403 && response.headers.get(ACCESS_DENIED_HEADER)) accessDeniedHandler?.();
+  const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+  return new ApiError(response.status, body?.detail ?? "Ошибка запроса");
 }
 
 async function send(path: string, init?: RequestInit): Promise<Response> {
@@ -91,10 +105,7 @@ export async function apiDownload(path: string, init?: RequestInit): Promise<Fil
       throw error;
     }
   }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса");
-  }
+  if (!response.ok) throw await failure(response);
   return {
     blob: await response.blob(),
     filename: filenameFromDisposition(response.headers.get("Content-Disposition")),
@@ -112,10 +123,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit, options?: 
       throw error;
     }
   }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-    throw new ApiError(response.status, body?.detail ?? "Ошибка запроса");
-  }
+  if (!response.ok) throw await failure(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

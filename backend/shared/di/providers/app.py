@@ -9,7 +9,13 @@ from backend.modules.fin_reports.infrastructure.postgres import FinReportsReposi
 from backend.modules.notifications.application import BotAdminService, BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
+from backend.modules.platform.application import (
+    AuthService,
+    PasswordService,
+    ServiceAccessService,
+    TokenService,
+    UserAdminService,
+)
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_box_stickers.application import BoxStickerService, PackingService
 from backend.modules.wb_box_stickers.infrastructure.redis import PackingStore
@@ -149,6 +155,10 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def user_admin_service(self, users: UserRepository, passwords: PasswordService) -> UserAdminService:
         return UserAdminService(users, passwords)
+
+    @provide(scope=Scope.REQUEST)
+    def service_access_service(self, users: UserRepository) -> ServiceAccessService:
+        return ServiceAccessService(users)
 
     @provide(scope=Scope.REQUEST)
     def seller_repository(self, session: AsyncSession) -> SellerRepository:

@@ -1,11 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, CircleCheck, KeyRound, Plus, Shield, ShieldOff } from "lucide-react";
+import { Ban, CircleCheck, KeyRound, LayoutGrid, Plus, Shield, ShieldOff } from "lucide-react";
 import { useState } from "react";
 
 import { ApiError } from "../../api/http";
 import { Shell } from "../../components/Shell";
 import { EmployeeDialog, IssuedPasswordDialog } from "../../components/EmployeeDialog";
-import { createEmployee, getEmployees, resetEmployeePassword, updateEmployee } from "../../features/admin/api";
+import { ServiceAccessDialog } from "../../components/ServiceAccessDialog";
+import {
+  createEmployee,
+  getEmployees,
+  getServices,
+  resetEmployeePassword,
+  setEmployeeServices,
+  updateEmployee,
+} from "../../features/admin/api";
 import type { Employee, IssuedPassword } from "../../features/admin/types";
 import { useAuth } from "../../features/auth/AuthContext";
 
@@ -16,10 +24,13 @@ export function EmployeesPage() {
   const { user } = useAuth();
   const [creating, setCreating] = useState(false);
   const [issued, setIssued] = useState<IssuedPassword | null>(null);
+  const [accessFor, setAccessFor] = useState<Employee | null>(null);
+  const [accessError, setAccessError] = useState("");
   const [formError, setFormError] = useState("");
   const [rowError, setRowError] = useState("");
 
   const { data: employees = [], isLoading } = useQuery({ queryKey: ["employees"], queryFn: getEmployees });
+  const { data: catalog = [] } = useQuery({ queryKey: ["admin-services"], queryFn: getServices });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["employees"] });
 
   const createMutation = useMutation({
@@ -41,6 +52,16 @@ export function EmployeesPage() {
       await refresh();
     },
     onError: (error) => setRowError(error instanceof ApiError ? error.message : "Не удалось применить изменение"),
+  });
+  const accessMutation = useMutation({
+    mutationFn: ({ id, serviceIds }: { id: string; serviceIds: string[] }) => setEmployeeServices(id, serviceIds),
+    onSuccess: async () => {
+      setAccessFor(null);
+      setAccessError("");
+      await refresh();
+    },
+    onError: (error) =>
+      setAccessError(error instanceof ApiError ? error.message : "Не удалось сохранить доступы"),
   });
   const resetMutation = useMutation({
     mutationFn: resetEmployeePassword,
@@ -90,6 +111,7 @@ export function EmployeesPage() {
               <span>Сотрудник</span>
               <span>Роль</span>
               <span>Статус</span>
+              <span>Сервисы</span>
               <span>Последний вход</span>
               <span>Действия</span>
             </div>
@@ -105,10 +127,27 @@ export function EmployeesPage() {
                   <span className={employee.is_active ? "staff-active" : "staff-blocked"}>
                     {employee.is_active ? "Активен" : "Заблокирован"}
                   </span>
+                  <span className={employee.services.length ? undefined : "muted"}>
+                    {employee.is_admin
+                      ? "Все"
+                      : employee.services.length
+                        ? `${employee.services.length} из ${catalog.length || employee.services.length}`
+                        : "Нет"}
+                  </span>
                   <span>
                     {employee.last_login_at ? dateFormatter.format(new Date(employee.last_login_at)) : "—"}
                   </span>
                   <span className="registry-row-actions">
+                    <button
+                      title="Сервисы"
+                      aria-label={`Сервисы ${employee.username}`}
+                      onClick={() => {
+                        setAccessError("");
+                        setAccessFor(employee);
+                      }}
+                    >
+                      <LayoutGrid size={15} />
+                    </button>
                     <button
                       title="Выдать новый пароль"
                       aria-label={`Выдать новый пароль ${employee.username}`}
@@ -151,6 +190,16 @@ export function EmployeesPage() {
           error={formError}
           onClose={() => setCreating(false)}
           onSubmit={(value) => createMutation.mutate(value)}
+        />
+      )}
+      {accessFor && (
+        <ServiceAccessDialog
+          employee={accessFor}
+          catalog={catalog}
+          pending={accessMutation.isPending}
+          error={accessError}
+          onClose={() => setAccessFor(null)}
+          onSubmit={(serviceIds) => accessMutation.mutate({ id: accessFor.id, serviceIds })}
         />
       )}
       {issued && <IssuedPasswordDialog issued={issued} onClose={() => setIssued(null)} />}

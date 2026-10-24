@@ -9,6 +9,7 @@ from backend.modules.platform.application import (
     AuthService,
     LoginAttemptLimiter,
     LoginRateLimitError,
+    ServiceAccessService,
     UserAdminService,
 )
 from backend.modules.platform.presentation.http.schemas import (
@@ -38,6 +39,7 @@ async def login(
     payload: LoginRequest,
     response: Response,
     auth: FromDishka[AuthService],
+    access: FromDishka[ServiceAccessService],
     settings: FromDishka[Settings],
     redis: FromDishka[RedisClient],
 ) -> TokenResponse:
@@ -53,7 +55,7 @@ async def login(
         raise unauthorized() from error
     await attempts.reset(payload.username)
     set_refresh_cookie(response, session.refresh_token, settings)
-    return token_response(session, settings)
+    return token_response(session, settings, await access.granted(session.user))
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -61,6 +63,7 @@ async def login(
 async def refresh(
     response: Response,
     auth: FromDishka[AuthService],
+    access: FromDishka[ServiceAccessService],
     settings: FromDishka[Settings],
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE)] = None,
 ) -> TokenResponse:
@@ -72,20 +75,21 @@ async def refresh(
         clear_refresh_cookie(response, settings)
         raise unauthorized() from error
     set_refresh_cookie(response, session.refresh_token, settings)
-    return token_response(session, settings)
+    return token_response(session, settings, await access.granted(session.user))
 
 
 @router.get("/me", response_model=UserResponse)
 @inject
 async def me(
     auth: FromDishka[AuthService],
+    access: FromDishka[ServiceAccessService],
     principal: CurrentPrincipal,
 ) -> UserResponse:
     try:
         user = await auth.current_user(principal.user_id)
     except AuthenticationError as error:
         raise unauthorized() from error
-    return user_response(user)
+    return user_response(user, await access.granted(user))
 
 
 @router.post("/logout")

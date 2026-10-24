@@ -11,6 +11,7 @@ from backend.modules.notifications.infrastructure.postgres.models import BotMode
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.shared.settings import load_settings
+from backend.tests.operators import operator_token
 
 API = "/api/v1/wb/card-documents"
 AUTOMATION = "/api/v1/automations/wb-card-documents/sellers"
@@ -44,7 +45,7 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
 
 @pytest_asyncio.fixture
 async def client(application: Application) -> AsyncIterator[AsyncClient]:
-    token = application.token_service.issue_access(uuid.uuid4())
+    token = await operator_token(application)
     async with AsyncClient(
         transport=ASGITransport(app=application.get_app()),
         base_url="http://test",

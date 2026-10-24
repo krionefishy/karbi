@@ -5,6 +5,7 @@ export interface Employee {
   is_admin: boolean;
   created_at: string;
   last_login_at: string | null;
+  services: string[];
 }
 
 export interface IssuedPassword {
@@ -36,4 +37,9 @@ export interface BotCreate {
   code: string;
   title: string;
   token: string;
+}
+
+export interface ServiceInfo {
+  id: string;
+  title: string;
 }

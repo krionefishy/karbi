@@ -92,15 +92,17 @@ export function Shell({ current, seller, actions, admin = false, children }: She
           </nav>
         ) : (
           <nav className="shell-links" aria-label="Автоматизации">
-            {automationNav.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink key={item.id} to={`/automations/${item.id}`} title={item.title}>
-                  <Icon size={20} />
-                  <span>{item.title}</span>
-                </NavLink>
-              );
-            })}
+            {automationNav
+              .filter((item) => user?.services.includes(item.id))
+              .map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink key={item.id} to={`/automations/${item.id}`} title={item.title}>
+                    <Icon size={20} />
+                    <span>{item.title}</span>
+                  </NavLink>
+                );
+              })}
             <NavLink to="/sellers" className="shell-link-section" title="Селлеры">
               <Store size={20} />
               <span>Селлеры</span>

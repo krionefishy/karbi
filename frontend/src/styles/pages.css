@@ -223,7 +223,7 @@
 .cover-warning { color: var(--warning); }
 .cover-calm { color: var(--positive); }
 .cover-neutral { color: var(--ink-muted); }
-.staff-head, .staff-row { display: grid; grid-template-columns: minmax(220px, 1fr) 160px 150px 200px 130px; align-items: center; border-bottom: 1px solid var(--line); }
+.staff-head, .staff-row { display: grid; grid-template-columns: minmax(200px, 1fr) 140px 130px 90px 190px 170px; align-items: center; border-bottom: 1px solid var(--line); }
 .staff-row:last-child { border-bottom: 0; }
 .staff-head > *, .staff-row > * { padding: 0 var(--space-4); }
 .staff-row strong { font-size: 13px; }

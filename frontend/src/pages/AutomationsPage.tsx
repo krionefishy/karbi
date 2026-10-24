@@ -64,6 +64,11 @@ export function AutomationsPage() {
         </div>
         {isLoading ? (
           <div className="loading-block">Загружаем автоматизации…</div>
+        ) : data.length === 0 ? (
+          <section className="empty-state" role="status">
+            <h2>Сервисы пока не выданы</h2>
+            <p className="muted">Администратор выдаёт доступ к сервисам. Напишите ему, какие нужны для работы.</p>
+          </section>
         ) : (
           <section className="automation-grid" aria-label="Доступные автоматизации">
             {data.map((automation) => {
