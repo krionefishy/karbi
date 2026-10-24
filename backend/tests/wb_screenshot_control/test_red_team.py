@@ -466,7 +466,7 @@ def cases() -> list[Case]:
                 address(THIRD_CHAT),
                 image=photographed(screen(77)),
             ),
-            "needs_review",
+            "rejected",
             "photo_of_screen",
         ),
         (
@@ -476,8 +476,8 @@ def cases() -> list[Case]:
                 address(CHAT),
                 image=photographed(ORIGINAL_IMAGE),
             ),
-            "duplicate",
-            "case_key",
+            "rejected",
+            "photo_of_screen",
         ),
         (
             "следы правки на кадре",
@@ -586,8 +586,8 @@ async def test_a_phone_screen_of_another_buyer_with_the_same_words_is_a_new_case
 
 
 async def test_a_dom_edit_next_to_an_original_under_review_goes_to_review() -> None:
-    """Оригинал на проверке (фото экрана), рядом правка DOM: три слова и время в том же чате."""
-    first = Shot(flags(desktop(CHAT, REVIEW, at(6, 39)), photo_of_screen=True), address(CHAT))
+    """Оригинал на проверке (следы правки), рядом правка DOM: три слова и время в том же чате."""
+    first = Shot(flags(desktop(CHAT, REVIEW, at(6, 39)), looks_edited=True), address(CHAT))
     ledger = Ledger()
     assert (await ledger.submit(first)).verdict == "needs_review"
     decision = await ledger.submit(Shot(desktop(CHAT, THREE_WORDS, at(13, 20)), address(CHAT)))

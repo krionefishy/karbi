@@ -351,11 +351,13 @@ def keys_unread(fields: ExtractedFields | None) -> bool:
 
 
 def content_rejections(fields: ExtractedFields) -> list[Finding]:
-    """Строки 3–4: не скрин чата WB; нечитаемый или обрезанный, когда ключевые поля не прочитаны."""
+    """Строки 3–4: не скрин чата WB; фото экрана; нечитаемый или обрезанный, когда ключевые поля не прочитаны."""
     if fields.layout == "other" or not fields.is_wb_seller_chat:
         return [Finding("not_wb_screenshot", "rejected", {"layout": fields.layout})]
     if fields.layout == "unreadable":
         return [Finding("unreadable", "rejected", {"layout": fields.layout})]
+    if fields.quality.photo_of_screen or fields.quality.moire_or_glare:
+        return [Finding("photo_of_screen", "rejected")]
     if keys_unread(fields):
         if fields.quality.cropped_missing_panel:
             return [Finding("cropped_missing_panel", "rejected")]
@@ -426,11 +428,9 @@ def weak_key_findings(fields: ExtractedFields, cfg: ScreenshotControlConfig) -> 
 
 
 def authenticity_findings(fields: ExtractedFields) -> list[Finding]:
-    """Строки 14–15: фото экрана; признаки правки."""
+    """Строка 15: признаки правки. Фото экрана отклоняется раньше, в `content_rejections`."""
     findings = []
     quality = fields.quality
-    if quality.photo_of_screen or quality.moire_or_glare:
-        findings.append(Finding("photo_of_screen", "needs_review"))
     if quality.looks_edited:
         findings.append(Finding("possible_tampering", "needs_review", {"looks_edited": True}))
     return findings

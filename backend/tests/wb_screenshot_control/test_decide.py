@@ -577,8 +577,9 @@ def test_row_13_short_text_with_chat_is_not_weak() -> None:
 
 
 @pytest.mark.parametrize("quality", [QualityFlags(photo_of_screen=True), QualityFlags(moire_or_glare=True)])
-def test_row_14_photo_of_screen(quality: QualityFlags) -> None:
-    assert codes(run(desktop(quality=quality))) == ["photo_of_screen"]
+def test_row_14_photo_of_screen_is_rejected(quality: QualityFlags) -> None:
+    decision = run(desktop(quality=quality))
+    assert (decision.verdict, codes(decision)) == ("rejected", ["photo_of_screen"])
 
 
 def test_row_15_possible_tampering() -> None:

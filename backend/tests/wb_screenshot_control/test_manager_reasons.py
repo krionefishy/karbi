@@ -61,3 +61,9 @@ def test_phrases_are_plain_russian(text: str) -> None:
     assert "пожалуйста" not in lowered
     assert "!" not in text
     assert any("а" <= char <= "я" for char in lowered)
+
+
+def test_a_rejected_photo_of_the_screen_tells_the_manager_to_send_a_screenshot() -> None:
+    reason = manager_reason("rejected", ["photo_of_screen"])
+    assert reason is not None
+    assert (reason.code, reason.text) == ("photo_of_screen", "Нужен скриншот, а не фото экрана")

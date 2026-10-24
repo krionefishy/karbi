@@ -12,6 +12,7 @@ ManagerReasonCode = Literal[
     "under_review",
     "unreadable",
     "cropped_missing_panel",
+    "photo_of_screen",
     "not_wb_screenshot",
     "no_outcome",
 ]
@@ -26,6 +27,7 @@ MANAGER_TEXTS: dict[ManagerReasonCode, str] = {
     "under_review": "Принят, проверяется",
     "unreadable": "Нужен чёткий скриншот всего окна",
     "cropped_missing_panel": "Нужен скриншот всего окна без обрезки",
+    "photo_of_screen": "Нужен скриншот, а не фото экрана",
     "not_wb_screenshot": "Это не скриншот чата WB",
     "no_outcome": "Не выбран исход",
 }
@@ -35,6 +37,7 @@ MANAGER_TEXTS: dict[ManagerReasonCode, str] = {
 _REJECT_PRIORITY: tuple[ManagerReasonCode, ...] = (
     "no_outcome",
     "not_wb_screenshot",
+    "photo_of_screen",
     "cropped_missing_panel",
     "unreadable",
 )

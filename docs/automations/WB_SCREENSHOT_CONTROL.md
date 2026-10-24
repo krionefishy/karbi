@@ -106,6 +106,7 @@ inbox общие (`wb_core`), повторная доставка любого �
 | `no_outcome` | rejected | исход не выбран за `outcome_ttl_hours` |
 | `exact_file` (+`cross_user_duplicate`) | duplicate | тот же файл уже у не отклонённого скрина |
 | `not_wb_screenshot`, `unreadable`, `cropped_missing_panel` | rejected | не чат WB; кадр нечитаем или обрезан, и ключевые поля не прочитаны |
+| `photo_of_screen` | rejected | фото экрана камерой или блики: принимаются только нативные скриншоты |
 | `case_key` (+`cross_user_duplicate`, `caption_conflict`) | duplicate | тот же кейс: chatId + время до минуты + текст (S_text ≥ `text_dup`); у телефона — время и текст реплики с датой либо с совпавшим HMAC имени или артикулом |
 | `messages_overlap` | duplicate | телефон: продолжение того же диалога, реплики покупателя пересекаются |
 | `near_image` | duplicate | полей нет, а кадр почти тот же (dHash ≤ 6) |
@@ -118,7 +119,7 @@ inbox общие (`wb_core`), повторная доставка любого �
 | `extraction_disagreement_chat_id` / `_time` / `_text` | needs_review | два чтения разошлись (кадр и вырезка, текст и числа времени) |
 | `chat_id_unreadable`, `url_not_chat` | needs_review | у окна нет chatId; вкладка расширения — не чат WB |
 | `review_time_unreadable`, `review_date_implausible` | needs_review | время не прочитано; отзыв старше `review_age_max_days` (120) или в будущем |
-| `photo_of_screen`, `possible_tampering` | needs_review | фото экрана, блики; следы правки |
+| `possible_tampering` | needs_review | следы правки |
 | `clock_skew`, `late_upload` | needs_review | часы расширения спешат больше чем на 15 мин; выгрузка из очереди старше 72 ч |
 | `upload_burst` | needs_review | больше `burst_per_hour` (60) загрузок за час |
 | `audit_sample` | accepted | случайная выборка `audit_percent` (4 %) принятых на аудит; KPI засчитан сразу |

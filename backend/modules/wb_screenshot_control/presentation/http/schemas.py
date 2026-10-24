@@ -81,6 +81,7 @@ ManagerReasonCode = Literal[
     "under_review",
     "unreadable",
     "cropped_missing_panel",
+    "photo_of_screen",
     "not_wb_screenshot",
     "no_outcome",
 ]
