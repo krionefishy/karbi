@@ -93,7 +93,14 @@ def project_dialog(
     def result(state: DialogState, *, start: bool = False, end: bool = False) -> Projection:
         return Projection(state, start, end, buyer_first, buyer_last, our_last, human_last, no_contact, attention)
 
-    if our_last is None or buyer_last > our_last:
+    # Ответ покупателя после старта кампании её закрывает, даже если бот успел написать позже
+    # (зеркало чатов отстаёт, и следующее напоминание уходит раньше, чем мы видим ответ).
+    replied_in_campaign = (
+        campaign_started_at is not None
+        and buyer_last > campaign_started_at
+        and (human_last is None or human_last < buyer_last)
+    )
+    if our_last is None or buyer_last > our_last or replied_in_campaign:
         return result(DialogState.AWAITING_US, end=campaign_started_at is not None)
     anchor = human_last if human_last is not None else our_last
     idle = now - anchor

@@ -124,6 +124,21 @@ def test_buyer_reply_ends_campaign():
     assert result.end_campaign is True
 
 
+def test_buyer_reply_ends_campaign_even_when_the_bot_wrote_after_it():
+    events = [
+        event(0, "prompt"),
+        event(30, "buyer", "."),
+        event(60, "specialist", "Опишите проблему"),
+        event(301, "bot", "напоминание"),
+        event(400, "buyer", "ладно, расскажу"),
+        event(417, "bot", "напоминание"),
+    ]
+    sent = [SentMessage(at(300), "напоминание"), SentMessage(at(417), "напоминание")]
+    result = project(events, now_minutes=500, sent=sent, campaign_started_at=at(300), campaigns_count=1)
+    assert result.state is DialogState.AWAITING_US
+    assert result.end_campaign is True
+
+
 def test_specialist_message_during_campaign_pauses_it():
     events = [
         event(0, "prompt"),
