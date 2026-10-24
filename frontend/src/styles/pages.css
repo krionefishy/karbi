@@ -430,6 +430,7 @@
 /* Финансовые отчёты: строки ОПиУ сверху вниз, по колонке на период или кабинет. */
 .fin-toolbar { align-items: flex-end; }
 .fin-toolbar .mode-switch { margin-bottom: 0; margin-right: auto; }
+.fin-help { margin-top: var(--space-2); }
 .fin-table { margin-bottom: var(--space-5); }
 .fin-stale { opacity: 0.55; transition: opacity 0.2s; }
 .fin-updating { margin: 0 0 var(--space-3); }
