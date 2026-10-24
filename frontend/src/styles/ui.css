@@ -174,7 +174,7 @@ input[type="range"] { accent-color: var(--accent); }
 .dialog-close { position: absolute; top: 12px; right: 12px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; color: var(--ink-secondary); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
 .dialog-close:hover { color: var(--ink); background: var(--surface-hover); }
 .seller-form { display: grid; gap: var(--space-4); }
-.seller-form input, .seller-form select { width: 100%; }
+.seller-form input:not([type="checkbox"], [type="radio"]), .seller-form select { width: 100%; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 .neutral-dialog { border-color: var(--line); }
 
