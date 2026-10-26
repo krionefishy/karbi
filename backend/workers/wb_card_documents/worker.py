@@ -11,6 +11,7 @@ from backend.modules.wb_card_documents.application import (
     CardDocumentsPublisher,
     CardDocumentsSource,
     CollectionService,
+    MirrorStockSource,
     NotificationService,
 )
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
@@ -140,11 +141,13 @@ class CardDocumentsWorker(PollingWorker):
                     CardDocumentsRepository(session),
                     self.source,
                     self.publisher(session),
+                    self.stocks(session),
                     timezone=self.timezone,
                     thresholds=self.config.expiry_thresholds,
                     digest_time=f"{self.config.digest_hour}:{self.config.digest_minute:02d}",
                     full_interval=timedelta(hours=self.config.full_interval_hours),
                     cursor_margin=timedelta(seconds=self.config.cursor_margin_seconds),
+                    min_stock=self.config.min_stock_for_alerts,
                 ).collect(seller_id, full=full)
         except WBPermanentError as error:
             self.logger.warning("card_documents_collection_failed", seller_id=str(seller_id), error=str(error))
@@ -179,16 +182,22 @@ class CardDocumentsWorker(PollingWorker):
             bot_code=self.config.notification_bot,
         )
 
+    def stocks(self, session: AsyncSession) -> MirrorStockSource:
+        """Остаток для фильтра уведомлений — из зеркала wb_core, сами в WB за ним не ходим."""
+        return MirrorStockSource(session, fresh_hours=self.config.stock_fresh_hours)
+
     def notifications(self, session: AsyncSession) -> NotificationService:
         return NotificationService(
             session,
             SellerRepository(session),
             CardDocumentsRepository(session),
             self.publisher(session),
+            self.stocks(session),
             timezone=self.timezone,
             digest_hour=self.config.digest_hour,
             digest_minute=self.config.digest_minute,
             stale_hours=self.config.stale_hours,
+            min_stock=self.config.min_stock_for_alerts,
         )
 
     async def _fail(self, seller_id: uuid.UUID, error: str, *, permanent: bool = False) -> None:

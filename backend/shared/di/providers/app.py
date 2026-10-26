@@ -28,7 +28,11 @@ from backend.modules.wb_card_checklist.application import (
 )
 from backend.modules.wb_card_checklist.domain import Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
-from backend.modules.wb_card_documents.application import CardDocumentsEnrollment, CardDocumentsService
+from backend.modules.wb_card_documents.application import (
+    CardDocumentsEnrollment,
+    CardDocumentsService,
+)
+from backend.modules.wb_card_documents.application import MirrorStockSource as DocumentsStockSource
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -370,6 +374,8 @@ class SessionProvider(Provider):
             bot_code=config.notification_bot,
             timezone=ZoneInfo(config.timezone),
             stale_hours=config.stale_hours,
+            stocks=DocumentsStockSource(session, fresh_hours=config.stock_fresh_hours),
+            min_stock=config.min_stock_for_alerts,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -11,6 +11,7 @@ export interface CardDocumentItem {
   document_start: string | null;
   document_end: string | null;
   days_left: number | null;
+  stock: number | null;
   checked_at: string | null;
   since: string | null;
 }
@@ -22,6 +23,7 @@ export interface CardDocumentsSummary {
   missing: number;
   expiring: number;
   mismatch: number;
+  with_stock_problems: number;
 }
 
 export type NoticeLevel = "danger" | "warning";

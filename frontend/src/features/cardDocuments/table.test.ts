@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   agoText,
   banners,
+  hasStock,
+  stockText,
+  tileSummary,
   daysLeftText,
   daysTone,
   documentPeriod,
@@ -14,7 +17,15 @@ import {
 } from "./table";
 import type { CardDocumentItem, CardDocuments, CardDocumentsSummary, Notice } from "./types";
 
-const summary: CardDocumentsSummary = { total: 5, ok: 2, rejected: 1, missing: 0, expiring: 1, mismatch: 1 };
+const summary: CardDocumentsSummary = {
+  total: 5,
+  ok: 2,
+  rejected: 1,
+  missing: 0,
+  expiring: 1,
+  mismatch: 1,
+  with_stock_problems: 2,
+};
 
 function item(nmId: number, overrides: Partial<CardDocumentItem> = {}): CardDocumentItem {
   return {
@@ -28,6 +39,7 @@ function item(nmId: number, overrides: Partial<CardDocumentItem> = {}): CardDocu
     document_start: "2025-01-10",
     document_end: "2027-01-09",
     days_left: null,
+    stock: 10,
     checked_at: null,
     since: null,
     ...overrides,
@@ -159,9 +171,43 @@ describe("card documents table", () => {
     expect(agoText("2026-10-19T19:00:00Z", now)).toBe("3 дн. назад");
   });
 
+  it("keeps cards with stock or unknown stock when only stock is on", () => {
+    const items = [
+      item(1, { state: "rejected", stock: 0 }),
+      item(2, { state: "rejected", stock: 5 }),
+      item(3, { state: "expiring", stock: null }),
+      item(4, { stock: 0 }),
+    ];
+
+    expect(items.map(hasStock)).toEqual([false, true, true, false]);
+    expect(visibleItems(items, "all", "", true).map((row) => row.nm_id)).toEqual([2, 3]);
+    expect(visibleItems(items, "problems", "", false).map((row) => row.nm_id)).toEqual([1, 2, 3]);
+    expect(stockText(null)).toBe("—");
+    expect(stockText(0)).toBe("0");
+  });
+
+  it("counts tiles from items when only stock is on and from summary otherwise", () => {
+    const items = [item(1, { state: "rejected", stock: 0 }), item(2, { state: "rejected", stock: 5 }), item(3, { stock: null })];
+    const source = data({ items });
+
+    expect(tileSummary(source, true)).toEqual({
+      total: 2,
+      ok: 1,
+      rejected: 1,
+      missing: 0,
+      expiring: 0,
+      mismatch: 0,
+      with_stock_problems: 2,
+    });
+    expect(tileSummary(source, false)).toBe(summary);
+    const problems = tiles(tileSummary(source, true))[0];
+    expect(problems).toMatchObject({ count: 1, note: "по ним идут уведомления: 2" });
+  });
+
   it("explains an empty table", () => {
     expect(emptyMessage("problems", summary, "")).toContain("у всех 5 карточек");
     expect(emptyMessage("problems", { ...summary, total: 0 }, "")).toContain("нет карточек с документами");
     expect(emptyMessage("rejected", summary, "zzz")).toBe("По запросу карточек не нашлось.");
+    expect(emptyMessage("problems", { ...summary, total: 0 }, "", true)).toBe("Среди товаров с остатком карточек нет.");
   });
 });

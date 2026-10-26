@@ -15,6 +15,7 @@ from backend.modules.wb_card_documents.application.notifications import (
     alert_dedupe,
     card_params,
 )
+from backend.modules.wb_card_documents.application.stock import StockSource
 from backend.modules.wb_card_documents.domain import (
     DEFAULT_THRESHOLDS,
     CardDocument,
@@ -23,8 +24,8 @@ from backend.modules.wb_card_documents.domain import (
     DeclaredDocument,
     PreviousState,
     Verdict,
+    alert_decision,
     evaluate,
-    should_alert,
 )
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository, CardStateModel
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -65,6 +66,11 @@ class CollectionService:
     `nmID` последней прочитанной карточки). Остальные
     карточки с документами пересчитываются из сохранённого: пороги истечения сдвигаются
     календарём, а не `updatedAt`.
+
+    Состояния и журнал считаются по всем карточкам, а уведомления — только по карточкам с
+    остатком не меньше `min_stock` или с неизвестным остатком (`alert_decision`). Эпизод,
+    найденный при нулевом остатке, ждёт и уходит, когда остаток появится; `episode_alerted`
+    и `alerted` в журнале пишутся по факту постановки сообщения.
     """
 
     def __init__(
@@ -74,12 +80,14 @@ class CollectionService:
         documents: CardDocumentsRepository,
         source: CardDocumentsSource,
         publisher: CardDocumentsPublisher,
+        stocks: StockSource,
         *,
         timezone: ZoneInfo,
         thresholds: Sequence[int] = DEFAULT_THRESHOLDS,
         digest_time: str = "10:00",
         full_interval: timedelta = timedelta(hours=24),
         cursor_margin: timedelta = timedelta(seconds=60),
+        min_stock: int = 1,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -91,6 +99,8 @@ class CollectionService:
         self.digest_time = digest_time
         self.full_interval = full_interval
         self.cursor_margin = cursor_margin
+        self.stocks = stocks
+        self.min_stock = min_stock
         self.logger = logging.getLogger("wb.card_documents.collection")
 
     async def collect(
@@ -116,6 +126,7 @@ class CollectionService:
         previous = await self.documents.open_states(seller_id)
         seller = await self.sellers.get(seller_id)
         seller_name = seller.name if seller else "магазин"
+        stock = await self.stocks.stock(seller_id, now=moment)
 
         fresh = {card.nm_id: card for card in cards}
         cursor = max(((card.updated_at, card.nm_id) for card in cards if card.updated_at is not None), default=None)
@@ -126,8 +137,9 @@ class CollectionService:
                     unique[nm_id] = stored_card(model)
         rows: list[dict[str, Any]] = []
         transitions: list[dict[str, Any]] = []
-        alerts: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        alerts: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
         problems = 0
+        notifiable: list[dict[str, Any]] = []
         for card in unique.values():
             state = evaluate(card, today, self.thresholds)
             before = previous.get(card.nm_id)
@@ -139,16 +151,19 @@ class CollectionService:
             problems += int(state.problem)
             row = self._row(seller_id, card, state, before, moment)
             rows.append(row)
-            alert = not baseline and should_alert(_previous(before), state)
+            decision = alert_decision(_previous(before), state, stock=stock.get(card.nm_id), min_stock=self.min_stock)
+            row["episode_alerted"] = decision.already
+            if decision.send:
+                notifiable.append(row)
+            alert = not baseline and decision.send
+            transition = None
             if alert or _changed(before, state):
                 transition = self._transition(seller_id, card.nm_id, before, state, moment)
                 transitions.append(transition)
-                if alert:
-                    alerts.append((row, transition))
+            if alert:
+                alerts.append((row, transition))
 
         closed = [] if incremental else [nm_id for nm_id in previous if nm_id not in unique]
-        await self.documents.save_states(rows)
-        await self.documents.close_states(seller_id, closed, moment)
 
         sent = 0
         summary_sent = False
@@ -160,14 +175,22 @@ class CollectionService:
                 params={
                     "seller_name": seller_name,
                     "cards": len(unique),
-                    "problems": problems,
+                    "problems": len(notifiable),
+                    "skipped_without_stock": problems - len(notifiable),
                     "digest_time": self.digest_time,
                 },
             )
+            for row in notifiable:
+                row["episode_alerted"] = summary_sent
         else:
             for row, transition in alerts:
-                transition["alerted"] = await self._alert(seller_id, seller_name, row, today)
-                sent += int(transition["alerted"])
+                queued = await self._alert(seller_id, seller_name, row, today)
+                row["episode_alerted"] = queued
+                if transition is not None:
+                    transition["alerted"] = queued
+                sent += int(queued)
+        await self.documents.save_states(rows)
+        await self.documents.close_states(seller_id, closed, moment)
         await self.documents.add_transitions(transitions)
         stored = (
             (tracked.cursor_updated_at, tracked.cursor_nm_id)
@@ -296,7 +319,7 @@ class CollectionService:
 def _previous(model: CardStateModel | None) -> PreviousState | None:
     if model is None:
         return None
-    return PreviousState(model.state, model.reason, model.document_number, model.threshold)
+    return PreviousState(model.state, model.reason, model.document_number, model.threshold, model.episode_alerted)
 
 
 def _changed(before: CardStateModel | None, state: CardState) -> bool:

@@ -352,20 +352,26 @@ def _card_documents_alert(params: dict[str, Any]) -> str:
 
 
 def _card_documents_baseline(params: dict[str, Any]) -> str:
+    """`problems` — только карточки с остатком (или с неизвестным остатком); остальные — `skipped_without_stock`."""
     cards = int(params.get("cards") or 0)
     problems = int(params.get("problems") or 0)
+    skipped = int(params.get("skipped_without_stock") or 0)
     head = (
         f"{params.get('seller_name') or 'Магазин'}: взяли под наблюдение {cards} "
         f"{_plural(cards, 'карточку', 'карточки', 'карточек')}"
     )
     if problems:
         tail = (
-            f"{problems} {_plural(problems, 'карточка', 'карточки', 'карточек')} с проблемами в документах — "
+            f"{problems} {_plural(problems, 'карточка', 'карточки', 'карточек')} с остатком "
+            "и проблемами в документах — "
             f"список придёт в дайджесте в {params.get('digest_time') or '10:00'} и есть в Marketplace Auto."
         )
     else:
-        tail = "Проблем с документами нет. Напишу, когда WB отклонит документ или подойдёт срок."
-    return f"{head}.\n{tail}"
+        tail = "Проблем с документами у товаров с остатком нет. Напишу, когда WB отклонит документ или подойдёт срок."
+    lines = [f"{head}.", tail]
+    if skipped:
+        lines.append(f"Без остатка пропущено {skipped}: напишу, если по ним появится остаток.")
+    return "\n".join(lines)
 
 
 def _moscow(value: Any) -> str | None:

@@ -193,8 +193,10 @@ class CardDocumentsConfig:
     запасом `cursor_margin_seconds`, WB двигает `updatedAt` при каждом новом результате
     проверки. Раз в `full_interval_hours` — полный обход: только он замечает карточки, ушедшие
     из каталога. В `skip_hours` плановый сбор не начинается: это окна каталога (02:30) и
-    чек-листа (05:00). Сбои наблюдения показываются баннерами на странице, `stale_hours`
-    — порог баннера «данные устарели».
+    чек-листа (05:00). Уведомления (алерты, сводка, дайджест) — только по карточкам с
+    остатком FBO + FBS из зеркала не меньше `min_stock_for_alerts`; зеркало старше
+    `stock_fresh_hours` — остаток неизвестен, и уведомление не подавляется. Сбои наблюдения
+    показываются баннерами на странице, `stale_hours` — порог баннера «данные устарели».
     """
 
     timezone: str = "Europe/Moscow"
@@ -208,6 +210,8 @@ class CardDocumentsConfig:
     digest_minute: int = 0
     skip_hours: tuple[int, ...] = (2, 5)
     notification_bot: str = "card-documents"
+    min_stock_for_alerts: int = 1
+    stock_fresh_hours: int = 48
 
 
 @dataclass(frozen=True, slots=True)
@@ -528,6 +532,8 @@ class Settings:
             "stale_hours",
             "digest_hour",
             "digest_minute",
+            "min_stock_for_alerts",
+            "stock_fresh_hours",
         ):
             if key in card_documents:
                 card_documents[key] = int(card_documents[key] or 0)
@@ -732,6 +738,10 @@ class Settings:
             raise ValueError("card_documents.skip_hours must contain hours between 0 and 23 and leave some free")
         if not documents.notification_bot:
             raise ValueError("card_documents.notification_bot must be set")
+        if documents.min_stock_for_alerts < 0:
+            raise ValueError("card_documents.min_stock_for_alerts must not be negative")
+        if documents.stock_fresh_hours < 1:
+            raise ValueError("card_documents.stock_fresh_hours must be positive")
         if self.fbs_stocks.poll_minutes < 1:
             raise ValueError("fbs_stocks.poll_minutes must be positive")
         if self.fbs_stocks.retry_minutes < 1:

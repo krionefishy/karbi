@@ -15,6 +15,9 @@ class CardDocumentsSummaryResponse(BaseModel):
     missing: int
     expiring: int
     mismatch: int
+    with_stock_problems: int = Field(
+        description="Проблемные карточки, о которых шлются уведомления: остаток не меньше порога или неизвестен."
+    )
 
 
 class CardDocumentItemResponse(BaseModel):
@@ -30,6 +33,9 @@ class CardDocumentItemResponse(BaseModel):
     days_left: int | None
     checked_at: datetime | None
     since: datetime | None
+    stock: int | None = Field(
+        description="Остаток FBO + FBS из зеркала WB; null — неизвестен (зеркало старше срока или карточки в нём нет)."
+    )
 
 
 class CardDocumentsNoticeResponse(BaseModel):

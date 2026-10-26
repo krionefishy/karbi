@@ -9,6 +9,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotRegistry, SubscriptionService
+from backend.modules.notifications.application.templates import render
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.postgres.models import BotModel, SubscriptionModel
 from backend.modules.wb_card_documents.application import (
@@ -18,6 +19,7 @@ from backend.modules.wb_card_documents.application import (
     CardDocumentsPublisher,
     CardDocumentsService,
     CollectionService,
+    MirrorStockSource,
     NotificationService,
 )
 from backend.modules.wb_card_documents.domain import CardDocument, CardDocuments, DeclaredDocument, Verdict
@@ -25,7 +27,8 @@ from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
     TrackedSellerModel,
 )
-from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.domain import MIRROR_STOCKS, StockFact
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError, WBTemporaryError
 from backend.shared.settings import load_settings
@@ -126,6 +129,16 @@ async def seller(database: Database) -> AsyncIterator[uuid.UUID]:
             await session.commit()
 
 
+class FakeStock:
+    """Остаток по nmID; карточки нет в словаре — остаток неизвестен."""
+
+    def __init__(self, values: dict[int, int] | None = None) -> None:
+        self.values = dict(values or {})
+
+    async def stock(self, seller_id: uuid.UUID, *, now: datetime) -> dict[int, int]:
+        return dict(self.values)
+
+
 def publisher(session: AsyncSession, bot: str = BOT) -> CardDocumentsPublisher:
     return CardDocumentsPublisher(session, BotRegistry(session, NotificationRepository(session)), bot_code=bot)
 
@@ -140,6 +153,7 @@ async def collect(
     source: FakeSource | None = None,
     full: bool = False,
     full_interval: timedelta = timedelta(hours=24),
+    stock: dict[int, int] | None = None,
 ):
     if source is not None:
         source.cards_served = cards
@@ -150,17 +164,19 @@ async def collect(
             CardDocumentsRepository(session),
             source or FakeSource(cards),
             publisher(session, bot),
+            FakeStock(stock),
             timezone=MOSCOW,
             full_interval=full_interval,
         ).collect(seller_id, now=now, full=full)
 
 
-def notifications(session: AsyncSession) -> NotificationService:
+def notifications(session: AsyncSession, stock: dict[int, int] | None = None) -> NotificationService:
     return NotificationService(
         session,
         SellerRepository(session),
         CardDocumentsRepository(session),
         publisher(session),
+        FakeStock(stock),
         timezone=MOSCOW,
         digest_hour=10,
         digest_minute=0,
@@ -168,7 +184,7 @@ def notifications(session: AsyncSession) -> NotificationService:
     )
 
 
-def board_service(session: AsyncSession) -> CardDocumentsService:
+def board_service(session: AsyncSession, stock: dict[int, int] | None = None) -> CardDocumentsService:
     return CardDocumentsService(
         session,
         SellerRepository(session),
@@ -178,6 +194,7 @@ def board_service(session: AsyncSession) -> CardDocumentsService:
         bot_code=BOT,
         timezone=MOSCOW,
         stale_hours=9,
+        stocks=FakeStock(stock),
     )
 
 
@@ -670,3 +687,187 @@ async def test_the_cursor_keeps_the_latest_card_including_ties(database: Databas
     await collect(database, seller, [], source=source, now=NOW + timedelta(hours=1))
 
     assert source.calls[-1] == (same - timedelta(seconds=60), 7)
+
+
+def alert_templates(events: list[dict]) -> list[tuple[int, str]]:
+    return [
+        (event["params"]["nm_id"], event["params"]["state"]) for event in events if event["template"] == TEMPLATE_ALERT
+    ]
+
+
+async def test_a_problem_at_zero_stock_is_not_announced(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [card(1), card(2)], stock={1: 0, 2: 3})
+
+    result = await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found")],
+        now=NOW + timedelta(hours=1),
+        stock={1: 0, 2: 3},
+    )
+
+    assert result.alerts == 1
+    assert alert_templates(await outbox(database, seller)) == [(2, "rejected")]
+    async with database.session() as session:
+        repository = CardDocumentsRepository(session)
+        states = await repository.open_states(seller)
+        journal = {row.nm_id: row.alerted for row in await repository.transitions(seller)}
+    assert (states[1].state, states[1].episode_alerted) == ("rejected", False)
+    assert (states[2].state, states[2].episode_alerted) == ("rejected", True)
+    assert journal == {1: False, 2: True}
+
+
+async def test_stock_appearing_on_an_open_problem_announces_it_once(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [card(1)], stock={1: 0})
+    await collect(database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=1), stock={1: 0})
+
+    appeared = await collect(
+        database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=2), stock={1: 5}
+    )
+    again = await collect(database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=3), stock={1: 5})
+    gone = await collect(database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=4), stock={1: 0})
+    back = await collect(database, seller, [card(1, "document_not_found")], now=NOW + timedelta(hours=5), stock={1: 7})
+
+    assert (appeared.alerts, again.alerts, gone.alerts, back.alerts) == (1, 0, 0, 0)
+    assert alert_templates(await outbox(database, seller)) == [(1, "rejected")]
+    async with database.session() as session:
+        repository = CardDocumentsRepository(session)
+        row = (await repository.open_states(seller))[1]
+        journal = await repository.transitions(seller)
+    assert (row.state, row.episode_alerted) == ("rejected", True)
+    assert [(entry.from_state, entry.to_state, entry.alerted) for entry in journal] == [
+        ("ok", "rejected", False),
+        ("rejected", "rejected", True),
+    ]
+
+
+async def test_a_new_episode_after_recovery_is_announced_again(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [card(1)], stock={1: 2})
+    steps = [("document_not_found", 1), ("valid", 2), ("document_not_found", 3)]
+
+    results = [
+        (await collect(database, seller, [card(1, reason)], now=NOW + timedelta(hours=hours), stock={1: 2})).alerts
+        for reason, hours in steps
+    ]
+
+    assert results == [1, 0, 1]
+    keys = [event["dedupe_key"] for event in await outbox(database, seller) if event["template"] == TEMPLATE_ALERT]
+    assert len(set(keys)) == 2
+
+
+async def test_unknown_stock_does_not_suppress_the_alert(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [card(1), card(2)], stock={2: 0})
+
+    result = await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found")],
+        now=NOW + timedelta(hours=1),
+        stock={2: 0},
+    )
+
+    assert result.alerts == 1
+    assert alert_templates(await outbox(database, seller)) == [(1, "rejected")]
+
+
+async def test_the_first_summary_counts_only_cards_with_stock(database: Database, seller: uuid.UUID) -> None:
+    result = await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found"), card(3, "document_not_found"), card(4)],
+        stock={1: 4, 2: 0, 4: 0},
+    )
+
+    assert result.summary_sent
+    [event] = await outbox(database, seller)
+    assert (event["params"]["problems"], event["params"]["skipped_without_stock"]) == (2, 1)
+    assert "Без остатка пропущено 1" in render(TEMPLATE_BASELINE, event["params"])
+    async with database.session() as session:
+        states = await CardDocumentsRepository(session).open_states(seller)
+    assert {nm_id: row.episode_alerted for nm_id, row in states.items()} == {1: True, 2: False, 3: True, 4: False}
+
+    later = await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found"), card(3, "document_not_found"), card(4)],
+        now=NOW + timedelta(hours=1),
+        stock={1: 4, 2: 6, 4: 0},
+    )
+    assert later.alerts == 1
+    assert alert_templates(await outbox(database, seller)) == [(2, "rejected")]
+
+
+async def test_the_digest_lists_only_cards_with_stock(database: Database, seller: uuid.UUID) -> None:
+    morning = datetime.combine(TODAY, datetime.min.time(), tzinfo=MOSCOW).replace(hour=9, minute=30)
+    await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found"), card(3, "document_not_found")],
+        now=morning.astimezone(UTC),
+        stock={1: 3, 2: 0},
+    )
+
+    async with database.session() as session:
+        report = await notifications(session, {1: 3, 2: 0}).watch(seller, now=morning.replace(hour=10, minute=5))
+
+    assert report.digest
+    digest = (await outbox(database, seller))[-1]
+    assert digest["template"] == TEMPLATE_DIGEST
+    assert [item["nm_id"] for item in digest["params"]["items"]] == [1, 3]
+
+
+async def test_no_digest_when_every_problem_is_out_of_stock(database: Database, seller: uuid.UUID) -> None:
+    morning = datetime.combine(TODAY, datetime.min.time(), tzinfo=MOSCOW).replace(hour=9, minute=30)
+    await collect(database, seller, [card(1, "document_not_found")], now=morning.astimezone(UTC), stock={1: 0})
+
+    async with database.session() as session:
+        report = await notifications(session, {1: 0}).watch(seller, now=morning.replace(hour=10, minute=5))
+
+    assert not report.digest
+    assert [event["template"] for event in await outbox(database, seller)] == [TEMPLATE_BASELINE]
+
+
+async def test_expiry_warnings_wait_for_stock(database: Database, seller: uuid.UUID) -> None:
+    await collect(database, seller, [card(1, end=day(NOW) + timedelta(days=60))], stock={1: 0})
+
+    moment = NOW + timedelta(hours=1)
+    quiet = await collect(database, seller, [card(1, end=day(moment) + timedelta(days=20))], now=moment, stock={1: 0})
+    later = NOW + timedelta(hours=2)
+    stocked = await collect(database, seller, [card(1, end=day(later) + timedelta(days=20))], now=later, stock={1: 1})
+
+    assert (quiet.alerts, stocked.alerts) == (0, 1)
+    [alert] = [event for event in await outbox(database, seller) if event["template"] == TEMPLATE_ALERT]
+    assert alert["params"]["state"] == "expiring"
+
+
+async def test_the_board_shows_stock_and_counts_problems_worth_a_message(database: Database, seller: uuid.UUID) -> None:
+    await collect(
+        database,
+        seller,
+        [card(1, "document_not_found"), card(2, "document_not_found"), card(3, "document_not_found"), card(4)],
+    )
+
+    async with database.session() as session:
+        board = await board_service(session, {1: 5, 2: 0, 4: 0}).board(seller, now=NOW)
+
+    assert {item.nm_id: item.stock for item in board.items} == {1: 5, 2: 0, 3: None, 4: 0}
+    assert (board.summary.rejected, board.summary.with_stock_problems) == (3, 2)
+
+
+async def test_the_mirror_stock_is_fbo_plus_fbs_and_goes_unknown_when_stale(
+    database: Database, seller: uuid.UUID
+) -> None:
+    source = MirrorStockSource
+    async with database.session() as session:
+        stocks = source(session, fresh_hours=48)
+        assert await stocks.stock(seller, now=NOW) == {}
+
+        mirror = MirrorRepository(session)
+        collected = NOW - timedelta(hours=10)
+        await mirror.record_attempt(seller, MIRROR_STOCKS, now=collected)
+        await mirror.replace_stocks(seller, [StockFact("101", 3, 3, 2), StockFact("102", 0, 0, 0)], {}, now=collected)
+        await mirror.mark_collected(seller, MIRROR_STOCKS, now=collected)
+        await session.commit()
+
+        assert await stocks.stock(seller, now=NOW) == {101: 5, 102: 0}
+        assert await stocks.stock(seller, now=collected + timedelta(hours=49)) == {}

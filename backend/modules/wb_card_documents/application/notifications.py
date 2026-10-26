@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotNotFoundError, BotRegistry
-from backend.modules.wb_card_documents.domain import PROBLEMS, rank
+from backend.modules.wb_card_documents.application.stock import StockSource
+from backend.modules.wb_card_documents.domain import PROBLEMS, rank, stock_passes
 from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
     CardStateModel,
@@ -137,7 +138,11 @@ class WatchReport:
 
 
 class NotificationService:
-    """Сообщение по расписанию: дайджест открытых проблем раз в сутки."""
+    """Сообщение по расписанию: дайджест открытых проблем раз в сутки.
+
+    В дайджест идут только проблемные карточки с остатком не меньше `min_stock` или с
+    неизвестным остатком; если таких нет, сообщения нет.
+    """
 
     def __init__(
         self,
@@ -145,11 +150,13 @@ class NotificationService:
         sellers: SellerRepository,
         documents: CardDocumentsRepository,
         publisher: CardDocumentsPublisher,
+        stocks: StockSource,
         *,
         timezone: ZoneInfo,
         digest_hour: int,
         digest_minute: int,
         stale_hours: int,
+        min_stock: int = 1,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -159,6 +166,8 @@ class NotificationService:
         self.digest_hour = digest_hour
         self.digest_minute = digest_minute
         self.stale = timedelta(hours=stale_hours)
+        self.stocks = stocks
+        self.min_stock = min_stock
 
     async def watch(self, seller_id: uuid.UUID, *, now: datetime) -> WatchReport:
         tracked = await self.documents.tracked(seller_id)
@@ -188,8 +197,13 @@ class NotificationService:
         if await self.documents.logged(seller_id, KIND_DIGEST, key):
             return False
         states = await self.documents.open_states(seller_id)
+        stock = await self.stocks.stock(seller_id, now=now)
         problems = sorted(
-            (row for row in states.values() if row.state in PROBLEMS),
+            (
+                row
+                for row in states.values()
+                if row.state in PROBLEMS and stock_passes(stock.get(row.nm_id), self.min_stock)
+            ),
             key=lambda row: (rank(row.state), row.vendor_code.lower(), row.nm_id),
         )
         sent = False

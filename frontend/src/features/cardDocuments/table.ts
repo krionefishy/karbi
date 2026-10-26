@@ -88,6 +88,33 @@ export interface Tile {
   key: DocumentFilter;
   label: string;
   count: number;
+  note: string | null;
+}
+
+export function hasStock(item: CardDocumentItem): boolean {
+  return item.stock === null || item.stock > 0;
+}
+
+export function stockText(stock: number | null): string {
+  return stock === null ? "—" : String(stock);
+}
+
+export function summarize(items: CardDocumentItem[], withStockProblems: number): CardDocumentsSummary {
+  const summary: CardDocumentsSummary = {
+    total: items.length,
+    ok: 0,
+    rejected: 0,
+    missing: 0,
+    expiring: 0,
+    mismatch: 0,
+    with_stock_problems: withStockProblems,
+  };
+  for (const item of items) summary[item.state] += 1;
+  return summary;
+}
+
+export function tileSummary(data: CardDocuments, onlyStock: boolean): CardDocumentsSummary {
+  return onlyStock ? summarize(data.items.filter(hasStock), data.summary.with_stock_problems) : data.summary;
 }
 
 export function problemCount(summary: CardDocumentsSummary): number {
@@ -96,19 +123,30 @@ export function problemCount(summary: CardDocumentsSummary): number {
 
 export function tiles(summary: CardDocumentsSummary): Tile[] {
   return [
-    { key: "problems", label: "С проблемами", count: problemCount(summary) },
-    { key: "rejected", label: "Отклонены WB", count: summary.rejected },
-    { key: "missing", label: "Нет документа", count: summary.missing },
-    { key: "expiring", label: "Истекает срок", count: summary.expiring },
-    { key: "mismatch", label: "Расхождения", count: summary.mismatch },
-    { key: "ok", label: "В порядке", count: summary.ok },
-    { key: "all", label: "Всего карточек", count: summary.total },
+    {
+      key: "problems",
+      label: "С проблемами",
+      count: problemCount(summary),
+      note: `по ним идут уведомления: ${summary.with_stock_problems}`,
+    },
+    { key: "rejected", note: null, label: "Отклонены WB", count: summary.rejected },
+    { key: "missing", note: null, label: "Нет документа", count: summary.missing },
+    { key: "expiring", note: null, label: "Истекает срок", count: summary.expiring },
+    { key: "mismatch", note: null, label: "Расхождения", count: summary.mismatch },
+    { key: "ok", note: null, label: "В порядке", count: summary.ok },
+    { key: "all", note: null, label: "Всего карточек", count: summary.total },
   ];
 }
 
-export function visibleItems(items: CardDocumentItem[], filter: DocumentFilter, search: string): CardDocumentItem[] {
+export function visibleItems(
+  items: CardDocumentItem[],
+  filter: DocumentFilter,
+  search: string,
+  onlyStock = false,
+): CardDocumentItem[] {
   const query = search.trim().toLowerCase();
   return items.filter((item) => {
+    if (onlyStock && !hasStock(item)) return false;
     if (filter === "problems" && item.state === "ok") return false;
     if (filter !== "problems" && filter !== "all" && item.state !== filter) return false;
     if (!query) return true;
@@ -183,9 +221,16 @@ export function banners(data: CardDocuments, canInvite: boolean, now: Date = new
   }));
 }
 
-export function emptyMessage(filter: DocumentFilter, summary: CardDocumentsSummary, search: string): string {
+export function emptyMessage(
+  filter: DocumentFilter,
+  summary: CardDocumentsSummary,
+  search: string,
+  onlyStock = false,
+): string {
   if (search.trim()) return "По запросу карточек не нашлось.";
-  if (summary.total === 0) return "В кабинете нет карточек с документами.";
+  if (summary.total === 0) {
+    return onlyStock ? "Среди товаров с остатком карточек нет." : "В кабинете нет карточек с документами.";
+  }
   if (filter === "problems") return `Проблем нет: у всех ${summary.total} карточек документы в порядке.`;
   return "В этой группе карточек нет.";
 }

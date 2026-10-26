@@ -16,6 +16,7 @@ class DocumentsRow:
     days_left: int | None
     checked_at: datetime | None
     since: datetime | None
+    stock: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ class DocumentsSummary:
     missing: int = 0
     expiring: int = 0
     mismatch: int = 0
+    with_stock_problems: int = 0
 
 
 NOTICE_STALE = "stale"

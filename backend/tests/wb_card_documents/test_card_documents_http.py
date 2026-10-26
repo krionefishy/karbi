@@ -9,6 +9,8 @@ from sqlalchemy import delete, update
 from backend.app.factory import Application
 from backend.modules.notifications.infrastructure.postgres.models import BotModel, SubscriptionModel
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
+from backend.modules.wb_core.domain import MIRROR_STOCKS, StockFact
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.shared.settings import load_settings
 from backend.tests.operators import operator_token
@@ -83,7 +85,15 @@ async def test_a_connected_seller_starts_empty_and_can_press_refresh(client: Asy
         "collected_at": None,
         "last_error": None,
         "stale": True,
-        "summary": {"total": 0, "ok": 0, "rejected": 0, "missing": 0, "expiring": 0, "mismatch": 0},
+        "summary": {
+            "total": 0,
+            "ok": 0,
+            "rejected": 0,
+            "missing": 0,
+            "expiring": 0,
+            "mismatch": 0,
+            "with_stock_problems": 0,
+        },
         "items": [],
     }
     assert (await client.get(f"{API}/sellers/{seller}/refresh")).json() is None
@@ -179,3 +189,52 @@ async def test_the_old_fields_are_marked_deprecated_in_openapi(application: Appl
     assert board["properties"]["last_error"]["deprecated"] is True
     assert "notices" in board["required"]
     assert set(schemas["CardDocumentsNoticeResponse"]["properties"]) == {"kind", "level", "since", "detail"}
+
+
+async def test_items_carry_stock_and_null_means_unknown(
+    application: Application, client: AsyncClient, seller: uuid.UUID
+) -> None:
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    now = datetime.now(UTC)
+    async with application.database.session() as session:
+        await CardDocumentsRepository(session).save_states(
+            [
+                {
+                    "seller_id": seller,
+                    "nm_id": nm_id,
+                    "vendor_code": f"VK-{nm_id}",
+                    "title": "Товар",
+                    "subject_name": "Воздуходувки",
+                    "state": "rejected",
+                    "reason": "document_not_found",
+                    "document_number": None,
+                    "document_start": None,
+                    "document_end": None,
+                    "document_endless": False,
+                    "threshold": None,
+                    "episode_alerted": False,
+                    "verdict_at": None,
+                    "overall_status": None,
+                    "overall_reason": None,
+                    "overall_at": None,
+                    "documents": [],
+                    "declared": {},
+                    "since": now,
+                    "checked_at": now,
+                    "closed_at": None,
+                }
+                for nm_id in (101, 102)
+            ]
+        )
+        mirror = MirrorRepository(session)
+        await mirror.record_attempt(seller, MIRROR_STOCKS, now=now)
+        await mirror.replace_stocks(seller, [StockFact("101", 2, 2, 1)], {}, now=now)
+        await mirror.mark_collected(seller, MIRROR_STOCKS, now=now)
+        await session.commit()
+
+    body = (await client.get(f"{API}/sellers/{seller}")).json()
+
+    assert {item["nm_id"]: item["stock"] for item in body["items"]} == {101: 3, 102: None}
+    assert body["summary"]["with_stock_problems"] == 2
+    schema = application.get_app().openapi()["components"]["schemas"]["CardDocumentItemResponse"]
+    assert "null" in schema["properties"]["stock"]["description"]

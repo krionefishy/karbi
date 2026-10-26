@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.notifications.application import BotNotFoundError, BotRegistry, SubscriptionService
 from backend.modules.notifications.domain import Invite
 from backend.modules.wb_card_documents.application.notifications import remaining_days
+from backend.modules.wb_card_documents.application.stock import StockSource
 from backend.modules.wb_card_documents.application.view import (
     LEVEL_DANGER,
     LEVEL_WARNING,
@@ -22,7 +23,7 @@ from backend.modules.wb_card_documents.application.view import (
     Notice,
     RefreshRequest,
 )
-from backend.modules.wb_card_documents.domain import STATES, rank
+from backend.modules.wb_card_documents.domain import PROBLEMS, STATES, rank, stock_passes
 from backend.modules.wb_card_documents.infrastructure.postgres import (
     CardDocumentsRepository,
     RefreshRequestModel,
@@ -54,6 +55,8 @@ class CardDocumentsService:
         bot_code: str,
         timezone: ZoneInfo,
         stale_hours: int,
+        stocks: StockSource,
+        min_stock: int = 1,
     ) -> None:
         self.session = session
         self.sellers = sellers
@@ -63,6 +66,8 @@ class CardDocumentsService:
         self.bot_code = bot_code
         self.timezone = timezone
         self.stale = timedelta(hours=stale_hours)
+        self.stocks = stocks
+        self.min_stock = min_stock
 
     async def overview(self) -> CardDocumentsOverview:
         tracked = await self.documents.tracked_seller_ids()
@@ -81,6 +86,7 @@ class CardDocumentsService:
         tracked = await self.documents.tracked(seller_id)
         moment = now or datetime.now(UTC)
         today = moment.astimezone(self.timezone).date()
+        stock = await self.stocks.stock(seller_id, now=moment)
         rows = [
             DocumentsRow(
                 nm_id=row.nm_id,
@@ -95,6 +101,7 @@ class CardDocumentsService:
                 days_left=remaining_days(row.document_end, row.document_endless, today),
                 checked_at=row.verdict_at,
                 since=row.since,
+                stock=stock.get(row.nm_id),
             )
             for row in (await self.documents.open_states(seller_id)).values()
         ]
@@ -107,12 +114,13 @@ class CardDocumentsService:
             )
         )
         counts = {name: sum(1 for row in rows if row.state == name) for name in STATES}
+        with_stock = sum(1 for row in rows if row.state in PROBLEMS and stock_passes(row.stock, self.min_stock))
         collected_at = tracked.collected_at if tracked else None
         return DocumentsBoard(
             collected_at=collected_at,
             last_error=tracked.collection_error if tracked else None,
             stale=collected_at is None or collected_at < moment - self.stale,
-            summary=DocumentsSummary(total=len(rows), **counts),
+            summary=DocumentsSummary(total=len(rows), with_stock_problems=with_stock, **counts),
             items=tuple(row for row in rows if state is None or row.state == state),
             notices=await self._notices(seller_id, tracked, moment),
         )

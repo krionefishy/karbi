@@ -502,6 +502,8 @@ def test_templates_render_every_message() -> None:
     assert "взяли под наблюдение 120 карточек" in render(
         TEMPLATE_BASELINE, {"seller_name": "ИП", "cards": 120, "problems": 3}
     )
-    assert "3 карточки с проблемами" in render(TEMPLATE_BASELINE, {"seller_name": "ИП", "cards": 120, "problems": 3})
+    assert "3 карточки с остатком и проблемами" in render(
+        TEMPLATE_BASELINE, {"seller_name": "ИП", "cards": 120, "problems": 3}
+    )
     digest = render(TEMPLATE_DIGEST, {"seller_name": "ИП", "items": [card, {**card, "state": "missing"}]})
     assert digest.startswith("ИП: 2 карточки с проблемами в документах")

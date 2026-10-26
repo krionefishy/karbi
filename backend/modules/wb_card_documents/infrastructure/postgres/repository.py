@@ -27,6 +27,7 @@ _STATE_COLUMNS = (
     "document_end",
     "document_endless",
     "threshold",
+    "episode_alerted",
     "verdict_at",
     "overall_status",
     "overall_reason",

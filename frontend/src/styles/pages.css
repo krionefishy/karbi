@@ -517,7 +517,7 @@
 .docs-banner p { margin: 0; max-width: 760px; color: var(--ink); }
 .docs-retry { height: var(--control-sm); margin-top: var(--space-2); }
 .docs-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
-.docs-table { width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 13px; line-height: 18px; }
+.docs-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 13px; line-height: 18px; }
 .docs-table thead th { height: 36px; padding: 0 var(--space-3); color: var(--ink-muted); background: var(--surface-sunken); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; text-align: left; white-space: nowrap; }
 .docs-table tbody td { padding: 8px var(--space-3); border-bottom: 1px solid var(--line); vertical-align: top; }
 .docs-table tbody tr:last-child td { border-bottom: 0; }
@@ -525,6 +525,9 @@
 .docs-table td small { display: block; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
 .docs-product { min-width: 220px; max-width: 320px; }
 .docs-vendor { white-space: nowrap; }
+.docs-stock { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.docs-stock-empty { color: var(--ink-disabled); }
+.docs-tile small { color: var(--ink-muted); font-size: 11px; line-height: 14px; }
 .checklist-toolbar input.docs-search { width: 360px; max-width: 100%; }
 .docs-product strong { display: block; overflow-wrap: anywhere; }
 .docs-nm { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }

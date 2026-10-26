@@ -130,6 +130,10 @@ card_documents:
   # Плановый сбор не стартует в окна каталога (02:30) и чек-листа (05:00): бюджет «Контента» общий.
   skip_hours: [2, 5]
   notification_bot: ${CARD_DOCUMENTS_NOTIFICATION_BOT:-card-documents}
+  # Уведомления только по карточкам с остатком FBO + FBS (зеркало wb_core) не меньше порога;
+  # зеркало старше stock_fresh_hours — остаток неизвестен, уведомление не подавляется.
+  min_stock_for_alerts: 1
+  stock_fresh_hours: 48
 
 support_bot:
   # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
