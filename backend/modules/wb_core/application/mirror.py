@@ -13,6 +13,8 @@ from backend.modules.wb_core.domain import (
     MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_OZON_ACCRUALS,
+    MIRROR_OZON_ADVERTS,
+    MIRROR_OZON_PRODUCTS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -31,6 +33,8 @@ from backend.modules.wb_core.infrastructure.wb import (
     CatalogCard,
     FeedbackAggregation,
     OzonFinanceClient,
+    OzonPerformanceClient,
+    OzonProductClient,
     WBAdvertClient,
     WBAnalyticsClient,
     WBChatClient,
@@ -129,6 +133,19 @@ class OzonAccrualsOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class OzonProductsOutcome:
+    products: int
+
+
+@dataclass(frozen=True, slots=True)
+class OzonAdvertsOutcome:
+    windows: int
+    campaigns: int
+    stat_rows: int
+    collected_through: date | None
+
+
+@dataclass(frozen=True, slots=True)
 class SalesReportsOutcome:
     reports: int
     loaded: int
@@ -162,6 +179,8 @@ class MirrorService:
         sales_reports: WBSalesReportsClient | None = None,
         adverts: WBAdvertClient | None = None,
         ozon_finance: OzonFinanceClient | None = None,
+        ozon_products: OzonProductClient | None = None,
+        ozon_performance: OzonPerformanceClient | None = None,
         orders_history_months: int = 6,
         chats_history_days: int = 90,
         chats_pages_per_run: int = 100,
@@ -173,6 +192,8 @@ class MirrorService:
         ozon_history_from: date = date(2026, 1, 1),
         ozon_days_per_run: int = 14,
         ozon_overlap_days: int = 3,
+        ozon_adverts_windows_per_run: int = 2,
+        ozon_adverts_overlap_days: int = 3,
         heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
@@ -196,6 +217,10 @@ class MirrorService:
         self.ozon_history_from = ozon_history_from
         self.ozon_days_per_run = ozon_days_per_run
         self.ozon_overlap_days = ozon_overlap_days
+        self.ozon_products = ozon_products
+        self.ozon_performance = ozon_performance
+        self.ozon_adverts_windows_per_run = ozon_adverts_windows_per_run
+        self.ozon_adverts_overlap_days = ozon_adverts_overlap_days
         self._heartbeat = heartbeat or (lambda: None)
         self.logger = logging.getLogger("wb.core.mirror")
 
@@ -597,6 +622,81 @@ class MirrorService:
             await session.commit()
         outcome = OzonAccrualsOutcome(days, lines, collected_through)
         self.logger.info("ozon_accruals_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    async def collect_ozon_products(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OzonProductsOutcome:
+        """Карточки Ozon кабинета целиком — SKU, артикул продавца, название."""
+        if self.ozon_products is None:
+            raise WBPermanentError("Карточки Ozon не подключены к зеркалу")
+        stamp = now or datetime.now(UTC)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_OZON_PRODUCTS, stamp)
+            await session.commit()
+        try:
+            products = await self.ozon_products.products(str(seller_id), heartbeat=self._heartbeat)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_OZON_PRODUCTS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            mirror = MirrorRepository(session)
+            count = await mirror.replace_ozon_products(seller_id, products, now=stamp)
+            await mirror.mark_collected(seller_id, MIRROR_OZON_PRODUCTS, now=stamp)
+            await session.commit()
+        outcome = OzonProductsOutcome(count)
+        self.logger.info("ozon_products_collected", extra={"seller_id": str(seller_id), **asdict(outcome)})
+        return outcome
+
+    async def collect_ozon_adverts(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OzonAdvertsOutcome:
+        """Кампании Ozon и расход по SKU окнами по 31 дню от курсора — как реклама WB.
+
+        Последние дни перечитываются: Ozon уточняет расход задним числом.
+        Сегодняшний день ещё идёт, курсор не заходит за вчера.
+        """
+        if self.ozon_performance is None:
+            raise WBPermanentError("Реклама Ozon не подключена к зеркалу")
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        today = stamp.astimezone(WB_TIMEZONE).date()
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_OZON_ADVERTS, stamp)
+            await session.commit()
+            cursor = await MirrorRepository(session).ozon_advert_cursor(seller_id)
+        start = self.ozon_history_from
+        if cursor is not None:
+            start = max(start, cursor - timedelta(days=self.ozon_adverts_overlap_days))
+        windows = stat_rows = 0
+        collected_through = cursor
+        try:
+            campaigns = await self.ozon_performance.campaigns(seller_key)
+            async with self.database.session() as session:
+                await self._ensure_alive(session, seller_id)
+                await MirrorRepository(session).upsert_ozon_advert_campaigns(seller_id, campaigns, now=stamp)
+                await session.commit()
+            while start <= today and windows < self.ozon_adverts_windows_per_run:
+                self._heartbeat()
+                end = min(start + timedelta(days=MAX_ADVERT_WINDOW - 1), today)
+                stats = await self.ozon_performance.stats(seller_key, campaigns, start, end, heartbeat=self._heartbeat)
+                async with self.database.session() as session:
+                    await self._ensure_alive(session, seller_id)
+                    mirror = MirrorRepository(session)
+                    stat_rows += await mirror.replace_ozon_advert_stats(seller_id, start, end, stats, now=stamp)
+                    collected_through = min(end, today - timedelta(days=1))
+                    if cursor is not None:
+                        collected_through = max(collected_through, cursor)
+                    await mirror.save_ozon_advert_cursor(seller_id, collected_through)
+                    await session.commit()
+                windows += 1
+                start = end + timedelta(days=1)
+        except (WBPermanentError, WBTemporaryError) as error:
+            await self._fail(seller_id, MIRROR_OZON_ADVERTS, str(error))
+            raise
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_OZON_ADVERTS, now=stamp)
+            await session.commit()
+        outcome = OzonAdvertsOutcome(windows, len(campaigns), stat_rows, collected_through)
+        self.logger.info("ozon_adverts_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
 
     async def collect_sales_reports(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> SalesReportsOutcome:

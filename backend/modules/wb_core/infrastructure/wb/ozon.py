@@ -1,5 +1,7 @@
+import asyncio
 import logging
-from datetime import date
+from collections.abc import Callable, Iterable
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -10,13 +12,26 @@ from backend.modules.wb_core.domain import (
     OZON_LINE_NON_ITEM,
     OZON_LINE_SALE,
     OzonAccrualLine,
+    OzonAdvertCampaign,
+    OzonAdvertStat,
+    OzonProduct,
 )
-from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
+from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 
 OZON_SELLER_API = "seller"
 OZON_PERFORMANCE_API = "performance"
 MAX_PAGES = 200
+# Карточек на страницу списка и в запросе подробностей — потолки Ozon.
+PRODUCTS_PAGE = 1000
+# Performance: кампаний в одном отчёте и дней в окне — потолки Ozon; отчёт готовится
+# асинхронно, готовность опрашивается раз в несколько секунд.
+STATS_CAMPAIGNS_CHUNK = 10
+STATS_MAX_WINDOW_DAYS = 62
+STATS_POLL_SECONDS = 3.0
+STATS_POLL_ATTEMPTS = 100
+# Реферальные кампании (блогеры, VK) статистики по SKU не имеют — отчёт по ним не просят.
+STATS_SKIPPED_OBJECT_TYPES = frozenset({"REF_BLOGGER", "REF_VK"})
 KOPECK = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -59,12 +74,15 @@ class OzonJsonClient:
         self.priority = priority
         self.logger = logging.getLogger(f"ozon.{self.api}.client")
 
-    async def request(self, method: str, path: str, seller_id: str, *, json: Any | None = None) -> Any:
+    async def request(
+        self, method: str, path: str, seller_id: str, *, json: Any | None = None, params: dict[str, Any] | None = None
+    ) -> Any:
         return await self.gateway.call_ozon(
             seller_id=seller_id,
             api=self.api,
             method=method,
             path=path,
+            params=params,
             json=json,
             priority=self.priority,
             api_name=self.api_name,
@@ -180,3 +198,217 @@ class OzonFinanceClient(OzonJsonClient):
         if non_item:
             add(OZON_LINE_NON_ITEM, type_id=_count(non_item.get("type_id")), amount=_money(non_item.get("accrued")))
         return lines
+
+
+class OzonProductClient(OzonJsonClient):
+    """Карточки кабинета — `/v3/product/list` страницами, названия — из `/v3/product/info/list`."""
+
+    api_name = "Ozon Seller API (карточки)"
+
+    async def products(self, seller_id: str, *, heartbeat: Callable[[], None] | None = None) -> list[OzonProduct]:
+        found: dict[int, OzonProduct] = {}
+        product_ids: list[int] = []
+        last_id = ""
+        for _ in range(MAX_PAGES):
+            if heartbeat is not None:
+                heartbeat()
+            payload = await self.request(
+                "POST",
+                "/v3/product/list",
+                seller_id,
+                json={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": PRODUCTS_PAGE},
+            )
+            result = _mapping(_mapping(payload).get("result"))
+            items = _listing(result.get("items"))
+            for raw in items:
+                raw = _mapping(raw)
+                sku, product_id = _count(raw.get("sku")), _count(raw.get("product_id"))
+                if not sku:
+                    continue
+                found[sku] = OzonProduct(
+                    sku=sku,
+                    product_id=product_id,
+                    offer_id=str(raw.get("offer_id") or ""),
+                    name="",
+                    archived=bool(raw.get("archived")),
+                )
+                product_ids.append(product_id)
+            next_id = str(result.get("last_id") or "")
+            if not items or not next_id or next_id == last_id:
+                break
+            last_id = next_id
+        else:
+            raise WBPermanentError(f"{self.api_name}: список карточек не кончился за {MAX_PAGES} страниц")
+        names = await self._names(seller_id, product_ids, heartbeat)
+        return [
+            OzonProduct(item.sku, item.product_id, item.offer_id, names.get(item.sku, ""), item.archived)
+            for item in found.values()
+        ]
+
+    async def _names(
+        self, seller_id: str, product_ids: list[int], heartbeat: Callable[[], None] | None
+    ) -> dict[int, str]:
+        names: dict[int, str] = {}
+        for offset in range(0, len(product_ids), PRODUCTS_PAGE):
+            if heartbeat is not None:
+                heartbeat()
+            payload = await self.request(
+                "POST",
+                "/v3/product/info/list",
+                seller_id,
+                json={"product_id": product_ids[offset : offset + PRODUCTS_PAGE]},
+            )
+            for raw in _listing(_mapping(payload).get("items")):
+                raw = _mapping(raw)
+                name = str(raw.get("name") or "")
+                for source in _listing(raw.get("sources")):
+                    sku = _count(_mapping(source).get("sku"))
+                    if sku:
+                        names[sku] = name
+                sku = _count(raw.get("sku"))
+                if sku:
+                    names[sku] = name
+        return names
+
+
+class OzonPerformanceClient(OzonJsonClient):
+    """Рекламный кабинет Ozon: кампании и расход по SKU за день.
+
+    Отчёт статистики Ozon готовит асинхронно: запрос возвращает UUID, готовность
+    опрашивается, затем забирается сам отчёт. Отчётов — один за раз на кабинет и
+    до 2000 в сутки, поэтому окно и состав кампаний режутся по потолкам Ozon.
+    """
+
+    api = OZON_PERFORMANCE_API
+    api_name = "Ozon Performance API"
+
+    async def campaigns(self, seller_id: str) -> list[OzonAdvertCampaign]:
+        payload = await self.request("GET", "/api/client/campaign", seller_id)
+        found: list[OzonAdvertCampaign] = []
+        for raw in _listing(_mapping(payload).get("list")):
+            raw = _mapping(raw)
+            campaign_id = _count(raw.get("id")) or _int(raw.get("id"))
+            if not campaign_id:
+                continue
+            found.append(
+                OzonAdvertCampaign(
+                    campaign_id=campaign_id,
+                    title=str(raw.get("title") or ""),
+                    state=str(raw.get("state") or ""),
+                    object_type=str(raw.get("advObjectType") or ""),
+                    payment_type=str(raw.get("PaymentType") or raw.get("paymentType") or ""),
+                )
+            )
+        return found
+
+    async def stats(
+        self,
+        seller_id: str,
+        campaigns: Iterable[OzonAdvertCampaign],
+        date_from: date,
+        date_to: date,
+        *,
+        heartbeat: Callable[[], None] | None = None,
+    ) -> list[OzonAdvertStat]:
+        """Расход по SKU и дням за окно по всем названным кампаниям, кроме реферальных."""
+        if (date_to - date_from).days >= STATS_MAX_WINDOW_DAYS:
+            raise WBPermanentError(f"{self.api_name}: окно статистики не больше {STATS_MAX_WINDOW_DAYS} дней")
+        wanted = sorted({item.campaign_id for item in campaigns if item.object_type not in STATS_SKIPPED_OBJECT_TYPES})
+        stats: list[OzonAdvertStat] = []
+        for offset in range(0, len(wanted), STATS_CAMPAIGNS_CHUNK):
+            if heartbeat is not None:
+                heartbeat()
+            chunk = wanted[offset : offset + STATS_CAMPAIGNS_CHUNK]
+            report = await self._report(seller_id, chunk, date_from, date_to, heartbeat)
+            for campaign_id, raw in _mapping(report).items():
+                stats.extend(self._rows(_int(campaign_id), _mapping(raw)))
+        return stats
+
+    async def _report(
+        self,
+        seller_id: str,
+        campaign_ids: list[int],
+        date_from: date,
+        date_to: date,
+        heartbeat: Callable[[], None] | None,
+    ) -> Any:
+        created = await self.request(
+            "POST",
+            "/api/client/statistics/json",
+            seller_id,
+            json={
+                "campaigns": [str(campaign_id) for campaign_id in campaign_ids],
+                "dateFrom": date_from.isoformat(),
+                "dateTo": date_to.isoformat(),
+                "groupBy": "DATE",
+            },
+        )
+        uuid_ = str(_mapping(created).get("UUID") or "")
+        if not uuid_:
+            raise WBPermanentError(f"{self.api_name}: отчёт статистики не создан — в ответе нет UUID")
+        for _ in range(STATS_POLL_ATTEMPTS):
+            status = _mapping(await self.request("GET", f"/api/client/statistics/{uuid_}", seller_id))
+            state = str(status.get("state") or "")
+            if state == "OK":
+                return await self.request("GET", "/api/client/statistics/report", seller_id, params={"UUID": uuid_})
+            if state == "ERROR":
+                raise WBTemporaryError(f"{self.api_name}: отчёт {uuid_} не собрался: {status.get('error') or state}")
+            if heartbeat is not None:
+                heartbeat()
+            await asyncio.sleep(STATS_POLL_SECONDS)
+        raise WBTemporaryError(f"{self.api_name}: отчёт {uuid_} не готов за {STATS_POLL_ATTEMPTS} опросов")
+
+    @staticmethod
+    def _rows(campaign_id: int, raw: dict[str, Any]) -> list[OzonAdvertStat]:
+        folded: dict[tuple[date, int], list[Any]] = {}
+        for row in _listing(_mapping(raw.get("report")).get("rows")):
+            row = _mapping(row)
+            day = _day(row.get("date"))
+            sku = _int(row.get("sku"))
+            if day is None or not sku:
+                continue
+            values = folded.setdefault((day, sku), [0, 0, 0, ZERO, ZERO])
+            values[0] += _int(row.get("views"))
+            values[1] += _int(row.get("clicks"))
+            values[2] += _int(row.get("orders"))
+            values[3] += _report_money(row.get("moneySpent"))
+            values[4] += _report_money(row.get("ordersMoney"))
+        return [
+            OzonAdvertStat(campaign_id, day, sku, values[0], values[1], values[2], values[3], values[4])
+            for (day, sku), values in folded.items()
+        ]
+
+
+def _int(value: Any) -> int:
+    """Числа в отчётах Performance приходят строками: «17041» и даже «17 041»."""
+    if isinstance(value, bool) or value is None:
+        return 0
+    if isinstance(value, int | float):
+        return int(value)
+    try:
+        return int(str(value).replace("\xa0", "").replace(" ", "").split(",")[0] or 0)
+    except ValueError:
+        return 0
+
+
+def _report_money(value: Any) -> Decimal:
+    """Деньги в отчёте Performance — строка с запятой: «17041,06»."""
+    if value is None or isinstance(value, bool):
+        return ZERO
+    text = str(value).replace("\xa0", "").replace(" ", "").replace(",", ".")
+    try:
+        return Decimal(text or 0).quantize(KOPECK)
+    except (InvalidOperation, ValueError):
+        return ZERO
+
+
+def _day(value: Any) -> date | None:
+    """Дата в отчёте — «19.10.2026»; на всякий случай принимается и ISO."""
+    if not isinstance(value, str) or not value:
+        return None
+    for pattern in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value[:10], pattern).date()
+        except ValueError:
+            continue
+    return None

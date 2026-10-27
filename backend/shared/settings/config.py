@@ -306,6 +306,12 @@ class CoreMirrorConfig:
     ozon_interval_minutes: int = 120
     ozon_days_per_run: int = 45
     ozon_overlap_days: int = 3
+    # Карточки Ozon — раз в сутки; расход рекламы Ozon (Performance API) — окнами по 31 дню,
+    # отчёт на окно готовится асинхронно и тратит суточную квоту выгрузок.
+    ozon_products_interval_minutes: int = 1440
+    ozon_adverts_interval_minutes: int = 360
+    ozon_adverts_windows_per_run: int = 2
+    ozon_adverts_overlap_days: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -572,6 +578,10 @@ class Settings:
             "ozon_interval_minutes",
             "ozon_days_per_run",
             "ozon_overlap_days",
+            "ozon_products_interval_minutes",
+            "ozon_adverts_interval_minutes",
+            "ozon_adverts_windows_per_run",
+            "ozon_adverts_overlap_days",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -778,6 +788,16 @@ class Settings:
             raise ValueError("core_mirror.sales_reports_* must be positive")
         if min(mirror.adverts_interval_minutes, mirror.adverts_windows_per_run) < 1 or mirror.adverts_overlap_days < 0:
             raise ValueError("core_mirror.adverts_* must be positive")
+        if (
+            min(
+                mirror.ozon_products_interval_minutes,
+                mirror.ozon_adverts_interval_minutes,
+                mirror.ozon_adverts_windows_per_run,
+            )
+            < 1
+            or mirror.ozon_adverts_overlap_days < 0
+        ):
+            raise ValueError("core_mirror: ozon products/adverts intervals and windows must be positive")
         if min(mirror.ozon_interval_minutes, mirror.ozon_days_per_run) < 1 or mirror.ozon_overlap_days < 0:
             raise ValueError("core_mirror.ozon_* must be positive")
         try:

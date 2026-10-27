@@ -11,6 +11,8 @@ from backend.modules.wb_core.domain import (
     MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_OZON_ACCRUALS,
+    MIRROR_OZON_ADVERTS,
+    MIRROR_OZON_PRODUCTS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -23,6 +25,9 @@ from backend.shared.heartbeat import touch_heartbeat
 from backend.shared.settings import Settings
 from backend.shared.worker import PollingWorker
 from backend.storage.pg import Database
+
+# Виды зеркала, которые ходят в Ozon: кандидаты — кабинеты с учёткой Ozon.
+OZON_KINDS = (MIRROR_OZON_ACCRUALS, MIRROR_OZON_PRODUCTS, MIRROR_OZON_ADVERTS)
 
 
 class WBCoreWorker(PollingWorker):
@@ -65,6 +70,8 @@ class WBCoreWorker(PollingWorker):
         await self.collect_due(MIRROR_SALES_REPORTS, now)
         await self.collect_due(MIRROR_ADVERTS, now)
         await self.collect_due(MIRROR_OZON_ACCRUALS, now)
+        await self.collect_due(MIRROR_OZON_PRODUCTS, now)
+        await self.collect_due(MIRROR_OZON_ADVERTS, now)
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
@@ -100,6 +107,10 @@ class WBCoreWorker(PollingWorker):
             return now - timedelta(minutes=self.config.adverts_interval_minutes)
         if kind == MIRROR_OZON_ACCRUALS:
             return now - timedelta(minutes=self.config.ozon_interval_minutes)
+        if kind == MIRROR_OZON_PRODUCTS:
+            return now - timedelta(minutes=self.config.ozon_products_interval_minutes)
+        if kind == MIRROR_OZON_ADVERTS:
+            return now - timedelta(minutes=self.config.ozon_adverts_interval_minutes)
         local = now.astimezone(self.timezone)
         if kind == MIRROR_STOCKS:
             marks = [(hour, 0) for hour in sorted(self.config.stock_slot_hours)]
@@ -121,7 +132,7 @@ class WBCoreWorker(PollingWorker):
         async with self.database.session() as session:
             status_of = (
                 (lambda seller: seller.ozon_egress_status)
-                if kind == MIRROR_OZON_ACCRUALS
+                if kind in OZON_KINDS
                 else (lambda seller: seller.egress_status)
             )
             candidates = [
@@ -130,7 +141,7 @@ class WBCoreWorker(PollingWorker):
                 if status_of(seller) in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS, MIRROR_OZON_ACCRUALS):
+            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS, *OZON_KINDS):
                 catalog = await mirror.states(MIRROR_CATALOG)
                 candidates = [
                     seller_id
@@ -160,6 +171,8 @@ class WBCoreWorker(PollingWorker):
             MIRROR_SALES_REPORTS: self.mirror.collect_sales_reports,
             MIRROR_ADVERTS: self.mirror.collect_adverts,
             MIRROR_OZON_ACCRUALS: self.mirror.collect_ozon_accruals,
+            MIRROR_OZON_PRODUCTS: self.mirror.collect_ozon_products,
+            MIRROR_OZON_ADVERTS: self.mirror.collect_ozon_adverts,
         }[kind]
         try:
             await operation(seller_id, now=self._now())
