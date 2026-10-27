@@ -204,3 +204,33 @@ def test_a_stocked_article_without_movement_and_unknown_campaign_spend_get_their
     stocks = stock_rows(rows, last_price_of=lambda nm_id: money(3600))
     assert [(row.nm_id, row.quantity, row.stock_cost) for row in stocks] == [(SAW, 30, money(12000))]
     assert rows[-1].ads.balance == money(7)
+
+
+def test_service_rows_without_a_size_join_the_only_size_and_ads_count_once_per_article() -> None:
+    rows = article_rows(
+        [
+            totals(tech_size="0", doc_type_name="Продажа", quantity=2, gross=money(2000), retail_amount=money(1600)),
+            # Логистика и хранение WB приходят без размера.
+            totals(tech_size="", seller_oper_name="Логистика", delivery_service=money(150)),
+            totals(tech_size="", paid_storage=money(20)),
+            totals(nm_id=SAW, tech_size="S", doc_type_name="Продажа", quantity=1, gross=money(900)),
+            totals(nm_id=SAW, tech_size="M", doc_type_name="Продажа", quantity=3, gross=money(2700)),
+            totals(nm_id=SAW, tech_size="", seller_oper_name="Логистика", delivery_service=money(60)),
+        ],
+        cost_of=lambda nm_id: None,
+        stock_of=lambda nm_id, size: Stock(),
+        ads_of=lambda nm_id: AdSpend(balance=money(100)),
+        tax_rate=Decimal(0),
+    )
+
+    drill = [row for row in rows if row.nm_id == DRILL]
+    assert len(drill) == 1 and (drill[0].tech_size, drill[0].logistics, drill[0].storage) == (
+        "0",
+        money(150),
+        money(20),
+    )
+    assert drill[0].ads.balance == money(100)
+    # Пила в двух размерах: строка без размера остаётся отдельной, реклама — один раз, в самый продаваемый.
+    saw = {row.tech_size: row for row in rows if row.nm_id == SAW}
+    assert set(saw) == {"S", "M", ""} and saw[""].logistics == money(60)
+    assert [size for size, row in saw.items() if row.ads.balance] == ["M"]

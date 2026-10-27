@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.fin_reports.application.ads import week_ads
+from backend.modules.fin_reports.application.ads import period_ads, week_ads
 from backend.modules.fin_reports.application.build import FACTS_VERSION, OZON_FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
@@ -224,12 +224,25 @@ class FinReportsService:
                 column = column_of(period_of(day, granularity), report)
                 if column is not None:
                     column.pending.add(seller.id)
+        mine: dict[Period, Statement] = {}
         for (report_id, period), items in by_period.items():
             report = loaded[report_id]
             column = column_of(period, report)
             if column is None:
                 continue
             figures = statement(items, self._cost_on(book, min(report.date_to, column.date_to)), on_uncosted=remember)
+            mine.setdefault(period, Statement()).add(figures)
+        yesterday = self.today() - timedelta(days=1)
+        for period, figures in mine.items():
+            column = columns[period]
+            # Реклама — списания «ВБ.Продвижения» за дни периода, а не удержания отчёта:
+            # у кабинета с отложенным списанием удержаний нет, а расход есть.
+            ads = await period_ads(self.session, seller.id, since=column.date_from, until=column.date_to)
+            figures.set_advertising(ads.spend.paid, ads.spend.bonus)
+            # Зеркало рекламы отстало от конца периода — период неполный. Кабинет, до которого
+            # зеркало ещё не доходило, не держит период: реклама там просто ноль.
+            if ads.collected_through is not None and ads.collected_through < min(column.date_to, yesterday):
+                column.pending.add(seller.id)
             column.by_seller.setdefault(seller.id, Statement()).add(figures)
             column.by_seller[seller.id].close()
             column.total.add(figures)

@@ -132,7 +132,8 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     assert values["penalties"] == money("-9676.94")
     assert values["storage"] == money("-291.10")
     assert values["acceptance"] == money("-480")
-    assert values["advertising"] == money("-1436770")
+    # Удержание «WB Продвижение» — пополнение рекламного баланса: справочно, не расход.
+    assert (values["advertising"], values["advertising_topup"]) == (0, money("-1436770"))
     assert values["reviews"] == money("520364.16")
     assert values["loyalty_points"] == money("-198540")
     assert values["loyalty_program"] == money("-10666.96")
@@ -143,6 +144,10 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     )
     assert values["gross_margin"] == values["revenue_after_spp"] + values["direct_expenses"]
     assert figures.uncosted == 0
+    # Реклама — списания кампаний из «ВБ.Продвижения»: баланс и счёт в расход, бонусы справочно.
+    figures.set_advertising(money("1400000"), money("25000"))
+    assert (figures.values["advertising"], figures.values["advertising_bonus"]) == (money(-1400000), money(-25000))
+    assert figures.values["direct_expenses"] == values["direct_expenses"]
 
 
 def test_sales_without_a_cost_price_are_counted_apart() -> None:
@@ -165,7 +170,7 @@ def test_sales_without_a_cost_price_are_counted_apart() -> None:
 @pytest.mark.parametrize(
     ("name", "line"),
     [
-        ("Оказание услуг «WB Продвижение», документ №310258471", "advertising"),
+        ("Оказание услуг «WB Продвижение», документ №310258471", "advertising_topup"),
         ('Аванс за услугу "Баллы за отзывы"', "reviews"),
         ('Возврат неиспользованного остатка аванса за услугу "Баллы за отзывы"', "reviews"),
         ("Предоставление услуг по подписке «Джем», документ №305140207", "other_deductions"),
@@ -444,8 +449,9 @@ async def test_weeks_add_both_report_types_and_show_what_is_not_loaded_yet(
     week = own(body, seller, "2026-W39")
     assert (week["revenue_before_spp"], week["revenue_after_spp"], week["for_pay"]) == (5500.0, 4400.0, 4460.0)
     assert (week["planned_commission"], week["commission"]) == (-1040.0, 60.0)
-    assert (week["logistics"], week["advertising"]) == (-300.0, -500.0)
-    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0 - 500.0
+    # Удержание «WB Продвижение» 500 — справочная строка; списаний кампаний за неделю в зеркале нет.
+    assert (week["logistics"], week["advertising"], week["advertising_topup"]) == (-300.0, 0.0, -500.0)
+    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0
     split = next(item for item in body["periods"] if item["key"] == "2026-W36")
     assert (split["label"], split["by_seller"][str(seller)]["revenue_before_spp"]) == ("36 (31.08-06.09)", 3000.0)
     pending = next(item for item in body["periods"] if item["key"] == "2026-W40")
@@ -748,6 +754,40 @@ async def test_campaign_spend_is_split_between_articles_by_their_stats(
     )
     assert ads.unallocated.balance == Decimal("7.00") and ads.collected_through == date(2026, 9, 26)
     assert ads.of(999) == AdSpend()
+
+
+async def test_the_pnl_advertising_line_is_the_promotion_spend_of_the_period(
+    client: AsyncClient, seller: uuid.UUID, application: Application
+) -> None:
+    """Саниев, неделя 43: удержаний «WB Продвижение» в отчёте нет, списания кампаний — 2 390 048 ₽."""
+    await connect(client, seller)
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.replace_advert_spend(
+            seller,
+            date(2026, 9, 21),
+            date(2026, 9, 27),
+            [
+                AdvertSpend(1, date(2026, 9, 22), "Баланс", Decimal("300")),
+                AdvertSpend(1, date(2026, 9, 23), "Счет", Decimal("100")),
+                AdvertSpend(2, date(2026, 9, 24), "Бонусы", Decimal("50")),
+            ],
+            now=stamp,
+        )
+        await mirror.save_advert_cursor(seller, date(2026, 9, 27))
+        await session.commit()
+
+    response = await client.get(API, params={"year": 2026, "granularity": "week", "seller_id": str(seller)})
+
+    week = own(response.json(), seller, "2026-W39")
+    assert (week["advertising"], week["advertising_bonus"], week["advertising_topup"]) == (-400.0, -50.0, -500.0)
+    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0 - 400.0
+    # Неделя 38 без дочитанной рекламы (курсор 27.09, а неделя раньше) — не «неполная»: курсор дальше её конца.
+    assert (
+        str(seller)
+        not in next(item for item in response.json()["periods"] if item["key"] == "2026-W38")["pending_sellers"]
+    )
 
 
 async def test_campaign_spend_splits_to_the_kopeck_and_stats_of_a_vanished_campaign_go_away(

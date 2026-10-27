@@ -53,6 +53,22 @@ class WeekAds:
         return self.by_article.get(nm_id, AdSpend())
 
 
+@dataclass(frozen=True, slots=True)
+class PeriodAds:
+    """Списания «ВБ.Продвижения» за период целиком — строка «Внутренняя реклама» ОПиУ."""
+
+    spend: AdSpend
+    collected_through: date | None
+
+
+async def period_ads(session: AsyncSession, seller_id: uuid.UUID, *, since: date, until: date) -> PeriodAds:
+    mirror = AdvertMirror(session)
+    sums = _Sums()
+    for item in await mirror.spend(seller_id, since=since, until=until):
+        sums.add(item.payment_type, item.amount)
+    return PeriodAds(sums.spend(), await mirror.collected_through(seller_id))
+
+
 async def week_ads(session: AsyncSession, seller_id: uuid.UUID, *, since: date, until: date) -> WeekAds:
     mirror = AdvertMirror(session)
     spend = await mirror.spend(seller_id, since=since, until=until)

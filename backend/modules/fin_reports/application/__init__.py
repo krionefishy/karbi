@@ -1,4 +1,4 @@
-from backend.modules.fin_reports.application.ads import WeekAds, week_ads
+from backend.modules.fin_reports.application.ads import PeriodAds, WeekAds, period_ads, week_ads
 from backend.modules.fin_reports.application.build import FACTS_VERSION, OZON_FACTS_VERSION, BuildOutcome, FactsBuilder
 from backend.modules.fin_reports.application.costs import (
     CostFile,
@@ -57,6 +57,7 @@ __all__ = [
     "FinReportsQueryError",
     "FinReportsService",
     "LiveStock",
+    "PeriodAds",
     "PeriodColumn",
     "PnlView",
     "SellerArticles",
@@ -70,6 +71,7 @@ __all__ = [
     "fold_remains",
     "last_closed_week_end",
     "read_live_stock",
+    "period_ads",
     "week_ads",
     "match_cabinets",
     "read_cost_file",

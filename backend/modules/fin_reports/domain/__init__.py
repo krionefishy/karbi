@@ -16,6 +16,9 @@ from backend.modules.fin_reports.domain.periods import (
     period_of,
 )
 from backend.modules.fin_reports.domain.pnl import (
+    ADVERTISING,
+    ADVERTISING_BONUS,
+    ADVERTISING_TOPUP,
     COST,
     EXPENSE_KEYS,
     GROSS_MARGIN,
@@ -30,6 +33,9 @@ from backend.modules.fin_reports.domain.pnl import (
 )
 
 __all__ = [
+    "ADVERTISING",
+    "ADVERTISING_BONUS",
+    "ADVERTISING_TOPUP",
     "COST",
     "EXPENSE_KEYS",
     "GRANULARITIES",

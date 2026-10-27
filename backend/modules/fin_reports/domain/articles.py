@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from decimal import ROUND_DOWN, Decimal
 
 from backend.modules.fin_reports.domain.pnl import (
-    ADVERTISING,
+    ADVERTISING_TOPUP,
     CREDIT,
     OTHER_DEDUCTIONS,
     PAYOUT_TERM,
@@ -464,9 +464,20 @@ def article_rows(
     с остатком: без движения за неделю они тоже строки листа, иначе залежавшийся
     товар выпал бы из «Остатков».
     """
+    totals = list(totals)
+    # Строки логистики, хранения и удержаний WB приходят без размера. У артикула с одним
+    # размером они ложатся в его строку: иначе артикул делится на две строки, и «к оплате»
+    # с прибылью разъезжаются, а реклама, которая на артикул, считается дважды.
+    sizes: dict[int, set[str]] = {}
+    for item in totals:
+        if item.nm_id and item.tech_size:
+            sizes.setdefault(item.nm_id, set()).add(item.tech_size)
     rows: dict[tuple[int, str], ArticleRow] = {}
     for item in totals:
-        key = (item.nm_id, item.tech_size if item.nm_id else "")
+        tech_size = item.tech_size if item.nm_id else ""
+        if item.nm_id and not tech_size and len(sizes.get(item.nm_id, ())) == 1:
+            tech_size = next(iter(sizes[item.nm_id]))
+        key = (item.nm_id, tech_size)
         row = rows.get(key)
         if row is None:
             row = rows[key] = ArticleRow(nm_id=item.nm_id, vendor_code=item.vendor_code, tech_size=key[1])
@@ -481,13 +492,19 @@ def article_rows(
         blank.ads = AdSpend(
             unallocated_ads.balance, unallocated_ads.account, unallocated_ads.bonus, blank.ads.promotion_info
         )
+    # Реклама идёт на артикул, а не на размер: у артикула с несколькими размерами — в строку
+    # с наибольшими продажами, один раз.
+    ad_rows: dict[int, ArticleRow] = {}
+    for (nm_id, _), row in rows.items():
+        if nm_id and (nm_id not in ad_rows or row.sales_gross > ad_rows[nm_id].sales_gross):
+            ad_rows[nm_id] = row
     for (nm_id, tech_size), row in rows.items():
         row.tax_rate = tax_rate
         row.unit_cost = cost_of(nm_id) if nm_id else None
         stock = stock_of(nm_id, tech_size) if nm_id else Stock()
         row.stock_in_warehouse, row.stock_to_client = stock.in_warehouse, stock.to_client
         row.stock_from_client, row.stock_total = stock.from_client, stock.total
-        if nm_id:
+        if nm_id and ad_rows[nm_id] is row:
             spent = ads_of(nm_id)
             row.ads = AdSpend(spent.balance, spent.account, spent.bonus, spent.promotion_info + row.ads.promotion_info)
     _shares(list(rows.values()))
@@ -542,7 +559,7 @@ def _accumulate(row: ArticleRow, item: SalesReportTotals) -> None:
     deduction = money(item.deduction)
     if deduction:
         kind = deduction_kind(item.bonus_type_name)
-        if kind == ADVERTISING:
+        if kind == ADVERTISING_TOPUP:
             row.ads = AdSpend(promotion_info=row.ads.promotion_info + deduction)
         elif kind == REVIEWS:
             row.reviews += deduction
