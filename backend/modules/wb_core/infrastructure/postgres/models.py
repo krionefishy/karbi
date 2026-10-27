@@ -674,6 +674,9 @@ class OzonAdvertCampaignModel(WBCoreBase):
     state: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     object_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     payment_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    created_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    from_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    to_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

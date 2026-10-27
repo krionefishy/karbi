@@ -29,7 +29,7 @@ PRODUCTS_PAGE = 1000
 STATS_CAMPAIGNS_CHUNK = 10
 STATS_MAX_WINDOW_DAYS = 62
 STATS_POLL_SECONDS = 3.0
-STATS_POLL_ATTEMPTS = 100
+STATS_POLL_ATTEMPTS = 200
 # Реферальные кампании (блогеры, VK) статистики по SKU не имеют — отчёт по ним не просят.
 STATS_SKIPPED_OBJECT_TYPES = frozenset({"REF_BLOGGER", "REF_VK"})
 KOPECK = Decimal("0.01")
@@ -297,6 +297,9 @@ class OzonPerformanceClient(OzonJsonClient):
                     state=str(raw.get("state") or ""),
                     object_type=str(raw.get("advObjectType") or ""),
                     payment_type=str(raw.get("PaymentType") or raw.get("paymentType") or ""),
+                    created_at=_day(raw.get("createdAt")),
+                    from_date=_day(raw.get("fromDate")),
+                    to_date=_day(raw.get("toDate")),
                 )
             )
         return found
@@ -310,18 +313,39 @@ class OzonPerformanceClient(OzonJsonClient):
         *,
         heartbeat: Callable[[], None] | None = None,
     ) -> list[OzonAdvertStat]:
-        """Расход по SKU и дням за окно по всем названным кампаниям, кроме реферальных."""
+        """Расход по SKU и дням за окно по кампаниям, которые это окно застали, кроме реферальных.
+
+        Порцию, которую Ozon отверг целиком (HTTP 400), клиент перепрашивает по
+        одной кампании: одна неподходящая кампания не должна оставлять без
+        статистики девять остальных.
+        """
         if (date_to - date_from).days >= STATS_MAX_WINDOW_DAYS:
             raise WBPermanentError(f"{self.api_name}: окно статистики не больше {STATS_MAX_WINDOW_DAYS} дней")
-        wanted = sorted({item.campaign_id for item in campaigns if item.object_type not in STATS_SKIPPED_OBJECT_TYPES})
+        wanted = sorted(
+            {
+                item.campaign_id
+                for item in campaigns
+                if item.object_type not in STATS_SKIPPED_OBJECT_TYPES and item.overlaps(date_from, date_to)
+            }
+        )
         stats: list[OzonAdvertStat] = []
         for offset in range(0, len(wanted), STATS_CAMPAIGNS_CHUNK):
             if heartbeat is not None:
                 heartbeat()
             chunk = wanted[offset : offset + STATS_CAMPAIGNS_CHUNK]
-            report = await self._report(seller_id, chunk, date_from, date_to, heartbeat)
-            for campaign_id, raw in _mapping(report).items():
-                stats.extend(self._rows(_int(campaign_id), _mapping(raw)))
+            try:
+                reports = [await self._report(seller_id, chunk, date_from, date_to, heartbeat)]
+            except WBPermanentError as error:
+                self.logger.warning("ozon_performance_chunk_refused: %s; перепрашиваю по одной", error)
+                reports = []
+                for campaign_id in chunk:
+                    try:
+                        reports.append(await self._report(seller_id, [campaign_id], date_from, date_to, heartbeat))
+                    except WBPermanentError as single:
+                        self.logger.warning("ozon_performance_campaign_refused: %s — %s", campaign_id, single)
+            for report in reports:
+                for key, raw in _mapping(report).items():
+                    stats.extend(self._rows(_int(key), _mapping(raw)))
         return stats
 
     async def _report(

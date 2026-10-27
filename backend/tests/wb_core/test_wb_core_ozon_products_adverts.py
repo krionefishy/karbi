@@ -82,6 +82,13 @@ async def test_campaign_stats_come_from_an_async_report_per_ten_campaigns() -> N
         OzonAdvertCampaign(index, f"к{index}", "CAMPAIGN_STATE_RUNNING", "SKU", "CPC") for index in range(1, 13)
     ]
     campaigns.append(OzonAdvertCampaign(99, "", "CAMPAIGN_STATE_RUNNING", "REF_BLOGGER", ""))
+    # Кампания, закончившаяся до окна, и созданная после него — в отчёт не просятся.
+    campaigns.append(
+        OzonAdvertCampaign(98, "старая", "CAMPAIGN_STATE_ARCHIVED", "SKU", "CPC", to_date=date(2026, 9, 1))
+    )
+    campaigns.append(
+        OzonAdvertCampaign(97, "новая", "CAMPAIGN_STATE_RUNNING", "SKU", "CPC", created_at=date(2026, 11, 1))
+    )
     with respx.mock as router:
         stub = EgressStub(router)
         stub.on("POST", "/api/client/statistics/json", side_effect=[(200, {"UUID": "u1"}), (200, {"UUID": "u2"})])

@@ -437,6 +437,17 @@ class OzonAdvertCampaign:
     state: str
     object_type: str
     payment_type: str
+    # Когда кампания создана и в какие даты шла: статистику просят только за окна,
+    # которые она застала, — у кабинета сотни старых кампаний.
+    created_at: date | None = None
+    from_date: date | None = None
+    to_date: date | None = None
+
+    def overlaps(self, date_from: date, date_to: date) -> bool:
+        started = self.from_date or self.created_at
+        if started is not None and started > date_to:
+            return False
+        return not (self.to_date is not None and self.to_date < date_from)
 
 
 @dataclass(frozen=True, slots=True)

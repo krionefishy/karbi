@@ -54,6 +54,9 @@ def upgrade() -> None:
         sa.Column("state", sa.String(64), nullable=False, server_default=""),
         sa.Column("object_type", sa.String(64), nullable=False, server_default=""),
         sa.Column("payment_type", sa.String(32), nullable=False, server_default=""),
+        sa.Column("created_at", sa.Date(), nullable=True),
+        sa.Column("from_date", sa.Date(), nullable=True),
+        sa.Column("to_date", sa.Date(), nullable=True),
         sa.Column("collected_at", sa.DateTime(timezone=True), nullable=False),
         schema=SCHEMA,
     )
