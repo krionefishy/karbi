@@ -30,8 +30,10 @@ STATS_CAMPAIGNS_CHUNK = 10
 STATS_MAX_WINDOW_DAYS = 62
 STATS_POLL_SECONDS = 3.0
 STATS_POLL_ATTEMPTS = 200
-# Реферальные кампании (блогеры, VK) статистики по SKU не имеют — отчёт по ним не просят.
-STATS_SKIPPED_OBJECT_TYPES = frozenset({"REF_BLOGGER", "REF_VK"})
+# Реферальные кампании (блогеры, VK) статистики по SKU не имеют, а по кампаниям «Оплата за
+# заказ» (SEARCH_PROMO) Ozon этот отчёт не строит («generation of this type of report is
+# forbidden») — отчёт по ним не просят.
+STATS_SKIPPED_OBJECT_TYPES = frozenset({"REF_BLOGGER", "REF_VK", "SEARCH_PROMO"})
 KOPECK = Decimal("0.01")
 ZERO = Decimal("0.00")
 

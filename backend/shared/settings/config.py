@@ -309,8 +309,8 @@ class CoreMirrorConfig:
     # Карточки Ozon — раз в сутки; расход рекламы Ozon (Performance API) — окнами по 31 дню,
     # отчёт на окно готовится асинхронно и тратит суточную квоту выгрузок.
     ozon_products_interval_minutes: int = 1440
-    ozon_adverts_interval_minutes: int = 360
-    ozon_adverts_windows_per_run: int = 2
+    ozon_adverts_interval_minutes: int = 240
+    ozon_adverts_windows_per_run: int = 3
     ozon_adverts_overlap_days: int = 3
 
 
