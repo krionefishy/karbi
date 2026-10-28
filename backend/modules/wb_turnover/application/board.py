@@ -7,13 +7,12 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.application import RemainsMirror, SellerNotFoundError
+from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_turnover.domain import compute_board_cover, cover_tone
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 
 MOSCOW = ZoneInfo("Europe/Moscow")
-WB_STOCK_WAREHOUSE = "Склад WB РФ"
 BARCODE = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
 
 FBS_YES = "yes"
@@ -61,9 +60,8 @@ class BoardSeller:
 
     seller_id: uuid.UUID
     name: str
-    remains_at: datetime | None
-    remains_stale: bool
-    remains_error: str | None
+    stock_at: datetime | None
+    stock_stale: bool
     fbs_at: datetime | None
     orders_without_barcode: int
 
@@ -110,7 +108,6 @@ class BoardService:
         self.session = session
         self.sellers = sellers
         self.turnover = turnover
-        self.remains = RemainsMirror(session)
         self.window_days = window_days
         self.red_days = red_days
         self.yellow_days = yellow_days
@@ -140,17 +137,15 @@ class BoardService:
             shown = [item for item in seller_items if item.hidden_at is None]
             barcodes = [item.barcode for item in shown]
 
-            snapshot = await self.remains.snapshot(seller.id)
-            stale = snapshot.collected_at is not None and snapshot.collected_at < now - self.stale
             tracked_row = await self.turnover.tracked(seller.id)
+            stock_at = tracked_row.fbo_stocks_at if tracked_row else None
             fbs_at = tracked_row.fbs_stocks_at if tracked_row else None
             states.append(
                 BoardSeller(
                     seller_id=seller.id,
                     name=seller.name,
-                    remains_at=snapshot.collected_at,
-                    remains_stale=stale,
-                    remains_error=snapshot.error,
+                    stock_at=stock_at,
+                    stock_stale=stock_at is not None and stock_at < now - self.stale,
                     fbs_at=fbs_at,
                     orders_without_barcode=await self.turnover.orders_without_barcode(
                         seller.id, window_from, window_to
@@ -161,20 +156,17 @@ class BoardService:
             catalog = {article.article: article for article in await self.sellers.list_articles(seller.id)}
             cards = await self.sellers.list_barcode_cards(seller.id)
             from_orders = await self.turnover.barcode_articles(seller.id, barcodes)
-            from_remains = {remain.barcode: remain.article for remain in snapshot.remains}
             orders = await self.turnover.orders_by_barcode(seller.id, window_from, window_to, barcodes)
-            wb_stock = {
-                remain.barcode: remain.quantity
-                for remain in snapshot.remains
-                if remain.warehouse_name == WB_STOCK_WAREHOUSE
-            }
+            sizes = await self.sellers.list_barcode_sizes(seller.id)
+            fbo_by_size = await self.turnover.fbo_stocks(seller.id) if stock_at else {}
             fbs_by_article = await self.turnover.warehouse_stocks(seller.id) if fbs_at else {}
 
             for item in shown:
                 card = cards.get(item.barcode)
-                article = card.article if card else from_remains.get(item.barcode) or from_orders.get(item.barcode, "")
+                article = card.article if card else from_orders.get(item.barcode, "")
                 known = catalog.get(article)
-                stock = None if snapshot.collected_at is None else wb_stock.get(item.barcode, 0)
+                size = sizes.get(item.barcode)
+                stock = fbo_by_size.get(size[0], 0) if stock_at and size else None
                 cover = compute_board_cover(
                     orders=orders.get(item.barcode, 0), stock=stock, window_days=self.window_days
                 )

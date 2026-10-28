@@ -45,9 +45,8 @@ class RefreshResponse(BaseModel):
 class BoardSellerResponse(BaseModel):
     seller_id: uuid.UUID
     name: str
-    remains_at: str | None
-    remains_stale: bool
-    remains_error: str | None
+    stock_at: str | None
+    stock_stale: bool
     fbs_at: str | None
     orders_without_barcode: int
 
@@ -101,6 +100,10 @@ class BoardAddRequest(BaseModel):
 class BoardAddedResponse(BaseModel):
     added: int
     existing: int
+
+
+class BoardHiddenRequest(BaseModel):
+    hidden: bool
 
 
 class BoardItemRequest(BaseModel):

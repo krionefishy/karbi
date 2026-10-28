@@ -51,8 +51,8 @@ describe("board", () => {
   it("warns only about cabinets that have rows", () => {
     const board = {
       sellers: [
-        { seller_id: "s1", name: "Один", remains_at: null, remains_stale: false, remains_error: null, fbs_at: null, orders_without_barcode: 0 },
-        { seller_id: "s2", name: "Два", remains_at: null, remains_stale: false, remains_error: null, fbs_at: null, orders_without_barcode: 3 },
+        { seller_id: "s1", name: "Один", stock_at: null, stock_stale: false, fbs_at: null, orders_without_barcode: 0 },
+        { seller_id: "s2", name: "Два", stock_at: null, stock_stale: false, fbs_at: null, orders_without_barcode: 3 },
       ],
       rows: [row("1")],
     } as unknown as Board;

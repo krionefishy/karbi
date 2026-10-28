@@ -10,6 +10,7 @@ from backend.modules.wb_turnover.domain import ArticleOrders, ArticleStock, Turn
 from backend.modules.wb_turnover.infrastructure.postgres.models import (
     BoardItemModel,
     CollectionRunModel,
+    FboStockModel,
     NotificationLogModel,
     OrderModel,
     RefreshRequestModel,
@@ -49,6 +50,7 @@ class TurnoverRepository:
             WarehouseStockModel,
             NotificationLogModel,
             BoardItemModel,
+            FboStockModel,
         ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
@@ -325,6 +327,33 @@ class TurnoverRepository:
             .where(TrackedSellerModel.seller_id == seller_id)
             .values(fbs_stocks_at=datetime.now(UTC))
         )
+
+    async def replace_fbo_stocks(self, seller_id: uuid.UUID, amounts: dict[int, int]) -> None:
+        """Остаток WB по размерам целиком; когда это вышло — в `tracked_sellers.fbo_stocks_at`.
+
+        Целиком, потому что WB убирает размер из отчёта, когда остаток кончился:
+        обновление по месту оставило бы вчерашнюю цифру у размера, которого на
+        складе уже нет.
+        """
+        await self.session.execute(delete(FboStockModel).where(FboStockModel.seller_id == seller_id))
+        rows = [
+            {"seller_id": seller_id, "chrt_id": chrt_id, "quantity": quantity}
+            for chrt_id, quantity in amounts.items()
+            if chrt_id and quantity
+        ]
+        for offset in range(0, len(rows), _CHUNK):
+            await self.session.execute(insert(FboStockModel).values(rows[offset : offset + _CHUNK]))
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(fbo_stocks_at=datetime.now(UTC))
+        )
+
+    async def fbo_stocks(self, seller_id: uuid.UUID) -> dict[int, int]:
+        rows = await self.session.execute(
+            select(FboStockModel.chrt_id, FboStockModel.quantity).where(FboStockModel.seller_id == seller_id)
+        )
+        return {int(chrt_id): int(quantity) for chrt_id, quantity in rows.all()}
 
     async def warehouse_stocks(self, seller_id: uuid.UUID) -> dict[str, dict[int, int]]:
         """Артикул → склад → штук. Отсутствующая пара означает пустую полку.

@@ -1,6 +1,7 @@
 from backend.modules.wb_turnover.infrastructure.postgres.models import (
     BoardItemModel,
     CollectionRunModel,
+    FboStockModel,
     NotificationLogModel,
     OrderModel,
     RefreshRequestModel,
@@ -16,6 +17,7 @@ from backend.modules.wb_turnover.infrastructure.postgres.repository import Turno
 
 __all__ = [
     "BoardItemModel",
+    "FboStockModel",
     "CollectionRunModel",
     "NotificationLogModel",
     "OrderModel",

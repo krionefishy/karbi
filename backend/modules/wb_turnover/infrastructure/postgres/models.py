@@ -38,6 +38,7 @@ class TrackedSellerModel(WBTurnoverBase):
     regions_filled_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     regions_filled_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     fbs_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fbo_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SellerWarehouseModel(WBTurnoverBase):
@@ -280,3 +281,18 @@ class RefreshRequestModel(WBTurnoverBase):
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
     )
+
+
+class FboStockModel(WBTurnoverBase):
+    """Остаток WB по размеру карточки (`chrtId`) — то, что показывает отчёт кабинета в «Склад WB РФ».
+
+    Артикульные снимки складывают размеры в одну цифру, а таблице по баркодам
+    нужен каждый размер отдельно. Слой переписывается целиком каждым сбором:
+    размера, которого нет в ответе WB, на складе нет.
+    """
+
+    __tablename__ = "fbo_stocks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

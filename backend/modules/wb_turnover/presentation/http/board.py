@@ -17,6 +17,7 @@ from backend.modules.wb_turnover.application.board_report import XLSX_MEDIA_TYPE
 from backend.modules.wb_turnover.presentation.http.schemas import (
     BoardAddedResponse,
     BoardAddRequest,
+    BoardHiddenRequest,
     BoardHiddenRowResponse,
     BoardItemRequest,
     BoardRefreshResponse,
@@ -46,9 +47,8 @@ def board_response(view: BoardView) -> BoardResponse:
             BoardSellerResponse(
                 seller_id=seller.seller_id,
                 name=seller.name,
-                remains_at=seller.remains_at.isoformat() if seller.remains_at else None,
-                remains_stale=seller.remains_stale,
-                remains_error=seller.remains_error,
+                stock_at=seller.stock_at.isoformat() if seller.stock_at else None,
+                stock_stale=seller.stock_stale,
                 fbs_at=seller.fbs_at.isoformat() if seller.fbs_at else None,
                 orders_without_barcode=seller.orders_without_barcode,
             )
@@ -138,10 +138,14 @@ async def update_item(
 @router.put("/sellers/{seller_id}/items/{barcode}/hidden", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def set_hidden(
-    seller_id: uuid.UUID, barcode: str, payload: dict, _: CurrentPrincipal, service: FromDishka[BoardService]
+    seller_id: uuid.UUID,
+    barcode: str,
+    payload: BoardHiddenRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[BoardService],
 ) -> Response:
     try:
-        await service.set_hidden(seller_id, barcode, bool(payload.get("hidden")))
+        await service.set_hidden(seller_id, barcode, payload.hidden)
     except SellerNotFoundError as error:
         raise not_enrolled() from error
     except BoardInputError as error:

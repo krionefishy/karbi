@@ -34,7 +34,11 @@ export function TurnoverBoard() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
-  const { data: board, isLoading } = useQuery({ queryKey: ["turnover-board"], queryFn: getBoard });
+  const { data: board, isLoading } = useQuery({
+    queryKey: ["turnover-board"],
+    queryFn: getBoard,
+    refetchInterval: 60_000,
+  });
   const reload = () => queryClient.invalidateQueries({ queryKey: ["turnover-board"] });
   const fail = (fallback: string) => (failure: unknown) => setError(message(failure, fallback));
 
@@ -78,7 +82,7 @@ export function TurnoverBoard() {
       setError("");
       setInfo(
         result.queued > 0
-          ? "Сбор заказов поставлен в очередь, цифры обновятся через несколько минут."
+          ? "Обновление поставлено в очередь, цифры обновятся через несколько минут."
           : "Нет кабинетов со строками.",
       );
       await reload();
@@ -123,7 +127,7 @@ export function TurnoverBoard() {
           <h1>Хватит на</h1>
           <p className="muted">
             Заказано за {board.window_days} дн. ({board.window_from} — {board.window_to}), как в отчёте WB; остаток —
-            «Склад WB РФ». Красным — меньше {board.red_days} дн., жёлтым — до {board.yellow_days}.
+            остаток WB, как в колонке «Склад WB РФ» отчёта кабинета. Красным — меньше {board.red_days} дн., жёлтым — до {board.yellow_days}.
           </p>
         </div>
         <div className="review-sync-actions">
@@ -131,7 +135,7 @@ export function TurnoverBoard() {
             className="secondary-button"
             onClick={() => refreshMutation.mutate()}
             disabled={refreshMutation.isPending}
-            title="Собрать заказы прямо сейчас. Остаток склада WB обновляется отдельно, раз в несколько часов."
+            title="Собрать заказы и остатки прямо сейчас"
           >
             <RefreshCw size={15} className={refreshMutation.isPending ? "spinning" : undefined} />
             Обновить данные
@@ -182,7 +186,7 @@ export function TurnoverBoard() {
             <span>Баркод</span>
             <span>Товар</span>
             <button type="button" className="stocks-group-head" onClick={() => toggleSort("stock")}>
-              Остаток WB РФ {sortMark("stock")}
+              Остаток WB {sortMark("stock")}
             </button>
             <button type="button" className="stocks-group-head" onClick={() => toggleSort("orders")}>
               Продажи за {board.window_days} дн. {sortMark("orders")}

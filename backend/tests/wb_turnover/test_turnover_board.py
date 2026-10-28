@@ -2,15 +2,15 @@ import io
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from openpyxl import load_workbook
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 
 from backend.app.factory import Application
-from backend.modules.wb_core.domain import MIRROR_REMAINS, WarehouseRemain
-from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
+from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb import CatalogCard
 from backend.modules.wb_turnover.infrastructure.postgres import (
@@ -28,6 +28,7 @@ API = "/api/v1/wb/turnover/board"
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 NAME = "Таблица тест"
 DRILL, SAW, GHOST = "2053497104469", "2055210050862", "2000000000001"
+DRILL_CHRT, SAW_CHRT = 1870528015, 1870528016
 
 
 def own(body: dict) -> dict[str, dict]:
@@ -106,8 +107,12 @@ async def client(application: Application) -> AsyncIterator[AsyncClient]:
         yield test_client
 
 
+def today() -> date:
+    return datetime.now(ZoneInfo("Europe/Moscow")).date()
+
+
 def yesterday() -> date:
-    return datetime.now(UTC).date() - timedelta(days=1)
+    return today() - timedelta(days=1)
 
 
 async def seed_orders(application: Application, seller_id: uuid.UUID, rows: list[dict]) -> None:
@@ -116,18 +121,17 @@ async def seed_orders(application: Application, seller_id: uuid.UUID, rows: list
         await session.commit()
 
 
-async def seed_remains(application: Application, seller_id: uuid.UUID, remains: list[WarehouseRemain]) -> None:
-    now = datetime.now(UTC)
+async def seed_stock(
+    application: Application, seller_id: uuid.UUID, by_size: dict[int, int], at: datetime | None = None
+) -> None:
     async with application.database.session() as session:
-        mirror = MirrorRepository(session)
-        await mirror.record_attempt(seller_id, MIRROR_REMAINS, now=now)
-        await mirror.replace_remains(seller_id, remains, now=now)
-        await mirror.mark_collected(seller_id, MIRROR_REMAINS, now=now)
+        repository = TurnoverRepository(session)
+        await repository.replace_fbo_stocks(seller_id, by_size)
+        if at is not None:
+            await session.execute(
+                update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(fbo_stocks_at=at)
+            )
         await session.commit()
-
-
-def remain(barcode: str, article: str, warehouse: str, quantity: int) -> WarehouseRemain:
-    return WarehouseRemain(barcode, article, "0", "vendor", warehouse, quantity)
 
 
 async def add(client: AsyncClient, seller_id: uuid.UUID, *barcodes: str):
@@ -142,15 +146,7 @@ async def test_a_row_shows_orders_of_the_week_the_wb_warehouse_stock_and_the_day
     orders += [sale("old", DRILL, "1271611253", day - timedelta(days=7))]
     orders += [sale("c1", DRILL, "1271611253", day, cancelled=True)]
     await seed_orders(application, seller, orders)
-    await seed_remains(
-        application,
-        seller,
-        [
-            remain(DRILL, "1271611253", "Склад WB РФ", 30),
-            remain(DRILL, "1271611253", "Коледино", 500),
-            remain(DRILL, "1271611253", "В пути до получателей", 40),
-        ],
-    )
+    await seed_stock(application, seller, {DRILL_CHRT: 30, SAW_CHRT: 500})
     assert (await add(client, seller, DRILL)).json() == {"added": 1, "existing": 0}
 
     row = own((await client.get(API)).json())[DRILL]
@@ -163,22 +159,22 @@ async def test_a_row_shows_orders_of_the_week_the_wb_warehouse_stock_and_the_day
 async def test_orders_outside_the_window_and_today_are_not_counted(
     application: Application, seller: uuid.UUID, client: AsyncClient
 ) -> None:
-    today = datetime.now(UTC).date()
+    now = today()
     await seed_orders(
         application,
         seller,
         [
-            sale("today", DRILL, "1271611253", today),
-            sale("edge", DRILL, "1271611253", today - timedelta(days=7)),
-            sale("before", DRILL, "1271611253", today - timedelta(days=8)),
+            sale("today", DRILL, "1271611253", now),
+            sale("edge", DRILL, "1271611253", now - timedelta(days=7)),
+            sale("before", DRILL, "1271611253", now - timedelta(days=8)),
         ],
     )
     await add(client, seller, DRILL)
     body = (await client.get(API)).json()
     assert own(body)[DRILL]["orders"] == 1
     assert (body["window_from"], body["window_to"]) == (
-        (today - timedelta(days=7)).isoformat(),
-        (today - timedelta(days=1)).isoformat(),
+        (now - timedelta(days=7)).isoformat(),
+        (now - timedelta(days=1)).isoformat(),
     )
 
 
@@ -196,7 +192,7 @@ async def test_without_a_stock_snapshot_the_days_are_unknown_not_zero(
 async def test_an_article_without_orders_is_no_sales(
     application: Application, seller: uuid.UUID, client: AsyncClient
 ) -> None:
-    await seed_remains(application, seller, [remain(SAW, "1466514852", "Склад WB РФ", 12)])
+    await seed_stock(application, seller, {SAW_CHRT: 12})
     await add(client, seller, SAW)
 
     row = own((await client.get(API)).json())[SAW]
@@ -205,7 +201,7 @@ async def test_an_article_without_orders_is_no_sales(
 
 
 async def test_fbs_is_yes_no_or_unknown(application: Application, seller: uuid.UUID, client: AsyncClient) -> None:
-    await seed_remains(application, seller, [])
+    await seed_stock(application, seller, {})
     await add(client, seller, DRILL, SAW)
     assert {row["fbs"] for row in own((await client.get(API)).json()).values()} == {"unknown"}
 
@@ -236,19 +232,11 @@ async def test_orders_collected_before_barcodes_were_stored_are_reported(
     assert state["orders_without_barcode"] == 1
 
 
-async def test_a_stale_stock_snapshot_is_flagged(
-    application: Application, seller: uuid.UUID, client: AsyncClient
-) -> None:
-    long_ago = datetime.now(UTC) - timedelta(hours=30)
-    async with application.database.session() as session:
-        mirror = MirrorRepository(session)
-        await mirror.record_attempt(seller, MIRROR_REMAINS, now=long_ago)
-        await mirror.replace_remains(seller, [], now=long_ago)
-        await mirror.mark_collected(seller, MIRROR_REMAINS, now=long_ago)
-        await session.commit()
+async def test_a_stale_stock_layer_is_flagged(application: Application, seller: uuid.UUID, client: AsyncClient) -> None:
+    await seed_stock(application, seller, {}, at=datetime.now(UTC) - timedelta(hours=30))
     body = (await client.get(API)).json()
     [state] = [item for item in body["sellers"] if item["seller_id"] == str(seller)]
-    assert state["remains_stale"] is True
+    assert state["stock_stale"] is True
 
 
 async def test_the_list_is_edited_by_the_analyst(
@@ -307,7 +295,7 @@ async def test_the_workbook_has_the_analysts_columns_and_live_formulas(
     application: Application, seller: uuid.UUID, client: AsyncClient
 ) -> None:
     await seed_orders(application, seller, [sale(f"s{i}", DRILL, "1271611253", yesterday()) for i in range(14)])
-    await seed_remains(application, seller, [remain(DRILL, "1271611253", "Склад WB РФ", 30)])
+    await seed_stock(application, seller, {DRILL_CHRT: 30})
     await add(client, seller, DRILL)
 
     response = await client.get(f"{API}/export")
@@ -358,3 +346,70 @@ def test_the_statistics_client_reads_the_barcode_of_an_order() -> None:
     )
     assert isinstance(row, OrderRow)
     assert row.barcode == DRILL
+
+
+async def test_each_size_of_a_card_has_its_own_stock(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    """У размеров одной карточки остатки разные; артикульная сумма дала бы всем одну цифру."""
+    async with application.database.session() as session:
+        await SellerRepository(session).upsert_catalog(
+            seller,
+            active=[
+                CatalogCard(
+                    article="1270964388",
+                    vendor_code="Дождевики",
+                    name="Дождевики для обуви",
+                    subject_name="Дождевики",
+                    sizes=[
+                        {"chrt_id": 500, "tech_size": "M", "skus": ["2053485305847"]},
+                        {"chrt_id": 501, "tech_size": "L", "skus": ["2053486133913"]},
+                    ],
+                )
+            ],
+            archived=[],
+            archived_available=True,
+        )
+        await session.commit()
+    await seed_stock(application, seller, {500: 40, 501: 3})
+    await add(client, seller, "2053485305847", "2053486133913")
+
+    rows = own((await client.get(API)).json())
+
+    assert (rows["2053485305847"]["stock"], rows["2053486133913"]["stock"]) == (40, 3)
+
+
+async def test_a_size_missing_from_the_wb_report_is_an_empty_shelf_once_the_layer_exists(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_stock(application, seller, {DRILL_CHRT: 5})
+    await add(client, seller, SAW)
+
+    assert own((await client.get(API)).json())[SAW]["stock"] == 0
+
+
+async def test_collecting_stocks_stores_the_layer_per_size(application: Application, seller: uuid.UUID) -> None:
+    from backend.modules.wb_turnover.application import CollectionService
+    from backend.modules.wb_turnover.infrastructure.wb import FBOStockRow, WBAnalyticsClient, WBMarketplaceClient
+
+    class Analytics(WBAnalyticsClient):
+        async def stocks(self, seller_id: str) -> list[FBOStockRow]:
+            return [
+                FBOStockRow("1271611253", DRILL_CHRT, -999999, "Склад WB", "Склад WB", 12, 1, 2),
+                FBOStockRow("1466514852", SAW_CHRT, -999999, "Склад WB", "Склад WB", 7, 0, 0),
+            ]
+
+    async with application.database.session() as session:
+        await CollectionService(
+            session,
+            SellerRepository(session),
+            TurnoverRepository(session),
+            WBStatisticsClient(make_gateway()),
+            Analytics(make_gateway()),
+            WBMarketplaceClient(make_gateway()),
+        ).collect_stocks(seller, today(), 0)
+    async with application.database.session() as session:
+        repository = TurnoverRepository(session)
+        assert await repository.fbo_stocks(seller) == {DRILL_CHRT: 12, SAW_CHRT: 7}
+        tracked = await repository.tracked(seller)
+    assert tracked is not None and tracked.fbo_stocks_at is not None

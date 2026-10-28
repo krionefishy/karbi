@@ -8,9 +8,8 @@ export type BoardSortKey = "days" | "orders" | "stock";
 export interface BoardSeller {
   seller_id: string;
   name: string;
-  remains_at: string | null;
-  remains_stale: boolean;
-  remains_error: string | null;
+  stock_at: string | null;
+  stock_stale: boolean;
   fbs_at: string | null;
   orders_without_barcode: number;
 }
@@ -124,12 +123,11 @@ export function boardNotices(board: Board, sellerId: string): string[] {
     if (sellerId && seller.seller_id !== sellerId) continue;
     const hasRows = board.rows.some((row) => row.seller_id === seller.seller_id);
     if (!hasRows) continue;
-    if (!seller.remains_at) {
-      notices.push(`${seller.name}: остатки склада WB ещё не собирались — «Хватит на» показать нечем.`);
-    } else if (seller.remains_stale) {
-      notices.push(`${seller.name}: остатки склада WB сняты ${dateTime.format(new Date(seller.remains_at))} и устарели.`);
+    if (!seller.stock_at) {
+      notices.push(`${seller.name}: остатки WB ещё не собирались — «Хватит на» показать нечем. Нажмите «Обновить данные».`);
+    } else if (seller.stock_stale) {
+      notices.push(`${seller.name}: остатки WB сняты ${dateTime.format(new Date(seller.stock_at))} и устарели.`);
     }
-    if (seller.remains_error) notices.push(`${seller.name}: сбор остатков WB не удался — ${seller.remains_error}`);
     if (seller.orders_without_barcode > 0) {
       notices.push(
         `${seller.name}: ${seller.orders_without_barcode} заказов за окно ещё без баркода — цифры занижены до ближайшего сбора.`,
