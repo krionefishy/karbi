@@ -18,6 +18,7 @@ class OrderRow:
     price: float
     warehouse_type: str
     district: str = ""
+    barcode: str = ""
 
 
 class WBStatisticsClient(WBJsonClient):
@@ -114,6 +115,7 @@ class WBStatisticsClient(WBJsonClient):
             price=float(raw.get("finishedPrice") or raw.get("priceWithDisc") or 0),
             warehouse_type=str(raw.get("warehouseType") or ""),
             district=str(raw.get("oblastOkrugName") or ""),
+            barcode=str(raw.get("barcode") or ""),
         )
 
     @staticmethod

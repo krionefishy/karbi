@@ -221,6 +221,7 @@ class CollectionService:
                 {
                     "srid": row.srid,
                     "article": row.article,
+                    "barcode": row.barcode,
                     "order_date": row.order_date,
                     "last_change_date": self._aware(row.last_change_date),
                     "is_cancel": row.is_cancel,

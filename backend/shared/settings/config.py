@@ -149,9 +149,13 @@ class TurnoverConfig:
     digest_hour: int = 10
     digest_minute: int = 0
     orders_window_days: int = 3
-    orders_backfill_days: int = 3
+    orders_backfill_days: int = 8
     orders_overlap_hours: int = 24
     threshold_days: int = 10
+    board_window_days: int = 7
+    board_red_days: int = 10
+    board_yellow_days: int = 20
+    board_stale_hours: int = 24
     min_photos: int = 3
     snapshot_retention_days: int = 60
     order_retention_days: int = 45
@@ -506,6 +510,10 @@ class Settings:
             "orders_backfill_days",
             "orders_overlap_hours",
             "threshold_days",
+            "board_window_days",
+            "board_red_days",
+            "board_yellow_days",
+            "board_stale_hours",
             "min_photos",
             "snapshot_retention_days",
             "order_retention_days",
@@ -913,6 +921,12 @@ class Settings:
             raise ValueError("turnover.threshold_days must be positive")
         if self.turnover.min_photos < 0:
             raise ValueError("turnover.min_photos must not be negative")
+        if not 1 <= self.turnover.board_window_days < self.turnover.order_retention_days:
+            raise ValueError("turnover.board_window_days must be positive and below order_retention_days")
+        if self.turnover.orders_backfill_days <= self.turnover.board_window_days:
+            raise ValueError("turnover.orders_backfill_days must exceed turnover.board_window_days")
+        if not 0 < self.turnover.board_red_days < self.turnover.board_yellow_days:
+            raise ValueError("turnover.board_red_days must be positive and below board_yellow_days")
         if self.turnover.region_history_days < 1:
             raise ValueError("turnover.region_history_days must be positive")
         if self.turnover.region_backfill_step_days < 1:

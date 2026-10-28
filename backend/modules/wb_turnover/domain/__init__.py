@@ -1,3 +1,15 @@
+from backend.modules.wb_turnover.domain.board import (
+    COVER_NO_DATA,
+    COVER_NO_SALES,
+    COVER_OK,
+    TONE_CALM,
+    TONE_CRITICAL,
+    TONE_NEUTRAL,
+    TONE_WARNING,
+    BoardCover,
+    compute_board_cover,
+    cover_tone,
+)
 from backend.modules.wb_turnover.domain.entities import (
     STATUS_INSUFFICIENT,
     STATUS_NO_SALES,
@@ -10,6 +22,16 @@ from backend.modules.wb_turnover.domain.entities import (
 )
 
 __all__ = [
+    "COVER_NO_DATA",
+    "COVER_NO_SALES",
+    "COVER_OK",
+    "TONE_CALM",
+    "TONE_CRITICAL",
+    "TONE_NEUTRAL",
+    "TONE_WARNING",
+    "BoardCover",
+    "compute_board_cover",
+    "cover_tone",
     "STATUS_INSUFFICIENT",
     "STATUS_NO_SALES",
     "STATUS_NO_STOCK",

@@ -12,6 +12,7 @@ from backend.modules.wb_turnover.application import (
     ReplenishmentReportService,
     TurnoverService,
 )
+from backend.modules.wb_turnover.presentation.http.board import router as board_router
 from backend.modules.wb_turnover.presentation.http.schemas import (
     InviteLinkResponse,
     RefreshResponse,
@@ -21,6 +22,7 @@ from backend.modules.wb_turnover.presentation.http.utils import article_response
 from backend.shared.settings import Settings
 
 router = APIRouter(prefix="/wb/turnover", tags=["wb-turnover"])
+router.include_router(board_router)
 
 
 @router.get("/sellers/{seller_id}/articles", response_model=TurnoverArticlesResponse)

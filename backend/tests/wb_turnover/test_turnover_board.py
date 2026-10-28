@@ -1,0 +1,360 @@
+import io
+import uuid
+from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime, timedelta
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from openpyxl import load_workbook
+from sqlalchemy import delete
+
+from backend.app.factory import Application
+from backend.modules.wb_core.domain import MIRROR_REMAINS, WarehouseRemain
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
+from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
+from backend.modules.wb_core.infrastructure.wb import CatalogCard
+from backend.modules.wb_turnover.infrastructure.postgres import (
+    BoardItemModel,
+    RefreshRequestModel,
+    TrackedSellerModel,
+    TurnoverRepository,
+)
+from backend.modules.wb_turnover.infrastructure.wb import OrderRow, WBStatisticsClient
+from backend.shared.settings import load_settings
+from backend.tests.egress_stub import make_gateway
+from backend.tests.operators import operator_token
+
+API = "/api/v1/wb/turnover/board"
+SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
+NAME = "Таблица тест"
+DRILL, SAW, GHOST = "2053497104469", "2055210050862", "2000000000001"
+
+
+def own(body: dict) -> dict[str, dict]:
+    return {row["barcode"]: row for row in body["rows"] if row["seller_name"] == NAME}
+
+
+def sale(srid: str, barcode: str, article: str, day: date, *, cancelled: bool = False) -> dict:
+    return {
+        "srid": srid,
+        "article": article,
+        "barcode": barcode,
+        "order_date": day,
+        "last_change_date": datetime.combine(day, datetime.min.time(), tzinfo=UTC),
+        "is_cancel": cancelled,
+        "price": 1000,
+        "warehouse_type": "Склад WB",
+    }
+
+
+@pytest_asyncio.fixture
+async def application() -> AsyncIterator[Application]:
+    application = Application(SETTINGS)
+    app = application.get_app()
+    async with app.router.lifespan_context(app):
+        yield application
+
+
+@pytest_asyncio.fixture
+async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
+    async with application.database.session() as session:
+        model = SellerModel(name=NAME, catalog_sync_status="success", egress_status="verified")
+        session.add(model)
+        await session.flush()
+        seller_id = model.id
+        await SellerRepository(session).upsert_catalog(
+            seller_id,
+            active=[
+                CatalogCard(
+                    article="1271611253",
+                    vendor_code="KARBI - Шуруповерт",
+                    name="Шуруповерт",
+                    subject_name="Шуруповерты",
+                    sizes=[{"chrt_id": 1870528015, "tech_size": "0", "skus": [DRILL]}],
+                ),
+                CatalogCard(
+                    article="1466514852",
+                    vendor_code="KARBI - Пила",
+                    name="Пила",
+                    subject_name="Пилы",
+                    sizes=[{"chrt_id": 1870528016, "tech_size": "0", "skus": [SAW]}],
+                ),
+            ],
+            archived=[],
+            archived_available=True,
+        )
+        session.add(TrackedSellerModel(seller_id=seller_id))
+        await session.commit()
+    try:
+        yield seller_id
+    finally:
+        async with application.database.session() as session:
+            await TurnoverRepository(session).purge_seller(seller_id)
+            await session.execute(delete(RefreshRequestModel).where(RefreshRequestModel.seller_id == seller_id))
+            await session.execute(delete(SellerModel).where(SellerModel.id == seller_id))
+            await session.commit()
+
+
+@pytest_asyncio.fixture
+async def client(application: Application) -> AsyncIterator[AsyncClient]:
+    token = await operator_token(application)
+    async with AsyncClient(
+        transport=ASGITransport(app=application.get_app()),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {token}"},
+    ) as test_client:
+        yield test_client
+
+
+def yesterday() -> date:
+    return datetime.now(UTC).date() - timedelta(days=1)
+
+
+async def seed_orders(application: Application, seller_id: uuid.UUID, rows: list[dict]) -> None:
+    async with application.database.session() as session:
+        await TurnoverRepository(session).upsert_orders(seller_id, rows)
+        await session.commit()
+
+
+async def seed_remains(application: Application, seller_id: uuid.UUID, remains: list[WarehouseRemain]) -> None:
+    now = datetime.now(UTC)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.record_attempt(seller_id, MIRROR_REMAINS, now=now)
+        await mirror.replace_remains(seller_id, remains, now=now)
+        await mirror.mark_collected(seller_id, MIRROR_REMAINS, now=now)
+        await session.commit()
+
+
+def remain(barcode: str, article: str, warehouse: str, quantity: int) -> WarehouseRemain:
+    return WarehouseRemain(barcode, article, "0", "vendor", warehouse, quantity)
+
+
+async def add(client: AsyncClient, seller_id: uuid.UUID, *barcodes: str):
+    return await client.post(f"{API}/sellers/{seller_id}/items", json={"barcodes": list(barcodes)})
+
+
+async def test_a_row_shows_orders_of_the_week_the_wb_warehouse_stock_and_the_days_it_lasts(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    day = yesterday()
+    orders = [sale(f"d{index}", DRILL, "1271611253", day) for index in range(14)]
+    orders += [sale("old", DRILL, "1271611253", day - timedelta(days=7))]
+    orders += [sale("c1", DRILL, "1271611253", day, cancelled=True)]
+    await seed_orders(application, seller, orders)
+    await seed_remains(
+        application,
+        seller,
+        [
+            remain(DRILL, "1271611253", "Склад WB РФ", 30),
+            remain(DRILL, "1271611253", "Коледино", 500),
+            remain(DRILL, "1271611253", "В пути до получателей", 40),
+        ],
+    )
+    assert (await add(client, seller, DRILL)).json() == {"added": 1, "existing": 0}
+
+    row = own((await client.get(API)).json())[DRILL]
+
+    assert (row["article"], row["vendor_code"], row["name"]) == ("1271611253", "KARBI - Шуруповерт", "Шуруповерт")
+    assert (row["orders"], row["stock"], row["rate"], row["days"], row["status"]) == (15, 30, 2.1, 14, "ok")
+    assert row["tone"] == "warning"
+
+
+async def test_orders_outside_the_window_and_today_are_not_counted(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    today = datetime.now(UTC).date()
+    await seed_orders(
+        application,
+        seller,
+        [
+            sale("today", DRILL, "1271611253", today),
+            sale("edge", DRILL, "1271611253", today - timedelta(days=7)),
+            sale("before", DRILL, "1271611253", today - timedelta(days=8)),
+        ],
+    )
+    await add(client, seller, DRILL)
+    body = (await client.get(API)).json()
+    assert own(body)[DRILL]["orders"] == 1
+    assert (body["window_from"], body["window_to"]) == (
+        (today - timedelta(days=7)).isoformat(),
+        (today - timedelta(days=1)).isoformat(),
+    )
+
+
+async def test_without_a_stock_snapshot_the_days_are_unknown_not_zero(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_orders(application, seller, [sale("a", SAW, "1466514852", yesterday())])
+    await add(client, seller, SAW)
+
+    row = own((await client.get(API)).json())[SAW]
+
+    assert (row["stock"], row["days"], row["status"]) == (None, None, "no_data")
+
+
+async def test_an_article_without_orders_is_no_sales(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_remains(application, seller, [remain(SAW, "1466514852", "Склад WB РФ", 12)])
+    await add(client, seller, SAW)
+
+    row = own((await client.get(API)).json())[SAW]
+
+    assert (row["stock"], row["orders"], row["days"], row["status"]) == (12, 0, None, "no_sales")
+
+
+async def test_fbs_is_yes_no_or_unknown(application: Application, seller: uuid.UUID, client: AsyncClient) -> None:
+    await seed_remains(application, seller, [])
+    await add(client, seller, DRILL, SAW)
+    assert {row["fbs"] for row in own((await client.get(API)).json()).values()} == {"unknown"}
+
+    async with application.database.session() as session:
+        await TurnoverRepository(session).replace_warehouse_stocks(seller, {("1271611253", 7): 4})
+        await session.commit()
+    rows = own((await client.get(API)).json())
+    assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == ("yes", "no")
+
+
+async def test_a_barcode_missing_from_the_catalog_still_gets_a_row(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_orders(application, seller, [sale("g", GHOST, "999", yesterday())])
+    await add(client, seller, GHOST)
+
+    row = own((await client.get(API)).json())[GHOST]
+
+    assert (row["in_catalog"], row["article"], row["orders"]) == (False, "999", 1)
+
+
+async def test_orders_collected_before_barcodes_were_stored_are_reported(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_orders(application, seller, [sale("legacy", "", "1271611253", yesterday())])
+    body = (await client.get(API)).json()
+    [state] = [item for item in body["sellers"] if item["seller_id"] == str(seller)]
+    assert state["orders_without_barcode"] == 1
+
+
+async def test_a_stale_stock_snapshot_is_flagged(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    long_ago = datetime.now(UTC) - timedelta(hours=30)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.record_attempt(seller, MIRROR_REMAINS, now=long_ago)
+        await mirror.replace_remains(seller, [], now=long_ago)
+        await mirror.mark_collected(seller, MIRROR_REMAINS, now=long_ago)
+        await session.commit()
+    body = (await client.get(API)).json()
+    [state] = [item for item in body["sellers"] if item["seller_id"] == str(seller)]
+    assert state["remains_stale"] is True
+
+
+async def test_the_list_is_edited_by_the_analyst(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    assert (await add(client, seller, DRILL, DRILL, SAW)).json() == {"added": 2, "existing": 0}
+    assert (await add(client, seller, SAW)).json() == {"added": 0, "existing": 1}
+    assert (await add(client, seller, "не баркод!")).status_code == 409
+
+    patched = await client.patch(
+        f"{API}/sellers/{seller}/items/{DRILL}", json={"note": "включить FBS", "nomenclature": "Дрель 1С"}
+    )
+    assert patched.status_code == 204
+    row = own((await client.get(API)).json())[DRILL]
+    assert (row["note"], row["nomenclature"]) == ("включить FBS", "Дрель 1С")
+
+    assert (await client.put(f"{API}/sellers/{seller}/items/{DRILL}/hidden", json={"hidden": True})).status_code == 204
+    body = (await client.get(API)).json()
+    assert DRILL not in own(body)
+    assert [item["barcode"] for item in body["hidden"] if item["seller_name"] == NAME] == [DRILL]
+
+    await client.put(f"{API}/sellers/{seller}/items/{DRILL}/hidden", json={"hidden": False})
+    assert own((await client.get(API)).json())[DRILL]["note"] == "включить FBS"
+
+    assert (await client.delete(f"{API}/sellers/{seller}/items/{DRILL}")).status_code == 204
+    assert DRILL not in own((await client.get(API)).json())
+    assert (await client.delete(f"{API}/sellers/{seller}/items/{DRILL}")).status_code == 404
+
+
+async def test_a_seller_outside_the_automation_cannot_get_items(application: Application, client: AsyncClient) -> None:
+    async with application.database.session() as session:
+        model = SellerModel(name="Не подключён", catalog_sync_status="success", egress_status="verified")
+        session.add(model)
+        await session.commit()
+        stranger = model.id
+    try:
+        assert (await add(client, stranger, DRILL)).status_code == 404
+    finally:
+        async with application.database.session() as session:
+            await session.execute(delete(SellerModel).where(SellerModel.id == stranger))
+            await session.commit()
+
+
+async def test_refresh_queues_collection_for_sellers_with_rows(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await add(client, seller, DRILL)
+    first = (await client.post(f"{API}/refresh")).json()["queued"]
+    second = (await client.post(f"{API}/refresh")).json()["queued"]
+    assert first >= 1 and second == first
+    async with application.database.session() as session:
+        assert (await TurnoverRepository(session).active_refresh(seller)) is not None
+
+
+async def test_the_workbook_has_the_analysts_columns_and_live_formulas(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_orders(application, seller, [sale(f"s{i}", DRILL, "1271611253", yesterday()) for i in range(14)])
+    await seed_remains(application, seller, [remain(DRILL, "1271611253", "Склад WB РФ", 30)])
+    await add(client, seller, DRILL)
+
+    response = await client.get(f"{API}/export")
+
+    assert response.status_code == 200
+    sheet = load_workbook(io.BytesIO(response.content))["Оборачиваемость"]
+    header = [cell.value for cell in sheet[1]]
+    assert header == [
+        "Комментарии",
+        "Кабинет",
+        "Артикул WB",
+        "Баркод",
+        "Артикул продавца",
+        "Номенклатура 1С",
+        "Остатки ФБО (Склад ВБ РФ)",
+        "Продажи за 7 дней",
+        "Средние продажи в день",
+        "Оборачиваемость",
+        "Остатки ФБС",
+    ]
+    rows = [dict(zip(header, [cell.value for cell in row], strict=True)) for row in sheet.iter_rows(min_row=2)]
+    [row] = [item for item in rows if item["Кабинет"] == NAME]
+    assert (row["Баркод"], row["Остатки ФБО (Склад ВБ РФ)"], row["Продажи за 7 дней"]) == (DRILL, 30, 14)
+    assert str(row["Средние продажи в день"]).startswith("=H")
+    assert "ROUNDDOWN" in str(row["Оборачиваемость"])
+
+
+async def test_deleting_the_seller_with_purge_drops_its_rows(application: Application, seller: uuid.UUID) -> None:
+    async with application.database.session() as session:
+        repository = TurnoverRepository(session)
+        await repository.add_board_items(seller, [DRILL], None)
+        await repository.purge_seller(seller)
+        await session.commit()
+        assert await repository.board_items([seller]) == []
+    async with application.database.session() as session:
+        await session.execute(delete(BoardItemModel).where(BoardItemModel.seller_id == seller))
+
+
+def test_the_statistics_client_reads_the_barcode_of_an_order() -> None:
+    row = WBStatisticsClient(make_gateway())._order(
+        {
+            "nmId": 1271611253,
+            "srid": "x",
+            "barcode": DRILL,
+            "date": "2026-10-21T10:00:00",
+            "lastChangeDate": "2026-10-21T11:00:00",
+        }
+    )
+    assert isinstance(row, OrderRow)
+    assert row.barcode == DRILL
