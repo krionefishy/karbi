@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Download, EyeOff, Plus, RefreshCw, Trash2, Undo2 } from "lucide-react";
-import { useMemo, useState, type CSSProperties } from "react";
+import { ArrowDown, ArrowUp, Download, EyeOff, Plus, RefreshCw, Trash2, Undo2, Upload } from "lucide-react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 
 import { ApiError } from "../api/http";
 import {
@@ -10,6 +10,8 @@ import {
   downloadBoard,
   fbsText,
   getBoard,
+  importBoard,
+  importSummary,
   refreshBoard,
   removeBoardItem,
   setBoardItemHidden,
@@ -33,6 +35,7 @@ export function TurnoverBoard() {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const { data: board, isLoading } = useQuery({
     queryKey: ["turnover-board"],
@@ -75,6 +78,15 @@ export function TurnoverBoard() {
       await reload();
     },
     onError: fail("Не удалось добавить баркоды"),
+  });
+  const importMutation = useMutation({
+    mutationFn: importBoard,
+    onSuccess: async (result) => {
+      setError("");
+      setInfo(importSummary(result.cabinets));
+      await reload();
+    },
+    onError: fail("Не удалось загрузить список"),
   });
   const refreshMutation = useMutation({
     mutationFn: refreshBoard,
@@ -140,6 +152,26 @@ export function TurnoverBoard() {
             <RefreshCw size={15} className={refreshMutation.isPending ? "spinning" : undefined} />
             Обновить данные
           </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".xlsx"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) importMutation.mutate(file);
+              event.target.value = "";
+            }}
+          />
+          <button
+            className="secondary-button"
+            onClick={() => fileInput.current?.click()}
+            disabled={importMutation.isPending}
+            title="Excel со столбцами «Кабинет», «Баркод», «Номенклатура 1С» (лист «ОСНОВА»). Новые баркоды добавятся, прежние не тронутся."
+          >
+            <Upload size={15} />
+            {importMutation.isPending ? "Загружаем…" : "Загрузить из Excel"}
+          </button>
           <button className="primary-button" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
             <Download size={15} />
             {exportMutation.isPending ? "Собираем…" : "Скачать Excel"}
@@ -176,7 +208,10 @@ export function TurnoverBoard() {
       {board.rows.length === 0 ? (
         <div className="empty-state">
           <h2>В таблице пока нет товаров</h2>
-          <p>Выберите кабинет и впишите баркоды ниже — заказы и остаток подтянутся сами.</p>
+          <p>
+            Загрузите список из Excel кнопкой выше (столбцы «Кабинет», «Баркод», «Номенклатура 1С») или выберите
+            кабинет и впишите баркоды ниже — заказы и остаток подтянутся сами.
+          </p>
         </div>
       ) : (
         <section className="checklist-scroll stocks-scroll" style={{ "--stocks-template": TEMPLATE } as CSSProperties}>

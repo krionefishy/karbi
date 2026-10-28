@@ -3,7 +3,7 @@ import urllib.parse
 import uuid
 
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 
 from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
@@ -19,6 +19,8 @@ from backend.modules.wb_turnover.presentation.http.schemas import (
     BoardAddRequest,
     BoardHiddenRequest,
     BoardHiddenRowResponse,
+    BoardImportCabinetResponse,
+    BoardImportResponse,
     BoardItemRequest,
     BoardRefreshResponse,
     BoardResponse,
@@ -29,6 +31,7 @@ from backend.modules.wb_turnover.presentation.http.schemas import (
 router = APIRouter(prefix="/board")
 
 SPLIT = re.compile(r"[\s,;]+")
+MAX_LIST_BYTES = 5 * 1024 * 1024
 
 
 def not_enrolled() -> HTTPException:
@@ -183,4 +186,32 @@ async def export(_: CurrentPrincipal, service: FromDishka[BoardService]) -> Resp
         content=report.content,
         media_type=XLSX_MEDIA_TYPE,
         headers={"Content-Disposition": f"attachment; filename=\"{report.filename}\"; filename*=UTF-8''{encoded}"},
+    )
+
+
+@router.post("/import", response_model=BoardImportResponse)
+@inject
+async def import_list(
+    principal: CurrentPrincipal, service: FromDishka[BoardService], workbook: UploadFile = File(...)
+) -> BoardImportResponse:
+    """Список из Excel: лист «ОСНОВА» или любой с столбцами «Кабинет», «Баркод», «Номенклатура 1С»."""
+    content = await workbook.read(MAX_LIST_BYTES + 1)
+    if len(content) > MAX_LIST_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Файл больше 5 МБ")
+    try:
+        result = await service.import_list(content, principal.user_id)
+    except BoardInputError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return BoardImportResponse(
+        cabinets=[
+            BoardImportCabinetResponse(
+                name=item.name,
+                seller_name=item.seller_name,
+                connected_now=item.connected_now,
+                added=item.added,
+                existing=item.existing,
+                unknown=item.unknown,
+            )
+            for item in result.cabinets
+        ]
     )

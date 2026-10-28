@@ -6,6 +6,8 @@ from backend.modules.wb_turnover.application.board import (
     BoardService,
     BoardView,
     HiddenBoardRow,
+    ImportCabinet,
+    ImportResult,
 )
 from backend.modules.wb_turnover.application.board_report import BoardReportFile, render_board
 from backend.modules.wb_turnover.application.calculation import CalculationService
@@ -40,6 +42,8 @@ __all__ = [
     "BoardService",
     "BoardView",
     "HiddenBoardRow",
+    "ImportCabinet",
+    "ImportResult",
     "render_board",
     "AUTOMATION_ID",
     "XLSX_MEDIA_TYPE",

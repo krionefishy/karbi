@@ -75,6 +75,31 @@ export const setBoardItemHidden = (sellerId: string, barcode: string, hidden: bo
 export const removeBoardItem = (sellerId: string, barcode: string) =>
   apiRequest<void>(item(sellerId, barcode), { method: "DELETE" });
 
+export interface ImportCabinet {
+  name: string;
+  seller_name: string | null;
+  connected_now: boolean;
+  added: number;
+  existing: number;
+  unknown: number;
+}
+
+export const importBoard = (workbook: File) => {
+  const body = new FormData();
+  body.append("workbook", workbook);
+  return apiRequest<{ cabinets: ImportCabinet[] }>(`${root}/import`, { method: "POST", body });
+};
+
+export function importSummary(cabinets: ImportCabinet[]): string {
+  const parts = cabinets.map((cabinet) => {
+    if (!cabinet.seller_name) return `«${cabinet.name}» — такого кабинета нет в реестре, пропущен`;
+    const connected = cabinet.connected_now ? ", кабинет подключён" : "";
+    const unknown = cabinet.unknown > 0 ? `, ${cabinet.unknown} баркодов не найдено в каталоге` : "";
+    return `${cabinet.seller_name}: добавлено ${cabinet.added}, уже были ${cabinet.existing}${connected}${unknown}`;
+  });
+  return `${parts.join("; ")}. Заказы и остатки соберутся в течение нескольких минут.`;
+}
+
 export const refreshBoard = () => apiRequest<{ queued: number }>(`${root}/refresh`, { method: "POST" });
 
 export const downloadBoard = () => apiDownload(`${root}/export`);

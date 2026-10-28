@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_turnover.application.board_import import BoardFileError, normalize, parse_list
 from backend.modules.wb_turnover.domain import compute_board_cover, cover_tone
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 
@@ -83,6 +84,23 @@ class BoardView:
 class AddResult:
     added: int
     existing: int
+
+
+@dataclass(frozen=True, slots=True)
+class ImportCabinet:
+    """Что вышло с одним кабинетом файла: нашёлся ли, подключили ли, сколько строк добавлено."""
+
+    name: str
+    seller_name: str | None
+    connected_now: bool
+    added: int
+    existing: int
+    unknown: int
+
+
+@dataclass(frozen=True, slots=True)
+class ImportResult:
+    cabinets: list[ImportCabinet]
 
 
 class BoardService:
@@ -245,6 +263,57 @@ class BoardService:
             )
         await self.session.commit()
         return AddResult(added=added_codes, existing=len(unique) - added_codes)
+
+    async def import_list(self, content: bytes, requested_by: uuid.UUID | None) -> ImportResult:
+        """Загрузить список из Excel: подключить кабинеты файла, вписать баркоды, поставить сбор.
+
+        Повторная загрузка ничего не задваивает — новые баркоды добавляются, прежние
+        остаются со своими комментариями. Кабинет, которого нет в реестре, пропускается
+        и попадает в ответ без добавленных строк. Кабинет из файла подключается к
+        «Оборачиваемости» сам: файл и есть решение, что за ним следим.
+        """
+        try:
+            rows = parse_list(content)
+        except BoardFileError as error:
+            raise BoardInputError(str(error)) from error
+        if not rows:
+            raise BoardInputError("В файле нет строк с кабинетом и баркодом")
+        registry = await self.sellers.list_sellers()
+        tracked = await self.turnover.tracked_seller_ids()
+        results: list[ImportCabinet] = []
+        for name in dict.fromkeys(row.seller for row in rows):
+            wanted = list(dict.fromkeys(row.barcode for row in rows if row.seller == name))
+            seller = next((item for item in registry if normalize(item.name) == normalize(name)), None)
+            if seller is None:
+                results.append(ImportCabinet(name, None, False, 0, 0, 0))
+                continue
+            connected_now = seller.id not in tracked
+            if connected_now:
+                await self.turnover.track(seller.id)
+            barcodes = [row.barcode for row in rows if row.seller == name]
+            for barcode in barcodes:
+                if not BARCODE.match(barcode):
+                    raise BoardInputError(f"«{barcode[:40]}» не похоже на баркод")
+            added = await self.turnover.add_board_items(seller.id, wanted, requested_by)
+            for row in rows:
+                if row.seller == name and row.nomenclature:
+                    await self.turnover.update_board_item(
+                        seller.id, row.barcode, note=None, nomenclature=row.nomenclature[:500], updated_by=None
+                    )
+            known = await self.sellers.list_barcode_sizes(seller.id)
+            await self.turnover.request_refresh(seller.id, requested_by)
+            results.append(
+                ImportCabinet(
+                    name=name,
+                    seller_name=seller.name,
+                    connected_now=connected_now,
+                    added=added,
+                    existing=len(wanted) - added,
+                    unknown=sum(1 for barcode in wanted if barcode not in known),
+                )
+            )
+        await self.session.commit()
+        return ImportResult(results)
 
     async def update_item(
         self,

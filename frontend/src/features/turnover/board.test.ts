@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { boardNotices, daysText, sortBoardRows, visibleBoardRows, type Board, type BoardRow } from "./board";
+import { boardNotices, daysText, importSummary, sortBoardRows, visibleBoardRows, type Board, type BoardRow } from "./board";
 
 function row(barcode: string, patch: Partial<BoardRow> = {}): BoardRow {
   return {
@@ -59,5 +59,14 @@ describe("board", () => {
     const notices = boardNotices(board, "");
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("Один");
+  });
+
+  it("tells what the upload did per cabinet", () => {
+    const text = importSummary([
+      { name: "Яночкина", seller_name: "Яночкина", connected_now: true, added: 2, existing: 0, unknown: 1 },
+      { name: "Кто-то", seller_name: null, connected_now: false, added: 0, existing: 0, unknown: 0 },
+    ]);
+    expect(text).toContain("Яночкина: добавлено 2, уже были 0, кабинет подключён, 1 баркодов не найдено");
+    expect(text).toContain("«Кто-то» — такого кабинета нет в реестре");
   });
 });

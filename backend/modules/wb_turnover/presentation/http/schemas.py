@@ -113,3 +113,16 @@ class BoardItemRequest(BaseModel):
 
 class BoardRefreshResponse(BaseModel):
     queued: int
+
+
+class BoardImportCabinetResponse(BaseModel):
+    name: str
+    seller_name: str | None
+    connected_now: bool
+    added: int
+    existing: int
+    unknown: int
+
+
+class BoardImportResponse(BaseModel):
+    cabinets: list[BoardImportCabinetResponse]

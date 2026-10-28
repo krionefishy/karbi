@@ -413,3 +413,70 @@ async def test_collecting_stocks_stores_the_layer_per_size(application: Applicat
         assert await repository.fbo_stocks(seller) == {DRILL_CHRT: 12, SAW_CHRT: 7}
         tracked = await repository.tracked(seller)
     assert tracked is not None and tracked.fbo_stocks_at is not None
+
+
+def workbook(rows: list[tuple[str, str, str]], sheet_title: str = "ОСНОВА ") -> bytes:
+    from openpyxl import Workbook
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = sheet_title
+    sheet.append(["Кабинет", "Артикул WB", "Баркод", "Артикул продавца", "Номенклатура 1С", "Активность"])
+    for cabinet, barcode, nomenclature in rows:
+        sheet.append([cabinet, 1, int(barcode) if barcode.isdigit() else barcode, "x", nomenclature, "активна"])
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
+async def upload(client: AsyncClient, content: bytes):
+    return await client.post(f"{API}/import", files={"workbook": ("list.xlsx", content)})
+
+
+async def test_uploading_the_list_connects_the_cabinet_adds_rows_and_queues_collection(
+    application: Application, client: AsyncClient
+) -> None:
+    async with application.database.session() as session:
+        model = SellerModel(name="Импорт тест", catalog_sync_status="success", egress_status="verified")
+        session.add(model)
+        await session.commit()
+        seller_id = model.id
+    try:
+        content = workbook([("Импорт тест", DRILL, "Дрель 1С"), ("Импорт тест", SAW, ""), ("Нет такого", DRILL, "")])
+
+        first = (await upload(client, content)).json()["cabinets"]
+        assert first[0] == {
+            "name": "Импорт тест",
+            "seller_name": "Импорт тест",
+            "connected_now": True,
+            "added": 2,
+            "existing": 0,
+            "unknown": 2,
+        }
+        assert first[1]["seller_name"] is None
+
+        second = (await upload(client, content)).json()["cabinets"][0]
+        assert (second["connected_now"], second["added"], second["existing"]) == (False, 0, 2)
+
+        row = [r for r in (await client.get(API)).json()["rows"] if r["seller_name"] == "Импорт тест"]
+        assert {item["barcode"]: item["nomenclature"] for item in row} == {DRILL: "Дрель 1С", SAW: ""}
+        async with application.database.session() as session:
+            assert await TurnoverRepository(session).active_refresh(seller_id) is not None
+    finally:
+        async with application.database.session() as session:
+            await TurnoverRepository(session).purge_seller(seller_id)
+            await session.execute(delete(RefreshRequestModel).where(RefreshRequestModel.seller_id == seller_id))
+            await session.execute(delete(SellerModel).where(SellerModel.id == seller_id))
+            await session.commit()
+
+
+async def test_a_file_without_the_columns_or_not_excel_is_refused(client: AsyncClient) -> None:
+    assert (await upload(client, b"not excel")).status_code == 422
+    from openpyxl import Workbook
+
+    book = Workbook()
+    book.active.append(["Что-то", "Другое"])
+    buffer = io.BytesIO()
+    book.save(buffer)
+    refused = await upload(client, buffer.getvalue())
+    assert refused.status_code == 422 and "нет столбцов" in refused.json()["detail"]

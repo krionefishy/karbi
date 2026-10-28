@@ -1,56 +1,20 @@
 import argparse
 import asyncio
-import re
 import sys
-from dataclasses import dataclass
-
-from openpyxl import load_workbook
 
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_turnover.application.board_import import BoardFileError, SheetRow, normalize, parse_list
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
-LIST_SHEET = "основа"
-HEADERS = {"кабинет": "seller", "баркод": "barcode", "номенклатура 1с": "nomenclature"}
-
-
-@dataclass(frozen=True, slots=True)
-class SheetRow:
-    seller: str
-    barcode: str
-    nomenclature: str
-
-
-def _norm(value: object) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
-
-
-def _barcode(value: object) -> str:
-    if value is None:
-        return ""
-    return str(int(value)) if isinstance(value, float) else str(value).strip()
-
 
 def read_rows(path: str) -> list[SheetRow]:
-    """Строки листа «ОСНОВА»: кабинет, баркод и номенклатура 1С. Остальное берётся из каталога."""
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    sheet = next((item for item in workbook.worksheets if _norm(item.title) == LIST_SHEET), None)
-    if sheet is None:
-        raise SystemExit(f"В книге нет листа «ОСНОВА»: {[item.title for item in workbook.worksheets]}")
-    rows = sheet.iter_rows(values_only=True)
-    header = next(rows)
-    columns = {HEADERS[_norm(name)]: index for index, name in enumerate(header) if _norm(name) in HEADERS}
-    missing = set(HEADERS.values()) - set(columns)
-    if missing:
-        raise SystemExit(f"На листе «ОСНОВА» нет столбцов: {sorted(missing)}")
-    collected = []
-    for row in rows:
-        seller = str(row[columns["seller"]] or "").strip()
-        barcode = _barcode(row[columns["barcode"]])
-        if seller and barcode:
-            collected.append(SheetRow(seller, barcode, str(row[columns["nomenclature"]] or "").strip()))
-    return collected
+    try:
+        with open(path, "rb") as handle:
+            return parse_list(handle.read())
+    except BoardFileError as error:
+        raise SystemExit(str(error)) from error
 
 
 async def run(path: str, apply: bool) -> int:
@@ -66,8 +30,12 @@ async def run(path: str, apply: bool) -> int:
             tracked = await turnover.tracked_seller_ids()
             for name in dict.fromkeys(row.seller for row in rows):
                 wanted = [row for row in rows if row.seller == name]
-                seller = next((item for item in sellers if _norm(item.name) == _norm(name)), None) or next(
-                    (item for item in sellers if _norm(name) in _norm(item.name) or _norm(item.name) in _norm(name)),
+                seller = next((item for item in sellers if normalize(item.name) == normalize(name)), None) or next(
+                    (
+                        item
+                        for item in sellers
+                        if normalize(name) in normalize(item.name) or normalize(item.name) in normalize(name)
+                    ),
                     None,
                 )
                 if seller is None:
