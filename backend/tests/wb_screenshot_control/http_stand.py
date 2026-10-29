@@ -44,6 +44,7 @@ PASSWORD = "correct horse battery staple"
 BUCKET = "screens-test"
 EXTRA_TABLES = ("extension_installs", "pairing_codes", "telegram_links", "telegram_link_tokens")
 REDIS_PATTERNS = ("rate_limit:sc-pair:*", "sc:user:*", "rate_limit:ip-screenshots:*")
+SERVICE_ID = "wb-screenshot-control"
 
 
 @dataclass
@@ -242,8 +243,14 @@ async def _clean(application: Application) -> None:
 
 @asynccontextmanager
 async def open_stand(
-    tmp_path: Path, *, s3: bool = True, roles: Sequence[str] = ("admin", "manager", "other"), **overrides: Any
+    tmp_path: Path,
+    *,
+    s3: bool = True,
+    roles: Sequence[str] = ("admin", "manager", "other"),
+    without_service: Sequence[str] = (),
+    **overrides: Any,
 ) -> AsyncIterator[Stand]:
+    """Сотрудникам, кроме админа и ролей из `without_service`, сервис выдан, как это сделал бы админ."""
     staging = tmp_path / "staging"
     application = Application(settings_for(staging, **overrides))
     app = application.get_app()
@@ -259,6 +266,10 @@ async def open_stand(
             for role in roles:
                 user = await repository.create(f"{prefix}-{role}", passwords.hash(PASSWORD), is_admin=role == "admin")
                 users[role] = user.id
+            granted_by = users.get("admin", next(iter(users.values()), None))
+            for role, user_id in users.items():
+                if role != "admin" and role not in without_service and granted_by is not None:
+                    await repository.replace_services(user_id, {SERVICE_ID}, granted_by)
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             try:
                 yield Stand(client, application, prefix, users, blobs, staging)

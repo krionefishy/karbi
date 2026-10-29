@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from sqlalchemy import update
 
+from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.platform.infrastructure.postgres.models import UserModel
 from backend.modules.wb_screenshot_control.application.extension_service import hash_token
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
@@ -236,3 +237,28 @@ async def test_extension_is_closed_when_the_module_is_off(tmp_path: Path) -> Non
         assert (bad.status_code, bad.headers["X-Error-Code"]) == (401, "bad_token")
         closed = await stand.client.get(f"{EXTENSION}/me", headers=bearer(token))
         assert (closed.status_code, closed.headers["X-Error-Code"]) == (503, "module_off")
+
+
+async def test_manager_routes_need_the_service_and_the_extension_token_does_not(tmp_path: Path) -> None:
+    async with open_stand(tmp_path, roles=("admin", "manager", "other"), without_service=("other",)) as stand:
+        token = await paired(stand)
+        async with stand.database.session() as session:
+            await UserRepository(session).replace_services(stand.users["manager"], set(), stand.users["admin"])
+
+        for headers in (await stand.sign_in("manager"), await stand.sign_in("other")):
+            for method, path in (
+                ("GET", f"{MANAGER}/submissions"),
+                ("GET", f"{MANAGER}/summary"),
+                ("GET", f"{MANAGER}/submissions/{uuid.uuid4()}"),
+                ("POST", f"{MANAGER}/extension/pairing-code"),
+            ):
+                refused = await stand.client.request(method, path, headers=headers)
+                assert refused.status_code == 403, (path, refused.text)
+                assert refused.headers.get("X-Access-Denied"), path
+            denied_upload = await stand.upload(headers)
+            assert denied_upload.status_code == 403 and denied_upload.headers.get("X-Access-Denied")
+
+        me = await stand.client.get(f"{EXTENSION}/me", headers=bearer(token))
+        assert me.status_code == 200, me.text
+        sent = await ext_upload(stand, token)
+        assert sent.status_code == 201, sent.text
