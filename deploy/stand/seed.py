@@ -4,8 +4,9 @@
 `роль логин пароль`): нет пользователя — создаётся, есть — пароль и флаг админа приводятся к файлу.
 Пароли в вывод не попадают.
 
-В этой ветке нет доступа к сервисам по сотрудникам (platform.user_service_access появился в main позже):
-«Контроль скриншотов ДБС» открыт любому вошедшему, админка — флагу is_admin. Выдавать доступ не нужно.
+Доступ к сервисам выдаётся каждому сотруднику (platform.user_service_access): менеджерам стенда seed
+выдаёт «Контроль скриншотов ДБС» от имени администратора стенда, как это сделал бы админ в диалоге
+доступов. Администратор видит все сервисы без выдачи.
 
     python /stand/seed.py [/stand/.credentials.txt]
 """
@@ -18,6 +19,8 @@ from backend.modules.platform.application import PasswordService
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
+
+SERVICE_ID = "wb-screenshot-control"
 
 
 def read_credentials(path: Path) -> list[tuple[str, str, str]]:
@@ -53,6 +56,15 @@ async def seed(path: Path) -> None:
                     action = "обновлён"
                 print(f"{role:8} {username:20} {action}")
             await session.commit()
+            admins = [username for role, username, _ in rows if role == "admin"]
+            granter = await users.get_by_username(admins[0]) if admins else None
+            if granter is None:
+                raise SystemExit("Нужен администратор в файле логинов: от его имени выдаётся доступ к сервису")
+            for role, username, _ in rows:
+                user = await users.get_by_username(username)
+                if role != "admin" and user is not None:
+                    await users.replace_services(user.id, await users.service_ids(user.id) | {SERVICE_ID}, granter.id)
+                    print(f"{role:8} {username:20} доступ к {SERVICE_ID}")
     finally:
         await database.disconnect()
 
