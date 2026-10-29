@@ -383,7 +383,7 @@ outbox → Kafka (`wb.support-bot.reply.requested`) → `ReplyConsumer` → кл
 | `history_days` | 12 | глубина разбора диалогов; больше `campaign_days` |
 | `mirror_stale_minutes` | 90 | старше этого зеркало чатов считается устаревшим |
 | `max_idle_days` | 5 | диалог не трогаем, если специалист писал последний раз дольше этого назад (старт кампании и идущая кампания): часто разговор уже закончен вежливым прощанием, и тишина покупателя ничего не значит. Сообщения самого бота давность не продлевают |
-| `reply_gate_mode`, `reply_prompt_version` | `off`, `r1` | слой ответов: `off` / `shadow` / `enforce` и версия промпта |
+| `reply_gate_mode`, `reply_prompt_version` | `off`, `r2` | слой ответов: `off` / `shadow` / `enforce` и версия промпта |
 | `reply_retry_minutes`, `reply_max_attempts` | 15, 10 | повтор запроса класса при сбое |
 | `canary_percent` | 10 | доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения |
 | `chat_url_template` | `…/chat-with-clients?chatId={chat_id}` | шаблон ссылки на чат в кабинете WB; пусто — без ссылок |

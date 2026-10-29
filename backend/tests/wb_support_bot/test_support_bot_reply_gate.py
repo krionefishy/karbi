@@ -332,7 +332,7 @@ async def test_a_reply_holds_the_campaign_until_the_class_arrives(database: Data
     assert state.state == "in_campaign" and state.reply_hold and state.campaign_started_at is not None
     assert await send_count(database, seller) == before, "пока вердикта нет, напоминания не уходят"
     assert len(rows) == 1 and rows[0].messages == 1 and rows[0].last_event_id == REPLY.event_id
-    assert rows[0].prompt_version == "r1"
+    assert rows[0].prompt_version == "r2"
     # Через три часа прошло больше окна повтора: запрос поставлен второй раз, а не потерян.
     assert rows[0].attempts == 2 and await outbox_count(database) == 2
 
@@ -444,7 +444,7 @@ async def test_a_new_prompt_version_does_not_end_a_continued_campaign(database: 
     await finish(database, row.id, "noise")
     await go(database, seller, mode="enforce", now=NOW + timedelta(minutes=90))
 
-    await go(database, seller, mode="enforce", now=NOW + timedelta(minutes=100), reply_prompt_version="r2")
+    await go(database, seller, mode="enforce", now=NOW + timedelta(minutes=100), reply_prompt_version="r3")
 
     state = await dialog_of(database, seller)
     assert state.state == "in_campaign" and not state.reply_hold
@@ -552,7 +552,7 @@ async def request_reply(database: Database, seller_id: uuid.UUID, *messages: Cha
                 first_event_at=messages[0].added_at,
                 last_event_at=messages[-1].added_at,
                 messages=len(messages),
-                prompt_version="r1",
+                prompt_version="r2",
                 status=VERDICT_PENDING,
                 attempts=1,
             )

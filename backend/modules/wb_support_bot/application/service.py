@@ -263,7 +263,7 @@ class SupportBotService(ReplyStatsMixin):
         classifier_mode: str = MODE_OFF,
         classifier_prompt_version: str = "v2",
         reply_gate_mode: str = MODE_OFF,
-        reply_prompt_version: str = "r1",
+        reply_prompt_version: str = "r2",
     ) -> None:
         self.canary_percent = canary_percent
         self.classifier_mode = classifier_mode

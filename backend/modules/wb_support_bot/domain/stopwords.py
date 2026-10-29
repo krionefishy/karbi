@@ -4,7 +4,7 @@ from dataclasses import dataclass
 NO_CONTACT_PATTERNS: tuple[str, ...] = (
     r"не пиши\w*",
     r"не звони\w*",
-    r"не беспокой\w*",
+    r"не беспоко[ий]\w*",
     r"не надо писать",
     r"хватит",
     r"прекрат\w*",

@@ -360,7 +360,7 @@ class SupportBotConfig:
     classifier_retry_minutes: int = 15
     classifier_max_attempts: int = 3
     reply_gate_mode: str = "off"
-    reply_prompt_version: str = "r1"
+    reply_prompt_version: str = "r2"
     reply_retry_minutes: int = 15
     reply_max_attempts: int = 10
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
