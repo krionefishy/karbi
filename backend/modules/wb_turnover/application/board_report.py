@@ -13,6 +13,7 @@ from backend.modules.wb_turnover.application.board import FBS_NO, FBS_YES, Board
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 COLUMNS = (
+    ("Хватит на, дн.", 14),
     ("Комментарии", 34),
     ("Кабинет", 20),
     ("Артикул WB", 14),
@@ -22,7 +23,6 @@ COLUMNS = (
     ("Остатки ФБО (Склад ВБ РФ)", 16),
     ("Продажи за 7 дней", 14),
     ("Средние продажи в день", 14),
-    ("Оборачиваемость", 16),
     ("Остатки ФБС", 12),
 )
 
@@ -62,6 +62,7 @@ def render_board(view: BoardView) -> BoardReportFile:
     for number, row in enumerate(view.rows, start=2):
         sheet.append(
             [
+                f'=IF(I{number}=0,"нет продаж",IF(H{number}="","нет данных",ROUNDDOWN(H{number}/J{number},0)))',
                 row.note,
                 row.seller_name,
                 int(row.article) if row.article.isdigit() else row.article,
@@ -70,20 +71,19 @@ def render_board(view: BoardView) -> BoardReportFile:
                 row.nomenclature,
                 row.stock,
                 row.orders,
-                f"=H{number}/{view.window_days}",
-                f'=IF(H{number}=0,"нет продаж",IF(G{number}="","нет данных",ROUNDDOWN(G{number}/I{number},0)))',
+                f"=I{number}/{view.window_days}",
                 FBS_LABELS.get(row.fbs),
             ]
         )
-        sheet.cell(row=number, column=4).number_format = "@"
-        sheet.cell(row=number, column=9).number_format = "0.0"
+        sheet.cell(row=number, column=5).number_format = "@"
+        sheet.cell(row=number, column=10).number_format = "0.0"
 
     last = max(len(view.rows) + 1, 2)
-    scope = f"J2:J{last}"
+    scope = f"A2:A{last}"
     sheet.conditional_formatting.add(
         scope,
         FormulaRule(
-            formula=[f"AND(ISNUMBER($J2),$J2<{view.red_days})"],
+            formula=[f"AND(ISNUMBER($A2),$A2<{view.red_days})"],
             fill=PatternFill("solid", bgColor="FFC7CE"),
             font=Font(color="9C0006"),
         ),
@@ -91,12 +91,12 @@ def render_board(view: BoardView) -> BoardReportFile:
     sheet.conditional_formatting.add(
         scope,
         FormulaRule(
-            formula=[f"AND(ISNUMBER($J2),$J2>={view.red_days},$J2<{view.yellow_days})"],
+            formula=[f"AND(ISNUMBER($A2),$A2>={view.red_days},$A2<{view.yellow_days})"],
             fill=PatternFill("solid", bgColor="FFEB9C"),
             font=Font(color="9C5700"),
         ),
     )
-    sheet.freeze_panes = "E2"
+    sheet.freeze_panes = "C2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(columns))}{last}"
 
     buffer = io.BytesIO()

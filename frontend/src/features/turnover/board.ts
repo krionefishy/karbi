@@ -100,6 +100,18 @@ export function importSummary(cabinets: ImportCabinet[]): string {
   return `${parts.join("; ")}. Заказы и остатки соберутся в течение нескольких минут.`;
 }
 
+export interface FbsWarehouse {
+  key: string;
+  label: string;
+  selected: boolean;
+  cabinets: number;
+}
+
+export const getFbsWarehouses = () => apiRequest<FbsWarehouse[]>(`${root}/fbs-warehouses`);
+
+export const setFbsWarehouses = (keys: string[]) =>
+  apiRequest<FbsWarehouse[]>(`${root}/fbs-warehouses`, { method: "PUT", body: JSON.stringify({ keys }) });
+
 export const refreshBoard = () => apiRequest<{ queued: number }>(`${root}/refresh`, { method: "POST" });
 
 export const downloadBoard = () => apiDownload(`${root}/export`);

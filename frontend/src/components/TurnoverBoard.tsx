@@ -10,11 +10,13 @@ import {
   downloadBoard,
   fbsText,
   getBoard,
+  getFbsWarehouses,
   importBoard,
   importSummary,
   refreshBoard,
   removeBoardItem,
   setBoardItemHidden,
+  setFbsWarehouses,
   sortBoardRows,
   updateBoardItem,
   visibleBoardRows,
@@ -23,7 +25,7 @@ import {
   type BoardSortKey,
 } from "../features/turnover/board";
 
-const TEMPLATE = "220px 130px 140px 380px 110px 110px 110px 120px 90px 44px";
+const TEMPLATE = "120px 220px 130px 140px 380px 110px 110px 110px 90px 44px";
 
 const message = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
 
@@ -42,6 +44,16 @@ export function TurnoverBoard() {
     queryFn: getBoard,
     refetchInterval: 60_000,
   });
+  const { data: warehouses } = useQuery({ queryKey: ["turnover-board-warehouses"], queryFn: getFbsWarehouses });
+  const warehouseMutation = useMutation({
+    mutationFn: setFbsWarehouses,
+    onSuccess: async (result) => {
+      queryClient.setQueryData(["turnover-board-warehouses"], result);
+      await queryClient.invalidateQueries({ queryKey: ["turnover-board"] });
+    },
+    onError: (failure: unknown) => setError(message(failure, "Не удалось сохранить склады")),
+  });
+  const [warehouseSearch, setWarehouseSearch] = useState("");
   const reload = () => queryClient.invalidateQueries({ queryKey: ["turnover-board"] });
   const fail = (fallback: string) => (failure: unknown) => setError(message(failure, fallback));
 
@@ -139,7 +151,7 @@ export function TurnoverBoard() {
           <h1>Хватит на</h1>
           <p className="muted">
             Заказано за {board.window_days} дн. ({board.window_from} — {board.window_to}), как в отчёте WB; остаток —
-            остаток WB, как в колонке «Склад WB РФ» отчёта кабинета. Красным — меньше {board.red_days} дн., жёлтым — до {board.yellow_days}.
+            остаток WB, как в колонке «Склад WB РФ» отчёта кабинета. Красным — меньше {board.red_days} дн., жёлтым — до {board.yellow_days}. «Остатки ФБС» — только по выбранным складам.
           </p>
         </div>
         <div className="review-sync-actions">
@@ -205,6 +217,49 @@ export function TurnoverBoard() {
         />
       </div>
 
+      {warehouses && (
+        <details className="stocks-hidden">
+          <summary>
+            Склады для «Остатков ФБС» ({warehouses.filter((item) => item.selected).length} из {warehouses.length})
+          </summary>
+          <p className="muted">
+            «Есть» — если на отмеченных складах хотя бы один размер артикула с остатком. Названия одинаковые во всех
+            кабинетах. Чтобы расширить список, отметьте нужный склад.
+          </p>
+          <input
+            type="search"
+            aria-label="Поиск склада"
+            placeholder="Найти склад"
+            value={warehouseSearch}
+            onChange={(event) => setWarehouseSearch(event.target.value)}
+          />
+          <ul className="stocks-hidden-list">
+            {warehouses
+              .filter((item) => item.selected || item.label.toLowerCase().includes(warehouseSearch.trim().toLowerCase()))
+              .map((item) => (
+                <li key={item.key} className="stocks-hidden-row">
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={item.selected}
+                      disabled={warehouseMutation.isPending}
+                      onChange={() =>
+                        warehouseMutation.mutate(
+                          warehouses
+                            .filter((other) => (other.key === item.key ? !item.selected : other.selected))
+                            .map((other) => other.key),
+                        )
+                      }
+                    />{" "}
+                    {item.label}
+                  </label>
+                  <span className="muted">{item.cabinets > 0 ? `кабинетов: ${item.cabinets}` : "нет в кабинетах"}</span>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
+
       {board.rows.length === 0 ? (
         <div className="empty-state">
           <h2>В таблице пока нет товаров</h2>
@@ -216,6 +271,9 @@ export function TurnoverBoard() {
       ) : (
         <section className="checklist-scroll stocks-scroll" style={{ "--stocks-template": TEMPLATE } as CSSProperties}>
           <div className="stocks-head">
+            <button type="button" className="stocks-group-head" onClick={() => toggleSort("days")}>
+              Хватит на {sortMark("days")}
+            </button>
             <span>Комментарии</span>
             <span>Кабинет</span>
             <span>Баркод</span>
@@ -227,14 +285,12 @@ export function TurnoverBoard() {
               Продажи за {board.window_days} дн. {sortMark("orders")}
             </button>
             <span>Средние в день</span>
-            <button type="button" className="stocks-group-head" onClick={() => toggleSort("days")}>
-              Оборачиваемость {sortMark("days")}
-            </button>
             <span>Остатки ФБС</span>
             <span />
           </div>
           {rows.map((row) => (
             <div className="stocks-row" key={`${row.seller_id}:${row.barcode}`}>
+              <span className={`stocks-cell cover cover-${row.tone}`}>{daysText(row)}</span>
               <div className="checklist-comment">
                 <input
                   key={`${row.barcode}:${row.note}`}
@@ -275,7 +331,6 @@ export function TurnoverBoard() {
               <span className={`stocks-cell ${row.stock === 0 ? "stocks-zero" : ""}`}>{row.stock ?? "—"}</span>
               <span className="stocks-cell">{row.orders}</span>
               <span className="stocks-cell">{row.rate.toFixed(1)}</span>
-              <span className={`stocks-cell cover cover-${row.tone}`}>{daysText(row)}</span>
               <span className={`stocks-cell ${row.fbs === "no" ? "stocks-zero" : ""}`}>{fbsText[row.fbs]}</span>
               <button
                 type="button"
