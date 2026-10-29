@@ -214,6 +214,12 @@ class ChatMirror:
         """Одно событие ленты по идентификатору; `None` — его нет в зеркале."""
         return await self.mirror.chat_event(seller_id, event_id)
 
+    async def chat_events(
+        self, seller_id: uuid.UUID, chat_id: str, *, since: datetime, until: datetime
+    ) -> list[ChatEvent]:
+        """События одного чата в промежутке `[since, until]`: контекст и срез для оценки ответов."""
+        return await self.mirror.chat_events(seller_id, chat_id, since=since, until=until)
+
     async def launch_at(self, seller_id: uuid.UUID, *, within: timedelta) -> datetime | None:
         """Первое сообщение из API, ушедшее не позже `within` после автосообщения WB; `None` — не было."""
         return await self.mirror.first_api_reply_at(seller_id, within=within)

@@ -468,6 +468,8 @@ class SessionProvider(Provider):
             canary_percent=settings.support_bot.canary_percent,
             classifier_mode=settings.support_bot.classifier_mode,
             classifier_prompt_version=settings.support_bot.classifier_prompt_version,
+            reply_gate_mode=settings.support_bot.reply_gate_mode,
+            reply_prompt_version=settings.support_bot.reply_prompt_version,
         )
 
     @provide(scope=Scope.REQUEST)

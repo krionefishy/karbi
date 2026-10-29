@@ -29,6 +29,7 @@ export interface SupportBot {
   mirror_read_through: string | null;
   canary_percent: number;
   classifier_mode: ClassifierMode;
+  reply_gate_mode: ReplyGateMode;
 }
 
 export type ClassifierMode = "off" | "shadow" | "enforce";
@@ -55,6 +56,8 @@ export interface BotDialog {
   verdict: Verdict | null;
   verdict_reason: string | null;
   manual_verdict: ManualVerdict | null;
+  reply_hold: boolean;
+  reply_category: ReplyCategory | null;
 }
 
 export interface DialogPage {
@@ -97,4 +100,120 @@ export interface DialogFilter {
   state: DialogState | "";
   flag: DialogFlag | "";
   page: number;
+}
+
+export type ReplyGateMode = "off" | "shadow" | "enforce";
+export type ReplyCategory =
+  | "threat"
+  | "stop_request"
+  | "thanks"
+  | "cant_delete"
+  | "refuses"
+  | "not_helped"
+  | "noise"
+  | "waiting_seller"
+  | "sent_details"
+  | "question"
+  | "says_deleted"
+  | "unclear";
+export type ReplyBucket = ReplyCategory | "stopword" | "attachment" | "undetermined";
+export type ReplyAction = "continue" | "stop" | "wait";
+
+export interface ArmStats {
+  dialogs: number;
+  eligible24: number;
+  replied24: number;
+  eligible48: number;
+  replied48: number;
+}
+
+export interface ReplyCategoryCount {
+  category: ReplyBucket;
+  count: number;
+}
+
+export interface DailyPoint {
+  date: string;
+  started_live: number;
+  started_control: number;
+  replied48_live: number;
+  replied48_control: number;
+  replies_live: number;
+  replies_control: number;
+}
+
+export interface ReplySummary {
+  generated_at: string;
+  days: number;
+  gate_mode: ReplyGateMode;
+  live_since: string | null;
+  effect: { live: ArmStats; control: ArmStats };
+  categories: ReplyCategoryCount[];
+  categories_slices: ReplyCategoryCount[];
+  categories_before: ReplyCategoryCount[];
+  categories_after: ReplyCategoryCount[];
+  actions: { continue: number; stop: number; wait: number };
+  daily: DailyPoint[];
+  escalations_open: number;
+  late_sends: {
+    count: number;
+    total_sends: number;
+    median_lag_minutes: number | null;
+    max_lag_minutes: number | null;
+  };
+  continues: {
+    dialogs: number;
+    escalated_after: number;
+    resolved_after: number;
+    max_per_dialog: number;
+    distribution: { count: number; dialogs: number }[];
+  };
+  health: {
+    total: number;
+    pending: number;
+    stuck: number;
+    failed: number;
+    unclear: number;
+    median_decision_minutes: number | null;
+    tokens_in: number;
+    tokens_out: number;
+    calls: number;
+  };
+}
+
+export interface EscalationItem {
+  chat_id: string;
+  prompt_at: string;
+  nm_id: number | null;
+  category: ReplyBucket;
+  reason: string | null;
+  event_at: string;
+  state: string;
+  closed: boolean;
+  excluded: boolean;
+  chat_url: string | null;
+}
+
+export interface ReplyDialogMessage {
+  at: string;
+  role: "buyer" | "seller" | "bot" | "wb";
+  text: string;
+}
+
+export interface ReplyVerdict {
+  first_event_at: string;
+  last_event_at: string;
+  messages: number;
+  status: "pending" | "done" | "failed";
+  category: ReplyBucket | null;
+  reason: string | null;
+  action: ReplyAction;
+}
+
+export interface ReplyDialog {
+  chat_id: string;
+  prompt_at: string;
+  chat_url: string | null;
+  messages: ReplyDialogMessage[];
+  verdicts: ReplyVerdict[];
 }

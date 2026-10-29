@@ -141,6 +141,10 @@ support_bot:
   # off | shadow | enforce: как вердикт нейросети влияет на отправку (shadow — только записываем).
   classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-enforce}
   classifier_prompt_version: v2
+  # off | shadow | enforce: слой ответов покупателей. enforce — класс ответа решает, продолжать ли рассылку;
+  # shadow — классы считаются и пишутся, рассылка не меняется.
+  reply_gate_mode: ${SUPPORT_BOT_REPLY_GATE_MODE:-enforce}
+  reply_prompt_version: r2
 
 llm:
   # Модель меняется здесь: правка строки и перераскатка. Ключ — только из окружения.

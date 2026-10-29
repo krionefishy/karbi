@@ -59,10 +59,11 @@ class SupportBotTopics:
     """Запросы вердикта «диалог завершён нашей стороной» для нейросети: бот не ждёт модель, а кладёт запрос в outbox."""
 
     CLASSIFY_REQUESTED = validate_topic_name("wb.support-bot.classify.requested")
+    REPLY_REQUESTED = validate_topic_name("wb.support-bot.reply.requested")
 
     @classmethod
     def all(cls) -> tuple[str, ...]:
-        return (cls.CLASSIFY_REQUESTED,)
+        return (cls.CLASSIFY_REQUESTED, cls.REPLY_REQUESTED)
 
 
 class ScreenshotControlTopics:

@@ -184,6 +184,8 @@ def test_stopwords_no_contact_and_attention():
     assert match("ХВАТИТ").no_contact
     assert match("Достали уже").no_contact
     assert match("Отстаньте").no_contact
+    assert match("просьба не беспокоить").no_contact
+    assert match("Не беспокойте меня").no_contact
     assert match("Добавьте в чёрный список").no_contact
     assert match("Я пожалуюсь на вас").attention
     assert match("это спам").attention

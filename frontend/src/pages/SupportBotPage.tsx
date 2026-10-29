@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
+import { SupportBotReplies } from "../components/SupportBotReplies";
 import { SupportBotJournal } from "../components/SupportBotJournal";
 import { SupportBotTemplates } from "../components/SupportBotTemplates";
 import { Shell } from "../components/Shell";
@@ -28,6 +29,7 @@ import {
   STATE_LABEL,
   STATE_ORDER,
   needsDecision,
+  replyLabel,
   statusLine,
   totalDialogs,
   verdictNote,
@@ -83,6 +85,7 @@ export function SupportBotPage() {
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [pendingMode, setPendingMode] = useState<"canary" | "live" | null>(null);
+  const [tab, setTab] = useState<"dialogs" | "replies">("dialogs");
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -323,6 +326,29 @@ export function SupportBotPage() {
               </article>
             </div>
 
+            <div className="mode-switch" role="tablist" aria-label="Раздел бота" style={{ marginBottom: 16 }}>
+              {(
+                [
+                  { value: "dialogs", label: "Диалоги и журнал" },
+                  { value: "replies", label: "Ответы" },
+                ] as const
+              ).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === option.value}
+                  className={tab === option.value ? "mode-active" : undefined}
+                  onClick={() => setTab(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {tab === "replies" && <SupportBotReplies sellerId={sellerId} gateMode={view.reply_gate_mode} />}
+            {tab === "dialogs" && (
+              <>
             <h2 className="chats-section-title">Тексты напоминаний</h2>
             <p className="muted chats-legend">
               Бот берёт случайный активный текст и не повторяет один и тот же подряд. До 1 000 символов; в тексте нельзя
@@ -402,6 +428,8 @@ export function SupportBotPage() {
                     {verdictNote(dialog) && (
                       <em className={dialog.verdict === "open" ? undefined : "stocks-unknown"}>{verdictNote(dialog)}</em>
                     )}
+                    {dialog.reply_hold && <em className="stocks-unknown">Ждёт оценки ответа</em>}
+                    {dialog.reply_category && <em>{replyLabel(dialog.reply_category)}</em>}
                     {dialog.next_send_at && dialog.state === "in_campaign" && (
                       <em>следующее: {stamp(dialog.next_send_at)}</em>
                     )}
@@ -477,6 +505,8 @@ export function SupportBotPage() {
 
             <h2 className="chats-section-title">Журнал отправок</h2>
             <SupportBotJournal page={sends.data} filter={journalFilter} onFilter={setJournalFilter} />
+              </>
+            )}
           </>
         )}
       </main>

@@ -7,6 +7,7 @@ from datetime import datetime
 
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_support_bot.domain.dialog import SentMessage, _is_ours
+from backend.modules.wb_support_bot.domain.reply import is_wb_notice
 
 VERDICT_OPEN = "open"
 VERDICT_CLOSING = "closing"
@@ -44,13 +45,15 @@ USER_PREFIX = "Сообщение продавца:\n"
 REASON_LIMIT = 200
 
 
-def tail_message(events: list[ChatEvent], sent: list[SentMessage]) -> ChatEvent | None:
+def tail_message(events: list[ChatEvent], sent: list[SentMessage], *, ignore_notices: bool = False) -> ChatEvent | None:
     """Последнее сообщение специалиста после первого ответа покупателя.
 
     Сообщения самого бота не считаются: они хвост не меняют. `None` — специалист
     не писал (или писал только бот): оценивать нечего.
     """
     ordered = sorted(events, key=lambda event: (event.added_at, event.event_id))
+    if ignore_notices:
+        ordered = [event for event in ordered if not is_wb_notice(event)]
     buyer_first: datetime | None = next(
         (event.added_at for event in ordered if event.sender == CHAT_SENDER_CLIENT), None
     )

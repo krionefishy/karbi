@@ -7,6 +7,23 @@ from backend.modules.wb_support_bot.domain.dialog import (
     project_dialog,
 )
 from backend.modules.wb_support_bot.domain.links import DEFAULT_CHAT_URL_TEMPLATE, chat_url
+from backend.modules.wb_support_bot.domain.reply import (
+    CATEGORY_FLAGS,
+    CONTINUE_CATEGORIES,
+    ESCALATION_CATEGORIES,
+    GUARD_ATTACHMENT,
+    GUARD_STOPWORD,
+    REPLY_CATEGORIES,
+    REPLY_SYSTEM_PROMPT,
+    Gate,
+    gate_decision,
+    is_wb_notice,
+    parse_reply_verdict,
+    reply_slice,
+    reply_user_message,
+    slice_fingerprint,
+    slice_guard,
+)
 from backend.modules.wb_support_bot.domain.schedule import MOSCOW, Pace, SendWindow, first_send_at, next_send_at
 from backend.modules.wb_support_bot.domain.stopwords import StopMatch, match
 from backend.modules.wb_support_bot.domain.verdict import (
@@ -28,6 +45,21 @@ from backend.modules.wb_support_bot.domain.verdict import (
 )
 
 __all__ = [
+    "CATEGORY_FLAGS",
+    "CONTINUE_CATEGORIES",
+    "ESCALATION_CATEGORIES",
+    "GUARD_ATTACHMENT",
+    "GUARD_STOPWORD",
+    "REPLY_CATEGORIES",
+    "REPLY_SYSTEM_PROMPT",
+    "Gate",
+    "gate_decision",
+    "is_wb_notice",
+    "parse_reply_verdict",
+    "reply_slice",
+    "reply_user_message",
+    "slice_fingerprint",
+    "slice_guard",
     "MANUAL_ALLOW",
     "MANUAL_DENY",
     "MODE_ENFORCE",

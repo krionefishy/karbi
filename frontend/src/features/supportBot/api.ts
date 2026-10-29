@@ -5,7 +5,10 @@ import type {
   DialogFilter,
   DialogPage,
   JournalFilter,
+  EscalationItem,
   ManualVerdict,
+  ReplyDialog,
+  ReplySummary,
   SendPage,
   SupportBot,
   Template,
@@ -71,3 +74,14 @@ export const setManualVerdict = (
     method: "POST",
     body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, value }),
   });
+
+export const getReplySummary = (sellerId: string, days: number) =>
+  apiRequest<ReplySummary>(`${base(sellerId)}/replies/summary?days=${days}`);
+
+export const getReplyEscalations = (sellerId: string) =>
+  apiRequest<{ items: EscalationItem[] }>(`${base(sellerId)}/replies/escalations`);
+
+export function getReplyDialog(sellerId: string, chatId: string, promptAt: string) {
+  const params = new URLSearchParams({ chat_id: chatId, prompt_at: promptAt });
+  return apiRequest<ReplyDialog>(`${base(sellerId)}/replies/dialog?${params.toString()}`);
+}
