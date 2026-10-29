@@ -33,3 +33,21 @@ def test_monitoring_config_names_match_nginx_log_format() -> None:
 
 def test_every_monitoring_service_has_a_health_check() -> None:
     assert all(service.get("health_url") for service in build_config()["services"])
+
+
+def test_screenshot_control_has_its_own_section_and_hides_identifiers() -> None:
+    config = build_config()
+    rules = config["route_rules"]
+
+    def route_for(path: str) -> str:
+        return next(rule["route"] for rule in rules if re.fullmatch(rule["pattern"], path))
+
+    submission = "3f2b1c1e-1111-2222-3333-444455556666"
+    assert route_for(f"/wb/screenshot-control/submissions/{submission}/outcome") == (
+        "/wb/screenshot-control/submissions/{submission_id}/outcome"
+    )
+    assert route_for(f"/admin/screenshot-control/submissions/{submission}/resolve") == (
+        "/admin/screenshot-control/submissions/{submission_id}/resolve"
+    )
+    names = {service["prefix"]: service["name"] for service in config["services"]}
+    assert names["/wb/screenshot-control"] == "Контроль скриншотов ДБС"

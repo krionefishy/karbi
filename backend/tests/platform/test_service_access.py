@@ -31,6 +31,8 @@ OPEN_ROUTER_TAGS = {
     "onec",  # машинный токен 1С
     "wb-sellers",  # реестр селлеров нужен любому сервису
     "wb-returns-extension",  # расширение браузера со своим токеном
+    "wb-screenshot-control-extension",  # расширение браузера со своим токеном
+    "wb-screenshot-control-admin",  # CurrentAdmin
     "automations",  # каталог сам фильтруется по доступу, подключение селлеров проверяет id из пути
 }
 ROUTER_FILE = Path("backend/app/api/router.py")

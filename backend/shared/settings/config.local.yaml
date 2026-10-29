@@ -70,3 +70,9 @@ returns:
   pairing_ttl_minutes: 15
   code_alert_hour: 1
   install_silent_hours: 24
+screenshot_control:
+  mode: shadow
+  hmac_key: local-development-screenshot-hmac-key-not-real
+  staging_root: /tmp/karbi-screenshots-staging
+  public_base_url: http://localhost:5173
+  telegram_enabled: false

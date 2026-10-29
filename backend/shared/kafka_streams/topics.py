@@ -14,10 +14,18 @@ class StorageTopics:
 
     WB_REVIEWS_EXPORT_UPLOAD = validate_topic_name("storage.s3.wb-reviews-export.upload")
     WB_REVIEWS_EXPORT_DELETE = validate_topic_name("storage.s3.wb-reviews-export.delete")
+    # Скрины ДБС: подписчики в wb-screenshot-control-worker, файл берут из staging, а не из события.
+    WB_SCREENSHOT_CONTROL_UPLOAD = validate_topic_name("storage.s3.wb-screenshot-control.upload")
+    WB_SCREENSHOT_CONTROL_DELETE = validate_topic_name("storage.s3.wb-screenshot-control.delete")
 
     @classmethod
     def all(cls) -> tuple[str, ...]:
-        return (cls.WB_REVIEWS_EXPORT_UPLOAD, cls.WB_REVIEWS_EXPORT_DELETE)
+        return (
+            cls.WB_REVIEWS_EXPORT_UPLOAD,
+            cls.WB_REVIEWS_EXPORT_DELETE,
+            cls.WB_SCREENSHOT_CONTROL_UPLOAD,
+            cls.WB_SCREENSHOT_CONTROL_DELETE,
+        )
 
 
 class WBCoreTopics:
@@ -58,6 +66,18 @@ class SupportBotTopics:
         return (cls.CLASSIFY_REQUESTED, cls.REPLY_REQUESTED)
 
 
+class ScreenshotControlTopics:
+    """Конвейер скриншотов ДБС: приём → распознавание → решение. `extracted` идёт одним ключом партиции."""
+
+    SUBMITTED = validate_topic_name("wb.screenshot-control.screenshot.submitted")
+    EXTRACTED = validate_topic_name("wb.screenshot-control.screenshot.extracted")
+    VERDICT_READY = validate_topic_name("wb.screenshot-control.screenshot.verdict-ready")
+
+    @classmethod
+    def all(cls) -> tuple[str, ...]:
+        return (cls.SUBMITTED, cls.EXTRACTED, cls.VERDICT_READY)
+
+
 def all_topics() -> tuple[str, ...]:
     return (
         *StorageTopics.all(),
@@ -65,4 +85,5 @@ def all_topics() -> tuple[str, ...]:
         *WBReviewsTopics.all(),
         *NotificationTopics.all(),
         *SupportBotTopics.all(),
+        *ScreenshotControlTopics.all(),
     )

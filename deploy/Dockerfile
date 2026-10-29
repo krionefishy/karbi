@@ -23,7 +23,11 @@ COPY --from=builder /app/.venv /app/.venv
 COPY alembic.ini pyproject.toml ./
 COPY backend ./backend
 
-RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+# Каталог staging скриншотов создаётся в образе: пустой именованный том при первом монтировании
+# берёт его права, иначе том принадлежал бы root и appuser не смог бы в него писать.
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /data/screenshots-staging \
+    && chown -R appuser:appuser /app /data/screenshots-staging
 USER appuser
 
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]

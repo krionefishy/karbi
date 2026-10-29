@@ -152,3 +152,76 @@ llm:
   timeout_seconds: 60
   max_tokens: 150
   temperature: 0
+
+screenshot_control:
+  # off | shadow | enforce. shadow: вердикты пишутся, KPI помечен как предварительный.
+  mode: ${SCREENSHOT_CONTROL_MODE:-shadow}
+  # Дата начала боевого KPI (YYYY-MM-DD); раньше неё цифры предварительные.
+  kpi_from: ${SCREENSHOT_CONTROL_KPI_FROM:-}
+  timezone: Europe/Moscow
+  poll_seconds: 2
+  # Ключ HMAC для имён покупателей, 32+ символов: без него при mode != off модуль выключается сам.
+  hmac_key: ${SCREENSHOT_CONTROL_HMAC_KEY:-}
+  # Отдельный бакет под скрины (ПДн, свой lifecycle); пусто — общий s3.bucket с префиксом dbs-screenshots/.
+  s3_bucket: ${SCREENSHOT_CONTROL_S3_BUCKET:-}
+  staging_root: ${SCREENSHOT_CONTROL_STAGING:-/data/screenshots-staging}
+  staging_max_used_percent: 85
+  # Предел самого каталога staging (2 ГБ): без S3 файлы копятся здесь, а том общий с базой.
+  staging_max_bytes: 2147483648
+  staging_stale_minutes: 15
+  max_upload_bytes: 15728640
+  min_side_px: 500
+  # Реальные скрины до 6K Retina — около 20 Мпикс; больше — память api (512 МБ) под угрозой.
+  max_image_pixels: 25000000
+  retention_original_days: 365
+  retention_thumb_days: 365
+  retention_fields_days: 1095
+  purge_hour: 4
+  purge_minute: 10
+  dedupe_window_days: 90
+  outcome_ttl_hours: 24
+  late_upload_hours: 72
+  clock_skew_minutes: 15
+  review_age_max_days: 120
+  burst_per_hour: 60
+  uploads_per_minute: 20
+  uploads_per_hour: 120
+  status_polls_per_minute: 120
+  extraction_max_attempts: 4
+  audit_percent: ${SCREENSHOT_CONTROL_AUDIT_PERCENT:-4.0}
+  thresholds:
+    text_dup: 0.90
+    text_maybe: 0.75
+    min_text_len: 25
+    vlm_ocr_text: 0.80
+    near_dhash_strict: 6
+    near_tile_strict: 0.97
+    near_dhash_soft: 12
+    near_tile_soft: 0.90
+  image_url_ttl_seconds: 300
+  pairing_ttl_minutes: 15
+  # Жёсткий лимит на обмен кода сопряжения: с одного IP не больше N попыток за окно.
+  pair_attempts_per_window: 10
+  pair_window_seconds: 600
+  extension_token_idle_days: 60
+  link_token_ttl_minutes: 15
+  notification_bot: ${SCREENSHOT_CONTROL_BOT:-screens}
+  # Telegram — второй релиз: нужен релей с фото и кнопками.
+  telegram_enabled: ${SCREENSHOT_CONTROL_TELEGRAM:-false}
+  pipeline_version: v1
+  public_base_url: https://${PUBLIC_DOMAIN:-localhost}
+  extension_download_path: /extension/marketplace-auto-screenshots.zip
+  extension_min_version: 0.1.0
+  allowed_url_prefixes: ["https://seller.wildberries.ru/chat-with-clients"]
+
+vision:
+  # Модель для скриншотов, отдельно от текстовой llm; выбрана пробным прогоном, рассуждения выключены.
+  base_url: ${LLM_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
+  model: ${VISION_MODEL:-Qwen/Qwen3.6-35B-A3B}
+  fallback_model: ${VISION_FALLBACK_MODEL:-Qwen/Qwen3.5-397B-A17B}
+  enable_thinking: false
+  api_key: ${FOUNDATION_MODELS_API_KEY:-}
+  timeout_seconds: 60
+  max_tokens: 1200
+  temperature: 0
+  max_image_side: 2000

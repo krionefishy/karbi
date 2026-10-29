@@ -2,6 +2,8 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    /** Машинный код из заголовка X-Error-Code, если сервер его прислал. */
+    public readonly code: string | null = null,
   ) {
     super(message);
   }
@@ -34,7 +36,7 @@ export function setAccessDeniedHandler(handler: (() => void) | null) {
 async function failure(response: Response): Promise<ApiError> {
   if (response.status === 403 && response.headers.get(ACCESS_DENIED_HEADER)) accessDeniedHandler?.();
   const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-  return new ApiError(response.status, body?.detail ?? "Ошибка запроса");
+  return new ApiError(response.status, body?.detail ?? "Ошибка запроса", response.headers.get("X-Error-Code"));
 }
 
 async function send(path: string, init?: RequestInit): Promise<Response> {

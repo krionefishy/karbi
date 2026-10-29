@@ -33,6 +33,10 @@ lint:
 test:
     CONFIG_PATH={{ test_config }} uv run pytest
 
+# Схема OpenAPI в JSON; `--tag wb-screenshot-control` оставляет одну автоматизацию.
+openapi *args:
+    CONFIG_PATH={{ test_config }} uv run python -m backend.commands.export_openapi {{ args }}
+
 # Напечатать конфиг внешнего мониторинга; на сервер он попадает сам при выкладке.
 monitoring-config:
     CONFIG_PATH={{ test_config }} uv run python -m backend.commands.monitoring_config
@@ -60,6 +64,7 @@ test-migrate:
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_returns upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_podsort upgrade head
     DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n fin_reports upgrade head
+    DATABASE_URL=postgresql+asyncpg://karbi:karbi@localhost:55433/karbi_test uv run alembic -n wb_screenshot_control upgrade head
 
 test-all: test-infra-up test-migrate
     CONFIG_PATH={{ test_config }} uv run pytest
@@ -109,7 +114,10 @@ migrate-wb-podsort:
 migrate-fin-reports:
     uv run alembic -n fin_reports upgrade head
 
-migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-card-documents migrate-wb-fbs-stocks migrate-wb-fbs-penalties migrate-wb-review-chats migrate-wb-support-bot migrate-wb-returns migrate-wb-podsort migrate-fin-reports
+migrate-wb-screenshot-control:
+    uv run alembic -n wb_screenshot_control upgrade head
+
+migrate-all: migrate-platform migrate-wb-core migrate-wb-reviews migrate-notifications migrate-wb-turnover migrate-wb-fbs-distribution migrate-wb-card-checklist migrate-wb-card-documents migrate-wb-fbs-stocks migrate-wb-fbs-penalties migrate-wb-review-chats migrate-wb-support-bot migrate-wb-returns migrate-wb-podsort migrate-fin-reports migrate-wb-screenshot-control
 
 compose-up:
     {{ compose }} up -d --build
@@ -129,7 +137,7 @@ prod-deploy:
     {{ prod_compose }} config --quiet
     {{ prod_compose }} build
     {{ prod_compose }} up -d --remove-orphans
-    @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker wb-core-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
+    @for attempt in $(seq 1 36); do if curl --fail --silent --max-time 5 http://127.0.0.1:8080/api/v1/health/ready >/dev/null; then break; fi; if [ "$attempt" = 36 ]; then {{ prod_compose }} logs --tail=200 migrate api wb-reviews-worker wb-core-worker wb-screenshot-control-worker outbox-publisher nginx; exit 1; fi; sleep 5; done
     @test "$({{ prod_compose }} ps --status running -q wb-reviews-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q outbox-publisher | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q notifications-worker | wc -l | tr -d ' ')" = "1"
@@ -143,6 +151,7 @@ prod-deploy:
     @test "$({{ prod_compose }} ps --status running -q wb-returns-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q wb-support-bot-worker | wc -l | tr -d ' ')" = "1"
     @test "$({{ prod_compose }} ps --status running -q fin-reports-worker | wc -l | tr -d ' ')" = "1"
+    @test "$({{ prod_compose }} ps --status running -q wb-screenshot-control-worker | wc -l | tr -d ' ')" = "1"
     {{ prod_compose }} ps
 
 # Start production containers without rebuilding images.
@@ -173,3 +182,25 @@ prod-backup-list:
 # Restore a named dump over the current database. DESTRUCTIVE: stop the app first.
 prod-restore dump:
     {{ prod_compose }} exec -T pg-backup sh -c 'pg_restore --clean --if-exists --no-owner --dbname="$PGDATABASE" /backups/{{ dump }}'
+
+# Локальный стенд «Контроль скриншотов ДБС» (docs/STAND.md): свой профиль Colima, фейковая модель, MinIO.
+stand-up:
+    deploy/stand/stand.sh up
+
+stand-down:
+    deploy/stand/stand.sh down
+
+# Стереть данные стенда (базу, Kafka, MinIO) и поднять заново; логины из .credentials.txt сохраняются.
+stand-reset:
+    deploy/stand/stand.sh reset
+
+stand-logs *services:
+    deploy/stand/stand.sh logs {{ services }}
+
+# Синтетические скриншоты в deploy/stand/samples (`--random 10` — ещё десять уникальных).
+stand-samples *args:
+    uv run python deploy/stand/make_samples.py {{ args }}
+
+# Распакованное расширение стенда в deploy/stand/extension/unpacked (адрес http://localhost:8090).
+stand-extension:
+    deploy/stand/build-extension.sh http://localhost:8090 deploy/stand/extension

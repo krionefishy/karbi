@@ -22,6 +22,7 @@ SERVICES: tuple[Service, ...] = (
     Service("wb-podsort", "Подсорт WB"),
     Service("fin-reports", "Финансовые отчёты"),
     Service("wb-box-stickers", "Стикеры коробов"),
+    Service("wb-screenshot-control", "Контроль скриншотов ДБС"),
 )
 
 SERVICE_IDS: frozenset[str] = frozenset(service.id for service in SERVICES)

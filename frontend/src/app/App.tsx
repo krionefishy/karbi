@@ -6,6 +6,7 @@ import { AdminRoute, AuthProvider, ProtectedRoute } from "../features/auth/AuthC
 import { ServiceRoute } from "../features/auth/ServiceRoute";
 import { BotsPage } from "../pages/admin/BotsPage";
 import { EmployeesPage } from "../pages/admin/EmployeesPage";
+import { ScreenshotsPage } from "../pages/admin/ScreenshotsPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AutomationsPage } from "../pages/AutomationsPage";
 import { CardChecklistPage } from "../pages/CardChecklistPage";
@@ -19,6 +20,7 @@ import { PodsortPage } from "../pages/PodsortPage";
 import { BoxStickersPage } from "../pages/BoxStickersPage";
 import { FinReportsPage } from "../pages/FinReportsPage";
 import { ReturnsPage } from "../pages/ReturnsPage";
+import { ScreenshotControlPage } from "../pages/ScreenshotControlPage";
 import { FbsStocksPage } from "../pages/FbsStocksPage";
 import { TurnoverPage } from "../pages/TurnoverPage";
 
@@ -48,10 +50,12 @@ export function AppRoutes() {
           <Route path="/automations/wb-podsort" element={<PodsortPage />} />
           <Route path="/automations/wb-box-stickers" element={<BoxStickersPage />} />
           <Route path="/automations/fin-reports" element={<FinReportsPage />} />
+          <Route path="/automations/wb-screenshot-control" element={<ScreenshotControlPage />} />
         </Route>
         <Route element={<AdminRoute />}>
           <Route path="/admin/users" element={<EmployeesPage />} />
           <Route path="/admin/bots" element={<BotsPage />} />
+          <Route path="/admin/screenshots" element={<ScreenshotsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to={homeRoute()} replace />} />

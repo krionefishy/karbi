@@ -1,0 +1,235 @@
+name: karbi-stand
+
+# Локальный стенд «Контроль скриншотов ДБС»: только то, что нужно этому модулю. Без WB, релея и Telegram.
+# Поднимается `just stand-up` (секреты — deploy/stand/.env.stand, создаётся сам), описание — docs/STAND.md.
+# Порты слушают только 127.0.0.1. Значения ключей здесь — локальные тестовые, на сервере не годятся.
+
+x-backend: &backend
+  image: karbi-stand-backend:latest
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  restart: unless-stopped
+  networks: [stand]
+
+x-environment: &environment
+  CONFIG_PATH: /app/backend/shared/settings/config.docker.yaml
+  APP_ENVIRONMENT: stand
+  DB_PASSWORD: ${DB_PASSWORD:?run just stand-up, it writes deploy/stand/.env.stand}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?run just stand-up}
+  JWT_SECRET: ${JWT_SECRET:?run just stand-up}
+  KAFKA_ENABLED: "true"
+  # Стенд прокликивают руками: прод-лимит 30 запросов в минуту на IP мешал бы.
+  RATE_LIMIT_REQUESTS: "600"
+  S3_ENABLED: "true"
+  # Имя *.localhost: внутри сети это сервис s3, а браузер на Mac резолвит его в 127.0.0.1, где тот же порт
+  # проброшен наружу. Поэтому presigned-ссылка, подписанная API, открывается и из браузера.
+  S3_ENDPOINT_URL: http://s3.localhost:19000
+  S3_TENANT_ID: ""
+  S3_KEY_ID: ${STAND_S3_ACCESS_KEY:?run just stand-up}
+  S3_SECRET_KEY: ${STAND_S3_SECRET_KEY:?run just stand-up}
+  S3_BUCKET: karbi-stand
+  S3_REGION: us-east-1
+  S3_VERIFY_TLS: "false"
+  PUBLIC_DOMAIN: localhost:8090
+  SCREENSHOT_CONTROL_MODE: ${SCREENSHOT_CONTROL_MODE:-shadow}
+  SCREENSHOT_CONTROL_HMAC_KEY: ${SCREENSHOT_CONTROL_HMAC_KEY:?run just stand-up}
+  SCREENSHOT_CONTROL_KPI_FROM: ${SCREENSHOT_CONTROL_KPI_FROM:-}
+  SCREENSHOT_CONTROL_TELEGRAM: "false"
+  # Модель: по умолчанию поддельная (fake-vlm). Настоящий Cloud.ru — две строки в .env.stand:
+  # LLM_BASE_URL и FOUNDATION_MODELS_API_KEY (docs/STAND.md). VISION_MODEL сюда не передаётся: пустая
+  # переменная окружения в конфиге — пустая строка, а не значение по умолчанию.
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://fake-vlm:8000/v1}
+  FOUNDATION_MODELS_API_KEY: ${FOUNDATION_MODELS_API_KEY:-stand-fake-key}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["postgres", "-c", "max_connections=40", "-c", "shared_buffers=64MB"]
+    environment:
+      POSTGRES_DB: karbi
+      POSTGRES_USER: karbi
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?run just stand-up}
+    ports: ["127.0.0.1:55440:5432"]
+    volumes: [stand_postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U karbi -d karbi"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks: [stand]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    mem_limit: 96m
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?run just stand-up}", "--maxmemory", "64mb"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?run just stand-up}
+    networks: [stand]
+
+  kafka:
+    # GraalVM-сборка: стартует за секунды и держит ~150 МБ вместо полугигабайта JVM.
+    image: apache/kafka-native:3.9.0
+    restart: unless-stopped
+    mem_limit: 384m
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Как на проде: топики создаёт ensure_topics приложения, а не первый producer.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes: [stand_kafka:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks: [stand]
+
+  s3:
+    # S3 вместо Cloud.ru. MinIO из Docker Hub и quay.io больше не раздаётся, поэтому RustFS — совместимый
+    # по API, с веб-консолью. Ключи — локальные тестовые из .env.stand.
+    image: rustfs/rustfs:1.0.1
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["server", "--address", ":19000", "--console-enable", "--console-address", ":19001", "/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${STAND_S3_ACCESS_KEY:?run just stand-up}
+      RUSTFS_SECRET_KEY: ${STAND_S3_SECRET_KEY:?run just stand-up}
+      RUSTFS_OBS_LOG_DIRECTORY: ""
+    ports: ["127.0.0.1:19000:19000", "127.0.0.1:19001:19001"]
+    volumes: [stand_s3:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 19000"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      stand:
+        aliases: [s3.localhost]
+
+  s3-init:
+    # Бакет создаётся сам: boto3 уже есть в образе бэкенда.
+    <<: *backend
+    restart: "no"
+    mem_limit: 128m
+    command:
+      - python
+      - -c
+      - |
+        import boto3, os
+        s3 = boto3.client("s3", endpoint_url=os.environ["S3_ENDPOINT_URL"], aws_access_key_id=os.environ["S3_KEY_ID"],
+                          aws_secret_access_key=os.environ["S3_SECRET_KEY"], region_name="us-east-1")
+        names = {bucket["Name"] for bucket in s3.list_buckets().get("Buckets", [])}
+        if os.environ["S3_BUCKET"] not in names:
+            s3.create_bucket(Bucket=os.environ["S3_BUCKET"])
+        print("bucket ready:", os.environ["S3_BUCKET"])
+    environment: *environment
+    depends_on:
+      s3: { condition: service_healthy }
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    mem_limit: 256m
+    command:
+      - /bin/sh
+      - -c
+      - alembic -n platform upgrade head && alembic -n wb_core upgrade head && alembic -n wb_reviews upgrade head && alembic -n notifications upgrade head && alembic -n wb_turnover upgrade head && alembic -n wb_fbs_distribution upgrade head && alembic -n wb_card_checklist upgrade head && alembic -n wb_card_documents upgrade head && alembic -n wb_fbs_stocks upgrade head && alembic -n wb_fbs_penalties upgrade head && alembic -n wb_review_chats upgrade head && alembic -n wb_support_bot upgrade head && alembic -n wb_returns upgrade head && alembic -n wb_podsort upgrade head && alembic -n fin_reports upgrade head && alembic -n wb_screenshot_control upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://karbi:${DB_PASSWORD:?run just stand-up}@db:5432/karbi
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    mem_limit: 512m
+    environment: *environment
+    ports: ["127.0.0.1:8091:8000"]
+    volumes: [stand_staging:/data/screenshots-staging]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      s3-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready')"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  outbox-publisher:
+    <<: *backend
+    mem_limit: 256m
+    command: ["python", "-m", "backend.workers.outbox.main"]
+    environment: *environment
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      kafka: { condition: service_healthy }
+
+  wb-screenshot-control-worker:
+    <<: *backend
+    mem_limit: 512m
+    command: ["python", "-m", "backend.workers.wb_screenshot_control.main"]
+    environment: *environment
+    volumes: [stand_staging:/data/screenshots-staging]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      s3-init: { condition: service_completed_successfully }
+      fake-vlm: { condition: service_started }
+
+  fake-vlm:
+    # Тот же образ: нужен только Pillow, чтобы прочитать метку синтетических скринов.
+    <<: *backend
+    mem_limit: 128m
+    command: ["python", "/stand/fake_vlm.py", "--port", "8000"]
+    volumes: ["./stand:/stand:ro"]
+
+  frontend:
+    image: karbi-stand-frontend:latest
+    build:
+      context: ..
+      dockerfile: deploy/stand/frontend.Dockerfile
+    restart: unless-stopped
+    mem_limit: 64m
+    networks: [stand]
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    mem_limit: 64m
+    ports: ["127.0.0.1:8090:80"]
+    volumes: ["./stand/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on:
+      api: { condition: service_healthy }
+      frontend: { condition: service_started }
+    networks: [stand]
+
+volumes:
+  stand_postgres:
+  stand_kafka:
+  stand_s3:
+  stand_staging:
+
+networks:
+  stand:

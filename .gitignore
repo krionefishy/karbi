@@ -40,3 +40,10 @@ kafka_data/
 
 # Сертификат релея кладётся на сервер руками, как и host-конфиги nginx
 deploy/relay-tls/
+
+# Локальный стенд: секреты, логины, собранное расширение и синтетические скрины (docs/STAND.md)
+deploy/stand/.env.stand
+deploy/stand/.credentials.txt
+deploy/stand/samples/
+deploy/stand/extension/
+deploy/stand/scenarios.json

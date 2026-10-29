@@ -81,9 +81,22 @@ class S3Client:
         response = await asyncio.to_thread(self._client.list_objects_v2, Bucket=self._bucket, Prefix=prefix)
         return response.get("Contents", [])
 
-    def generate_presigned_url(self, key: str, expires_in: int = 3600) -> str:
-        return self._client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": self._bucket, "Key": key},
-            ExpiresIn=expires_in,
-        )
+    @property
+    def bucket(self) -> str:
+        return self._bucket
+
+    def generate_presigned_url(
+        self,
+        key: str,
+        expires_in: int = 3600,
+        *,
+        response_content_type: str | None = None,
+        response_content_disposition: str | None = None,
+    ) -> str:
+        """Подписанный GET без сети; заголовки ответа S3 подставит из параметров подписи."""
+        params: dict[str, str] = {"Bucket": self._bucket, "Key": key}
+        if response_content_type:
+            params["ResponseContentType"] = response_content_type
+        if response_content_disposition:
+            params["ResponseContentDisposition"] = response_content_disposition
+        return self._client.generate_presigned_url("get_object", Params=params, ExpiresIn=expires_in)

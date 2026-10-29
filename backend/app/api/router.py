@@ -21,6 +21,11 @@ from backend.modules.wb_returns.presentation.http import extension_router as wb_
 from backend.modules.wb_returns.presentation.http import router as wb_returns_router
 from backend.modules.wb_review_chats.presentation.http import router as wb_review_chats_router
 from backend.modules.wb_reviews.presentation.http import router as wb_reviews_router
+from backend.modules.wb_screenshot_control.presentation.http import admin_router as wb_screenshot_control_admin_router
+from backend.modules.wb_screenshot_control.presentation.http import (
+    extension_router as wb_screenshot_control_extension_router,
+)
+from backend.modules.wb_screenshot_control.presentation.http import router as wb_screenshot_control_router
 from backend.modules.wb_support_bot.presentation.http import router as wb_support_bot_router
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
@@ -67,6 +72,9 @@ include_service(wb_podsort_router, "wb-podsort")
 include_service(wb_box_stickers_router, "wb-box-stickers")
 include_service(wb_box_packing_router, "wb-box-stickers")
 include_service(fin_reports_router, "fin-reports")
+include_service(wb_screenshot_control_router, "wb-screenshot-control")
+include_open(wb_screenshot_control_extension_router)
+include_open(wb_screenshot_control_admin_router)
 include_open(automations_router)
 
 

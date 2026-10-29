@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   Package,
   ReceiptText,
+  ScanSearch,
   Truck,
   Undo2,
   type LucideIcon,
@@ -33,6 +34,7 @@ export const automationNav: AutomationNavItem[] = [
   { id: "wb-podsort", title: "Подсорт WB", icon: Truck },
   { id: "fin-reports", title: "Финансовые отчёты", icon: Calculator },
   { id: "wb-box-stickers", title: "Стикеры коробов", icon: Package },
+  { id: "wb-screenshot-control", title: "Контроль скриншотов ДБС", icon: ScanSearch },
 ];
 
 export function automationIcon(id: string): LucideIcon {

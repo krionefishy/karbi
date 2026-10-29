@@ -180,6 +180,7 @@ def test_the_catalog_lists_every_automation() -> None:
         podsort_card,
         fin_card,
         stickers_card,
+        screenshots_card,
     ) = automation_catalog(
         SyncOverview(seller_count=4, last_run=None, last_success_at=None, runs_last_24h=0),
         turnover,
@@ -208,6 +209,12 @@ def test_the_catalog_lists_every_automation() -> None:
     assert turnover_card.seller_count == 2
     assert turnover_card.status == "idle"
     assert (stickers_card.id, stickers_card.kind, stickers_card.next_run_at) == ("wb-box-stickers", "tool", None)
+    assert (screenshots_card.id, screenshots_card.kind, screenshots_card.title, screenshots_card.status) == (
+        "wb-screenshot-control",
+        "tool",
+        "Контроль скриншотов ДБС",
+        "active",
+    )
     assert reviews_card.kind == "automation"
     assert (fin_card.id, fin_card.seller_count, fin_card.status, fin_card.next_run_at) == (
         "fin-reports",
