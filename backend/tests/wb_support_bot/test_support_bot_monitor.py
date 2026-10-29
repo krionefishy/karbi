@@ -241,3 +241,38 @@ async def test_a_page_without_any_recording_says_no_data(client: AsyncClient, ht
     assert body["monitor_overall"] == "nodata"
     assert next(item for item in monitor["checks"] if item["id"] == "worker_alive")["severity"] == "nodata"
     assert (await client.get(f"{API}/sellers/{uuid.uuid4()}/monitor")).status_code == 404
+
+
+async def test_dry_run_sends_before_the_switch_to_live_are_not_a_mismatch(
+    database: Database, seller: uuid.UUID
+) -> None:
+    from backend.modules.wb_support_bot.infrastructure.postgres import SEND_DRY_RUN, SendModel
+
+    moment = datetime.now(UTC)
+    async with database.session() as session:
+        repository = SupportBotRepository(session)
+        await repository.set_mode(seller, "live")
+        session.add(
+            SendModel(
+                seller_id=seller,
+                chat_id="1:a",
+                prompt_at=moment - timedelta(days=2),
+                seq=1,
+                text="т",
+                status=SEND_DRY_RUN,
+                planned_at=moment - timedelta(hours=3),
+            )
+        )
+        await session.commit()
+
+    async def mismatch() -> Severity:
+        async with database.session() as session:
+            monitor = BotMonitor(
+                session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="off", reply_prompt_version="r2"
+            )
+            tracked = await SupportBotRepository(session).tracked(seller)
+            assert tracked is not None
+            snapshot = await monitor.snapshot(seller, moment, worker_checked_at=None, check_worker=False)
+            return next(check.severity for check in evaluate(snapshot) if check.id == "mode_consistent")
+
+    assert await mismatch() is Severity.OK

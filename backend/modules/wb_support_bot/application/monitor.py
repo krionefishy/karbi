@@ -124,6 +124,11 @@ class BotMonitor:
         tracked = await repository.tracked(seller_id)
         mirror = await self.chats.state(seller_id)
         counts = await repository.send_status_counts_since(seller_id, now - DAY)
+        # Сухие отправки до перехода на «всю рассылку» нарушением не считаются.
+        live_since = await repository.live_since(seller_id)
+        dry_run = counts.get("dry_run", 0)
+        if live_since is not None and live_since > now - DAY:
+            dry_run = (await repository.send_status_counts_since(seller_id, live_since)).get("dry_run", 0)
         midnight = now.astimezone(MSK).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
         slices_models = await repository.reply_slices(seller_id, self.reply_prompt_version, now - timedelta(days=14))
         rows = [_slice_row(row) for row in slices_models]
@@ -174,7 +179,7 @@ class BotMonitor:
             sends_failed_24h=counts.get("failed", 0),
             sends_unknown_24h=counts.get("unknown", 0),
             unknown_stuck=await repository.unknown_stuck_count(seller_id, now - limits.unknown_stuck),
-            dry_run_24h=counts.get("dry_run", 0),
+            dry_run_24h=dry_run,
             sent_today=await repository.sent_today(seller_id, midnight),
             daily_cap=self.daily_cap,
             active_templates=len(await repository.templates(seller_id, active_only=True)),
