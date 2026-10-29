@@ -76,7 +76,14 @@ up() {
     ensure_colima
     ensure_env
     compose build
-    compose up -d --wait --wait-timeout 300
+    # Healthcheck Kafka видит только открытый порт: воркер, стартовавший раньше готовности брокера, падает на
+    # ensure_topics и перезапускается сам (restart: unless-stopped), но --wait уже вернул ошибку. Один повтор.
+    if ! compose up -d --wait --wait-timeout 300; then
+        echo "Не все контейнеры поднялись с первого раза, повтор через 10 с" >&2
+        compose ps -a --format '{{.Service}}: {{.Status}}' >&2
+        sleep 10
+        compose up -d --wait --wait-timeout 300
+    fi
     seed
     samples
     cat <<EOF
