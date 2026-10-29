@@ -7,22 +7,29 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_core.application import CatalogMirror, ChatMirror
-from backend.modules.wb_core.domain import CHAT_SENDER_SELLER, ChatEvent
+from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_support_bot.application.ports import ChatSender
 from backend.modules.wb_support_bot.domain import (
+    CATEGORY_FLAGS,
     MODE_ENFORCE,
     MODE_OFF,
     CampaignRules,
     DialogState,
+    Gate,
     Pace,
     SendWindow,
     SentMessage,
     first_send_at,
+    gate_decision,
     in_canary,
+    is_wb_notice,
     may_send,
     next_send_at,
     project_dialog,
+    reply_slice,
+    slice_fingerprint,
+    slice_guard,
     tail_fingerprint,
     tail_message,
 )
@@ -38,6 +45,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     VERDICT_PENDING,
     DialogKey,
     DialogModel,
+    ReplyVerdictModel,
     SendModel,
     SupportBotRepository,
     TemplateModel,
@@ -66,6 +74,10 @@ class BotPolicy:
     classifier_prompt_version: str = "v2"
     classifier_retry: timedelta = timedelta(minutes=15)
     classifier_max_attempts: int = 3
+    reply_gate_mode: str = MODE_OFF
+    reply_prompt_version: str = "r1"
+    reply_retry: timedelta = timedelta(minutes=15)
+    reply_max_attempts: int = 10
 
 
 @dataclass(slots=True)
@@ -79,8 +91,18 @@ class SellerReport:
     failed: int = 0
     held: int = 0
     verdicts_requested: int = 0
+    replies_requested: int = 0
+    replies_held: int = 0
     skipped: str | None = None
     notes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _ReplyGate:
+    """Итог слоя ответов по диалогу за проход: ждём вердикт (pending) или только что решили продолжать (released)."""
+
+    pending: bool = False
+    released: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +176,12 @@ class SupportBotProcessor:
             removed = await self.catalog.removed_articles(
                 seller_id, {str(segment.nm_id) for segment in segments if segment.nm_id}
             )
+        reply_rows: dict[tuple[str, str], ReplyVerdictModel] = {}
+        outbox = OutboxRepository(self.repository.session)
+        if self.policy.reply_gate_mode != MODE_OFF:
+            reply_rows = await self.repository.reply_verdicts_by_slice(
+                seller_id, self.policy.reply_prompt_version, since
+            )
         models: dict[tuple[str, datetime], DialogModel] = {}
         for segment in segments:
             key = (segment.chat_id, segment.prompt_at)
@@ -165,7 +193,11 @@ class SupportBotProcessor:
                 if send.status in (SEND_SENT, SEND_UNKNOWN)
             ]
             gone = segment.nm_id is not None and str(segment.nm_id) in removed
-            model = await self._project(seller_id, segment, model, record, now, report, product_removed=gone)
+            gate = _ReplyGate()
+            if self.policy.reply_gate_mode != MODE_OFF and model is not None:
+                gate = self._reply_gate(seller_id, segment, model, reply_rows, outbox, now, report)
+            model = await self._project(seller_id, segment, model, record, now, report, product_removed=gone, gate=gate)
+            self._note_first_reply(model, segment, sends)
             models[key] = model
             report.dialogs += 1
         await self.repository.retire_out_of_window(seller_id, since)
@@ -198,8 +230,10 @@ class SupportBotProcessor:
         report: SellerReport,
         *,
         product_removed: bool = False,
+        gate: _ReplyGate = _ReplyGate(),
     ) -> DialogModel:
         created = model is None
+        enforce = self.policy.reply_gate_mode == MODE_ENFORCE
         if model is None:
             model = DialogModel(
                 seller_id=seller_id,
@@ -221,8 +255,11 @@ class SupportBotProcessor:
             campaign_started_at=model.campaign_started_at,
             campaigns_count=model.campaigns_count,
             product_removed=product_removed,
+            cleared_through=model.reply_cleared_through if enforce else None,
+            reply_pending=gate.pending,
+            ignore_notices=enforce,
         )
-        tail = tail_message(segment.events, record)
+        tail = tail_message(segment.events, record, ignore_notices=enforce)
         model.tail_event_id = tail.event_id if tail else None
         model.tail_fingerprint = tail_fingerprint(tail) if tail else None
         if model.manual_verdict is not None and model.manual_fingerprint != model.tail_fingerprint:
@@ -235,6 +272,9 @@ class SupportBotProcessor:
         model.no_contact = model.no_contact or projection.no_contact
         model.attention = model.attention or projection.attention
         model.state = DialogState.CLOSED.value if model.closed else projection.state.value
+        model.reply_hold = gate.pending and projection.state is DialogState.IN_CAMPAIGN
+        if model.reply_hold:
+            report.replies_held += 1
         if projection.start_campaign:
             model.campaign_started_at = now
             model.campaigns_count += 1
@@ -247,10 +287,130 @@ class SupportBotProcessor:
             model.next_send_at = None
         elif model.next_send_at is None:
             model.next_send_at = first_send_at(now, window=self.policy.window, pace=self.policy.pace, rng=self.rng)
+        if gate.released and projection.state is DialogState.IN_CAMPAIGN and not projection.end_campaign:
+            # Покупатель ответил, рассылка продолжается: следующее напоминание через обычный шаг, а не сразу.
+            model.next_send_at = next_send_at(now, window=self.policy.window, pace=self.policy.pace, rng=self.rng)
         model.updated_at = now
         if created:
             await self.repository.add_dialog(model)
         return model
+
+    def _reply_eligible(self, model: DialogModel, now: datetime) -> bool:
+        """Слой ответов смотрит только диалоги, где рассылка действительно идёт."""
+        return (
+            model.campaign_started_at is not None
+            and model.state == DialogState.IN_CAMPAIGN.value
+            and not (model.closed or model.excluded or model.no_contact)
+            and now - model.campaign_started_at < self.policy.rules.duration
+        )
+
+    def _reply_gate(
+        self,
+        seller_id: uuid.UUID,
+        segment: _Segment,
+        model: DialogModel,
+        rows: dict[tuple[str, str], ReplyVerdictModel],
+        outbox: OutboxRepository,
+        now: datetime,
+        report: SellerReport,
+    ) -> _ReplyGate:
+        """Продолжать ли рассылку после ответа покупателя.
+
+        Срез — ещё не разобранные сообщения покупателя после старта кампании. По нему
+        бот ставит запрос нейросети и не ждёт ответа. Пока вердикта нет, диалог держится
+        в кампании без отправок: сбой модели рассылку не убивает, она истекает по сроку.
+        В режиме `shadow` классы только записываются, поведение прежнее.
+        """
+        if not self._reply_eligible(model, now):
+            return _ReplyGate()
+        marks = [moment for moment in (model.campaign_started_at, model.reply_cleared_through) if moment is not None]
+        events = reply_slice(segment.events, boundary=max(marks))
+        if not events:
+            return _ReplyGate()
+        fingerprint = slice_fingerprint(events)
+        key = (segment.chat_id, fingerprint)
+        row = rows.get(key)
+        policy = self.policy
+        if row is None:
+            guard = slice_guard(events)
+            row = ReplyVerdictModel(
+                id=uuid.uuid4(),
+                seller_id=seller_id,
+                chat_id=segment.chat_id,
+                prompt_at=segment.prompt_at,
+                slice_fingerprint=fingerprint,
+                first_event_id=events[0].event_id,
+                last_event_id=events[-1].event_id,
+                first_event_at=events[0].added_at,
+                last_event_at=events[-1].added_at,
+                messages=len(events),
+                prompt_version=policy.reply_prompt_version,
+                status=VERDICT_DONE if guard else VERDICT_PENDING,
+                guard=guard,
+                attempts=0 if guard else 1,
+                requested_at=now,
+                completed_at=now if guard else None,
+            )
+            self.repository.add_reply_verdict(row)
+            rows[key] = row
+            if not guard:
+                self._request_reply(outbox, row, seller_id, report)
+        elif (
+            row.status != VERDICT_DONE
+            and row.attempts < policy.reply_max_attempts
+            and (now - row.requested_at >= policy.reply_retry)
+        ):
+            row.status = VERDICT_PENDING
+            row.error = None
+            row.attempts += 1
+            row.requested_at = now
+            self._request_reply(outbox, row, seller_id, report)
+        if policy.reply_gate_mode != MODE_ENFORCE:
+            return _ReplyGate()
+        decision = gate_decision(guard=row.guard, status=row.status, category=row.category)
+        if decision is Gate.WAIT:
+            return _ReplyGate(pending=True)
+        if decision is Gate.CONTINUE:
+            model.reply_cleared_through = events[-1].added_at
+            return _ReplyGate(released=True)
+        flag = CATEGORY_FLAGS.get(row.category or "")
+        if flag == "attention":
+            model.attention = True
+        elif flag == "no_contact":
+            model.no_contact = True
+        return _ReplyGate()
+
+    @staticmethod
+    def _request_reply(
+        outbox: OutboxRepository, row: ReplyVerdictModel, seller_id: uuid.UUID, report: SellerReport
+    ) -> None:
+        outbox.add(
+            aggregate_id=row.id,
+            event_type="SupportBotReplyRequested",
+            topic=SupportBotTopics.REPLY_REQUESTED,
+            payload={"verdict_id": str(row.id), "seller_id": str(seller_id)},
+        )
+        report.replies_requested += 1
+
+    @staticmethod
+    def _note_first_reply(model: DialogModel, segment: _Segment, sends: list[SendModel]) -> None:
+        """Когда покупатель впервые ответил после первого сообщения бота (живого или сухого)."""
+        if model.reply_first_at is not None:
+            return
+        planned = [item.planned_at for item in sends if item.status in (SEND_SENT, SEND_UNKNOWN, SEND_DRY_RUN)]
+        if not planned:
+            return
+        first_send = min(planned)
+        replies = [
+            event.added_at
+            for event in segment.events
+            if event.sender == CHAT_SENDER_CLIENT
+            and not event.review_prompt
+            and not is_wb_notice(event)
+            and event.added_at > first_send
+        ]
+        if replies:
+            model.reply_first_at = min(replies)
 
     async def _request_verdicts(
         self, seller_id: uuid.UUID, models: dict[tuple[str, datetime], DialogModel], now: datetime, report: SellerReport

@@ -2,19 +2,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import case, delete, func, select, update
+from sqlalchemy import case, delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     MODE_DRY_RUN,
+    MODE_LIVE,
     SEND_DRY_RUN,
     SEND_FAILED,
     SEND_SENT,
     SEND_UNKNOWN,
     ControlModel,
     DialogModel,
+    ModeChangeModel,
+    ReplyVerdictModel,
     SendModel,
     TemplateModel,
     TrackedSellerModel,
@@ -49,10 +52,19 @@ class SupportBotRepository:
         await self.session.execute(delete(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id))
 
     async def purge_seller(self, seller_id: uuid.UUID) -> None:
-        for model in (SendModel, DialogModel, VerdictModel, TemplateModel, TrackedSellerModel):
+        for model in (
+            SendModel,
+            DialogModel,
+            VerdictModel,
+            ReplyVerdictModel,
+            ModeChangeModel,
+            TemplateModel,
+            TrackedSellerModel,
+        ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
 
-    async def set_mode(self, seller_id: uuid.UUID, mode: str) -> None:
+    async def set_mode(self, seller_id: uuid.UUID, mode: str, canary_percent: int | None = None) -> None:
+        self.session.add(ModeChangeModel(seller_id=seller_id, mode=mode, canary_percent=canary_percent))
         await self.session.execute(
             update(TrackedSellerModel)
             .where(TrackedSellerModel.seller_id == seller_id)
@@ -118,6 +130,7 @@ class SupportBotRepository:
             .values(
                 state=case((DialogModel.campaign_started_at.is_not(None), "exhausted"), else_="awaiting_buyer"),
                 next_send_at=None,
+                reply_hold=False,
                 updated_at=func.now(),
             )
         )
@@ -141,6 +154,7 @@ class SupportBotRepository:
                 ~DialogModel.excluded,
                 ~DialogModel.closed,
                 ~DialogModel.no_contact,
+                ~DialogModel.reply_hold,
             )
             .order_by(DialogModel.next_send_at)
             .limit(limit)
@@ -299,6 +313,127 @@ class SupportBotRepository:
             )
         )
         return {(row.chat_id, row.tail_fingerprint): row for row in rows}
+
+    async def reply_verdicts_by_slice(
+        self, seller_id: uuid.UUID, prompt_version: str, since: datetime
+    ) -> dict[tuple[str, str], ReplyVerdictModel]:
+        """Классы ответов кабинета для версии промпта, по паре (чат, отпечаток среза)."""
+        rows = await self.session.scalars(
+            select(ReplyVerdictModel).where(
+                ReplyVerdictModel.seller_id == seller_id,
+                ReplyVerdictModel.prompt_version == prompt_version,
+                ReplyVerdictModel.last_event_at >= since,
+            )
+        )
+        return {(row.chat_id, row.slice_fingerprint): row for row in rows}
+
+    async def effect_rows(
+        self, seller_id: uuid.UUID, since: datetime
+    ) -> list[tuple[str, datetime, datetime, bool, datetime | None]]:
+        """Диалоги с отправками: первая отправка (живая или сухая), была ли живая, первый ответ после неё."""
+        first = (
+            select(
+                SendModel.chat_id,
+                SendModel.prompt_at,
+                func.min(SendModel.planned_at).label("first_at"),
+                func.bool_or(SendModel.status == SEND_SENT).label("live"),
+            )
+            .where(
+                SendModel.seller_id == seller_id,
+                SendModel.status.in_((SEND_SENT, SEND_UNKNOWN, SEND_DRY_RUN)),
+            )
+            .group_by(SendModel.chat_id, SendModel.prompt_at)
+            .subquery()
+        )
+        rows = await self.session.execute(
+            select(first.c.chat_id, first.c.prompt_at, first.c.first_at, first.c.live, DialogModel.reply_first_at)
+            .join(
+                DialogModel,
+                (DialogModel.seller_id == seller_id)
+                & (DialogModel.chat_id == first.c.chat_id)
+                & (DialogModel.prompt_at == first.c.prompt_at),
+            )
+            .where(first.c.first_at >= since)
+        )
+        return [(chat, prompt, first_at, bool(live), reply) for chat, prompt, first_at, live, reply in rows]
+
+    async def reply_slices(self, seller_id: uuid.UUID, prompt_version: str, since: datetime) -> list[ReplyVerdictModel]:
+        rows = await self.session.scalars(
+            select(ReplyVerdictModel)
+            .where(
+                ReplyVerdictModel.seller_id == seller_id,
+                ReplyVerdictModel.prompt_version == prompt_version,
+                ReplyVerdictModel.last_event_at >= since,
+            )
+            .order_by(ReplyVerdictModel.first_event_at)
+        )
+        return list(rows)
+
+    async def sent_rows(self, seller_id: uuid.UUID, since: datetime) -> list[tuple[str, datetime, datetime]]:
+        rows = await self.session.execute(
+            select(
+                SendModel.chat_id, SendModel.prompt_at, func.coalesce(SendModel.sent_at, SendModel.planned_at)
+            ).where(SendModel.seller_id == seller_id, SendModel.status == SEND_SENT, SendModel.planned_at >= since)
+        )
+        return [(chat, prompt, moment) for chat, prompt, moment in rows]
+
+    async def dialog_states(
+        self, seller_id: uuid.UUID, keys: set[tuple[str, datetime]]
+    ) -> dict[tuple[str, datetime], DialogModel]:
+        if not keys:
+            return {}
+        rows = await self.session.scalars(
+            select(DialogModel).where(
+                DialogModel.seller_id == seller_id, tuple_(DialogModel.chat_id, DialogModel.prompt_at).in_(keys)
+            )
+        )
+        return {(row.chat_id, row.prompt_at): row for row in rows}
+
+    async def live_since(self, seller_id: uuid.UUID) -> datetime | None:
+        """С какого момента кабинет в режиме «вся рассылка»; `None` — сейчас не в нём или переход не записан."""
+        last = await self.session.execute(
+            select(ModeChangeModel.mode, ModeChangeModel.changed_at)
+            .where(ModeChangeModel.seller_id == seller_id)
+            .order_by(ModeChangeModel.changed_at.desc(), ModeChangeModel.id.desc())
+            .limit(1)
+        )
+        row = last.first()
+        return row[1] if row is not None and row[0] == MODE_LIVE else None
+
+    async def latest_reply_verdicts(
+        self, seller_id: uuid.UUID, chat_ids: list[str], prompt_version: str
+    ) -> dict[str, ReplyVerdictModel]:
+        if not chat_ids:
+            return {}
+        rows = await self.session.scalars(
+            select(ReplyVerdictModel)
+            .where(
+                ReplyVerdictModel.seller_id == seller_id,
+                ReplyVerdictModel.prompt_version == prompt_version,
+                ReplyVerdictModel.chat_id.in_(chat_ids),
+            )
+            .order_by(ReplyVerdictModel.last_event_at)
+        )
+        return {row.chat_id: row for row in rows}
+
+    async def dialog_reply_verdicts(self, key: DialogKey, prompt_version: str) -> list[ReplyVerdictModel]:
+        rows = await self.session.scalars(
+            select(ReplyVerdictModel)
+            .where(
+                ReplyVerdictModel.seller_id == key.seller_id,
+                ReplyVerdictModel.chat_id == key.chat_id,
+                ReplyVerdictModel.prompt_at == key.prompt_at,
+                ReplyVerdictModel.prompt_version == prompt_version,
+            )
+            .order_by(ReplyVerdictModel.first_event_at)
+        )
+        return list(rows)
+
+    async def get_reply_verdict(self, verdict_id: uuid.UUID) -> ReplyVerdictModel | None:
+        return await self.session.get(ReplyVerdictModel, verdict_id)
+
+    def add_reply_verdict(self, model: ReplyVerdictModel) -> None:
+        self.session.add(model)
 
     async def get_verdict(self, verdict_id: uuid.UUID) -> VerdictModel | None:
         return await self.session.get(VerdictModel, verdict_id)

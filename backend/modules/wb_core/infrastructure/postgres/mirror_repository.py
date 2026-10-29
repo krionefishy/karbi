@@ -595,6 +595,22 @@ class MirrorRepository:
         )
         return [self._chat_event(row) for row in rows]
 
+    async def chat_events(
+        self, seller_id: uuid.UUID, chat_id: str, *, since: datetime, until: datetime
+    ) -> list[ChatEvent]:
+        """События одного чата в промежутке `[since, until]`, по времени."""
+        rows = await self.session.scalars(
+            select(ChatEventModel)
+            .where(
+                ChatEventModel.seller_id == seller_id,
+                ChatEventModel.chat_id == chat_id,
+                ChatEventModel.added_at >= since,
+                ChatEventModel.added_at <= until,
+            )
+            .order_by(ChatEventModel.added_at, ChatEventModel.event_id)
+        )
+        return [self._chat_event(row) for row in rows]
+
     async def chat_event(self, seller_id: uuid.UUID, event_id: str) -> ChatEvent | None:
         row = await self.session.get(ChatEventModel, (seller_id, event_id))
         return self._chat_event(row) if row is not None else None

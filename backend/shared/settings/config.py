@@ -349,6 +349,10 @@ class SupportBotConfig:
     classifier_prompt_version: str = "v2"
     classifier_retry_minutes: int = 15
     classifier_max_attempts: int = 3
+    reply_gate_mode: str = "off"
+    reply_prompt_version: str = "r1"
+    reply_retry_minutes: int = 15
+    reply_max_attempts: int = 10
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
 
 
@@ -585,7 +589,14 @@ class Settings:
                 review_chats[key] = int(review_chats[key])
         support_bot = dict(data.get("support_bot", {}))
         for key, value in list(support_bot.items()):
-            if key not in ("timezone", "chat_url_template", "classifier_mode", "classifier_prompt_version"):
+            if key not in (
+                "timezone",
+                "chat_url_template",
+                "classifier_mode",
+                "classifier_prompt_version",
+                "reply_gate_mode",
+                "reply_prompt_version",
+            ):
                 support_bot[key] = int(value)
         llm = dict(data.get("llm", {}))
         for key in ("timeout_seconds", "max_tokens"):
@@ -822,6 +833,10 @@ class Settings:
             raise ValueError("support_bot.classifier_mode must be off, shadow or enforce")
         if min(bot.classifier_retry_minutes, bot.classifier_max_attempts) < 1:
             raise ValueError("support_bot.classifier_* limits must be positive")
+        if bot.reply_gate_mode not in ("off", "shadow", "enforce"):
+            raise ValueError("support_bot.reply_gate_mode must be off, shadow or enforce")
+        if min(bot.reply_retry_minutes, bot.reply_max_attempts) < 1:
+            raise ValueError("support_bot.reply_* limits must be positive")
         if self.llm.timeout_seconds < 1 or self.llm.max_tokens < 1:
             raise ValueError("llm.timeout_seconds and llm.max_tokens must be positive")
         penalties = self.fbs_penalties

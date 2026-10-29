@@ -1,12 +1,30 @@
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
+from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_support_bot.domain import MANUAL_ALLOW, MANUAL_DENY, MODE_OFF, DialogState
+from backend.modules.wb_support_bot.application.reply_stats import (
+    EffectRow,
+    ReplySummary,
+    SliceRow,
+    build_summary,
+    open_escalations,
+)
+from backend.modules.wb_support_bot.application.reply_stats import (
+    SendRow as StatSendRow,
+)
+from backend.modules.wb_support_bot.domain import (
+    MANUAL_ALLOW,
+    MANUAL_DENY,
+    MODE_OFF,
+    DialogState,
+    Gate,
+    is_wb_notice,
+)
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
     MODE_CANARY,
@@ -14,6 +32,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     MODE_LIVE,
     DialogKey,
     DialogModel,
+    ReplyVerdictModel,
     SendModel,
     SupportBotRepository,
     TemplateModel,
@@ -62,6 +81,7 @@ class SellerBotView:
     dry_run: bool
     canary_percent: int
     classifier_mode: str
+    reply_gate_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +106,151 @@ class DialogPage:
     page: int
     page_size: int
     verdicts: dict[tuple[str, str], VerdictModel] = field(default_factory=dict)
+    replies: dict[str, ReplyVerdictModel] = field(default_factory=dict)
 
 
-class SupportBotService:
+@dataclass(frozen=True, slots=True)
+class ReplyOverview:
+    summary: ReplySummary
+    generated_at: datetime
+    live_since: datetime | None
+    gate_mode: str
+
+
+@dataclass(frozen=True, slots=True)
+class EscalationRow:
+    chat_id: str
+    prompt_at: datetime
+    nm_id: int | None
+    category: str
+    reason: str | None
+    event_at: datetime
+    state: str
+    closed: bool
+    excluded: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyMessage:
+    at: datetime
+    role: str
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReplyDialogCard:
+    messages: tuple[ReplyMessage, ...]
+    verdicts: tuple[ReplyVerdictModel, ...]
+
+
+def _slice_row(row: ReplyVerdictModel) -> SliceRow:
+    return SliceRow(
+        chat_id=row.chat_id,
+        prompt_at=row.prompt_at,
+        first_event_at=row.first_event_at,
+        last_event_at=row.last_event_at,
+        status=row.status,
+        category=row.category,
+        guard=row.guard,
+        requested_at=row.requested_at,
+        completed_at=row.completed_at,
+        model=row.model,
+        tokens_in=row.tokens_in,
+        tokens_out=row.tokens_out,
+    )
+
+
+def reply_action(row: ReplyVerdictModel) -> Gate:
+    return _slice_row(row).gate
+
+
+class ReplyStatsMixin:
+    """Статистика ответов покупателей на рассылку и карточка диалога с текстом."""
+
+    repository: SupportBotRepository
+    chats: ChatMirror
+    reply_prompt_version: str
+    reply_gate_mode: str
+
+    async def _tracked(self, seller_id: uuid.UUID):  # type: ignore[no-untyped-def]
+        raise NotImplementedError
+
+    async def reply_overview(self, seller_id: uuid.UUID, *, days: int, now: datetime | None = None) -> ReplyOverview:
+        await self._tracked(seller_id)
+        if not 1 <= days <= 400:
+            raise BotRequestError("Период должен быть от 1 до 400 дней")
+        moment = now or datetime.now(UTC)
+        since = moment - timedelta(days=days)
+        slices = await self.repository.reply_slices(seller_id, self.reply_prompt_version, since)
+        keys = {(row.chat_id, row.prompt_at) for row in slices}
+        states = await self.repository.dialog_states(seller_id, keys)
+        live_since = await self.repository.live_since(seller_id)
+        summary = build_summary(
+            days=days,
+            now=moment,
+            effect=[
+                EffectRow(chat, prompt, first, live, reply)
+                for chat, prompt, first, live, reply in await self.repository.effect_rows(seller_id, since)
+            ],
+            slices=[_slice_row(row) for row in slices],
+            sends=[StatSendRow(*row) for row in await self.repository.sent_rows(seller_id, since)],
+            dialogs={key: (model.state, model.closed) for key, model in states.items()},
+            live_since=live_since,
+        )
+        return ReplyOverview(summary, moment, live_since, self.reply_gate_mode)
+
+    async def reply_escalations(self, seller_id: uuid.UUID, *, days: int = 30) -> list[EscalationRow]:
+        await self._tracked(seller_id)
+        since = datetime.now(UTC) - timedelta(days=days)
+        slices = await self.repository.reply_slices(seller_id, self.reply_prompt_version, since)
+        states = await self.repository.dialog_states(seller_id, {(row.chat_id, row.prompt_at) for row in slices})
+        latest = {(row.chat_id, row.prompt_at): row for row in slices}
+        stats = [_slice_row(row) for row in slices]
+        result: list[EscalationRow] = []
+        for last in open_escalations(stats, {key: (model.state, model.closed) for key, model in states.items()}):
+            key = (last.chat_id, last.prompt_at)
+            dialog = states[key]
+            result.append(
+                EscalationRow(
+                    chat_id=last.chat_id,
+                    prompt_at=last.prompt_at,
+                    nm_id=dialog.nm_id,
+                    category=last.bucket,
+                    reason=latest[key].reason,
+                    event_at=last.last_event_at,
+                    state=dialog.state,
+                    closed=dialog.closed,
+                    excluded=dialog.excluded,
+                )
+            )
+        return result
+
+    async def reply_dialog(self, seller_id: uuid.UUID, chat_id: str, prompt_at: datetime) -> ReplyDialogCard:
+        await self._tracked(seller_id)
+        key = DialogKey(seller_id, chat_id, prompt_at)
+        if await self.repository.get_dialog(key) is None:
+            raise BotRequestError("Диалог не найден")
+        events = await self.chats.chat_events(
+            seller_id, chat_id, since=prompt_at - timedelta(minutes=1), until=datetime.now(UTC) + timedelta(days=1)
+        )
+        reminders = {send.text.strip() for send in await self.repository.dialog_sends(key)}
+        messages: list[ReplyMessage] = []
+        for event in events:
+            text = (event.text or "").strip()
+            if event.review_prompt or is_wb_notice(event):
+                role = "wb"
+            elif event.sender == CHAT_SENDER_CLIENT:
+                role = "buyer"
+            elif text in reminders:
+                role = "bot"
+            else:
+                role = "seller"
+            messages.append(ReplyMessage(event.added_at, role, text))
+        verdicts = await self.repository.dialog_reply_verdicts(key, self.reply_prompt_version)
+        return ReplyDialogCard(tuple(messages), tuple(verdicts))
+
+
+class SupportBotService(ReplyStatsMixin):
     """Что бот показывает оператору и что оператор ему может поручить."""
 
     def __init__(
@@ -100,10 +262,14 @@ class SupportBotService:
         canary_percent: int = 10,
         classifier_mode: str = MODE_OFF,
         classifier_prompt_version: str = "v2",
+        reply_gate_mode: str = MODE_OFF,
+        reply_prompt_version: str = "r1",
     ) -> None:
         self.canary_percent = canary_percent
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
+        self.reply_gate_mode = reply_gate_mode
+        self.reply_prompt_version = reply_prompt_version
         self.session = session
         self.sellers = sellers
         self.repository = repository
@@ -152,6 +318,7 @@ class SupportBotService:
             dry_run=tracked.mode == MODE_DRY_RUN,
             canary_percent=self.canary_percent,
             classifier_mode=self.classifier_mode,
+            reply_gate_mode=self.reply_gate_mode,
         )
 
     async def dialogs(
@@ -166,7 +333,10 @@ class SupportBotService:
             seller_id, state=state, flag=flag, limit=page_size, offset=(page - 1) * page_size
         )
         verdicts = await self.repository.verdicts_by_tail(seller_id, self.classifier_prompt_version)
-        return DialogPage(tuple(rows), total, page, page_size, verdicts)
+        replies = await self.repository.latest_reply_verdicts(
+            seller_id, [row.chat_id for row in rows], self.reply_prompt_version
+        )
+        return DialogPage(tuple(rows), total, page, page_size, verdicts, replies)
 
     async def sends(self, seller_id: uuid.UUID, *, status: str | None, page: int, page_size: int) -> SendPage:
         await self._tracked(seller_id)
@@ -187,7 +357,7 @@ class SupportBotService:
         await self._tracked(seller_id)
         if mode not in MODES:
             raise BotRequestError(f"Неизвестный режим: {mode}")
-        await self.repository.set_mode(seller_id, mode)
+        await self.repository.set_mode(seller_id, mode, self.canary_percent)
         await self.session.commit()
 
     async def set_paused(self, paused: bool) -> None:

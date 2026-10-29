@@ -19,6 +19,7 @@ class SupportBotResponse(BaseModel):
     mirror_read_through: str | None
     canary_percent: int
     classifier_mode: str
+    reply_gate_mode: str
 
 
 class DialogResponse(BaseModel):
@@ -41,6 +42,8 @@ class DialogResponse(BaseModel):
     verdict: str | None = None
     verdict_reason: str | None = None
     manual_verdict: str | None = None
+    reply_hold: bool = False
+    reply_category: str | None = None
 
 
 class DialogPageResponse(BaseModel):
@@ -99,3 +102,122 @@ class ManualVerdictRequest(BaseModel):
     chat_id: str
     prompt_at: str
     value: str | None = None
+
+
+class ArmStatsResponse(BaseModel):
+    dialogs: int
+    eligible24: int
+    replied24: int
+    eligible48: int
+    replied48: int
+
+
+class EffectResponse(BaseModel):
+    live: ArmStatsResponse
+    control: ArmStatsResponse
+
+
+class CategoryCountResponse(BaseModel):
+    category: str
+    count: int
+
+
+class DailyPointResponse(BaseModel):
+    date: str
+    started_live: int
+    started_control: int
+    replied48_live: int
+    replied48_control: int
+    replies_live: int
+    replies_control: int
+
+
+class LateSendsResponse(BaseModel):
+    count: int
+    total_sends: int
+    median_lag_minutes: int | None
+    max_lag_minutes: int | None
+
+
+class ContinueBucketResponse(BaseModel):
+    count: int
+    dialogs: int
+
+
+class ContinuesResponse(BaseModel):
+    dialogs: int
+    escalated_after: int
+    resolved_after: int
+    max_per_dialog: int
+    distribution: list[ContinueBucketResponse]
+
+
+class HealthResponse(BaseModel):
+    total: int
+    pending: int
+    stuck: int
+    failed: int
+    unclear: int
+    median_decision_minutes: int | None
+    tokens_in: int
+    tokens_out: int
+    calls: int
+
+
+class ReplySummaryResponse(BaseModel):
+    generated_at: str
+    days: int
+    gate_mode: str
+    live_since: str | None
+    effect: EffectResponse
+    categories: list[CategoryCountResponse]
+    categories_slices: list[CategoryCountResponse]
+    categories_before: list[CategoryCountResponse]
+    categories_after: list[CategoryCountResponse]
+    actions: dict[str, int]
+    daily: list[DailyPointResponse]
+    escalations_open: int
+    late_sends: LateSendsResponse
+    continues: ContinuesResponse
+    health: HealthResponse
+
+
+class EscalationResponse(BaseModel):
+    chat_id: str
+    prompt_at: str
+    nm_id: int | None
+    category: str
+    reason: str | None
+    event_at: str
+    state: str
+    closed: bool
+    excluded: bool
+    chat_url: str | None
+
+
+class EscalationListResponse(BaseModel):
+    items: list[EscalationResponse]
+
+
+class ReplyMessageResponse(BaseModel):
+    at: str
+    role: str
+    text: str
+
+
+class ReplyVerdictResponse(BaseModel):
+    first_event_at: str
+    last_event_at: str
+    messages: int
+    status: str
+    category: str | None
+    reason: str | None
+    action: str
+
+
+class ReplyDialogResponse(BaseModel):
+    chat_id: str
+    prompt_at: str
+    chat_url: str | None
+    messages: list[ReplyMessageResponse]
+    verdicts: list[ReplyVerdictResponse]

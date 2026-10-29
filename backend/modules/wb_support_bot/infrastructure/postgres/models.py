@@ -85,6 +85,9 @@ class DialogModel(WBSupportBotBase):
     tail_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
     manual_verdict: Mapped[str | None] = mapped_column(String(8), nullable=True)
     manual_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    reply_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    reply_cleared_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reply_first_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
@@ -138,6 +141,69 @@ class VerdictModel(WBSupportBotBase):
     )
 
 
+class ReplyVerdictModel(WBSupportBotBase):
+    """Класс ответа покупателя на рассылку: по нему рассылка продолжается или останавливается.
+
+    Строка описывает срез: подряд идущие сообщения покупателя, которые ещё никто не разобрал.
+    Текст здесь не хранится, он остаётся в зеркале чатов. Решение «продолжаем / стоп»
+    выводится из класса в коде (`CONTINUE_CATEGORIES`), в таблице хранится только класс.
+    """
+
+    __tablename__ = "reply_verdicts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    chat_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    prompt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    slice_fingerprint: Mapped[str] = mapped_column(String(40), nullable=False)
+    first_event_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_event_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    first_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    messages: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    prompt_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, server_default=VERDICT_PENDING)
+    category: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guard: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_wb_support_bot_reply_verdicts_slice",
+            "seller_id",
+            "chat_id",
+            "slice_fingerprint",
+            "prompt_version",
+            unique=True,
+        ),
+        Index("ix_wb_support_bot_reply_verdicts_time", "seller_id", "last_event_at"),
+        Index("ix_wb_support_bot_reply_verdicts_category", "seller_id", "category", "last_event_at"),
+        Index("ix_wb_support_bot_reply_verdicts_status", "status", "requested_at"),
+    )
+
+
+class ModeChangeModel(WBSupportBotBase):
+    """История режимов кабинета: по ней на графике ответов ставится метка перехода на 100%."""
+
+    __tablename__ = "mode_changes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    canary_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index("ix_wb_support_bot_mode_changes_seller", "seller_id", "changed_at"),)
+
+
 SEND_PLANNED = "planned"
 SEND_SENDING = "sending"
 SEND_SENT = "sent"
@@ -184,6 +250,8 @@ __all__ = [
     "VERDICT_PENDING",
     "ControlModel",
     "DialogModel",
+    "ModeChangeModel",
+    "ReplyVerdictModel",
     "SendModel",
     "TemplateModel",
     "TrackedSellerModel",

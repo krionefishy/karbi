@@ -44,6 +44,10 @@ def policy_from(settings: Settings) -> BotPolicy:
         classifier_prompt_version=config.classifier_prompt_version,
         classifier_retry=timedelta(minutes=config.classifier_retry_minutes),
         classifier_max_attempts=config.classifier_max_attempts,
+        reply_gate_mode=config.reply_gate_mode,
+        reply_prompt_version=config.reply_prompt_version,
+        reply_retry=timedelta(minutes=config.reply_retry_minutes),
+        reply_max_attempts=config.reply_max_attempts,
     )
 
 
@@ -121,6 +125,8 @@ class SupportBotWorker(PollingWorker):
                 failed=report.failed,
                 held=report.held,
                 verdicts_requested=report.verdicts_requested,
+                replies_requested=report.replies_requested,
+                replies_held=report.replies_held,
                 skipped=report.skipped,
             )
         return handled

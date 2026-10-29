@@ -7,6 +7,7 @@ from backend.modules.wb_support_bot.infrastructure.wb import WBChatSender
 from backend.shared.llm import LLMClient
 from backend.shared.worker import WorkerApplication, run_application
 from backend.workers.wb_support_bot.classify_consumer import ClassifyConsumer
+from backend.workers.wb_support_bot.reply_consumer import ReplyConsumer
 from backend.workers.wb_support_bot.worker import SupportBotWorker
 
 
@@ -22,6 +23,7 @@ class SupportBotWorkerApplication(WorkerApplication[SupportBotWorker]):
 
     def build_worker(self) -> SupportBotWorker:
         self.consumer = self._create_consumer()
+        self.reply_consumer = self._create_reply_consumer()
         return SupportBotWorker(self.database, WBChatSender(EgressGateway(self.settings.egress)), self.settings)
 
     def _create_consumer(self) -> ClassifyConsumer | None:
@@ -34,10 +36,23 @@ class SupportBotWorkerApplication(WorkerApplication[SupportBotWorker]):
             LLMClient(self.settings.llm),
         )
 
+    def _create_reply_consumer(self) -> ReplyConsumer | None:
+        if not self.settings.kafka.enabled or self.settings.support_bot.reply_gate_mode == MODE_OFF:
+            return None
+        return ReplyConsumer(
+            self.database,
+            self.settings.kafka.bootstrap_servers,
+            f"{self.settings.kafka.consumer_group}.wb.support-bot.reply",
+            LLMClient(self.settings.llm),
+        )
+
     def consumers(self) -> dict[str, Callable[[], Awaitable[None]]]:
-        if self.consumer is None:
-            return {}
-        return {"support-bot-classify": self.consumer.run}
+        running: dict[str, Callable[[], Awaitable[None]]] = {}
+        if self.consumer is not None:
+            running["support-bot-classify"] = self.consumer.run
+        if self.reply_consumer is not None:
+            running["support-bot-reply"] = self.reply_consumer.run
+        return running
 
 
 if __name__ == "__main__":
