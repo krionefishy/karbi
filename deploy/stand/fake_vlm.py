@@ -300,7 +300,8 @@ class State:
         self.lock = threading.Lock()
         self.requests = 0
         self.frames: list[dict[str, Any]] = []  # недавние кадры: отпечаток верха, url, chat_id, метка
-        self.fired: dict[int, int] = {}
+        # Счётчик `times` по содержимому правила, а не по номеру: правка файла сдвигает номера.
+        self.fired: dict[str, int] = {}
         self.scenarios_path = scenarios_path
         self.manifest_path = manifest_path
 
@@ -411,15 +412,16 @@ def respond(body: dict[str, Any]) -> tuple[int, dict[str, Any] | None, str | Non
 
     rule = None
     marks = STATE.sample_marks()
-    for index, candidate in enumerate(STATE.rules()):
+    for candidate in STATE.rules():
         if not _matches(candidate.get("match", {}), ctx, marks):
             continue
         times = candidate.get("times")
+        key = json.dumps(candidate, sort_keys=True, ensure_ascii=False)
         with STATE.lock:
-            fired = STATE.fired.get(index, 0)
+            fired = STATE.fired.get(key, 0)
             if times is not None and fired >= int(times):
                 continue
-            STATE.fired[index] = fired + 1
+            STATE.fired[key] = fired + 1
         rule = candidate
         break
 

@@ -4,8 +4,10 @@
 получилось»: этот тест упадёт раньше.
 """
 
+import base64
 import importlib.util
 import io
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -60,3 +62,19 @@ def test_mark_survives_jpeg(fake: ModuleType) -> None:
 def test_address_bar_answer_matches_schema(fake: ModuleType) -> None:
     facts = fake.facts(5, 7)
     AddressBarAnswerV1.model_validate({"url": facts["url"], "chat_id": facts["chat_id"]})
+
+
+def test_times_follow_the_rule_not_its_position_in_the_file(fake: ModuleType, tmp_path: Path) -> None:
+    """Правка scenarios.json на ходу: новое правило на месте сработавшего не должно считаться сработавшим."""
+    scenarios = tmp_path / "scenarios.json"
+    fake.__dict__["STATE"] = fake.State(str(scenarios), str(tmp_path / "manifest.json"))
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), (200, 200, 200)).save(buffer, format="PNG")
+    image = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+    body = {"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}}]}]}
+
+    scenarios.write_text(json.dumps({"rules": [{"match": {"kind": "frame"}, "error": 503, "times": 1}]}))
+    assert fake.respond(body)[0] == 503
+    assert fake.respond(body)[0] == 200
+    scenarios.write_text(json.dumps({"rules": [{"match": {"kind": "frame"}, "error": 429, "times": 1}]}))
+    assert fake.respond(body)[0] == 429
