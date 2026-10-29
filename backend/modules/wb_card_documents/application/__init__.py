@@ -23,6 +23,7 @@ from backend.modules.wb_card_documents.application.notifications import (
     WatchReport,
     alert_dedupe,
 )
+from backend.modules.wb_card_documents.application.stock import MirrorStockSource, StockSource
 from backend.modules.wb_card_documents.application.view import (
     CardDocumentsOverview,
     DocumentsBoard,
@@ -50,9 +51,11 @@ __all__ = [
     "DocumentsRow",
     "DocumentsSummary",
     "NotificationBotMissingError",
+    "MirrorStockSource",
     "NotificationService",
     "Notice",
     "RefreshRequest",
+    "StockSource",
     "UnknownStateError",
     "WatchReport",
     "alert_dedupe",

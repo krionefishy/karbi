@@ -20,6 +20,8 @@ SURCHARGES = "surcharges"
 STORAGE = "storage"
 ACCEPTANCE = "acceptance"
 ADVERTISING = "advertising"
+ADVERTISING_BONUS = "advertising_bonus"
+ADVERTISING_TOPUP = "advertising_topup"
 EXTERNAL_MARKETING = "external_marketing"
 RATING_ABUSE = "rating_abuse"
 REVIEWS = "reviews"
@@ -57,6 +59,8 @@ LINES: tuple[Line, ...] = (
     Line(STORAGE, "Хранение", LEVEL_ITEM),
     Line(ACCEPTANCE, "Платная приемка", LEVEL_ITEM),
     Line(ADVERTISING, "Внутренняя реклама", LEVEL_ITEM),
+    Line(ADVERTISING_BONUS, "инф: Реклама за бонусы", LEVEL_INFO),
+    Line(ADVERTISING_TOPUP, "инф: Удержано на баланс Продвижения", LEVEL_INFO),
     Line(EXTERNAL_MARKETING, "Внешний маркетинг", LEVEL_ITEM),
     Line(RATING_ABUSE, "ИМИЗР", LEVEL_ITEM),
     Line(REVIEWS, "Отзывы", LEVEL_ITEM),
@@ -69,8 +73,11 @@ LINES: tuple[Line, ...] = (
 LINE_KEYS = tuple(line.key for line in LINES)
 EXPENSE_KEYS = tuple(line.key for line in LINES if line.level == LEVEL_ITEM)
 
+# Удержание «WB Продвижение» — пополнение рекламного баланса, а не расход: расход — списания
+# кампаний из «ВБ.Продвижения» (`Statement.set_advertising`). У кабинетов с отложенным
+# списанием удержания нет вовсе, а реклама крутится.
 DEDUCTION_KINDS: tuple[tuple[str, str], ...] = (
-    ("wb продвижение", ADVERTISING),
+    ("wb продвижение", ADVERTISING_TOPUP),
     ("баллы за отзывы", REVIEWS),
     ("завышения рейтинга", RATING_ABUSE),
     ("срока перечисления", PAYOUT_TERM),
@@ -103,6 +110,12 @@ class Statement:
         for key in LINE_KEYS:
             self.values[key] += other.values[key]
         self.uncosted += other.uncosted
+
+    def set_advertising(self, paid: Decimal, bonus: Decimal) -> "Statement":
+        """Реклама периода — из списаний «ВБ.Продвижения»: с баланса и счёта в расход, бонусы справочно."""
+        self.values[ADVERTISING] = -paid
+        self.values[ADVERTISING_BONUS] = -bonus
+        return self.close()
 
     def close(self) -> "Statement":
         """Производные строки — из первичных: комиссии, прямые расходы, маржа."""

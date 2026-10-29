@@ -223,7 +223,7 @@
 .cover-warning { color: var(--warning); }
 .cover-calm { color: var(--positive); }
 .cover-neutral { color: var(--ink-muted); }
-.staff-head, .staff-row { display: grid; grid-template-columns: minmax(220px, 1fr) 160px 150px 200px 130px; align-items: center; border-bottom: 1px solid var(--line); }
+.staff-head, .staff-row { display: grid; grid-template-columns: minmax(200px, 1fr) 140px 130px 90px 190px 170px; align-items: center; border-bottom: 1px solid var(--line); }
 .staff-row:last-child { border-bottom: 0; }
 .staff-head > *, .staff-row > * { padding: 0 var(--space-4); }
 .staff-row strong { font-size: 13px; }
@@ -299,6 +299,7 @@
 .stocks-scroll { max-height: calc(100vh - 230px); overflow: auto; }
 .stocks-scroll .stocks-head { position: sticky; top: 0; z-index: 2; }
 .stocks-scroll .stocks-head .checklist-sticky, .stocks-scroll .stocks-head .stocks-sticky-barcode { z-index: 3; }
+.stocks-product { min-width: 0; overflow-wrap: anywhere; }
 .stocks-product strong { font-size: 12px; line-height: 16px; }
 .stocks-product em { color: var(--ink-muted); font-size: 11px; font-style: normal; }
 .stocks-unknown { color: var(--warning); font-size: 11px; font-style: normal; }
@@ -430,6 +431,7 @@
 /* Финансовые отчёты: строки ОПиУ сверху вниз, по колонке на период или кабинет. */
 .fin-toolbar { align-items: flex-end; }
 .fin-toolbar .mode-switch { margin-bottom: 0; margin-right: auto; }
+.fin-help { margin-top: var(--space-2); }
 .fin-table { margin-bottom: var(--space-5); }
 .fin-stale { opacity: 0.55; transition: opacity 0.2s; }
 .fin-updating { margin: 0 0 var(--space-3); }
@@ -516,7 +518,7 @@
 .docs-banner p { margin: 0; max-width: 760px; color: var(--ink); }
 .docs-retry { height: var(--control-sm); margin-top: var(--space-2); }
 .docs-scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
-.docs-table { width: 100%; min-width: 1100px; border-collapse: collapse; font-size: 13px; line-height: 18px; }
+.docs-table { width: 100%; min-width: 1180px; border-collapse: collapse; font-size: 13px; line-height: 18px; }
 .docs-table thead th { height: 36px; padding: 0 var(--space-3); color: var(--ink-muted); background: var(--surface-sunken); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 500; text-align: left; white-space: nowrap; }
 .docs-table tbody td { padding: 8px var(--space-3); border-bottom: 1px solid var(--line); vertical-align: top; }
 .docs-table tbody tr:last-child td { border-bottom: 0; }
@@ -524,6 +526,9 @@
 .docs-table td small { display: block; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
 .docs-product { min-width: 220px; max-width: 320px; }
 .docs-vendor { white-space: nowrap; }
+.docs-stock { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.docs-stock-empty { color: var(--ink-disabled); }
+.docs-tile small { color: var(--ink-muted); font-size: 11px; line-height: 14px; }
 .checklist-toolbar input.docs-search { width: 360px; max-width: 100%; }
 .docs-product strong { display: block; overflow-wrap: anywhere; }
 .docs-nm { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }

@@ -1,14 +1,14 @@
 import asyncio
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.fin_reports.application.ads import week_ads
+from backend.modules.fin_reports.application.ads import period_ads, week_ads
 from backend.modules.fin_reports.application.build import FACTS_VERSION, OZON_FACTS_VERSION
 from backend.modules.fin_reports.application.costs import CostFileError, match_cabinets, read_cost_file
 from backend.modules.fin_reports.application.report import FinReportFile, build_workbook
@@ -52,8 +52,20 @@ from backend.modules.fin_reports.domain import (
     stock_rows,
 )
 from backend.modules.fin_reports.infrastructure.postgres import FinReportsRepository
-from backend.modules.wb_core.application import OzonAccrualMirror, SalesReportMirror
-from backend.modules.wb_core.domain import EGRESS_SERVABLE, SalesReport, SalesReportTotals, Seller, tax_rate_on
+from backend.modules.wb_core.application import (
+    OzonAccrualMirror,
+    OzonAdvertMirror,
+    OzonProductMirror,
+    SalesReportMirror,
+)
+from backend.modules.wb_core.domain import (
+    EGRESS_SERVABLE,
+    OzonProduct,
+    SalesReport,
+    SalesReportTotals,
+    Seller,
+    tax_rate_on,
+)
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
 YEAR_MARGIN = timedelta(days=7)
@@ -86,6 +98,8 @@ class FinReportsService:
         self.timezone = timezone
         self.mirror = SalesReportMirror(session)
         self.ozon = OzonAccrualMirror(session)
+        self.ozon_products = OzonProductMirror(session)
+        self.ozon_adverts = OzonAdvertMirror(session)
 
     def today(self, now: datetime | None = None) -> date:
         return (now or datetime.now(UTC)).astimezone(self.timezone).date()
@@ -224,12 +238,25 @@ class FinReportsService:
                 column = column_of(period_of(day, granularity), report)
                 if column is not None:
                     column.pending.add(seller.id)
+        mine: dict[Period, Statement] = {}
         for (report_id, period), items in by_period.items():
             report = loaded[report_id]
             column = column_of(period, report)
             if column is None:
                 continue
             figures = statement(items, self._cost_on(book, min(report.date_to, column.date_to)), on_uncosted=remember)
+            mine.setdefault(period, Statement()).add(figures)
+        yesterday = self.today() - timedelta(days=1)
+        for period, figures in mine.items():
+            column = columns[period]
+            # Реклама — списания «ВБ.Продвижения» за дни периода, а не удержания отчёта:
+            # у кабинета с отложенным списанием удержаний нет, а расход есть.
+            ads = await period_ads(self.session, seller.id, since=column.date_from, until=column.date_to)
+            figures.set_advertising(ads.spend.paid, ads.spend.bonus)
+            # Зеркало рекламы отстало от конца периода — период неполный. Кабинет, до которого
+            # зеркало ещё не доходило, не держит период: реклама там просто ноль.
+            if ads.collected_through is not None and ads.collected_through < min(column.date_to, yesterday):
+                column.pending.add(seller.id)
             column.by_seller.setdefault(seller.id, Statement()).add(figures)
             column.by_seller[seller.id].close()
             column.total.add(figures)
@@ -280,6 +307,14 @@ class FinReportsService:
             key = (seller.id, sku)
             uncosted[key] = ("", uncosted.get(key, ("", ZERO))[1] + revenue)
 
+        async def name_uncosted() -> None:
+            """Артикул продавца из карточек Ozon — чтобы в списке без себестоимости был не только SKU."""
+            mine = [sku for (owner, sku) in uncosted if owner == seller.id]
+            products = await self.ozon_products.products(seller.id, mine) if mine else {}
+            for sku, product in products.items():
+                revenue = uncosted[(seller.id, sku)][1]
+                uncosted[(seller.id, sku)] = (product.offer_id, revenue)
+
         first = min(ready) if ready else through
         days_in_year = pending_days = 0
         if first is not None:
@@ -306,6 +341,7 @@ class FinReportsService:
             column.by_seller[seller.id].close()
             column.total.add(figures)
             column.total.close()
+        await name_uncosted()
         state = await self.ozon.state(seller.id)
         return SellerState(
             seller_id=seller.id,
@@ -431,16 +467,37 @@ class FinReportsService:
                 if fact.day in ready
             ]
             days = (date_from + timedelta(days=offset) for offset in range((date_to - date_from).days + 1))
+            # Расход кампаний по SKU за неделю — доли, по которым реклама без SKU ляжет на товары.
+            ad_spend: dict[int, Decimal] = defaultdict(Decimal)
+            for stat in await self.ozon_adverts.stats(seller.id, since=date_from, until=date_to):
+                ad_spend[stat.sku] += stat.money_spent
+            products = await self.ozon_products.products(seller.id, {fact.sku for fact in facts} | set(ad_spend))
+            ads_state = await self.ozon_adverts.state(seller.id)
             result.append(
                 SellerSkus(
                     seller_id=seller.id,
                     name=seller.name,
-                    rows=ozon_sku_rows(facts, self._cost_on(books[seller.id], date_to)),
+                    rows=ozon_sku_rows(
+                        facts,
+                        self._cost_on(books[seller.id], date_to),
+                        product_of=self._product_in(products),
+                        ad_spend=ad_spend,
+                    ),
                     pending=any(day not in ready for day in days if day <= yesterday),
                     collected_through=through,
+                    ads_through=await self.ozon_adverts.collected_through(seller.id),
+                    ads_error=ads_state.error if ads_state else None,
                 )
             )
         return SkusView(period, date_from, date_to, result)
+
+    @staticmethod
+    def _product_in(products: Mapping[int, OzonProduct]) -> Callable[[int], tuple[str, str] | None]:
+        def product(sku: int) -> tuple[str, str] | None:
+            item = products.get(sku)
+            return (item.offer_id, item.name) if item else None
+
+        return product
 
     @staticmethod
     def _stock_in(stocks: dict[tuple[int, str], Stock]) -> Callable[[int, str], Stock]:

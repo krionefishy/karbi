@@ -58,6 +58,7 @@ select { padding-right: 32px; appearance: none; background-image: url("data:imag
 input::placeholder, textarea::placeholder { color: var(--ink-muted); }
 input:where(:not([type="checkbox"], [type="radio"], [type="range"])):focus, select:focus, textarea:focus { border-color: var(--accent); }
 input:disabled, select:disabled, textarea:disabled { color: var(--ink-disabled); background: var(--surface-sunken); border-color: var(--line); }
+option, optgroup { color: var(--ink); background: var(--surface); }
 input[type="checkbox"] { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 input[type="range"] { accent-color: var(--accent); }
 .checkbox-field, .dormant-toggle, .archived-toggle { display: inline-flex; gap: var(--space-2); align-items: center; color: var(--ink); font-size: 13px; cursor: pointer; }
@@ -119,7 +120,7 @@ input[type="range"] { accent-color: var(--accent); }
 .fbs-head, .fbs-row { min-width: 950px; }
 .fbs-office-head, .fbs-office-row { min-width: 990px; }
 .fbs-pool-head, .fbs-pool-row { min-width: 820px; }
-.staff-head, .staff-row { min-width: 860px; }
+.staff-head, .staff-row { min-width: 960px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 52px; padding: 0 var(--space-5); border-bottom: 1px solid var(--line); }
 .card-head h2 { margin: 0; }
 .card-head-title { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
@@ -173,7 +174,7 @@ input[type="range"] { accent-color: var(--accent); }
 .dialog-close { position: absolute; top: 12px; right: 12px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; color: var(--ink-secondary); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
 .dialog-close:hover { color: var(--ink); background: var(--surface-hover); }
 .seller-form { display: grid; gap: var(--space-4); }
-.seller-form input, .seller-form select { width: 100%; }
+.seller-form input:not([type="checkbox"], [type="radio"]), .seller-form select { width: 100%; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 .neutral-dialog { border-color: var(--line); }
 
@@ -249,3 +250,10 @@ input[type="range"] { accent-color: var(--accent); }
 .password-field button { position: absolute; top: 4px; right: 4px; width: 36px; height: 36px; padding: 0; color: var(--ink-muted); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
 .password-field button:hover { color: var(--ink); background: var(--surface-hover); }
 .security-note { margin: var(--space-5) 0 0; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
+
+/* Диалог доступов к сервисам */
+.access-list { display: grid; gap: var(--space-1); max-height: 360px; overflow-y: auto; }
+.access-list .checkbox-field { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-2); border-radius: var(--radius-sm); }
+.access-list .checkbox-field:hover { background: var(--surface-hover); }
+.access-bulk { display: flex; gap: var(--space-4); font-size: 13px; }
+.link-button { padding: 0; color: var(--accent); background: none; border: 0; cursor: pointer; text-decoration: underline; font: inherit; }

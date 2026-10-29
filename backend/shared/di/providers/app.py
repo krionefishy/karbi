@@ -9,7 +9,13 @@ from backend.modules.fin_reports.infrastructure.postgres import FinReportsReposi
 from backend.modules.notifications.application import BotAdminService, BotRegistry, SubscriptionService
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
-from backend.modules.platform.application import AuthService, PasswordService, TokenService, UserAdminService
+from backend.modules.platform.application import (
+    AuthService,
+    PasswordService,
+    ServiceAccessService,
+    TokenService,
+    UserAdminService,
+)
 from backend.modules.platform.infrastructure.postgres import UserRepository
 from backend.modules.wb_box_stickers.application import BoxStickerService, PackingService
 from backend.modules.wb_box_stickers.infrastructure.redis import PackingStore
@@ -22,7 +28,11 @@ from backend.modules.wb_card_checklist.application import (
 )
 from backend.modules.wb_card_checklist.domain import Thresholds
 from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistRepository
-from backend.modules.wb_card_documents.application import CardDocumentsEnrollment, CardDocumentsService
+from backend.modules.wb_card_documents.application import (
+    CardDocumentsEnrollment,
+    CardDocumentsService,
+)
+from backend.modules.wb_card_documents.application import MirrorStockSource as DocumentsStockSource
 from backend.modules.wb_card_documents.infrastructure.postgres import CardDocumentsRepository
 from backend.modules.wb_core.application import AutomationEnrollment, SellerService
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
@@ -60,7 +70,12 @@ from backend.modules.wb_reviews.application import ReviewReportService, ReviewsE
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_support_bot.application import SupportBotEnrollment, SupportBotService
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
-from backend.modules.wb_turnover.application import ReplenishmentReportService, TurnoverEnrollment, TurnoverService
+from backend.modules.wb_turnover.application import (
+    BoardService,
+    ReplenishmentReportService,
+    TurnoverEnrollment,
+    TurnoverService,
+)
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.settings import Settings
@@ -149,6 +164,10 @@ class SessionProvider(Provider):
     @provide(scope=Scope.REQUEST)
     def user_admin_service(self, users: UserRepository, passwords: PasswordService) -> UserAdminService:
         return UserAdminService(users, passwords)
+
+    @provide(scope=Scope.REQUEST)
+    def service_access_service(self, users: UserRepository) -> ServiceAccessService:
+        return ServiceAccessService(users)
 
     @provide(scope=Scope.REQUEST)
     def seller_repository(self, session: AsyncSession) -> SellerRepository:
@@ -303,6 +322,20 @@ class SessionProvider(Provider):
         )
 
     @provide(scope=Scope.REQUEST)
+    def turnover_board_service(
+        self, session: AsyncSession, sellers: SellerRepository, turnover: TurnoverRepository, settings: Settings
+    ) -> BoardService:
+        return BoardService(
+            session,
+            sellers,
+            turnover,
+            window_days=settings.turnover.board_window_days,
+            red_days=settings.turnover.board_red_days,
+            yellow_days=settings.turnover.board_yellow_days,
+            stale_hours=settings.turnover.board_stale_hours,
+        )
+
+    @provide(scope=Scope.REQUEST)
     def checklist_repository(self, session: AsyncSession) -> ChecklistRepository:
         return ChecklistRepository(session)
 
@@ -360,6 +393,8 @@ class SessionProvider(Provider):
             bot_code=config.notification_bot,
             timezone=ZoneInfo(config.timezone),
             stale_hours=config.stale_hours,
+            stocks=DocumentsStockSource(session, fresh_hours=config.stock_fresh_hours),
+            min_stock=config.min_stock_for_alerts,
         )
 
     @provide(scope=Scope.REQUEST)

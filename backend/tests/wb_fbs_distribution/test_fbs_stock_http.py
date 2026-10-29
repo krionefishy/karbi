@@ -1,4 +1,3 @@
-import uuid
 from collections.abc import AsyncIterator
 
 import pytest_asyncio
@@ -8,6 +7,7 @@ from sqlalchemy import delete
 from backend.app.factory import Application
 from backend.modules.wb_fbs_distribution.infrastructure.postgres import StockPoolModel, StockSnapshotModel
 from backend.shared.settings import load_settings
+from backend.tests.operators import operator_token
 
 API = "/api/v1/wb/fbs"
 
@@ -17,7 +17,7 @@ async def client() -> AsyncIterator[AsyncClient]:
     application = Application(load_settings("backend/shared/settings/config.test.yaml"))
     app = application.get_app()
     async with app.router.lifespan_context(app):
-        token = application.token_service.issue_access(uuid.uuid4())
+        token = await operator_token(application)
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",

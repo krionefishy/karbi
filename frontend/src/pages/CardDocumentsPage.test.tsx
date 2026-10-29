@@ -27,6 +27,7 @@ function item(nmId: number, overrides: Partial<CardDocumentItem> = {}): CardDocu
     document_start: "2025-01-10",
     document_end: "2027-01-09",
     days_left: 444,
+    stock: 10,
     checked_at: "2026-10-22T07:00:00Z",
     since: null,
     ...overrides,
@@ -37,7 +38,7 @@ const sample: CardDocuments = {
   collected_at: "2026-10-22T07:00:00Z",
   last_error: null,
   stale: false,
-  summary: { total: 3, ok: 1, rejected: 1, missing: 0, expiring: 1, mismatch: 0 },
+  summary: { total: 3, ok: 1, rejected: 1, missing: 0, expiring: 1, mismatch: 0, with_stock_problems: 2 },
   items: [
     item(1504904633, { state: "rejected", reason: "document_not_found", since: "2026-10-21T09:00:00Z" }),
     item(1175671003, { state: "expiring", reason: "valid", days_left: 6 }),
@@ -138,7 +139,7 @@ describe("CardDocumentsPage", () => {
   it("tells when there are no problems", async () => {
     renderPage({
       ...sample,
-      summary: { total: 1, ok: 1, rejected: 0, missing: 0, expiring: 0, mismatch: 0 },
+      summary: { total: 1, ok: 1, rejected: 0, missing: 0, expiring: 0, mismatch: 0, with_stock_problems: 0 },
       items: [item(42)],
     });
 
@@ -205,5 +206,27 @@ describe("CardDocumentsPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Ссылка на бота/ }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Не удалось выпустить ссылку: Сервис недоступен");
+  });
+
+  it("hides cards without stock by default and shows them when the filter is off", async () => {
+    renderPage({
+      ...sample,
+      summary: { ...sample.summary, total: 4, rejected: 2, with_stock_problems: 2 },
+      items: [...sample.items, item(77, { state: "rejected", reason: "document_not_found", stock: 0 })],
+    });
+
+    expect(await screen.findByText("Товар 1504904633")).toBeInTheDocument();
+    expect(screen.queryByText("Товар 77")).not.toBeInTheDocument();
+    expect(screen.getByText("по ним идут уведомления: 2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /С проблемами/ })).toHaveTextContent(/С проблемами\s*2/);
+
+    await userEvent.click(screen.getByRole("checkbox", { name: /Только с остатком/ }));
+
+    expect(screen.getByText("Товар 77")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /С проблемами/ })).toHaveTextContent(/С проблемами\s*3/);
+    expect(screen.getByRole("columnheader", { name: "Остаток" })).toHaveAttribute(
+      "title",
+      "Уведомления приходят только по товарам с остатком",
+    );
   });
 });

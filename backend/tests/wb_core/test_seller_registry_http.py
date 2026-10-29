@@ -11,6 +11,7 @@ from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventMo
 from backend.modules.wb_core.infrastructure.wb import EgressGateway
 from backend.modules.wb_reviews.infrastructure.postgres.models import DailyReviewCountModel, TrackedSellerModel
 from backend.shared.settings import load_settings
+from backend.tests.operators import operator_token
 
 API = "/api/v1"
 
@@ -53,7 +54,7 @@ async def registry(monkeypatch) -> AsyncIterator[tuple[Application, AsyncClient]
     application = Application(load_settings("backend/shared/settings/config.test.yaml"))
     app = application.get_app()
     async with app.router.lifespan_context(app):
-        token = application.token_service.issue_access(uuid.uuid4())
+        token = await operator_token(application)
         async with AsyncClient(
             transport=ASGITransport(app=app),
             base_url="http://test",

@@ -12,6 +12,7 @@ const issued = {
     is_admin: false,
     created_at: "2026-08-22T10:00:00Z",
     last_login_at: null,
+    services: [],
   },
 };
 

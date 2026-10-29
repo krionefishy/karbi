@@ -37,6 +37,7 @@ from backend.modules.wb_turnover.infrastructure.wb import (
 from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 from backend.tests.egress_stub import make_gateway
+from backend.tests.operators import operator_token
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 TODAY = date(2026, 9, 3)
@@ -423,7 +424,7 @@ async def test_the_endpoint_hands_the_book_over_as_a_file() -> None:
     application = Application(load_settings("backend/shared/settings/config.test.yaml"))
     app = application.get_app()
     async with app.router.lifespan_context(app):
-        token = application.token_service.issue_access(uuid.uuid4())
+        token = await operator_token(application)
         seller = SellerModel(name="Подсорт HTTP", catalog_sync_status="success")
         async with application.database.session() as session:
             session.add(seller)

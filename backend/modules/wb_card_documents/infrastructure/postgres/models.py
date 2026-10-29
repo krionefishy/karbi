@@ -51,7 +51,8 @@ class CardStateModel(WBCardDocumentsBase):
     """The current state of each card: what we hold instead of the card itself.
 
     A card that left the catalog is closed (`closed_at`), not deleted, so the
-    journal keeps pointing at something.
+    journal keeps pointing at something. `episode_alerted` — the current problem episode
+    has been announced; a problem found at zero stock stays unannounced until stock appears.
     """
 
     __tablename__ = "card_states"
@@ -68,6 +69,7 @@ class CardStateModel(WBCardDocumentsBase):
     document_end: Mapped[date | None] = mapped_column(Date, nullable=True)
     document_endless: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     threshold: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    episode_alerted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     verdict_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     overall_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     overall_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

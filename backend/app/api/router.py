@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from backend.app.api.automations import router as automations_router
+from backend.app.http.principals import require_service
 from backend.modules.fin_reports.presentation.http import router as fin_reports_router
 from backend.modules.notifications.presentation.http import admin_bots_router
 from backend.modules.platform.presentation.http import admin_users_router
@@ -29,30 +30,52 @@ from backend.modules.wb_support_bot.presentation.http import router as wb_suppor
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
 router = APIRouter()
-router.include_router(auth_router)
-router.include_router(admin_users_router)
-router.include_router(admin_bots_router)
-router.include_router(wb_sellers_router)
-router.include_router(wb_reviews_router)
-router.include_router(wb_turnover_router)
-router.include_router(wb_fbs_distribution_router)
-router.include_router(onec_router)
-router.include_router(wb_card_checklist_router)
-router.include_router(wb_card_documents_router)
-router.include_router(wb_fbs_stocks_router)
-router.include_router(wb_fbs_penalties_router)
-router.include_router(wb_review_chats_router)
-router.include_router(wb_support_bot_router)
-router.include_router(wb_returns_router)
-router.include_router(wb_returns_extension_router)
-router.include_router(wb_podsort_router)
-router.include_router(wb_box_stickers_router)
-router.include_router(wb_box_packing_router)
-router.include_router(fin_reports_router)
-router.include_router(wb_screenshot_control_router)
-router.include_router(wb_screenshot_control_extension_router)
-router.include_router(wb_screenshot_control_admin_router)
-router.include_router(automations_router)
+
+
+SERVICE_ROUTERS: list[tuple[APIRouter, str]] = []
+OPEN_ROUTERS: list[APIRouter] = []
+
+
+def include_service(service_router: APIRouter, service_id: str) -> None:
+    """Рабочие роутеры подключаются только так: доступ к сервису проверяется на всём роутере сразу."""
+    SERVICE_ROUTERS.append((service_router, service_id))
+    router.include_router(service_router, dependencies=[Depends(require_service(service_id))])
+
+
+def include_open(open_router: APIRouter) -> None:
+    """Роутер без доступа к сервису: вход, админка, машинные токены, общие реестры.
+
+    Список таких роутеров зафиксирован в `tests/platform/test_service_access.py`:
+    новый открытый роутер придётся назвать там явно.
+    """
+    OPEN_ROUTERS.append(open_router)
+    router.include_router(open_router)
+
+
+include_open(auth_router)
+include_open(admin_users_router)
+include_open(admin_bots_router)
+include_open(wb_sellers_router)
+include_service(wb_reviews_router, "wb-reviews")
+include_service(wb_turnover_router, "wb-turnover")
+include_service(wb_fbs_distribution_router, "wb-fbs-stocks")
+include_open(onec_router)
+include_service(wb_card_checklist_router, "wb-card-checklist")
+include_service(wb_card_documents_router, "wb-card-documents")
+include_service(wb_fbs_stocks_router, "wb-fbs-stocks")
+include_service(wb_fbs_penalties_router, "wb-fbs-penalties")
+include_service(wb_review_chats_router, "wb-review-chats")
+include_service(wb_support_bot_router, "wb-support-bot")
+include_service(wb_returns_router, "wb-returns")
+include_open(wb_returns_extension_router)
+include_service(wb_podsort_router, "wb-podsort")
+include_service(wb_box_stickers_router, "wb-box-stickers")
+include_service(wb_box_packing_router, "wb-box-stickers")
+include_service(fin_reports_router, "fin-reports")
+include_service(wb_screenshot_control_router, "wb-screenshot-control")
+include_open(wb_screenshot_control_extension_router)
+include_open(wb_screenshot_control_admin_router)
+include_open(automations_router)
 
 
 @router.get("/health/live", include_in_schema=False)

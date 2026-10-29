@@ -113,7 +113,9 @@ class EgressGateway:
             if status == 429 or status >= 500:
                 raise WBTemporaryError(f"{api_name} отвечает HTTP {status}")
             if status >= 400:
-                raise WBPermanentError(f"{api_name} отклонил запрос: HTTP {status}")
+                # Кусок ответа — в ошибку: по одному коду 400 не понять, что именно не понравилось.
+                reason = str(payload.get("body") or "")[:200].replace("\n", " ")
+                raise WBPermanentError(f"{api_name} отклонил запрос: HTTP {status} {reason}".rstrip())
             if payload.get("truncated"):
                 raise WBTemporaryError(
                     f"{api_name}: ответ не поместился в потолок шлюза и пришёл обрезанным — "

@@ -136,6 +136,9 @@ class SellerSkus:
     rows: list[OzonSkuRow]
     pending: bool
     collected_through: date | None
+    # Докуда зеркало рекламы Ozon прочитало расход; `None` — не читало (нет ключа Performance).
+    ads_through: date | None = None
+    ads_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

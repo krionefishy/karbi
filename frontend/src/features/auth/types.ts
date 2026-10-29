@@ -2,6 +2,7 @@ export interface CurrentUser {
   id: string;
   username: string;
   is_admin: boolean;
+  services: string[];
 }
 
 export interface TokenResponse {

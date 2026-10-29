@@ -10,6 +10,8 @@ from backend.modules.wb_core.domain import (
     MIRROR_CHATS,
     MIRROR_ORDERS,
     MIRROR_OZON_ACCRUALS,
+    MIRROR_OZON_ADVERTS,
+    MIRROR_OZON_PRODUCTS,
     MIRROR_REMAINS,
     MIRROR_REVIEWS,
     MIRROR_SALES_REPORTS,
@@ -22,6 +24,8 @@ from backend.modules.wb_core.domain import (
     FbsOrder,
     FbsSupply,
     OzonAccrualLine,
+    OzonAdvertStat,
+    OzonProduct,
     ReviewFact,
     SalesReport,
     SalesReportRow,
@@ -297,6 +301,35 @@ class AdvertMirror:
 
     async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
         return await self.mirror.state(seller_id, MIRROR_ADVERTS)
+
+
+class OzonProductMirror:
+    """Карточки Ozon для автоматизаций: артикул продавца и название по SKU."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def products(self, seller_id: uuid.UUID, skus: Iterable[int] | None = None) -> dict[int, OzonProduct]:
+        return await self.mirror.ozon_products(seller_id, skus)
+
+    async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
+        return await self.mirror.state(seller_id, MIRROR_OZON_PRODUCTS)
+
+
+class OzonAdvertMirror:
+    """Расход рекламы Ozon по SKU и дням за окно и докуда он прочитан."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.mirror = MirrorRepository(session)
+
+    async def stats(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAdvertStat]:
+        return await self.mirror.ozon_advert_stats(seller_id, since=since, until=until)
+
+    async def collected_through(self, seller_id: uuid.UUID) -> date | None:
+        return await self.mirror.ozon_advert_cursor(seller_id)
+
+    async def state(self, seller_id: uuid.UUID) -> MirrorStateModel | None:
+        return await self.mirror.state(seller_id, MIRROR_OZON_ADVERTS)
 
 
 class OzonAccrualMirror:

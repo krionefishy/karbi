@@ -5,8 +5,9 @@ from fastapi import APIRouter, HTTPException, Response, status
 
 from backend.app.api.schemas import AutomationResponse, AutomationSellerAttach
 from backend.app.api.utils import automation_catalog
-from backend.app.http.principals import CurrentPrincipal
+from backend.app.http.principals import AutomationPrincipal, CurrentPrincipal
 from backend.modules.fin_reports.application import FinReportsService
+from backend.modules.platform.application import AuthService, ServiceAccessService
 from backend.modules.wb_card_checklist.application import ChecklistService
 from backend.modules.wb_card_documents.application import CardDocumentsService
 from backend.modules.wb_core.application import (
@@ -38,7 +39,9 @@ def unknown_automation() -> HTTPException:
 @router.get("/automations", response_model=list[AutomationResponse])
 @inject
 async def automations(
-    _: CurrentPrincipal,
+    principal: CurrentPrincipal,
+    auth: FromDishka[AuthService],
+    access: FromDishka[ServiceAccessService],
     reviews: FromDishka[ReviewSyncService],
     turnover: FromDishka[TurnoverService],
     card_checklist: FromDishka[ChecklistService],
@@ -52,7 +55,8 @@ async def automations(
     card_documents: FromDishka[CardDocumentsService],
     settings: FromDishka[Settings],
 ) -> list[AutomationResponse]:
-    return automation_catalog(
+    granted = set(await access.granted(await auth.current_user(principal.user_id)))
+    catalog = automation_catalog(
         await reviews.overview(),
         await turnover.overview(),
         await card_checklist.overview(),
@@ -66,12 +70,13 @@ async def automations(
         support_bot=await support_bot.overview(),
         card_documents=await card_documents.overview(),
     )
+    return [item for item in catalog if item.id in granted]
 
 
 @router.get("/automations/{automation_id}/sellers", response_model=list[SellerResponse])
 @inject
 async def automation_sellers(
-    automation_id: str, _: CurrentPrincipal, service: FromDishka[SellerService]
+    automation_id: str, _: AutomationPrincipal, service: FromDishka[SellerService]
 ) -> list[SellerResponse]:
     try:
         enrolled = await service.enrolled(automation_id)
@@ -85,7 +90,7 @@ async def automation_sellers(
 async def attach_seller(
     automation_id: str,
     payload: AutomationSellerAttach,
-    _: CurrentPrincipal,
+    _: AutomationPrincipal,
     service: FromDishka[SellerService],
 ) -> SellerResponse:
     """Connecting is the only way into an automation; creating a seller here is a shortcut."""
@@ -110,7 +115,7 @@ async def attach_seller(
 @router.delete("/automations/{automation_id}/sellers/{seller_id}", status_code=status.HTTP_204_NO_CONTENT)
 @inject
 async def detach_seller(
-    automation_id: str, seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SellerService]
+    automation_id: str, seller_id: uuid.UUID, _: AutomationPrincipal, service: FromDishka[SellerService]
 ) -> Response:
     """Disconnect from this automation only — the seller and his data stay."""
     try:

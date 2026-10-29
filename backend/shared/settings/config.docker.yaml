@@ -87,7 +87,7 @@ turnover:
   digest_hour: ${TURNOVER_DIGEST_HOUR:-10}
   digest_minute: 0
   orders_window_days: ${TURNOVER_ORDERS_WINDOW_DAYS:-3}
-  orders_backfill_days: 3
+  orders_backfill_days: 8
   orders_overlap_hours: 24
   threshold_days: ${TURNOVER_THRESHOLD_DAYS:-10}
   min_photos: ${TURNOVER_MIN_PHOTOS:-3}
@@ -130,6 +130,10 @@ card_documents:
   # Плановый сбор не стартует в окна каталога (02:30) и чек-листа (05:00): бюджет «Контента» общий.
   skip_hours: [2, 5]
   notification_bot: ${CARD_DOCUMENTS_NOTIFICATION_BOT:-card-documents}
+  # Уведомления только по карточкам с остатком FBO + FBS (зеркало wb_core) не меньше порога;
+  # зеркало старше stock_fresh_hours — остаток неизвестен, уведомление не подавляется.
+  min_stock_for_alerts: 1
+  stock_fresh_hours: 48
 
 support_bot:
   # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.

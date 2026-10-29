@@ -20,9 +20,12 @@ import {
   daysTone,
   documentPeriod,
   emptyMessage,
+  hasStock,
   reasonLabel,
   stateLabel,
   stateTone,
+  stockText,
+  tileSummary,
   tiles,
   visibleItems,
   type DocumentFilter,
@@ -52,6 +55,7 @@ export function CardDocumentsPage() {
   const [formError, setFormError] = useState("");
   const [filter, setFilter] = useState<DocumentFilter>("problems");
   const [search, setSearch] = useState("");
+  const [onlyStock, setOnlyStock] = useState(true);
   const [invite, setInvite] = useState<InviteLink | null>(null);
   const [inviteCopied, setInviteCopied] = useState(false);
 
@@ -145,7 +149,7 @@ export function CardDocumentsPage() {
 
   const selected = sellers.find((seller) => seller.id === sellerId);
   const items = documents?.items ?? [];
-  const shown = useMemo(() => visibleItems(items, filter, search), [items, filter, search]);
+  const shown = useMemo(() => visibleItems(items, filter, search, onlyStock), [items, filter, search, onlyStock]);
   const warnings = documents && selected ? banners(documents, true) : [];
   const requestError =
     refreshMutation.error instanceof ApiError ? refreshMutation.error.message : refreshMutation.error ? "Не удалось запустить обновление" : "";
@@ -288,7 +292,7 @@ export function CardDocumentsPage() {
         ) : (
           <>
             <div className="docs-tiles" role="group" aria-label="Фильтр по состоянию">
-              {tiles(documents.summary).map((tile) => (
+              {tiles(tileSummary(documents, onlyStock)).map((tile) => (
                 <button
                   key={tile.key}
                   type="button"
@@ -298,6 +302,7 @@ export function CardDocumentsPage() {
                 >
                   <span>{tile.label}</span>
                   <strong>{tile.count}</strong>
+                  {tile.note && <small>{tile.note}</small>}
                 </button>
               ))}
             </div>
@@ -310,10 +315,18 @@ export function CardDocumentsPage() {
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
+              <label className="dormant-toggle" title="Уведомления приходят только по товарам с остатком">
+                <input
+                  type="checkbox"
+                  checked={onlyStock}
+                  onChange={(event) => setOnlyStock(event.target.checked)}
+                />
+                Только с остатком ({items.filter(hasStock).length} из {items.length})
+              </label>
             </div>
             {shown.length === 0 ? (
               <div className="empty-state">
-                <h2>{emptyMessage(filter, documents.summary, search)}</h2>
+                <h2>{emptyMessage(filter, tileSummary(documents, onlyStock), search, onlyStock)}</h2>
               </div>
             ) : (
               <div className="docs-scroll">
@@ -323,6 +336,7 @@ export function CardDocumentsPage() {
                       <th>Товар</th>
                       <th>nmID</th>
                       <th>Артикул</th>
+                      <th title="Уведомления приходят только по товарам с остатком">Остаток</th>
                       <th>Состояние</th>
                       <th>Причина</th>
                       <th>Документ</th>
@@ -379,6 +393,12 @@ function DocumentRow({ item }: { item: CardDocumentItem }) {
         <NmId nmId={item.nm_id} />
       </td>
       <td className="mono docs-vendor">{item.vendor_code || "—"}</td>
+      <td
+        className={`docs-stock${item.stock === 0 ? " docs-stock-empty" : ""}`}
+        title="Уведомления приходят только по товарам с остатком"
+      >
+        {stockText(item.stock)}
+      </td>
       <td>
         <span className={`docs-state docs-tone-${stateTone(item.state)}`}>{stateLabel(item.state)}</span>
       </td>

@@ -27,7 +27,7 @@ vi.mock("../features/auth/AuthContext", async () => {
     AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     ProtectedRoute: () => <Outlet />,
     AdminRoute: () => <Outlet />,
-    useAuth: () => ({ user: { id: "1", username: "lera", is_admin: true }, isLoading: false }),
+    useAuth: () => ({ user: { id: "1", username: "lera", is_admin: true, services: ["wb-reviews", "wb-turnover", "wb-card-checklist", "wb-card-documents", "wb-fbs-stocks", "wb-fbs-penalties", "wb-returns", "wb-podsort", "wb-box-stickers", "fin-reports"] }, isLoading: false }),
   };
 });
 

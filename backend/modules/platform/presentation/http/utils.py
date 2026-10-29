@@ -8,11 +8,11 @@ from backend.shared.settings import Settings
 REFRESH_COOKIE = "karbi_refresh"
 
 
-def user_response(user: User) -> UserResponse:
-    return UserResponse(id=str(user.id), username=user.username, is_admin=user.is_admin)
+def user_response(user: User, services: list[str]) -> UserResponse:
+    return UserResponse(id=str(user.id), username=user.username, is_admin=user.is_admin, services=services)
 
 
-def employee_response(user: User) -> EmployeeResponse:
+def employee_response(user: User, services: list[str]) -> EmployeeResponse:
     return EmployeeResponse(
         id=str(user.id),
         username=user.username,
@@ -20,14 +20,15 @@ def employee_response(user: User) -> EmployeeResponse:
         is_admin=user.is_admin,
         created_at=user.created_at,
         last_login_at=user.last_login_at,
+        services=services,
     )
 
 
-def token_response(session: AuthSession, settings: Settings) -> TokenResponse:
+def token_response(session: AuthSession, settings: Settings, services: list[str]) -> TokenResponse:
     return TokenResponse(
         access_token=session.access_token,
         expires_in=settings.auth.access_token_ttl_seconds,
-        user=user_response(session.user),
+        user=user_response(session.user, services),
     )
 
 
@@ -87,4 +88,11 @@ def too_many_login_attempts(retry_after_seconds: int) -> HTTPException:
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="Слишком много неудачных попыток входа — попробуйте позже",
         headers={"Retry-After": str(retry_after_seconds)},
+    )
+
+
+def unknown_services(service_ids: list[str]) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Неизвестные сервисы: {', '.join(service_ids)}",
     )

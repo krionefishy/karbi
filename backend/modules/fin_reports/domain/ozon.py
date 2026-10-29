@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -7,6 +7,7 @@ from backend.modules.fin_reports.domain.pnl import LEVEL_ITEM, LEVEL_SUBTOTAL, L
 from backend.modules.wb_core.domain import OZON_LINE_SALE
 
 ZERO = Decimal("0.00")
+KOPECK = Decimal("0.01")
 
 REVENUE_WITH_POINTS = "revenue_with_points"
 REVENUE = "revenue"
@@ -203,6 +204,9 @@ class OzonSkuRow:
     """Строка листа «ЮНИТ Ozon»: деньги SKU за неделю из начислений."""
 
     sku: int
+    # Артикул продавца и название — из карточек Ozon; у строки «(пусто)» пустые.
+    vendor_code: str = ""
+    name: str = ""
     sales: int = 0
     returns: int = 0
     revenue_with_points: Decimal = ZERO
@@ -212,6 +216,9 @@ class OzonSkuRow:
     delivery: Decimal = ZERO
     returns_amount: Decimal = ZERO
     advertising: Decimal = ZERO
+    # Расход кампаний Ozon по этому SKU из Performance API — справочно; по его долям
+    # реклама из начислений, которая приходит без SKU, разложена по товарам.
+    ads_info: Decimal = ZERO
     additional_services: Decimal = ZERO
     other: Decimal = ZERO
     unit_cost: Decimal | None = None
@@ -240,6 +247,8 @@ class OzonSkuRow:
 
 OZON_SKU_COLUMNS: tuple[tuple[str, Callable[[OzonSkuRow], object]], ...] = (
     ("SKU", lambda r: str(r.sku) if r.sku else "(пусто)"),
+    ("Артикул продавца", lambda r: r.vendor_code),
+    ("Название", lambda r: r.name),
     ("Продажи, шт", lambda r: r.sales),
     ("Возвраты, шт", lambda r: r.returns),
     ("Реализация с баллами", lambda r: r.revenue_with_points),
@@ -249,6 +258,7 @@ OZON_SKU_COLUMNS: tuple[tuple[str, Callable[[OzonSkuRow], object]], ...] = (
     ("Обработка и доставка", lambda r: r.delivery),
     ("Возвраты и отмены", lambda r: r.returns_amount),
     ("Внутренняя реклама", lambda r: r.advertising),
+    ("инф: Расход рекламы по Performance", lambda r: -r.ads_info),
     ("Дополнительные услуги", lambda r: r.additional_services),
     ("Прочие начисления", lambda r: r.other),
     ("К перечислению", lambda r: r.payout),
@@ -258,13 +268,38 @@ OZON_SKU_COLUMNS: tuple[tuple[str, Callable[[OzonSkuRow], object]], ...] = (
 )
 
 
-def ozon_sku_rows(facts: Iterable[OzonFact], cost_of: Callable[[int], Decimal | None]) -> list[OzonSkuRow]:
-    """Строки по SKU; начисления без SKU (реклама, подписки) — в строке «(пусто)»."""
+def ozon_sku_rows(
+    facts: Iterable[OzonFact],
+    cost_of: Callable[[int], Decimal | None],
+    *,
+    product_of: Callable[[int], tuple[str, str] | None] | None = None,
+    ad_spend: Mapping[int, Decimal] | None = None,
+) -> list[OzonSkuRow]:
+    """Строки по SKU; начисления без SKU (подписки, услуги кабинета) — в строке «(пусто)».
+
+    Реклама в начислениях приходит одной суммой на кабинет. `ad_spend` — расход
+    кампаний по SKU за те же дни из Performance API: по его долям рекламные
+    начисления без SKU раскладываются по товарам до копейки, остаток округления
+    — SKU с наибольшим расходом. Без расхода реклама остаётся в «(пусто)».
+    `product_of` — артикул продавца и название по SKU из карточек Ozon.
+    """
     rows: dict[int, OzonSkuRow] = {}
-    for fact in facts:
-        row = rows.get(fact.sku)
+
+    def row_of(sku: int) -> OzonSkuRow:
+        row = rows.get(sku)
         if row is None:
-            row = rows[fact.sku] = OzonSkuRow(sku=fact.sku, unit_cost=cost_of(fact.sku) if fact.sku else None)
+            product = product_of(sku) if product_of is not None and sku else None
+            row = rows[sku] = OzonSkuRow(
+                sku=sku,
+                vendor_code=product[0] if product else "",
+                name=product[1] if product else "",
+                unit_cost=cost_of(sku) if sku else None,
+            )
+        return row
+
+    blank_ads = ZERO
+    for fact in facts:
+        row = row_of(fact.sku)
         if fact.line == OZON_LINE_SALE:
             sale = money(fact.sale_amount)
             if sale < 0:
@@ -283,9 +318,29 @@ def ozon_sku_rows(facts: Iterable[OzonFact], cost_of: Callable[[int], Decimal | 
         elif line == RETURNS:
             row.returns_amount += amount
         elif line in (ADVERTISING, EXTERNAL_MARKETING):
-            row.advertising += amount
+            if fact.sku:
+                row.advertising += amount
+            else:
+                blank_ads += amount
         elif line == ADDITIONAL_SERVICES:
             row.additional_services += amount
         else:
             row.other += amount
+    spent = {sku: amount for sku, amount in (ad_spend or {}).items() if sku and amount > 0}
+    for sku, amount in spent.items():
+        row_of(sku).ads_info = amount
+    if blank_ads and spent:
+        for sku, part in _split(blank_ads, spent).items():
+            row_of(sku).advertising += part
+    elif blank_ads:
+        row_of(0).advertising += blank_ads
     return sorted(rows.values(), key=lambda row: (row.sku == 0, -row.revenue_with_points, row.sku))
+
+
+def _split(amount: Decimal, weights: Mapping[int, Decimal]) -> dict[int, Decimal]:
+    """Сумма по долям весов с точностью до копейки; остаток округления — наибольшему весу."""
+    total = sum(weights.values(), ZERO)
+    parts = {sku: (amount * weight / total).quantize(KOPECK) for sku, weight in weights.items()}
+    largest = max(weights, key=lambda sku: (weights[sku], -sku))
+    parts[largest] += money(amount).quantize(KOPECK) - sum(parts.values(), ZERO)
+    return parts

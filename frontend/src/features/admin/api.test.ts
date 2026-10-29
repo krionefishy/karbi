@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createEmployee, resetEmployeePassword, updateEmployee } from "./api";
+import { createEmployee, resetEmployeePassword, setEmployeeServices, updateEmployee } from "./api";
 
 function stubJson(status = 200) {
   const request = vi
@@ -42,5 +42,15 @@ describe("employee admin api", () => {
     expect(request.mock.calls[0][0]).toBe("/api/v1/admin/users/user-1/password");
     expect(request.mock.calls[0][1].method).toBe("POST");
     expect(request.mock.calls[0][1].body).toBeUndefined();
+  });
+
+  it("replaces the whole set of services with a PUT", async () => {
+    const request = stubJson();
+
+    await setEmployeeServices("user-1", ["wb-reviews", "fin-reports"]);
+
+    expect(request.mock.calls[0][0]).toBe("/api/v1/admin/users/user-1/services");
+    expect(request.mock.calls[0][1].method).toBe("PUT");
+    expect(JSON.parse(String(request.mock.calls[0][1].body))).toEqual({ service_ids: ["wb-reviews", "fin-reports"] });
   });
 });

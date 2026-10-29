@@ -89,7 +89,9 @@ class CollectionService:
         await self.session.commit()
 
         fbo: dict[str, list[int]] = {article: [0, 0, 0, 0] for article in known}
+        by_size: dict[int, int] = defaultdict(int)
         for row in await self.analytics.stocks(seller_key):
+            by_size[row.chrt_id] += row.quantity
             values = fbo.setdefault(row.article, [0, 0, 0, 0])
             values[0] += row.quantity
             values[2] += row.in_way_to_client
@@ -106,6 +108,7 @@ class CollectionService:
             "fbo",
             {article: (values[0], values[1], values[2], values[3]) for article, values in fbo.items()},
         )
+        await self.turnover.replace_fbo_stocks(seller_id, by_size)
         await self.session.commit()
 
         return StockResult(len(fbo), await self._store_fbs(seller_id, seller_key, snapshot_date, slot, article_of))
@@ -221,6 +224,7 @@ class CollectionService:
                 {
                     "srid": row.srid,
                     "article": row.article,
+                    "barcode": row.barcode,
                     "order_date": row.order_date,
                     "last_change_date": self._aware(row.last_change_date),
                     "is_cancel": row.is_cancel,

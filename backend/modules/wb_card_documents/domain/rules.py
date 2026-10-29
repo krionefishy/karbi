@@ -80,10 +80,21 @@ class CardState:
 
 @dataclass(frozen=True, slots=True)
 class PreviousState:
+    """The stored state before this read; `alerted` — the current episode has already been sent."""
+
     state: str
     reason: str | None
     document_number: str | None
     threshold: int | None
+    alerted: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AlertDecision:
+    """`send` — this read should notify; `already` — the episode was notified before and stays so."""
+
+    send: bool
+    already: bool = False
 
 
 def rank(state: str) -> int:
@@ -149,6 +160,28 @@ def should_alert(previous: PreviousState | None, current: CardState) -> bool:
         return True
     number = current.document.number if current.document else None
     return previous.document_number != number
+
+
+def stock_passes(stock: int | None, min_stock: int) -> bool:
+    """Notify about a card with stock, or with stock unknown: a missed block costs more than a spare message."""
+    return stock is None or stock >= min_stock
+
+
+def alert_decision(
+    previous: PreviousState | None, current: CardState, *, stock: int | None, min_stock: int
+) -> AlertDecision:
+    """Whether a problem card is to be announced now.
+
+    An episode (problem + reason + document + expiry threshold, see `should_alert`) is
+    announced once, at the first read where the card is alertable: has stock or the
+    stock is unknown. A problem found at zero stock waits; when stock appears with the
+    same problem, it goes out then. Stock falling back to zero changes nothing.
+    """
+    if not current.problem:
+        return AlertDecision(False)
+    if previous is not None and previous.alerted and not should_alert(previous, current):
+        return AlertDecision(False, already=True)
+    return AlertDecision(stock_passes(stock, min_stock))
 
 
 def days_left(document: CardDocument, today: date) -> int | None:

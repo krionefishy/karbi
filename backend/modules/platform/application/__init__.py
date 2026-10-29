@@ -1,3 +1,4 @@
+from backend.modules.platform.application.access import ServiceAccessService, UnknownServiceError
 from backend.modules.platform.application.auth import (
     AccessClaims,
     AuthenticationError,
@@ -26,8 +27,10 @@ __all__ = [
     "LoginAttemptLimiter",
     "LoginRateLimitError",
     "PasswordService",
+    "ServiceAccessService",
     "SelfLockoutError",
     "TokenService",
+    "UnknownServiceError",
     "UserAdminService",
     "UserNotFoundError",
     "UsernameTakenError",

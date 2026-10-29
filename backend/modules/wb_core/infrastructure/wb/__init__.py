@@ -40,6 +40,8 @@ from backend.modules.wb_core.infrastructure.wb.ozon import (
     OZON_SELLER_API,
     OzonFinanceClient,
     OzonJsonClient,
+    OzonPerformanceClient,
+    OzonProductClient,
 )
 
 __all__ = [
@@ -64,6 +66,8 @@ __all__ = [
     "FeedbackAggregation",
     "FeedbackProduct",
     "OzonFinanceClient",
+    "OzonPerformanceClient",
+    "OzonProductClient",
     "OzonJsonClient",
     "SalesReportPage",
     "WBAdvertClient",

@@ -47,6 +47,8 @@ from backend.modules.wb_core.domain import (
     AdvertNmStat,
     AdvertSpend,
     OzonAccrualLine,
+    OzonAdvertStat,
+    OzonProduct,
     SalesReport,
     SalesReportRow,
     SalesReportTotals,
@@ -54,6 +56,7 @@ from backend.modules.wb_core.domain import (
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.shared.settings import load_settings
+from backend.tests.operators import operator_token
 from backend.workers.fin_reports.worker import FinReportsWorker
 
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
@@ -131,7 +134,8 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     assert values["penalties"] == money("-9676.94")
     assert values["storage"] == money("-291.10")
     assert values["acceptance"] == money("-480")
-    assert values["advertising"] == money("-1436770")
+    # Удержание «WB Продвижение» — пополнение рекламного баланса: справочно, не расход.
+    assert (values["advertising"], values["advertising_topup"]) == (0, money("-1436770"))
     assert values["reviews"] == money("520364.16")
     assert values["loyalty_points"] == money("-198540")
     assert values["loyalty_program"] == money("-10666.96")
@@ -142,6 +146,10 @@ def test_the_statement_reproduces_the_financiers_week_to_the_kopeck() -> None:
     )
     assert values["gross_margin"] == values["revenue_after_spp"] + values["direct_expenses"]
     assert figures.uncosted == 0
+    # Реклама — списания кампаний из «ВБ.Продвижения»: баланс и счёт в расход, бонусы справочно.
+    figures.set_advertising(money("1400000"), money("25000"))
+    assert (figures.values["advertising"], figures.values["advertising_bonus"]) == (money(-1400000), money(-25000))
+    assert figures.values["direct_expenses"] == values["direct_expenses"]
 
 
 def test_sales_without_a_cost_price_are_counted_apart() -> None:
@@ -164,7 +172,7 @@ def test_sales_without_a_cost_price_are_counted_apart() -> None:
 @pytest.mark.parametrize(
     ("name", "line"),
     [
-        ("Оказание услуг «WB Продвижение», документ №310258471", "advertising"),
+        ("Оказание услуг «WB Продвижение», документ №310258471", "advertising_topup"),
         ('Аванс за услугу "Баллы за отзывы"', "reviews"),
         ('Возврат неиспользованного остатка аванса за услугу "Баллы за отзывы"', "reviews"),
         ("Предоставление услуг по подписке «Джем», документ №305140207", "other_deductions"),
@@ -404,7 +412,7 @@ async def seller(application: Application) -> AsyncIterator[uuid.UUID]:
 
 @pytest_asyncio.fixture
 async def client(application: Application) -> AsyncIterator[AsyncClient]:
-    token = application.token_service.issue_access(uuid.uuid4())
+    token = await operator_token(application)
     async with AsyncClient(
         transport=ASGITransport(app=application.get_app()),
         base_url="http://test",
@@ -443,8 +451,9 @@ async def test_weeks_add_both_report_types_and_show_what_is_not_loaded_yet(
     week = own(body, seller, "2026-W39")
     assert (week["revenue_before_spp"], week["revenue_after_spp"], week["for_pay"]) == (5500.0, 4400.0, 4460.0)
     assert (week["planned_commission"], week["commission"]) == (-1040.0, 60.0)
-    assert (week["logistics"], week["advertising"]) == (-300.0, -500.0)
-    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0 - 500.0
+    # Удержание «WB Продвижение» 500 — справочная строка; списаний кампаний за неделю в зеркале нет.
+    assert (week["logistics"], week["advertising"], week["advertising_topup"]) == (-300.0, 0.0, -500.0)
+    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0
     split = next(item for item in body["periods"] if item["key"] == "2026-W36")
     assert (split["label"], split["by_seller"][str(seller)]["revenue_before_spp"]) == ("36 (31.08-06.09)", 3000.0)
     pending = next(item for item in body["periods"] if item["key"] == "2026-W40")
@@ -749,6 +758,40 @@ async def test_campaign_spend_is_split_between_articles_by_their_stats(
     assert ads.of(999) == AdSpend()
 
 
+async def test_the_pnl_advertising_line_is_the_promotion_spend_of_the_period(
+    client: AsyncClient, seller: uuid.UUID, application: Application
+) -> None:
+    """Саниев, неделя 43: удержаний «WB Продвижение» в отчёте нет, списания кампаний — 2 390 048 ₽."""
+    await connect(client, seller)
+    stamp = datetime(2026, 10, 5, 9, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.replace_advert_spend(
+            seller,
+            date(2026, 9, 21),
+            date(2026, 9, 27),
+            [
+                AdvertSpend(1, date(2026, 9, 22), "Баланс", Decimal("300")),
+                AdvertSpend(1, date(2026, 9, 23), "Счет", Decimal("100")),
+                AdvertSpend(2, date(2026, 9, 24), "Бонусы", Decimal("50")),
+            ],
+            now=stamp,
+        )
+        await mirror.save_advert_cursor(seller, date(2026, 9, 27))
+        await session.commit()
+
+    response = await client.get(API, params={"year": 2026, "granularity": "week", "seller_id": str(seller)})
+
+    week = own(response.json(), seller, "2026-W39")
+    assert (week["advertising"], week["advertising_bonus"], week["advertising_topup"]) == (-400.0, -50.0, -500.0)
+    assert week["gross_margin"] == 4400.0 + 60.0 - 300.0 - 400.0
+    # Неделя 38 без дочитанной рекламы (курсор 27.09, а неделя раньше) — не «неполная»: курсор дальше её конца.
+    assert (
+        str(seller)
+        not in next(item for item in response.json()["periods"] if item["key"] == "2026-W38")["pending_sellers"]
+    )
+
+
 async def test_campaign_spend_splits_to_the_kopeck_and_stats_of_a_vanished_campaign_go_away(
     application: Application, seller: uuid.UUID
 ) -> None:
@@ -896,6 +939,22 @@ def test_the_ozon_statement_takes_revenue_from_the_sale_and_the_rest_by_accrual_
     )
     assert (brush.sku, brush.additional_services) == (BRUSH, money("-20.63"))
     assert (blank_row.sku, blank_row.advertising, blank_row.payout) == (0, money("-28433.34"), money("-28433.34"))
+    # С расходом кампаний по SKU реклама без SKU расходится по товарам по его долям, до копейки.
+    named = ozon_sku_rows(
+        facts,
+        {SPEAKER: money(100)}.get,
+        product_of=lambda sku: ("колонка_карби", "Колонка") if sku == SPEAKER else None,
+        ad_spend={SPEAKER: money("200.00"), BRUSH: money("100.00"), 777: money("0.00")},
+    )
+    by_sku = {row.sku: row for row in named}
+    assert (by_sku[SPEAKER].vendor_code, by_sku[SPEAKER].name, by_sku[BRUSH].vendor_code) == (
+        "колонка_карби",
+        "Колонка",
+        "",
+    )
+    assert (by_sku[SPEAKER].advertising, by_sku[SPEAKER].ads_info) == (money("-18955.56"), money("200.00"))
+    assert by_sku[BRUSH].advertising == money("-9477.78")
+    assert by_sku[0].advertising == money(0) and 777 not in by_sku
 
 
 @pytest_asyncio.fixture
@@ -980,8 +1039,11 @@ async def test_ozon_weeks_come_from_folded_days_and_a_week_with_unread_days_is_p
     assert period.cell(row=2, column=header.index("ИП Озонтест О.О.") + 1).value == 2008
     skus = workbook["ЮНИТ Ozon 39 нед."]
     rows = [row for row in skus.iter_rows(min_row=2, values_only=True) if row[0] == "ИП Озонтест О.О."]
-    assert [(row[1], row[2], row[3]) for row in rows] == [(str(SPEAKER), 2, 1), (str(BRUSH), 0, 0), ("(пусто)", 0, 0)]
+    header = [cell.value for cell in skus[1]]
+    assert header[1:4] == ["SKU", "Артикул продавца", "Название"]
+    assert [(row[1], row[4], row[5]) for row in rows] == [(str(SPEAKER), 2, 1), (str(BRUSH), 0, 0), ("(пусто)", 0, 0)]
     assert rows[0][-1] == pytest.approx(778.85)
+    assert any("Расход рекламы Ozon не читается" in str(row[0]) for row in skus.iter_rows(min_row=2, values_only=True))
 
 
 async def test_an_ozon_day_is_folded_again_when_the_mirror_re_reads_or_moves_its_accruals(
@@ -1042,8 +1104,50 @@ async def test_a_sale_and_a_return_of_one_sku_on_one_day_keep_their_pieces(
     row = next(
         r for r in skus.iter_rows(min_row=2, values_only=True) if r[0] == "ИП Озонтест О.О." and r[1] == str(SPEAKER)
     )
-    assert (row[2], row[3]) == (7, 2)
+    assert (row[header.index("Продажи, шт")], row[header.index("Возвраты, шт")]) == (7, 2)
     assert row[header.index("Себестоимость реализованного")] == 500
+
+
+async def test_ozon_ads_are_spread_over_skus_by_performance_spend_and_rows_carry_the_offer_id(
+    client: AsyncClient, ozon_seller: uuid.UUID, application: Application
+) -> None:
+    await connect(client, ozon_seller)
+    stamp = datetime(2026, 9, 29, 8, 0, tzinfo=UTC)
+    async with application.database.session() as session:
+        mirror = MirrorRepository(session)
+        await mirror.replace_ozon_products(
+            ozon_seller, [OzonProduct(SPEAKER, 1, "колонка_карби", "Колонка", False)], now=stamp
+        )
+        await mirror.replace_ozon_advert_stats(
+            ozon_seller,
+            date(2026, 9, 21),
+            date(2026, 9, 27),
+            [
+                OzonAdvertStat(1, date(2026, 9, 24), SPEAKER, 10, 2, 1, Decimal("300.00"), Decimal("0")),
+                OzonAdvertStat(2, date(2026, 9, 25), BRUSH, 10, 2, 1, Decimal("100.00"), Decimal("0")),
+            ],
+            now=stamp,
+        )
+        await mirror.save_ozon_advert_cursor(ozon_seller, date(2026, 9, 27))
+        await session.commit()
+
+    export = await client.get(f"{API}/export", params={"year": 2026, "period": "2026-W39", "marketplace": "ozon"})
+
+    skus = load_workbook(io.BytesIO(export.content))["ЮНИТ Ozon 39 нед."]
+    header = [cell.value for cell in skus[1]]
+    rows = {r[1]: r for r in skus.iter_rows(min_row=2, values_only=True) if r[0] == "ИП Озонтест О.О."}
+    ads = header.index("Внутренняя реклама")
+    assert (rows[str(SPEAKER)][2], rows[str(SPEAKER)][3]) == ("колонка_карби", "Колонка")
+    # 28 433,34 рекламы без SKU делятся 3:1 по расходу кампаний; «(пусто)» остаётся без рекламы.
+    assert (rows[str(SPEAKER)][ads], rows[str(BRUSH)][ads], rows["(пусто)"][ads]) == (
+        pytest.approx(-21325.00),
+        pytest.approx(-7108.34),
+        0,
+    )
+    assert rows[str(SPEAKER)][header.index("инф: Расход рекламы по Performance")] == -300
+    # Список без себестоимости у Ozon — с артикулом продавца из карточек.
+    body = (await client.get(API, params={"year": 2026, "marketplace": "ozon", "seller_id": str(ozon_seller)})).json()
+    assert [(item["nm_id"], item["vendor_code"]) for item in body["uncosted"]] == [(SPEAKER, "колонка_карби")]
 
 
 async def test_the_ozon_report_refuses_an_unknown_marketplace(client: AsyncClient) -> None:

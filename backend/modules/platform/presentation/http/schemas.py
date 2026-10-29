@@ -13,6 +13,7 @@ class UserResponse(BaseModel):
     id: str
     username: str
     is_admin: bool
+    services: list[str]
 
 
 class TokenResponse(BaseModel):
@@ -34,6 +35,7 @@ class EmployeeResponse(BaseModel):
     is_admin: bool
     created_at: datetime
     last_login_at: datetime | None
+    services: list[str]
 
 
 class EmployeeCreate(BaseModel):
@@ -51,3 +53,12 @@ class IssuedPasswordResponse(BaseModel):
 
     user: EmployeeResponse
     password: str
+
+
+class ServiceResponse(BaseModel):
+    id: str
+    title: str
+
+
+class ServiceAccessUpdate(BaseModel):
+    service_ids: list[str] = Field(max_length=100)

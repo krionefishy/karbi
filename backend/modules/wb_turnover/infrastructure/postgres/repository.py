@@ -8,7 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_turnover.domain import ArticleOrders, ArticleStock, TurnoverRow
 from backend.modules.wb_turnover.infrastructure.postgres.models import (
+    BoardItemModel,
     CollectionRunModel,
+    FboStockModel,
     NotificationLogModel,
     OrderModel,
     RefreshRequestModel,
@@ -47,6 +49,8 @@ class TurnoverRepository:
             SellerWarehouseModel,
             WarehouseStockModel,
             NotificationLogModel,
+            BoardItemModel,
+            FboStockModel,
         ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
         await self.untrack(seller_id)
@@ -204,6 +208,7 @@ class TurnoverRepository:
                     set_={
                         "seller_id": statement.excluded.seller_id,
                         "article": statement.excluded.article,
+                        "barcode": statement.excluded.barcode,
                         "order_date": statement.excluded.order_date,
                         "last_change_date": statement.excluded.last_change_date,
                         "is_cancel": statement.excluded.is_cancel,
@@ -323,6 +328,33 @@ class TurnoverRepository:
             .values(fbs_stocks_at=datetime.now(UTC))
         )
 
+    async def replace_fbo_stocks(self, seller_id: uuid.UUID, amounts: dict[int, int]) -> None:
+        """Остаток WB по размерам целиком; когда это вышло — в `tracked_sellers.fbo_stocks_at`.
+
+        Целиком, потому что WB убирает размер из отчёта, когда остаток кончился:
+        обновление по месту оставило бы вчерашнюю цифру у размера, которого на
+        складе уже нет.
+        """
+        await self.session.execute(delete(FboStockModel).where(FboStockModel.seller_id == seller_id))
+        rows = [
+            {"seller_id": seller_id, "chrt_id": chrt_id, "quantity": quantity}
+            for chrt_id, quantity in amounts.items()
+            if chrt_id and quantity
+        ]
+        for offset in range(0, len(rows), _CHUNK):
+            await self.session.execute(insert(FboStockModel).values(rows[offset : offset + _CHUNK]))
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(fbo_stocks_at=datetime.now(UTC))
+        )
+
+    async def fbo_stocks(self, seller_id: uuid.UUID) -> dict[int, int]:
+        rows = await self.session.execute(
+            select(FboStockModel.chrt_id, FboStockModel.quantity).where(FboStockModel.seller_id == seller_id)
+        )
+        return {int(chrt_id): int(quantity) for chrt_id, quantity in rows.all()}
+
     async def warehouse_stocks(self, seller_id: uuid.UUID) -> dict[str, dict[int, int]]:
         """Артикул → склад → штук. Отсутствующая пара означает пустую полку.
 
@@ -340,6 +372,125 @@ class TurnoverRepository:
         for article, warehouse_id, quantity in rows.all():
             collected.setdefault(article, {})[int(warehouse_id)] = int(quantity)
         return collected
+
+    async def board_items(self, seller_ids: Sequence[uuid.UUID] | None = None) -> list[BoardItemModel]:
+        statement = select(BoardItemModel).order_by(BoardItemModel.seller_id, BoardItemModel.position)
+        if seller_ids is not None:
+            statement = statement.where(BoardItemModel.seller_id.in_(seller_ids))
+        return list(await self.session.scalars(statement))
+
+    async def add_board_items(self, seller_id: uuid.UUID, barcodes: Sequence[str], added_by: uuid.UUID | None) -> int:
+        """Дописать баркоды в конец списка. Уже вписанные пропускаются, не задваиваются."""
+        position = int(
+            (
+                await self.session.execute(
+                    select(func.coalesce(func.max(BoardItemModel.position), -1)).where(
+                        BoardItemModel.seller_id == seller_id
+                    )
+                )
+            ).scalar_one()
+        )
+        added = 0
+        now = datetime.now(UTC)
+        for barcode in dict.fromkeys(barcodes):
+            position += 1
+            statement = insert(BoardItemModel).values(
+                seller_id=seller_id, barcode=barcode, position=position, added_by=added_by, added_at=now
+            )
+            result = await self.session.execute(
+                statement.on_conflict_do_nothing(index_elements=["seller_id", "barcode"]).returning(
+                    BoardItemModel.barcode
+                )
+            )
+            added += len(result.all())
+        return added
+
+    async def update_board_item(
+        self,
+        seller_id: uuid.UUID,
+        barcode: str,
+        *,
+        note: str | None,
+        nomenclature: str | None,
+        updated_by: uuid.UUID | None,
+    ) -> bool:
+        values: dict = {}
+        if note is not None:
+            values.update(note=note, note_updated_by=updated_by, note_updated_at=datetime.now(UTC))
+        if nomenclature is not None:
+            values["nomenclature_1c"] = nomenclature
+        if not values:
+            return await self.board_item_exists(seller_id, barcode)
+        result = await self.session.execute(
+            update(BoardItemModel)
+            .where(BoardItemModel.seller_id == seller_id, BoardItemModel.barcode == barcode)
+            .values(**values)
+            .returning(BoardItemModel.barcode)
+        )
+        return result.first() is not None
+
+    async def board_item_exists(self, seller_id: uuid.UUID, barcode: str) -> bool:
+        return await self.session.get(BoardItemModel, (seller_id, barcode)) is not None
+
+    async def set_board_item_hidden(self, seller_id: uuid.UUID, barcode: str, hidden: bool) -> bool:
+        result = await self.session.execute(
+            update(BoardItemModel)
+            .where(BoardItemModel.seller_id == seller_id, BoardItemModel.barcode == barcode)
+            .values(hidden_at=datetime.now(UTC) if hidden else None)
+            .returning(BoardItemModel.barcode)
+        )
+        return result.first() is not None
+
+    async def delete_board_item(self, seller_id: uuid.UUID, barcode: str) -> bool:
+        result = await self.session.execute(
+            delete(BoardItemModel)
+            .where(BoardItemModel.seller_id == seller_id, BoardItemModel.barcode == barcode)
+            .returning(BoardItemModel.barcode)
+        )
+        return result.first() is not None
+
+    async def orders_by_barcode(
+        self, seller_id: uuid.UUID, since: date, until: date, barcodes: Sequence[str]
+    ) -> dict[str, int]:
+        """Заказано, шт. — как в отчёте WB: все заказы баркода, отмены не вычитаются."""
+        if not barcodes:
+            return {}
+        rows = await self.session.execute(
+            select(OrderModel.barcode, func.count())
+            .where(
+                OrderModel.seller_id == seller_id,
+                OrderModel.barcode.in_(barcodes),
+                OrderModel.order_date >= since,
+                OrderModel.order_date <= until,
+            )
+            .group_by(OrderModel.barcode)
+        )
+        return {row[0]: int(row[1]) for row in rows.all()}
+
+    async def barcode_articles(self, seller_id: uuid.UUID, barcodes: Sequence[str]) -> dict[str, str]:
+        """Баркод → артикул WB по заказам: единственное место, где у нас они стоят рядом."""
+        if not barcodes:
+            return {}
+        rows = await self.session.execute(
+            select(OrderModel.barcode, OrderModel.article)
+            .where(OrderModel.seller_id == seller_id, OrderModel.barcode.in_(barcodes))
+            .order_by(OrderModel.order_date)
+        )
+        return {row[0]: row[1] for row in rows.all()}
+
+    async def orders_without_barcode(self, seller_id: uuid.UUID, since: date, until: date) -> int:
+        """Заказы окна, собранные до того, как мы стали записывать баркод."""
+        return int(
+            await self.session.scalar(
+                select(func.count()).where(
+                    OrderModel.seller_id == seller_id,
+                    OrderModel.barcode == "",
+                    OrderModel.order_date >= since,
+                    OrderModel.order_date <= until,
+                )
+            )
+            or 0
+        )
 
     async def prune(
         self,
