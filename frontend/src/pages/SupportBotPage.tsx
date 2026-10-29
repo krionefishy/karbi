@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
+import { SupportBotMonitor } from "../components/SupportBotMonitor";
 import { SupportBotReplies } from "../components/SupportBotReplies";
 import { SupportBotJournal } from "../components/SupportBotJournal";
 import { SupportBotTemplates } from "../components/SupportBotTemplates";
@@ -84,7 +85,7 @@ export function SupportBotPage() {
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
   const [pendingMode, setPendingMode] = useState<"live" | null>(null);
-  const [tab, setTab] = useState<"dialogs" | "replies">("dialogs");
+  const [tab, setTab] = useState<"dialogs" | "replies" | "monitor">("dialogs");
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
 
@@ -325,11 +326,25 @@ export function SupportBotPage() {
               </article>
             </div>
 
+            {(view.monitor_overall === "crit" || view.monitor_overall === "warn") && (
+              <div className={`mon-banner mon-banner-${view.monitor_overall}`} role="status">
+                <span>
+                  {view.monitor_overall === "crit"
+                    ? "Мониторинг бота: есть проблема"
+                    : "Мониторинг бота: есть замечания"}
+                </span>
+                <button type="button" className="secondary-button" onClick={() => setTab("monitor")}>
+                  Открыть состояние
+                </button>
+              </div>
+            )}
+
             <div className="mode-switch" role="tablist" aria-label="Раздел бота" style={{ marginBottom: 16 }}>
               {(
                 [
                   { value: "dialogs", label: "Диалоги и журнал" },
                   { value: "replies", label: "Ответы" },
+                  { value: "monitor", label: "Состояние" },
                 ] as const
               ).map((option) => (
                 <button
@@ -345,6 +360,7 @@ export function SupportBotPage() {
               ))}
             </div>
 
+            {tab === "monitor" && <SupportBotMonitor sellerId={sellerId} />}
             {tab === "replies" && <SupportBotReplies sellerId={sellerId} gateMode={view.reply_gate_mode} />}
             {tab === "dialogs" && (
               <>

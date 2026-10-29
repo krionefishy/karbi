@@ -17,6 +17,8 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     ControlModel,
     DialogModel,
     ModeChangeModel,
+    MonitorEventModel,
+    MonitorStateModel,
     ReplyVerdictModel,
     SendModel,
     TemplateModel,
@@ -58,6 +60,8 @@ class SupportBotRepository:
             VerdictModel,
             ReplyVerdictModel,
             ModeChangeModel,
+            MonitorStateModel,
+            MonitorEventModel,
             TemplateModel,
             TrackedSellerModel,
         ):
@@ -426,6 +430,70 @@ class SupportBotRepository:
                 ReplyVerdictModel.prompt_version == prompt_version,
             )
             .order_by(ReplyVerdictModel.first_event_at)
+        )
+        return list(rows)
+
+    async def send_status_counts_since(self, seller_id: uuid.UUID, since: datetime) -> dict[str, int]:
+        rows = await self.session.execute(
+            select(SendModel.status, func.count())
+            .where(SendModel.seller_id == seller_id, SendModel.planned_at >= since)
+            .group_by(SendModel.status)
+        )
+        return {status: int(count) for status, count in rows}
+
+    async def unknown_stuck_count(self, seller_id: uuid.UUID, before: datetime) -> int:
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(SendModel)
+            .where(SendModel.seller_id == seller_id, SendModel.status == SEND_UNKNOWN, SendModel.planned_at < before)
+        )
+        return int(total or 0)
+
+    async def verdicts_pending_stuck(self, seller_id: uuid.UUID, before: datetime) -> int:
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(VerdictModel)
+            .where(
+                VerdictModel.seller_id == seller_id,
+                VerdictModel.status != "done",
+                VerdictModel.requested_at < before,
+            )
+        )
+        return int(total or 0)
+
+    async def monitor_state(self, seller_id: uuid.UUID) -> MonitorStateModel | None:
+        return await self.session.get(MonitorStateModel, seller_id)
+
+    async def save_monitor_state(self, seller_id: uuid.UUID, checked_at: datetime, overall: str, checks: list) -> None:
+        statement = insert(MonitorStateModel).values(
+            seller_id=seller_id, checked_at=checked_at, overall=overall, checks=checks
+        )
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id"],
+                set_={"checked_at": checked_at, "overall": overall, "checks": checks},
+            )
+        )
+
+    async def open_monitor_events(self, seller_id: uuid.UUID) -> list[MonitorEventModel]:
+        rows = await self.session.scalars(
+            select(MonitorEventModel).where(
+                MonitorEventModel.seller_id == seller_id, MonitorEventModel.ended_at.is_(None)
+            )
+        )
+        return list(rows)
+
+    def add_monitor_event(self, model: MonitorEventModel) -> None:
+        self.session.add(model)
+
+    async def monitor_events_since(self, seller_id: uuid.UUID, since: datetime) -> list[MonitorEventModel]:
+        rows = await self.session.scalars(
+            select(MonitorEventModel)
+            .where(
+                MonitorEventModel.seller_id == seller_id,
+                (MonitorEventModel.ended_at.is_(None)) | (MonitorEventModel.ended_at >= since),
+            )
+            .order_by(MonitorEventModel.started_at.desc())
         )
         return list(rows)
 

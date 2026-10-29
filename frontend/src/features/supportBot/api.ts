@@ -5,6 +5,7 @@ import type {
   DialogFilter,
   DialogPage,
   JournalFilter,
+  MonitorResponse,
   EscalationItem,
   ManualVerdict,
   ReplyDialog,
@@ -85,3 +86,5 @@ export function getReplyDialog(sellerId: string, chatId: string, promptAt: strin
   const params = new URLSearchParams({ chat_id: chatId, prompt_at: promptAt });
   return apiRequest<ReplyDialog>(`${base(sellerId)}/replies/dialog?${params.toString()}`);
 }
+
+export const getMonitor = (sellerId: string) => apiRequest<MonitorResponse>(`${base(sellerId)}/monitor`);

@@ -7,7 +7,15 @@ import {
   armRates,
   cumulative,
   dailySeries,
+  dayBars,
   formatMinutes,
+  groupChecks,
+  groupLabel,
+  incidentDuration,
+  severityLabel,
+  severityTone,
+  sortChecks,
+  workerStale,
   needsDecision,
   percent,
   replyLabel,
@@ -143,5 +151,63 @@ describe("supportBot replies format", () => {
     expect(formatMinutes(125)).toBe("2 ч 05 мин");
     expect(formatMinutes(1440)).toBe("1 д");
     expect(formatMinutes(1620)).toBe("1 д 3 ч");
+  });
+
+  it("подпись и тон уровня", () => {
+    expect(severityLabel("ok")).toBe("В норме");
+    expect(severityLabel("warn")).toBe("Внимание");
+    expect(severityLabel("crit")).toBe("Проблема");
+    expect(severityLabel("nodata")).toBe("Мало данных");
+    expect(severityTone("ok")).toBe("go");
+    expect(severityTone("warn")).toBe("warn");
+    expect(severityTone("crit")).toBe("stop");
+    expect(severityTone("nodata")).toBe("neutral");
+    expect(groupLabel("delivery")).toBe("Рассылка");
+    expect(groupLabel("model")).toBe("Нейросеть");
+    expect(groupLabel("safety")).toBe("Безопасность ответов");
+  });
+
+  it("проверки: crit, warn, nodata, ok; порядок внутри уровня сохраняется", () => {
+    const check = (id: string, severity: "ok" | "warn" | "crit" | "nodata", group: "delivery" | "model" = "delivery") => ({
+      id,
+      group,
+      title: id,
+      severity,
+      value: null,
+      threshold: "",
+      hint: "",
+    });
+    const sorted = sortChecks([check("a", "ok"), check("b", "nodata"), check("c", "warn"), check("d", "crit"), check("e", "warn")]);
+    expect(sorted.map((item) => item.id)).toEqual(["d", "c", "e", "b", "a"]);
+    const groups = groupChecks([check("a", "ok"), check("b", "crit", "model"), check("c", "crit")]);
+    expect(groups.map((item) => item.group)).toEqual(["delivery", "model"]);
+    expect(groups[0].checks.map((item) => item.id)).toEqual(["c", "a"]);
+  });
+
+  it("длительность инцидента", () => {
+    const now = Date.parse("2026-10-29T12:00:00Z");
+    expect(
+      incidentDuration({ started_at: "2026-10-29T08:00:00Z", ended_at: "2026-10-29T10:15:00Z" }, now),
+    ).toBe("2 ч 15 мин");
+    expect(incidentDuration({ started_at: "2026-10-29T11:20:00Z", ended_at: null }, now)).toBe("идёт 40 мин");
+    expect(incidentDuration({ started_at: "bad", ended_at: null }, now)).toBe("—");
+  });
+
+  it("полосы по дням: минимум 7 дней, пустые как нули", () => {
+    const full = Array.from({ length: 7 }, (_, i) => ({ date: `2026-10-0${i + 1}`, warn_minutes: i, crit_minutes: 0 }));
+    expect(dayBars(full)).toHaveLength(7);
+    const short = dayBars([{ date: "2026-10-29", warn_minutes: 10, crit_minutes: 5 }]);
+    expect(short).toHaveLength(7);
+    expect(short[0]).toEqual({ date: "2026-10-23", warn: 0, crit: 0 });
+    expect(short[6]).toEqual({ date: "2026-10-29", warn: 10, crit: 5 });
+    expect(dayBars([]).every((bar) => bar.warn === 0 && bar.crit === 0)).toBe(true);
+    expect(dayBars([])).toHaveLength(7);
+  });
+
+  it("воркер не отвечает дольше 30 минут", () => {
+    const now = Date.parse("2026-10-29T12:00:00Z");
+    expect(workerStale(null, now)).toBe(false);
+    expect(workerStale("2026-10-29T11:45:00Z", now)).toBe(false);
+    expect(workerStale("2026-10-29T11:20:00Z", now)).toBe(true);
   });
 });

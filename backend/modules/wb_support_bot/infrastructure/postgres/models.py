@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, MetaData, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -202,6 +202,37 @@ class ModeChangeModel(WBSupportBotBase):
     __table_args__ = (Index("ix_wb_support_bot_mode_changes_seller", "seller_id", "changed_at"),)
 
 
+class MonitorStateModel(WBSupportBotBase):
+    """Последний снимок проверок кабинета: время прохода воркера и результат каждой проверки."""
+
+    __tablename__ = "monitor_state"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    overall: Mapped[str] = mapped_column(String(8), nullable=False)
+    checks: Mapped[list] = mapped_column(JSONB, nullable=False)
+
+
+class MonitorEventModel(WBSupportBotBase):
+    """Период, пока проверка была жёлтой или красной: история для вкладки «Состояние»."""
+
+    __tablename__ = "monitor_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    check_id: Mapped[str] = mapped_column(String(48), nullable=False)
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    severity: Mapped[str] = mapped_column(String(8), nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_wb_support_bot_monitor_events_seller", "seller_id", "started_at"),
+        Index("ix_wb_support_bot_monitor_events_open", "seller_id", "ended_at"),
+    )
+
+
 SEND_PLANNED = "planned"
 SEND_SENDING = "sending"
 SEND_SENT = "sent"
@@ -248,6 +279,8 @@ __all__ = [
     "ControlModel",
     "DialogModel",
     "ModeChangeModel",
+    "MonitorEventModel",
+    "MonitorStateModel",
     "ReplyVerdictModel",
     "SendModel",
     "TemplateModel",

@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
@@ -28,6 +28,19 @@ class OutboxRepository:
         return event_id
 
     DEFAULT_LOCK_SECONDS = 120
+
+    async def count_stuck(self, topics: tuple[str, ...], older_than: datetime) -> int:
+        """Сколько событий этих топиков не опубликовано и лежит дольше `older_than`."""
+        total = await self.session.scalar(
+            select(func.count())
+            .select_from(OutboxEventModel)
+            .where(
+                OutboxEventModel.topic.in_(topics),
+                OutboxEventModel.published_at.is_(None),
+                OutboxEventModel.created_at < older_than,
+            )
+        )
+        return int(total or 0)
 
     async def claim(
         self, worker_id: str, limit: int = 50, lock_seconds: int = DEFAULT_LOCK_SECONDS

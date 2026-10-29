@@ -40,6 +40,10 @@ from backend.modules.wb_support_bot.presentation.http.schemas import (
     LateSendsResponse,
     ManualVerdictRequest,
     ModeRequest,
+    MonitorCheckResponse,
+    MonitorDayResponse,
+    MonitorIncidentResponse,
+    MonitorResponse,
     PauseRequest,
     ReplyDialogResponse,
     ReplyMessageResponse,
@@ -146,6 +150,7 @@ async def seller_view(
         mirror_read_through=_iso(view.mirror_read_through),
         classifier_mode=view.classifier_mode,
         reply_gate_mode=view.reply_gate_mode,
+        monitor_overall=view.monitor_overall,
     )
 
 
@@ -463,5 +468,46 @@ async def replies_dialog(
                 action=reply_action(row).value,
             )
             for row in card.verdicts
+        ],
+    )
+
+
+@router.get("/sellers/{seller_id}/monitor", response_model=MonitorResponse)
+@inject
+async def monitor(seller_id: uuid.UUID, _: CurrentPrincipal, service: FromDishka[SupportBotService]) -> MonitorResponse:
+    try:
+        view = await service.monitor_view(seller_id)
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    return MonitorResponse(
+        checked_at=view.checked_at.isoformat(),
+        worker_checked_at=_iso(view.worker_checked_at),
+        overall=view.overall.value,
+        checks=[
+            MonitorCheckResponse(
+                id=check.id,
+                group=check.group,
+                title=check.title,
+                severity=check.severity.value,
+                value=check.value,
+                threshold=check.threshold,
+                hint=check.hint,
+            )
+            for check in view.checks
+        ],
+        incidents=[
+            MonitorIncidentResponse(
+                check_id=event.check_id,
+                title=event.title,
+                severity=event.severity,
+                started_at=event.started_at.isoformat(),
+                ended_at=_iso(event.ended_at),
+                value=event.value,
+            )
+            for event in view.incidents
+        ],
+        days=[
+            MonitorDayResponse(date=day.date, warn_minutes=day.warn_minutes, crit_minutes=day.crit_minutes)
+            for day in view.days
         ],
     )

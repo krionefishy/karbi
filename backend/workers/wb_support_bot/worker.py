@@ -1,4 +1,5 @@
 import random
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -7,6 +8,7 @@ from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_support_bot.application import BotPolicy, ChatSender, SupportBotProcessor
+from backend.modules.wb_support_bot.application.monitor import BotMonitor
 from backend.modules.wb_support_bot.domain import CampaignRules, Pace, SendWindow
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.shared.heartbeat import touch_heartbeat
@@ -114,6 +116,7 @@ class SupportBotWorker(PollingWorker):
                 self.logger.exception("support_bot_seller_failed", seller_id=str(seller_id))
                 continue
             handled += 1
+            await self._record_monitor(seller_id, now)
             self.logger.info(
                 "support_bot_seller_processed",
                 seller_id=str(seller_id),
@@ -129,3 +132,19 @@ class SupportBotWorker(PollingWorker):
                 skipped=report.skipped,
             )
         return handled
+
+    async def _record_monitor(self, seller_id: uuid.UUID, now: datetime) -> None:
+        """Снимок проверок для вкладки «Состояние»; его сбой не должен мешать рассылке."""
+        try:
+            async with self.database.session() as session:
+                monitor = BotMonitor(
+                    session,
+                    SupportBotRepository(session),
+                    daily_cap=self.policy.daily_cap,
+                    reply_gate_mode=self.policy.reply_gate_mode,
+                    reply_prompt_version=self.policy.reply_prompt_version,
+                )
+                overall = await monitor.record(seller_id, now)
+            self.logger.info("support_bot_monitor_recorded", seller_id=str(seller_id), overall=overall.value)
+        except Exception:
+            self.logger.exception("support_bot_monitor_failed", seller_id=str(seller_id))

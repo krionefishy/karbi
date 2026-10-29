@@ -469,6 +469,7 @@ class SessionProvider(Provider):
             classifier_prompt_version=settings.support_bot.classifier_prompt_version,
             reply_gate_mode=settings.support_bot.reply_gate_mode,
             reply_prompt_version=settings.support_bot.reply_prompt_version,
+            daily_cap=settings.support_bot.daily_cap_per_seller,
         )
 
     @provide(scope=Scope.REQUEST)

@@ -71,6 +71,7 @@ class SliceRow:
     model: str | None
     tokens_in: int | None
     tokens_out: int | None
+    error: str | None = None
 
     @property
     def bucket(self) -> str:
@@ -234,6 +235,21 @@ def late_sends(rows: list[SliceRow], sends: list[SendRow]) -> LateSends:
     )
 
 
+def late_dialogs(rows: list[SliceRow], sends: list[SendRow], tolerance: timedelta) -> tuple[int, int]:
+    """Остановленные диалоги и те из них, где бот написал позже допуска (задержка зеркала) после ответа."""
+    stops: dict[tuple[str, datetime], list[SliceRow]] = defaultdict(list)
+    for row in rows:
+        if row.gate is Gate.STOP:
+            stops[(row.chat_id, row.prompt_at)].append(row)
+    late: set[tuple[str, datetime]] = set()
+    for send in sends:
+        key = (send.chat_id, send.prompt_at)
+        for row in stops.get(key, []):
+            if row.first_event_at + tolerance < send.sent_at <= row.first_event_at + LATE_WINDOW:
+                late.add(key)
+    return len(stops), len(late)
+
+
 def continue_stats(rows: list[SliceRow]) -> ContinueStats:
     per_dialog: Counter[int] = Counter()
     escalated = resolved = longest = 0
@@ -325,6 +341,7 @@ __all__ = [
     "EffectRow",
     "Health",
     "LateSends",
+    "late_dialogs",
     "ReplySummary",
     "SendRow",
     "SliceRow",

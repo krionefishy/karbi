@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_support_bot.application.monitor import BotMonitor, MonitorView
 from backend.modules.wb_support_bot.application.reply_stats import (
     EffectRow,
     ReplySummary,
@@ -80,6 +81,7 @@ class SellerBotView:
     dry_run: bool
     classifier_mode: str
     reply_gate_mode: str
+    monitor_overall: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,11 +263,13 @@ class SupportBotService(ReplyStatsMixin):
         classifier_prompt_version: str = "v2",
         reply_gate_mode: str = MODE_OFF,
         reply_prompt_version: str = "r2",
+        daily_cap: int = 2500,
     ) -> None:
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
+        self.daily_cap = daily_cap
         self.session = session
         self.sellers = sellers
         self.repository = repository
@@ -280,6 +284,7 @@ class SupportBotService(ReplyStatsMixin):
             if state is None:
                 continue
             failing += 1 if state.error else 0
+            failing += 1 if (await self._monitor().overall(seller_id)).value == "crit" else 0
             if state.synced_through is not None:
                 synced.append(state.synced_through)
         return SupportBotOverview(
@@ -314,7 +319,21 @@ class SupportBotService(ReplyStatsMixin):
             dry_run=tracked.mode == MODE_DRY_RUN,
             classifier_mode=self.classifier_mode,
             reply_gate_mode=self.reply_gate_mode,
+            monitor_overall=(await self._monitor().overall(seller_id)).value,
         )
+
+    def _monitor(self) -> BotMonitor:
+        return BotMonitor(
+            self.session,
+            self.repository,
+            daily_cap=self.daily_cap,
+            reply_gate_mode=self.reply_gate_mode,
+            reply_prompt_version=self.reply_prompt_version,
+        )
+
+    async def monitor_view(self, seller_id: uuid.UUID) -> MonitorView:
+        await self._tracked(seller_id)
+        return await self._monitor().view(seller_id)
 
     async def dialogs(
         self, seller_id: uuid.UUID, *, state: str | None, flag: str | None, page: int, page_size: int

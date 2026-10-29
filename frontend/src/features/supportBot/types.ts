@@ -29,6 +29,7 @@ export interface SupportBot {
   mirror_read_through: string | null;
   classifier_mode: ClassifierMode;
   reply_gate_mode: ReplyGateMode;
+  monitor_overall: Severity;
 }
 
 export type ClassifierMode = "off" | "shadow" | "enforce";
@@ -215,4 +216,41 @@ export interface ReplyDialog {
   chat_url: string | null;
   messages: ReplyDialogMessage[];
   verdicts: ReplyVerdict[];
+}
+
+export type Severity = "ok" | "warn" | "crit" | "nodata";
+export type MonitorGroup = "delivery" | "model" | "safety";
+
+export interface MonitorCheck {
+  id: string;
+  group: MonitorGroup;
+  title: string;
+  severity: Severity;
+  value: string | null;
+  threshold: string;
+  hint: string;
+}
+
+export interface MonitorIncident {
+  check_id: string;
+  title: string;
+  severity: "warn" | "crit";
+  started_at: string;
+  ended_at: string | null;
+  value: string | null;
+}
+
+export interface MonitorDay {
+  date: string;
+  warn_minutes: number;
+  crit_minutes: number;
+}
+
+export interface MonitorResponse {
+  checked_at: string;
+  worker_checked_at: string | null;
+  overall: Severity;
+  checks: MonitorCheck[];
+  incidents: MonitorIncident[];
+  days: MonitorDay[];
 }

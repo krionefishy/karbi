@@ -4,11 +4,16 @@ import type {
   BotMode,
   DailyPoint,
   DialogState,
+  MonitorCheck,
+  MonitorDay,
+  MonitorGroup,
+  MonitorIncident,
   ManualVerdict,
   ReplyBucket,
   ReplyCategoryCount,
   ReplyGateMode,
   SendStatus,
+  Severity,
   SupportBot,
   Verdict,
 } from "./types";
@@ -228,4 +233,97 @@ export function formatMinutes(minutes: number | null): string {
   const days = Math.floor(total / 1440);
   const hours = Math.floor((total % 1440) / 60);
   return hours ? `${days} д ${hours} ч` : `${days} д`;
+}
+
+export const SEVERITY_LABEL: Record<Severity, string> = {
+  ok: "В норме",
+  warn: "Внимание",
+  crit: "Проблема",
+  nodata: "Мало данных",
+};
+
+export type SeverityTone = "go" | "warn" | "stop" | "neutral";
+
+const SEVERITY_TONE: Record<Severity, SeverityTone> = {
+  ok: "go",
+  warn: "warn",
+  crit: "stop",
+  nodata: "neutral",
+};
+
+export const severityLabel = (severity: Severity): string => SEVERITY_LABEL[severity];
+export const severityTone = (severity: Severity): SeverityTone => SEVERITY_TONE[severity];
+
+export const GROUP_LABEL: Record<MonitorGroup, string> = {
+  delivery: "Рассылка",
+  model: "Нейросеть",
+  safety: "Безопасность ответов",
+};
+
+export const GROUP_ORDER: MonitorGroup[] = ["delivery", "model", "safety"];
+
+export const groupLabel = (group: MonitorGroup): string => GROUP_LABEL[group];
+
+const SEVERITY_RANK: Record<Severity, number> = { crit: 0, warn: 1, nodata: 2, ok: 3 };
+
+/** Проверки группы: сначала crit, затем warn, nodata, ok; внутри уровня порядок сохраняется. */
+export function sortChecks(checks: MonitorCheck[]): MonitorCheck[] {
+  return checks
+    .map((check, index) => ({ check, index }))
+    .sort((a, b) => SEVERITY_RANK[a.check.severity] - SEVERITY_RANK[b.check.severity] || a.index - b.index)
+    .map((item) => item.check);
+}
+
+export interface CheckGroup {
+  group: MonitorGroup;
+  checks: MonitorCheck[];
+}
+
+/** Непустые группы в порядке GROUP_ORDER, проверки отсортированы по тяжести. */
+export function groupChecks(checks: MonitorCheck[]): CheckGroup[] {
+  return GROUP_ORDER.map((group) => ({
+    group,
+    checks: sortChecks(checks.filter((check) => check.group === group)),
+  })).filter((item) => item.checks.length > 0);
+}
+
+/** Длительность инцидента: «2 ч 15 мин»; у открытого — «идёт 40 мин». */
+export function incidentDuration(
+  incident: Pick<MonitorIncident, "started_at" | "ended_at">,
+  now: number = Date.now(),
+): string {
+  const started = Date.parse(incident.started_at);
+  const ended = incident.ended_at ? Date.parse(incident.ended_at) : now;
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) return "—";
+  const text = formatMinutes(Math.max(0, (ended - started) / 60000));
+  return incident.ended_at ? text : `идёт ${text}`;
+}
+
+export interface DayBar {
+  date: string;
+  warn: number;
+  crit: number;
+}
+
+/** Полосы истории: не меньше minDays дней (недостающие старые дни — нули), старые сверху. */
+export function dayBars(days: MonitorDay[], minDays = 7): DayBar[] {
+  const bars: DayBar[] = days.map((day) => ({
+    date: day.date,
+    warn: Math.max(0, day.warn_minutes || 0),
+    crit: Math.max(0, day.crit_minutes || 0),
+  }));
+  if (bars.length >= minDays) return bars;
+  const first = bars.length ? Date.parse(`${bars[0].date}T00:00:00Z`) : Date.now();
+  const pad: DayBar[] = [];
+  for (let i = minDays - bars.length; i >= 1; i -= 1) {
+    pad.push({ date: new Date(first - i * 86400000).toISOString().slice(0, 10), warn: 0, crit: 0 });
+  }
+  return [...pad, ...bars];
+}
+
+/** Воркер не отвечает: отметка есть и старше порога (по умолчанию 30 минут). */
+export function workerStale(workerCheckedAt: string | null, now: number = Date.now(), limitMinutes = 30): boolean {
+  if (!workerCheckedAt) return false;
+  const at = Date.parse(workerCheckedAt);
+  return Number.isFinite(at) && now - at > limitMinutes * 60000;
 }

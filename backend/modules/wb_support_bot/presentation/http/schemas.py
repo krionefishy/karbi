@@ -19,6 +19,7 @@ class SupportBotResponse(BaseModel):
     mirror_read_through: str | None
     classifier_mode: str
     reply_gate_mode: str
+    monitor_overall: str
 
 
 class DialogResponse(BaseModel):
@@ -220,3 +221,37 @@ class ReplyDialogResponse(BaseModel):
     chat_url: str | None
     messages: list[ReplyMessageResponse]
     verdicts: list[ReplyVerdictResponse]
+
+
+class MonitorCheckResponse(BaseModel):
+    id: str
+    group: str
+    title: str
+    severity: str
+    value: str | None
+    threshold: str
+    hint: str
+
+
+class MonitorIncidentResponse(BaseModel):
+    check_id: str
+    title: str
+    severity: str
+    started_at: str
+    ended_at: str | None
+    value: str | None
+
+
+class MonitorDayResponse(BaseModel):
+    date: str
+    warn_minutes: int
+    crit_minutes: int
+
+
+class MonitorResponse(BaseModel):
+    checked_at: str
+    worker_checked_at: str | None
+    overall: str
+    checks: list[MonitorCheckResponse]
+    incidents: list[MonitorIncidentResponse]
+    days: list[MonitorDayResponse]
