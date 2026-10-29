@@ -554,7 +554,8 @@ export function SupportBotReplies({
             {data.live_since && (
               <>
                 {" "}
-                Режим 100% с {dayFormatter.format(new Date(data.live_since))}.
+                Режим 100% с{" "}
+                {dayFormatter.format(new Date(data.live_since)).replace(/ г\.$/, "\u00a0г")}.
               </>
             )}
           </p>
@@ -593,7 +594,11 @@ export function SupportBotReplies({
               <h4 className="rp-chart-title">
                 Доля ответивших за 48 ч по дню старта
               </h4>
-              <RateLines daily={data.daily} liveSince={data.live_since} />
+              <RateLines
+                daily={data.daily}
+                liveSince={data.live_since}
+                generatedAt={data.generated_at}
+              />
             </>
           )}
 

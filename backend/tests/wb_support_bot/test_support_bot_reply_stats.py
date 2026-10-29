@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_support_bot.application.reply_stats import (
+    MSK,
     EffectRow,
     SendRow,
     SliceRow,
@@ -79,6 +80,7 @@ def test_arms_are_counted_apart_and_the_day_is_moscow_time() -> None:
     assert [point.date for point in points] == ["2026-10-26"]
     point = points[0]
     assert (point.started_live, point.started_control) == (1, 1)
+    assert (point.eligible48_live, point.eligible48_control) == (1, 1)
     assert (point.replied48_live, point.replied48_control) == (1, 0)
     assert (point.replies_live, point.replies_control) == (1, 0)
 
@@ -177,3 +179,19 @@ def test_the_summary_collects_everything_for_one_period() -> None:
     assert summary.categories == [("refuses", 1)]
     assert summary.categories_before == [("refuses", 1)] and summary.categories_after == [("undetermined", 1)]
     assert summary.escalations_open == 0 and uuid.uuid4()
+
+
+def test_a_young_day_has_no_eligible_dialogs_so_its_rate_is_not_a_zero() -> None:
+    rows = [
+        effect("a", hours_ago=30, live=True, replied_after_hours=None),
+        effect("b", hours_ago=60, live=True, replied_after_hours=5),
+    ]
+
+    points = {point.date: point for point in daily_points(rows, NOW, NOW - timedelta(days=14))}
+
+    young, old = (
+        points[(NOW - timedelta(hours=30)).astimezone(MSK).date().isoformat()],
+        points[(NOW - timedelta(hours=60)).astimezone(MSK).date().isoformat()],
+    )
+    assert (young.started_live, young.eligible48_live, young.replied48_live) == (1, 0, 0)
+    assert (old.started_live, old.eligible48_live, old.replied48_live) == (1, 1, 1)

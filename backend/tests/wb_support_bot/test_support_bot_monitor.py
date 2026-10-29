@@ -178,7 +178,7 @@ async def test_recording_opens_closes_and_updates_incidents(database: Database, 
                 SupportBotRepository(session),
                 daily_cap=2500,
                 reply_gate_mode="enforce",
-                reply_prompt_version="r2",
+                reply_prompt_version="r3",
             )
             return await monitor.record(seller, moment)
 
@@ -218,7 +218,7 @@ async def test_the_monitor_page_shows_checks_and_history(
     assert (await client.post(AUTOMATION, json={"seller_id": str(http_seller)})).status_code == 201
     async with application.database.session() as session:
         monitor = BotMonitor(
-            session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="enforce", reply_prompt_version="r2"
+            session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="enforce", reply_prompt_version="r3"
         )
         await monitor.record(http_seller, datetime.now(UTC))
 
@@ -268,7 +268,7 @@ async def test_dry_run_sends_before_the_switch_to_live_are_not_a_mismatch(
     async def mismatch() -> Severity:
         async with database.session() as session:
             monitor = BotMonitor(
-                session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="off", reply_prompt_version="r2"
+                session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="off", reply_prompt_version="r3"
             )
             tracked = await SupportBotRepository(session).tracked(seller)
             assert tracked is not None

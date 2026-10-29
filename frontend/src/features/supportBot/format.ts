@@ -206,8 +206,8 @@ export function dailySeries(daily: DailyPoint[]): DailySeries {
     live,
     control,
     cumulative: cumulative(daily.map((day) => day.replies_live + day.replies_control)),
-    rate48Live: daily.map((day) => (day.started_live > 0 ? day.replied48_live / day.started_live : null)),
-    rate48Control: daily.map((day) => (day.started_control > 0 ? day.replied48_control / day.started_control : null)),
+    rate48Live: daily.map((day) => (day.eligible48_live > 0 ? day.replied48_live / day.eligible48_live : null)),
+    rate48Control: daily.map((day) => (day.eligible48_control > 0 ? day.replied48_control / day.eligible48_control : null)),
   };
 }
 

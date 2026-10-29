@@ -37,7 +37,9 @@ function CheckCard({ check }: { check: MonitorCheck }) {
           {severityLabel(check.severity)}
         </span>
       </div>
-      <strong className="mon-value">{check.value ?? "—"}</strong>
+      <strong className={`mon-value${/[а-яё]{4,}/i.test(check.value ?? "") ? " mon-value-long" : ""}`}>
+        {check.value ?? "—"}
+      </strong>
       <small className="muted">Порог: {check.threshold}</small>
       {showHint && check.hint && <p className="mon-hint">Что делать: {check.hint}</p>}
     </article>

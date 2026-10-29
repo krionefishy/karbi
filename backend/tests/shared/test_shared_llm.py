@@ -110,3 +110,23 @@ def test_masking_hides_contacts_ids_and_long_numbers_but_keeps_the_sense() -> No
 def test_masking_leaves_ordinary_text_alone() -> None:
     text = "Здравствуйте! Мы готовы вернуть 1000 рублей в течение 3 дней."
     assert mask_pii(text) == text
+
+
+def test_full_names_are_masked_by_the_patronymic() -> None:
+    assert mask_pii("Сбербанк Алексей Владимирович М.") == "<NAME>"
+    assert mask_pii("Переведите Ивану Петровичу Сидорову") == "Переведите Ивану Петровичу Сидорову"
+    assert mask_pii("Меня зовут Анна, заказ пришёл") == "меня зовут <NAME>, заказ пришёл"
+    assert mask_pii("Иванов И.И. оформил возврат") == "<NAME> оформил возврат"
+
+
+def test_ordinary_capitalised_words_are_left_alone() -> None:
+    text = "Верните Деньги За Брак. Вайлдберриз Не Отвечает"
+
+    assert mask_pii(text) == text
+
+
+def test_streets_flats_and_logins_are_masked() -> None:
+    assert mask_pii("Живу на ул. Ленина, д. 5, кв. 12") == "Живу на <ADDRESS>"
+    assert mask_pii("проспект Мира 10 корп. 2") == "<ADDRESS>"
+    assert mask_pii("подъезд 3, этаж 5") == "<ADDRESS>, <ADDRESS>"
+    assert mask_pii("пишите в телеграм @ivan_petrov") == "пишите в телеграм <LOGIN>"

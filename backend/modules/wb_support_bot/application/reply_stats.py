@@ -107,6 +107,8 @@ class DailyPoint:
     date: str
     started_live: int = 0
     started_control: int = 0
+    eligible48_live: int = 0
+    eligible48_control: int = 0
     replied48_live: int = 0
     replied48_control: int = 0
     replies_live: int = 0
@@ -182,12 +184,10 @@ def daily_points(rows: list[EffectRow], now: datetime, since: datetime) -> list[
         arm = "live" if row.live else "control"
         started = row.first_at.astimezone(MSK).date().isoformat()
         days[started][f"started_{arm}"] += 1
-        if (
-            row.first_at <= now - timedelta(hours=48)
-            and row.reply_first_at
-            and row.reply_first_at - row.first_at <= timedelta(hours=48)
-        ):
-            days[started][f"replied48_{arm}"] += 1
+        if row.first_at <= now - timedelta(hours=48):
+            days[started][f"eligible48_{arm}"] += 1
+            if row.reply_first_at and row.reply_first_at - row.first_at <= timedelta(hours=48):
+                days[started][f"replied48_{arm}"] += 1
         if row.reply_first_at and row.reply_first_at >= since:
             days[row.reply_first_at.astimezone(MSK).date().isoformat()][f"replies_{arm}"] += 1
     return [DailyPoint(date=day, **dict(counts)) for day, counts in sorted(days.items())]

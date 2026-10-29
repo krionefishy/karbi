@@ -333,9 +333,11 @@ export function SupportBotPage() {
                     ? "Мониторинг бота: есть проблема"
                     : "Мониторинг бота: есть замечания"}
                 </span>
-                <button type="button" className="secondary-button" onClick={() => setTab("monitor")}>
-                  Открыть состояние
-                </button>
+                {tab !== "monitor" && (
+                  <button type="button" className="secondary-button" onClick={() => setTab("monitor")}>
+                    Открыть состояние
+                  </button>
+                )}
               </div>
             )}
 

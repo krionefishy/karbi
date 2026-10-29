@@ -90,7 +90,7 @@ async def seed(
                 first_event_at=reply_at,
                 last_event_at=reply_at,
                 messages=1,
-                prompt_version="r2",
+                prompt_version="r3",
                 status="done",
                 category=category,
                 reason="угрожает судом",

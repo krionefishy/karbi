@@ -136,6 +136,8 @@ export interface DailyPoint {
   date: string;
   started_live: number;
   started_control: number;
+  eligible48_live: number;
+  eligible48_control: number;
   replied48_live: number;
   replied48_control: number;
   replies_live: number;

@@ -72,7 +72,7 @@ class BotPolicy:
     classifier_retry: timedelta = timedelta(minutes=15)
     classifier_max_attempts: int = 3
     reply_gate_mode: str = MODE_OFF
-    reply_prompt_version: str = "r2"
+    reply_prompt_version: str = "r3"
     reply_retry: timedelta = timedelta(minutes=15)
     reply_max_attempts: int = 10
 

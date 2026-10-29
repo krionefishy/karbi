@@ -126,6 +126,8 @@ class DailyPointResponse(BaseModel):
     date: str
     started_live: int
     started_control: int
+    eligible48_live: int
+    eligible48_control: int
     replied48_live: int
     replied48_control: int
     replies_live: int

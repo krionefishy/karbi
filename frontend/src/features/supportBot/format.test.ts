@@ -122,8 +122,8 @@ describe("supportBot replies format", () => {
 
   it("ряды по дням: доля 48 ч только там, где были старты", () => {
     const series = dailySeries([
-      { date: "2026-10-01", started_live: 4, started_control: 0, replied48_live: 1, replied48_control: 0, replies_live: 2, replies_control: 1 },
-      { date: "2026-10-02", started_live: 0, started_control: 2, replied48_live: 0, replied48_control: 1, replies_live: 0, replies_control: 3 },
+      { date: "2026-10-01", started_live: 4, started_control: 0, eligible48_live: 4, eligible48_control: 0, replied48_live: 1, replied48_control: 0, replies_live: 2, replies_control: 1 },
+      { date: "2026-10-02", started_live: 0, started_control: 2, eligible48_live: 0, eligible48_control: 2, replied48_live: 0, replied48_control: 1, replies_live: 0, replies_control: 3 },
     ]);
     expect(series.dates).toEqual(["2026-10-01", "2026-10-02"]);
     expect(series.live).toEqual([2, 0]);

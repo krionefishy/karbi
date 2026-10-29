@@ -286,14 +286,29 @@ export function DailyBars({
   );
 }
 
+const RATE_WINDOW_MS = 48 * 3600 * 1000;
+
 export function RateLines({
   daily,
   liveSince,
+  generatedAt,
 }: {
   daily: DailyPoint[];
   liveSince: string | null;
+  generatedAt?: string;
 }) {
-  const series = dailySeries(daily);
+  const base = dailySeries(daily);
+  // Окно 48 ч у свежих дней ещё не закрыто: бэкенд не считает по ним ответы, и доля выглядела бы провалом до 0%.
+  const matureUntil = generatedAt
+    ? moscowDate(new Date(new Date(generatedAt).getTime() - RATE_WINDOW_MS).toISOString())
+    : null;
+  const mask = (rates: (number | null)[]) =>
+    rates.map((rate, at) => (matureUntil !== null && base.dates[at] >= matureUntil ? null : rate));
+  const series = {
+    ...base,
+    rate48Live: mask(base.rate48Live),
+    rate48Control: mask(base.rate48Control),
+  };
   const count = daily.length;
   const top = 12;
   const bottom = 130;
