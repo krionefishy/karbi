@@ -187,7 +187,9 @@ async def test_summary_counts_by_moscow_days(tmp_path: Path) -> None:
             await stand.set_received(item, datetime(2026, 10, 22, 21, 30, tzinfo=UTC))
         await stand.set_received(ids[1], datetime(2026, 10, 22, 20, 59, tzinfo=UTC))
 
-        day = await stand.client.get(f"{MANAGER}/summary", params={"from": "2026-10-23"}, headers=manager)
+        day = await stand.client.get(
+            f"{MANAGER}/summary", params={"from": "2026-10-23", "to": "2026-10-23"}, headers=manager
+        )
         summary = Summary.model_validate(day.json())
         assert (summary.period.from_.isoformat(), summary.period.to.isoformat()) == ("2026-10-23", "2026-10-23")
         assert summary.counts.model_dump() == {"positive": 1, "amended": 1, "deleted": 0, "accepted_total": 2}
