@@ -60,7 +60,7 @@ RETRY_DELAYS = (timedelta(seconds=15), timedelta(seconds=60), timedelta(minutes=
 # Решение ждёт более ранний скрин моложе получаса, перепроверяя раз в 30 секунд.
 ORDER_WINDOW = timedelta(minutes=30)
 DEFER_DELAY = timedelta(seconds=30)
-MAX_DEFERRALS = 60
+MAX_DEFERRALS = 6
 MIN_MESSAGE_LEN = 8
 
 Clock = Callable[[], datetime]

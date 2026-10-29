@@ -485,9 +485,9 @@ def test_row_6_near_image_when_keys_are_unread() -> None:
     assert codes(decision)[0] == "near_image"
 
 
-def test_row_6_hash_alone_never_duplicates_readable_fields() -> None:
+def test_row_6_hash_alone_never_duplicates_or_holds_readable_fields() -> None:
     decision = run(desktop(), [make_candidate(1, desktop(chat_id=CHAT_2, text_norm=OTHER_TEXT), dhash=0)], dhash=1)
-    assert decision.verdict == "needs_review"
+    assert decision.verdict == "accepted"
     assert codes(decision) == ["near_image_conflict"]
 
 

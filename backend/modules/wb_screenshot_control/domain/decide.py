@@ -100,7 +100,8 @@ def decide(
         findings.extend(_duplicate_group("near_image", root, inp))
         duplicate_emitted = True
 
-    # 7. Частичные совпадения и похожая картинка при противоречащих полях.
+    # 7. Частичные совпадения. Похожая картинка при противоречащих полях только записывается для админа:
+    # одинаковый интерфейс у разных отзывов даёт близкий хеш всего кадра, на вердикт он не влияет.
     for hit in hits:
         if hit.impact == "needs_review":
             findings.append(Finding(hit.code, "needs_review", _other(hit.candidate, hit.match.details)))
@@ -108,9 +109,7 @@ def decide(
                 # Тот же текст у другого менеджера под другим чатом — перенос кейса с подменой chatId.
                 findings.append(Finding("cross_user_duplicate", None, _other(hit.candidate)))
     for candidate, distance in near_conflicts:
-        findings.append(
-            Finding("near_image_conflict", "needs_review", {**_other(candidate), "dhash_distance": distance})
-        )
+        findings.append(Finding("near_image_conflict", None, {**_other(candidate), "dhash_distance": distance}))
 
     # 8. Распознавание не удалось.
     if fields is None:
