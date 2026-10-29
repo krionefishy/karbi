@@ -23,7 +23,7 @@ import {
   type BoardSortKey,
 } from "../features/turnover/board";
 
-const TEMPLATE = "220px 130px 140px minmax(220px, 1fr) 110px 110px 110px 120px 90px 44px";
+const TEMPLATE = "220px 130px 140px 380px 110px 110px 110px 120px 90px 44px";
 
 const message = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
 
