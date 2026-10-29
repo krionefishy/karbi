@@ -37,6 +37,9 @@ from backend.modules.wb_core.domain import (
     FbsOrder,
     FbsSupply,
     OzonAccrualLine,
+    OzonAdvertCampaign,
+    OzonAdvertStat,
+    OzonProduct,
     ReviewFact,
     SalesReport,
     SalesReportRow,
@@ -61,6 +64,10 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     MirrorStateModel,
     OzonAccrualCursorModel,
     OzonAccrualLineModel,
+    OzonAdvertCampaignModel,
+    OzonAdvertCursorModel,
+    OzonAdvertStatModel,
+    OzonProductModel,
     ReviewFactModel,
     SalesReportModel,
     SalesReportRowModel,
@@ -1103,6 +1110,93 @@ class MirrorRepository:
         )
         names = [field.name for field in fields(OzonAccrualLine)]
         return [OzonAccrualLine(**{name: getattr(row, name) for name in names}) for row in rows]
+
+    # --- карточки и реклама Ozon ------------------------------------------------------------
+
+    async def replace_ozon_products(
+        self, seller_id: uuid.UUID, products: Iterable[OzonProduct], *, now: datetime
+    ) -> int:
+        """Карточки кабинета целиком: SKU, пропавший из списка, пропадает и отсюда."""
+        await self.session.execute(delete(OzonProductModel).where(OzonProductModel.seller_id == seller_id))
+        unique = {item.sku: item for item in products if item.sku}
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(item)} for item in unique.values()]
+        await self._insert(OzonProductModel, rows)
+        return len(rows)
+
+    async def ozon_products(self, seller_id: uuid.UUID, skus: Iterable[int] | None = None) -> dict[int, OzonProduct]:
+        query = select(OzonProductModel).where(OzonProductModel.seller_id == seller_id)
+        if skus is not None:
+            wanted = {sku for sku in skus if sku}
+            if not wanted:
+                return {}
+            query = query.where(_any_of(OzonProductModel.sku, wanted, BigInteger))
+        names = [field.name for field in fields(OzonProduct)]
+        return {
+            row.sku: OzonProduct(**{name: getattr(row, name) for name in names})
+            for row in await self.session.scalars(query)
+        }
+
+    async def upsert_ozon_advert_campaigns(
+        self, seller_id: uuid.UUID, campaigns: Iterable[OzonAdvertCampaign], *, now: datetime
+    ) -> int:
+        unique = {item.campaign_id: item for item in campaigns}
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(item)} for item in unique.values()]
+        for offset in range(0, len(rows), _INSERT_CHUNK):
+            statement = insert(OzonAdvertCampaignModel).values(rows[offset : offset + _INSERT_CHUNK])
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["seller_id", "campaign_id"],
+                    set_={column: getattr(excluded, column) for column in rows[0] if column != "seller_id"},
+                )
+            )
+        return len(rows)
+
+    async def ozon_advert_campaigns(self, seller_id: uuid.UUID) -> list[OzonAdvertCampaign]:
+        rows = await self.session.scalars(
+            select(OzonAdvertCampaignModel).where(OzonAdvertCampaignModel.seller_id == seller_id)
+        )
+        names = [field.name for field in fields(OzonAdvertCampaign)]
+        return [OzonAdvertCampaign(**{name: getattr(row, name) for name in names}) for row in rows]
+
+    async def replace_ozon_advert_stats(
+        self, seller_id: uuid.UUID, since: date, until: date, stats: Iterable[OzonAdvertStat], *, now: datetime
+    ) -> int:
+        """Окно дней целиком по всем кампаниям — те же правила, что у рекламы WB."""
+        await self.session.execute(
+            delete(OzonAdvertStatModel).where(
+                OzonAdvertStatModel.seller_id == seller_id,
+                OzonAdvertStatModel.day >= since,
+                OzonAdvertStatModel.day <= until,
+            )
+        )
+        unique = {(item.campaign_id, item.day, item.sku): item for item in stats if since <= item.day <= until}
+        rows = [{"seller_id": seller_id, "collected_at": now, **asdict(item)} for item in unique.values()]
+        await self._insert(OzonAdvertStatModel, rows)
+        return len(rows)
+
+    async def ozon_advert_stats(self, seller_id: uuid.UUID, *, since: date, until: date) -> list[OzonAdvertStat]:
+        rows = await self.session.scalars(
+            select(OzonAdvertStatModel).where(
+                OzonAdvertStatModel.seller_id == seller_id,
+                OzonAdvertStatModel.day >= since,
+                OzonAdvertStatModel.day <= until,
+            )
+        )
+        names = [field.name for field in fields(OzonAdvertStat)]
+        return [OzonAdvertStat(**{name: getattr(row, name) for name in names}) for row in rows]
+
+    async def ozon_advert_cursor(self, seller_id: uuid.UUID) -> date | None:
+        row = await self.session.get(OzonAdvertCursorModel, seller_id)
+        return row.collected_through if row else None
+
+    async def save_ozon_advert_cursor(self, seller_id: uuid.UUID, collected_through: date) -> None:
+        statement = insert(OzonAdvertCursorModel).values(seller_id=seller_id, collected_through=collected_through)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id"], set_={"collected_through": statement.excluded.collected_through}
+            )
+        )
 
     async def lock_catalog(self, seller_id: uuid.UUID) -> None:
         """Транзакционная блокировка на селлера: вторая запись каталога ждёт первую."""

@@ -299,6 +299,7 @@
 .stocks-scroll { max-height: calc(100vh - 230px); overflow: auto; }
 .stocks-scroll .stocks-head { position: sticky; top: 0; z-index: 2; }
 .stocks-scroll .stocks-head .checklist-sticky, .stocks-scroll .stocks-head .stocks-sticky-barcode { z-index: 3; }
+.stocks-product { min-width: 0; overflow-wrap: anywhere; }
 .stocks-product strong { font-size: 12px; line-height: 16px; }
 .stocks-product em { color: var(--ink-muted); font-size: 11px; font-style: normal; }
 .stocks-unknown { color: var(--warning); font-size: 11px; font-style: normal; }

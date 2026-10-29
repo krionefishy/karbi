@@ -12,6 +12,8 @@ MIRROR_REMAINS = "remains"
 MIRROR_SALES_REPORTS = "sales_reports"
 MIRROR_ADVERTS = "adverts"
 MIRROR_OZON_ACCRUALS = "ozon_accruals"
+MIRROR_OZON_PRODUCTS = "ozon_products"
+MIRROR_OZON_ADVERTS = "ozon_adverts"
 MIRROR_KINDS = (
     MIRROR_CATALOG,
     MIRROR_STOCKS,
@@ -23,6 +25,8 @@ MIRROR_KINDS = (
     MIRROR_SALES_REPORTS,
     MIRROR_ADVERTS,
     MIRROR_OZON_ACCRUALS,
+    MIRROR_OZON_PRODUCTS,
+    MIRROR_OZON_ADVERTS,
 )
 
 SALES_REPORT_WEEKLY = "weekly"
@@ -411,6 +415,53 @@ class OzonAccrualLine:
     sale_commission: Decimal
     bonus: Decimal
     coinvestment: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class OzonProduct:
+    """Карточка Ozon из `/v3/product/list`: SKU и артикул продавца, по которым узнают товар в начислениях."""
+
+    sku: int
+    product_id: int
+    offer_id: str
+    name: str
+    archived: bool
+
+
+@dataclass(frozen=True, slots=True)
+class OzonAdvertCampaign:
+    """Рекламная кампания Ozon (Performance API) — как её отдаёт `/api/client/campaign`."""
+
+    campaign_id: int
+    title: str
+    state: str
+    object_type: str
+    payment_type: str
+    # Когда кампания создана и в какие даты шла: статистику просят только за окна,
+    # которые она застала, — у кабинета сотни старых кампаний.
+    created_at: date | None = None
+    from_date: date | None = None
+    to_date: date | None = None
+
+    def overlaps(self, date_from: date, date_to: date) -> bool:
+        started = self.from_date or self.created_at
+        if started is not None and started > date_to:
+            return False
+        return not (self.to_date is not None and self.to_date < date_from)
+
+
+@dataclass(frozen=True, slots=True)
+class OzonAdvertStat:
+    """Расход кампании Ozon по SKU за день из отчёта `/api/client/statistics`."""
+
+    campaign_id: int
+    day: date
+    sku: int
+    views: int
+    clicks: int
+    orders: int
+    money_spent: Decimal
+    orders_money: Decimal
 
 
 def is_review_prompt(sender: str, source: str, text: str | None) -> bool:

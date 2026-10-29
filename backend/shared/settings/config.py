@@ -149,9 +149,13 @@ class TurnoverConfig:
     digest_hour: int = 10
     digest_minute: int = 0
     orders_window_days: int = 3
-    orders_backfill_days: int = 3
+    orders_backfill_days: int = 8
     orders_overlap_hours: int = 24
     threshold_days: int = 10
+    board_window_days: int = 7
+    board_red_days: int = 10
+    board_yellow_days: int = 20
+    board_stale_hours: int = 24
     min_photos: int = 3
     snapshot_retention_days: int = 60
     order_retention_days: int = 45
@@ -306,6 +310,12 @@ class CoreMirrorConfig:
     ozon_interval_minutes: int = 120
     ozon_days_per_run: int = 45
     ozon_overlap_days: int = 3
+    # Карточки Ozon — раз в сутки; расход рекламы Ozon (Performance API) — окнами по 31 дню,
+    # отчёт на окно готовится асинхронно и тратит суточную квоту выгрузок.
+    ozon_products_interval_minutes: int = 1440
+    ozon_adverts_interval_minutes: int = 240
+    ozon_adverts_windows_per_run: int = 3
+    ozon_adverts_overlap_days: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -504,6 +514,10 @@ class Settings:
             "orders_backfill_days",
             "orders_overlap_hours",
             "threshold_days",
+            "board_window_days",
+            "board_red_days",
+            "board_yellow_days",
+            "board_stale_hours",
             "min_photos",
             "snapshot_retention_days",
             "order_retention_days",
@@ -576,6 +590,10 @@ class Settings:
             "ozon_interval_minutes",
             "ozon_days_per_run",
             "ozon_overlap_days",
+            "ozon_products_interval_minutes",
+            "ozon_adverts_interval_minutes",
+            "ozon_adverts_windows_per_run",
+            "ozon_adverts_overlap_days",
         ):
             if key in core_mirror:
                 core_mirror[key] = int(core_mirror[key])
@@ -789,6 +807,16 @@ class Settings:
             raise ValueError("core_mirror.sales_reports_* must be positive")
         if min(mirror.adverts_interval_minutes, mirror.adverts_windows_per_run) < 1 or mirror.adverts_overlap_days < 0:
             raise ValueError("core_mirror.adverts_* must be positive")
+        if (
+            min(
+                mirror.ozon_products_interval_minutes,
+                mirror.ozon_adverts_interval_minutes,
+                mirror.ozon_adverts_windows_per_run,
+            )
+            < 1
+            or mirror.ozon_adverts_overlap_days < 0
+        ):
+            raise ValueError("core_mirror: ozon products/adverts intervals and windows must be positive")
         if min(mirror.ozon_interval_minutes, mirror.ozon_days_per_run) < 1 or mirror.ozon_overlap_days < 0:
             raise ValueError("core_mirror.ozon_* must be positive")
         try:
@@ -908,6 +936,12 @@ class Settings:
             raise ValueError("turnover.threshold_days must be positive")
         if self.turnover.min_photos < 0:
             raise ValueError("turnover.min_photos must not be negative")
+        if not 1 <= self.turnover.board_window_days < self.turnover.order_retention_days:
+            raise ValueError("turnover.board_window_days must be positive and below order_retention_days")
+        if self.turnover.orders_backfill_days <= self.turnover.board_window_days:
+            raise ValueError("turnover.orders_backfill_days must exceed turnover.board_window_days")
+        if not 0 < self.turnover.board_red_days < self.turnover.board_yellow_days:
+            raise ValueError("turnover.board_red_days must be positive and below board_yellow_days")
         if self.turnover.region_history_days < 1:
             raise ValueError("turnover.region_history_days must be positive")
         if self.turnover.region_backfill_step_days < 1:

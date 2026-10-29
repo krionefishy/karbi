@@ -70,7 +70,12 @@ from backend.modules.wb_reviews.application import ReviewReportService, ReviewsE
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_support_bot.application import SupportBotEnrollment, SupportBotService
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
-from backend.modules.wb_turnover.application import ReplenishmentReportService, TurnoverEnrollment, TurnoverService
+from backend.modules.wb_turnover.application import (
+    BoardService,
+    ReplenishmentReportService,
+    TurnoverEnrollment,
+    TurnoverService,
+)
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 from backend.shared.kafka_streams.producer import KafkaProducerWrapper
 from backend.shared.settings import Settings
@@ -314,6 +319,20 @@ class SessionProvider(Provider):
             bots,
             subscriptions,
             bot_code=settings.turnover.notification_bot,
+        )
+
+    @provide(scope=Scope.REQUEST)
+    def turnover_board_service(
+        self, session: AsyncSession, sellers: SellerRepository, turnover: TurnoverRepository, settings: Settings
+    ) -> BoardService:
+        return BoardService(
+            session,
+            sellers,
+            turnover,
+            window_days=settings.turnover.board_window_days,
+            red_days=settings.turnover.board_red_days,
+            yellow_days=settings.turnover.board_yellow_days,
+            stale_hours=settings.turnover.board_stale_hours,
         )
 
     @provide(scope=Scope.REQUEST)

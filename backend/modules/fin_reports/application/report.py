@@ -267,9 +267,11 @@ def _skus_sheet(sheet: Worksheet, view: SkusView) -> None:
                     cells[index].number_format = COUNT_FORMAT
     sheet.column_dimensions["A"].width = 16
     sheet.column_dimensions["B"].width = 14
-    for index in range(3, len(titles) + 1):
+    sheet.column_dimensions["C"].width = 22
+    sheet.column_dimensions["D"].width = 40
+    for index in range(5, len(titles) + 1):
         sheet.column_dimensions[get_column_letter(index)].width = 15
-    sheet.freeze_panes = "C2"
+    sheet.freeze_panes = "D2"
     sheet.auto_filter.ref = f"A1:{get_column_letter(len(titles))}{max(sheet.max_row, 1)}"
     notes = []
     pending = [
@@ -279,9 +281,27 @@ def _skus_sheet(sheet: Worksheet, view: SkusView) -> None:
     ]
     if pending:
         notes.append(f"Начисления Ozon дочитаны не до конца недели: {', '.join(pending)}. Строки неполные.")
+    no_ads = [
+        f"{seller.name} ({seller.ads_error})" if seller.ads_error else seller.name
+        for seller in view.sellers
+        if seller.ads_through is None
+    ]
+    if no_ads:
+        notes.append(
+            f"Расход рекламы Ozon не читается: {', '.join(no_ads)} — реклама этих кабинетов в строке «(пусто)». "
+            "Нужен рабочий ключ Performance API в карточке кабинета Ozon."
+        )
+    behind = [
+        f"{seller.name} (по {seller.ads_through:%d.%m})"
+        for seller in view.sellers
+        if seller.ads_through is not None and seller.ads_through < view.date_to
+    ]
+    if behind:
+        notes.append(f"Расход рекламы Ozon дочитан не до конца недели: {', '.join(behind)}.")
     notes.append(
-        "Начисления без SKU — реклама, подписки, услуги кабинета — в строке «(пусто)»; "
-        "«К перечислению» — продажи с баллами минус всё, что Ozon удержал по SKU."
+        "Реклама из начислений приходит без SKU и разложена по товарам по долям расхода кампаний "
+        "(Performance API); «К перечислению» — продажи с баллами минус всё, что Ozon удержал по SKU; "
+        "подписки и услуги кабинета — в строке «(пусто)»."
     )
     for note in notes:
         sheet.append([])

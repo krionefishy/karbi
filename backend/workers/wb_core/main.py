@@ -6,6 +6,8 @@ from backend.modules.wb_core.application import MirrorService
 from backend.modules.wb_core.infrastructure.wb import (
     EgressGateway,
     OzonFinanceClient,
+    OzonPerformanceClient,
+    OzonProductClient,
     WBAdvertClient,
     WBAnalyticsClient,
     WBChatClient,
@@ -42,6 +44,8 @@ class WBCoreWorkerApplication(WorkerApplication[WBCoreWorker]):
             sales_reports=WBSalesReportsClient(gateway),
             adverts=WBAdvertClient(gateway),
             ozon_finance=OzonFinanceClient(gateway),
+            ozon_products=OzonProductClient(gateway),
+            ozon_performance=OzonPerformanceClient(gateway),
             orders_history_months=self.settings.core_mirror.orders_history_months,
             chats_history_days=self.settings.core_mirror.chats_history_days,
             chats_pages_per_run=self.settings.core_mirror.chats_pages_per_run,
@@ -53,6 +57,8 @@ class WBCoreWorkerApplication(WorkerApplication[WBCoreWorker]):
             ozon_history_from=date.fromisoformat(self.settings.core_mirror.sales_reports_history_from),
             ozon_days_per_run=self.settings.core_mirror.ozon_days_per_run,
             ozon_overlap_days=self.settings.core_mirror.ozon_overlap_days,
+            ozon_adverts_windows_per_run=self.settings.core_mirror.ozon_adverts_windows_per_run,
+            ozon_adverts_overlap_days=self.settings.core_mirror.ozon_adverts_overlap_days,
             heartbeat=touch_heartbeat,
         )
         self.catalog_consumer = self._create_consumer()

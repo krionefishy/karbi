@@ -149,7 +149,7 @@ class MirrorStateModel(WBCoreBase):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', "
-            "'sales_reports', 'adverts', 'ozon_accruals')",
+            "'sales_reports', 'adverts', 'ozon_accruals', 'ozon_products', 'ozon_adverts')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -638,6 +638,73 @@ class OzonAccrualCursorModel(WBCoreBase):
     """Докуда дочитаны начисления Ozon кабинета: день, прочитанный целиком."""
 
     __tablename__ = "ozon_accrual_cursors"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    collected_through: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class OzonProductModel(WBCoreBase):
+    """Карточка Ozon — SKU, артикул продавца и название; переписывается каждым сбором."""
+
+    __tablename__ = "ozon_products"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    sku: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    offer_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OzonAdvertCampaignModel(WBCoreBase):
+    """Рекламная кампания Ozon из Performance API."""
+
+    __tablename__ = "ozon_advert_campaigns"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    campaign_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    state: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    object_type: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    payment_type: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    created_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    from_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    to_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OzonAdvertStatModel(WBCoreBase):
+    """Расход кампании Ozon по SKU за день — окно дней переписывается целиком."""
+
+    __tablename__ = "ozon_advert_stats"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    campaign_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    sku: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    views: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    clicks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orders: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    money_spent: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    orders_money: Mapped[Decimal] = mapped_column(MONEY, nullable=False, default=0)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_wb_core_ozon_advert_stats_day", "seller_id", "day"),)
+
+
+class OzonAdvertCursorModel(WBCoreBase):
+    """Докуда дочитан расход рекламы Ozon: последний день окна, прочитанного целиком."""
+
+    __tablename__ = "ozon_advert_cursors"
 
     seller_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True

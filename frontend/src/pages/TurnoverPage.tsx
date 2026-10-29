@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
+import { TurnoverBoard } from "../components/TurnoverBoard";
 import { SellerSwitcher } from "../components/SellerSwitcher";
 import { Shell } from "../components/Shell";
 import {
@@ -47,6 +48,7 @@ export function TurnoverPage() {
   const [copied, setCopied] = useState(false);
   const [showDormant, setShowDormant] = useState(false);
   const [reportError, setReportError] = useState("");
+  const [tab, setTab] = useState<"articles" | "board">("articles");
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -163,6 +165,18 @@ export function TurnoverPage() {
       }
     >
         <main className="reviews-content">
+          <span className="mode-switch">
+            <button className={tab === "articles" ? "mode-active" : ""} onClick={() => setTab("articles")}>
+              По артикулам
+            </button>
+            <button className={tab === "board" ? "mode-active" : ""} onClick={() => setTab("board")}>
+              Таблица по баркодам
+            </button>
+          </span>
+          {tab === "board" ? (
+            <TurnoverBoard />
+          ) : (
+            <>
           <div className="reviews-heading">
             <div>
               <h1>Оборачиваемость</h1>
@@ -343,6 +357,8 @@ export function TurnoverPage() {
                 );
               })}
             </section>
+            </>
+          )}
             </>
           )}
         </main>

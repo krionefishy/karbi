@@ -38,6 +38,7 @@ class TrackedSellerModel(WBTurnoverBase):
     regions_filled_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     regions_filled_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     fbs_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fbo_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SellerWarehouseModel(WBTurnoverBase):
@@ -93,6 +94,7 @@ class OrderModel(WBTurnoverBase):
     srid: Mapped[str] = mapped_column(String(128), primary_key=True)
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     article: Mapped[str] = mapped_column(String(255), nullable=False)
+    barcode: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     order_date: Mapped[date] = mapped_column(Date, nullable=False)
     last_change_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_cancel: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -103,7 +105,29 @@ class OrderModel(WBTurnoverBase):
     __table_args__ = (
         Index("ix_wb_turnover_orders_window", "seller_id", "order_date"),
         Index("ix_wb_turnover_orders_article", "seller_id", "article", "order_date"),
+        Index("ix_wb_turnover_orders_barcode", "seller_id", "barcode", "order_date"),
     )
+
+
+class BoardItemModel(WBTurnoverBase):
+    """Баркод из списка аналитика: за ним следит таблица оборачиваемости.
+
+    Автоматически строки не появляются — таблица показывает то, что в неё
+    вписали, а не весь каталог. Скрытая строка остаётся со всеми заметками.
+    """
+
+    __tablename__ = "board_items"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    barcode: Mapped[str] = mapped_column(String(64), primary_key=True)
+    nomenclature_1c: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    note: Mapped[str] = mapped_column(String(2000), nullable=False, default="", server_default="")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    note_updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    note_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class RegionOrdersModel(WBTurnoverBase):
@@ -257,3 +281,18 @@ class RefreshRequestModel(WBTurnoverBase):
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
     )
+
+
+class FboStockModel(WBTurnoverBase):
+    """Остаток WB по размеру карточки (`chrtId`) — то, что показывает отчёт кабинета в «Склад WB РФ».
+
+    Артикульные снимки складывают размеры в одну цифру, а таблице по баркодам
+    нужен каждый размер отдельно. Слой переписывается целиком каждым сбором:
+    размера, которого нет в ответе WB, на складе нет.
+    """
+
+    __tablename__ = "fbo_stocks"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    chrt_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
