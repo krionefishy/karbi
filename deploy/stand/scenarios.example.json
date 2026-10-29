@@ -1,0 +1,24 @@
+{
+  "_comment": "Скопируйте в deploy/stand/scenarios.json (он в .gitignore) и правьте: фейк перечитывает файл на каждый запрос, перезапуск не нужен. Правила проверяются сверху вниз, срабатывает первое подходящее. match: sample (имя из samples/manifest.json), request (номер запроса к фейку с его старта), kind (frame | address_bar), sha256 (картинки, как в логе fake-vlm). Действие: error (HTTP-статус числом, \"timeout\", \"invalid_json\", \"empty\"), answer (ответ целиком), patch (слияние с выведенным ответом). times — сколько раз правило сработает.",
+  "rules": [
+    {
+      "match": { "sample": "12-desktop-unique" },
+      "error": 503,
+      "times": 2,
+      "_why": "две ошибки подряд, третья попытка успешна: ретраи без needs_review"
+    },
+    {
+      "match": { "sample": "13-desktop-unique", "kind": "address_bar" },
+      "answer": {
+        "url": "https://seller.wildberries.ru/chat-with-clients?chatId=00000000-1111-4222-a333-444444444444",
+        "chat_id": "00000000-1111-4222-a333-444444444444"
+      },
+      "_why": "адресная строка прочитана иначе, чем кадр: extraction_disagreement_chat_id → needs_review"
+    },
+    {
+      "match": { "sample": "14-mobile-unique" },
+      "patch": { "quality": { "photo_of_screen": true } },
+      "_why": "фото экрана: rejected"
+    }
+  ]
+}
