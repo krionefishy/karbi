@@ -41,6 +41,20 @@ class TrackedSellerModel(WBTurnoverBase):
     fbo_stocks_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class BoardFbsWarehouseModel(WBTurnoverBase):
+    """Склады, по которым таблица по баркодам считает «Остатки ФБС».
+
+    Ключ — название без регистра и лишних пробелов: у каждого кабинета свои id
+    складов, а названия («4. Питер наш») одни.
+    """
+
+    __tablename__ = "board_fbs_warehouses"
+
+    name_key: Mapped[str] = mapped_column(String(255), primary_key=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class SellerWarehouseModel(WBTurnoverBase):
     """A seller's own warehouses — the FBS side of the stock."""
 

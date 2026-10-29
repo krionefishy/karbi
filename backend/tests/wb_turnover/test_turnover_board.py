@@ -206,10 +206,41 @@ async def test_fbs_is_yes_no_or_unknown(application: Application, seller: uuid.U
     assert {row["fbs"] for row in own((await client.get(API)).json()).values()} == {"unknown"}
 
     async with application.database.session() as session:
-        await TurnoverRepository(session).replace_warehouse_stocks(seller, {("1271611253", 7): 4})
+        repository = TurnoverRepository(session)
+        await repository.replace_warehouses(seller, [(7, "4.  Питер наш"), (8, "ФФ Казань")])
+        await repository.replace_warehouse_stocks(seller, {("1271611253", 7): 4, ("1466514852", 8): 9})
         await session.commit()
     rows = own((await client.get(API)).json())
     assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == ("yes", "no")
+
+
+async def test_fbs_counts_only_the_chosen_warehouses_and_the_list_can_grow(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    await seed_stock(application, seller, {})
+    await add(client, seller, DRILL, SAW)
+    async with application.database.session() as session:
+        repository = TurnoverRepository(session)
+        await repository.replace_warehouses(seller, [(7, "4. Питер наш"), (8, "ФФ Казань")])
+        await repository.replace_warehouse_stocks(seller, {("1271611253", 7): 4, ("1466514852", 8): 9})
+        await session.commit()
+
+    options = (await client.get(f"{API}/fbs-warehouses")).json()
+    by_label = {item["label"]: item for item in options}
+    assert by_label["4. Питер наш"]["selected"] is True
+    assert by_label["ФФ Казань"]["selected"] is False
+
+    try:
+        keys = [item["key"] for item in options if item["selected"]] + [by_label["ФФ Казань"]["key"]]
+        assert (await client.put(f"{API}/fbs-warehouses", json={"keys": keys})).status_code == 200
+        rows = own((await client.get(API)).json())
+        assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == ("yes", "yes")
+    finally:
+        async with application.database.session() as session:
+            await TurnoverRepository(session).set_board_fbs_warehouses(
+                {item["key"]: item["label"] for item in options if item["selected"]}
+            )
+            await session.commit()
 
 
 async def test_a_barcode_missing_from_the_catalog_still_gets_a_row(
@@ -304,6 +335,7 @@ async def test_the_workbook_has_the_analysts_columns_and_live_formulas(
     sheet = load_workbook(io.BytesIO(response.content))["Оборачиваемость"]
     header = [cell.value for cell in sheet[1]]
     assert header == [
+        "Хватит на, дн.",
         "Комментарии",
         "Кабинет",
         "Артикул WB",
@@ -313,14 +345,13 @@ async def test_the_workbook_has_the_analysts_columns_and_live_formulas(
         "Остатки ФБО (Склад ВБ РФ)",
         "Продажи за 7 дней",
         "Средние продажи в день",
-        "Оборачиваемость",
         "Остатки ФБС",
     ]
     rows = [dict(zip(header, [cell.value for cell in row], strict=True)) for row in sheet.iter_rows(min_row=2)]
     [row] = [item for item in rows if item["Кабинет"] == NAME]
     assert (row["Баркод"], row["Остатки ФБО (Склад ВБ РФ)"], row["Продажи за 7 дней"]) == (DRILL, 30, 14)
-    assert str(row["Средние продажи в день"]).startswith("=H")
-    assert "ROUNDDOWN" in str(row["Оборачиваемость"])
+    assert str(row["Средние продажи в день"]).startswith("=I")
+    assert "ROUNDDOWN" in str(row["Хватит на, дн."])
 
 
 async def test_deleting_the_seller_with_purge_drops_its_rows(application: Application, seller: uuid.UUID) -> None:

@@ -111,6 +111,17 @@ class BoardItemRequest(BaseModel):
     nomenclature: str | None = Field(default=None, max_length=500)
 
 
+class BoardFbsWarehouseResponse(BaseModel):
+    key: str
+    label: str
+    selected: bool
+    cabinets: int
+
+
+class BoardFbsWarehousesRequest(BaseModel):
+    keys: list[str] = Field(max_length=500)
+
+
 class BoardRefreshResponse(BaseModel):
     queued: int
 

@@ -11,12 +11,15 @@ from backend.modules.wb_turnover.application import (
     BoardInputError,
     BoardService,
     BoardView,
+    FbsWarehouseOption,
     render_board,
 )
 from backend.modules.wb_turnover.application.board_report import XLSX_MEDIA_TYPE
 from backend.modules.wb_turnover.presentation.http.schemas import (
     BoardAddedResponse,
     BoardAddRequest,
+    BoardFbsWarehouseResponse,
+    BoardFbsWarehousesRequest,
     BoardHiddenRequest,
     BoardHiddenRowResponse,
     BoardImportCabinetResponse,
@@ -96,6 +99,28 @@ def board_response(view: BoardView) -> BoardResponse:
 @inject
 async def board(_: CurrentPrincipal, service: FromDishka[BoardService]) -> BoardResponse:
     return board_response(await service.view())
+
+
+def warehouses_response(options: list[FbsWarehouseOption]) -> list[BoardFbsWarehouseResponse]:
+    return [
+        BoardFbsWarehouseResponse(key=item.key, label=item.label, selected=item.selected, cabinets=item.cabinets)
+        for item in options
+    ]
+
+
+@router.get("/fbs-warehouses", response_model=list[BoardFbsWarehouseResponse])
+@inject
+async def fbs_warehouses(_: CurrentPrincipal, service: FromDishka[BoardService]) -> list[BoardFbsWarehouseResponse]:
+    """Склады, по которым считаются «Остатки ФБС»; отмечены выбранные."""
+    return warehouses_response(await service.fbs_warehouses())
+
+
+@router.put("/fbs-warehouses", response_model=list[BoardFbsWarehouseResponse])
+@inject
+async def set_fbs_warehouses(
+    payload: BoardFbsWarehousesRequest, _: CurrentPrincipal, service: FromDishka[BoardService]
+) -> list[BoardFbsWarehouseResponse]:
+    return warehouses_response(await service.set_fbs_warehouses(payload.keys))
 
 
 @router.post("/sellers/{seller_id}/items", response_model=BoardAddedResponse)

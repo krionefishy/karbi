@@ -154,7 +154,7 @@ class TurnoverConfig:
     orders_overlap_hours: int = 24
     threshold_days: int = 10
     board_window_days: int = 7
-    board_red_days: int = 10
+    board_red_days: int = 7
     board_yellow_days: int = 20
     board_stale_hours: int = 24
     min_photos: int = 3

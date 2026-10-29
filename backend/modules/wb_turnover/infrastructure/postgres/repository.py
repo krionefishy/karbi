@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_turnover.domain import ArticleOrders, ArticleStock, TurnoverRow
 from backend.modules.wb_turnover.infrastructure.postgres.models import (
+    BoardFbsWarehouseModel,
     BoardItemModel,
     CollectionRunModel,
     FboStockModel,
@@ -88,6 +89,20 @@ class TurnoverRepository:
             .where(TrackedSellerModel.seller_id == seller_id)
             .values(warehouses_synced_at=datetime.now(UTC))
         )
+
+    async def board_fbs_warehouse_keys(self) -> set[str]:
+        rows = await self.session.execute(select(BoardFbsWarehouseModel.name_key))
+        return {row[0] for row in rows.all()}
+
+    async def board_fbs_warehouse_labels(self) -> dict[str, str]:
+        rows = await self.session.execute(select(BoardFbsWarehouseModel.name_key, BoardFbsWarehouseModel.label))
+        return {row[0]: row[1] for row in rows.all()}
+
+    async def set_board_fbs_warehouses(self, chosen: dict[str, str]) -> None:
+        """Заменяет выбор целиком: ключ → подпись для списка."""
+        await self.session.execute(delete(BoardFbsWarehouseModel))
+        for key, label in chosen.items():
+            self.session.add(BoardFbsWarehouseModel(name_key=key, label=label))
 
     async def warehouses(self, seller_id: uuid.UUID) -> list[tuple[int, str]]:
         rows = await self.session.execute(

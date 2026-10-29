@@ -1,7 +1,7 @@
 import re
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,18 @@ FBS_UNKNOWN = "unknown"
 
 class BoardInputError(Exception):
     """Вписано то, что таблица принять не может, или строки, которой нет."""
+
+
+def warehouse_key(name: str) -> str:
+    return " ".join(name.lower().split())
+
+
+@dataclass(frozen=True, slots=True)
+class FbsWarehouseOption:
+    key: str
+    label: str
+    selected: bool
+    cabinets: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,6 +143,34 @@ class BoardService:
         self.yellow_days = yellow_days
         self.stale = timedelta(hours=stale_hours)
 
+    async def fbs_warehouses(self) -> list[FbsWarehouseOption]:
+        """Все склады кабинетов с отметкой, учитывается ли склад в «Остатках ФБС»."""
+        chosen = await self.turnover.board_fbs_warehouse_labels()
+        found: dict[str, FbsWarehouseOption] = {}
+        tracked = await self.turnover.tracked_seller_ids()
+        for seller in await self.sellers.list_sellers():
+            if seller.id not in tracked:
+                continue
+            for _, name in await self.turnover.warehouses(seller.id):
+                key = warehouse_key(name)
+                option = found.get(key)
+                if option is None:
+                    found[key] = FbsWarehouseOption(
+                        key=key, label=" ".join(name.split()), selected=key in chosen, cabinets=1
+                    )
+                else:
+                    found[key] = replace(option, cabinets=option.cabinets + 1)
+        for key, label in chosen.items():
+            found.setdefault(key, FbsWarehouseOption(key=key, label=label, selected=True, cabinets=0))
+        return sorted(found.values(), key=lambda option: (not option.selected, option.label.lower()))
+
+    async def set_fbs_warehouses(self, keys: list[str]) -> list[FbsWarehouseOption]:
+        known = {option.key: option.label for option in await self.fbs_warehouses()}
+        chosen = {key: known[key] for key in dict.fromkeys(keys) if key in known}
+        await self.turnover.set_board_fbs_warehouses(chosen)
+        await self.session.commit()
+        return await self.fbs_warehouses()
+
     async def view(self, today: date | None = None, now: datetime | None = None) -> BoardView:
         now = now or datetime.now(UTC)
         day = today or now.astimezone(MOSCOW).date()
@@ -147,6 +187,7 @@ class BoardService:
         for item in items:
             by_seller.setdefault(item.seller_id, []).append(item)
 
+        chosen_warehouses = await self.turnover.board_fbs_warehouse_keys()
         states: list[BoardSeller] = []
         rows: list[BoardRow] = []
         hidden: list[HiddenBoardRow] = []
@@ -178,6 +219,11 @@ class BoardService:
             sizes = await self.sellers.list_barcode_sizes(seller.id)
             fbo_by_size = await self.turnover.fbo_stocks(seller.id) if stock_at else {}
             fbs_by_article = await self.turnover.warehouse_stocks(seller.id) if fbs_at else {}
+            chosen_ids = {
+                warehouse_id
+                for warehouse_id, name in await self.turnover.warehouses(seller.id)
+                if warehouse_key(name) in chosen_warehouses
+            }
 
             for item in shown:
                 card = cards.get(item.barcode)
@@ -191,7 +237,12 @@ class BoardService:
                 if fbs_at is None or not article:
                     fbs = FBS_UNKNOWN
                 else:
-                    fbs = FBS_YES if sum(fbs_by_article.get(article, {}).values()) > 0 else FBS_NO
+                    on_shelf = sum(
+                        quantity
+                        for warehouse_id, quantity in fbs_by_article.get(article, {}).items()
+                        if warehouse_id in chosen_ids
+                    )
+                    fbs = FBS_YES if on_shelf > 0 else FBS_NO
                 rows.append(
                     BoardRow(
                         seller_id=seller.id,
