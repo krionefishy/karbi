@@ -174,7 +174,8 @@ class BotMonitor:
             mode=tracked.mode if tracked else "dry_run",
             paused_reason=tracked.paused_reason if tracked else None,
             globally_paused=await repository.is_paused(),
-            mirror_read_through=mirror.read_through if mirror else None,
+            # Свежесть — когда дочитали ленту до конца, а не время последнего события: ночью событий нет часами.
+            mirror_read_through=(mirror.synced_through or mirror.read_through) if mirror else None,
             mirror_error=mirror.error if mirror else None,
             sends_failed_24h=counts.get("failed", 0),
             sends_unknown_24h=counts.get("unknown", 0),
