@@ -17,7 +17,6 @@ class SupportBotResponse(BaseModel):
     templates: list[TemplateResponse]
     mirror_error: str | None
     mirror_read_through: str | None
-    canary_percent: int
     classifier_mode: str
     reply_gate_mode: str
 

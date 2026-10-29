@@ -136,8 +136,6 @@ card_documents:
   stock_fresh_hours: 48
 
 support_bot:
-  # Доля диалогов, по которым в режиме «канарейка» уходят настоящие сообщения.
-  canary_percent: ${SUPPORT_BOT_CANARY_PERCENT:-50}
   # off | shadow | enforce: как вердикт нейросети влияет на отправку (shadow — только записываем).
   classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-enforce}
   classifier_prompt_version: v2

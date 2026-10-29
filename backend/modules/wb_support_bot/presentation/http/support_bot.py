@@ -144,7 +144,6 @@ async def seller_view(
         templates=[template_response(item) for item in view.templates],
         mirror_error=view.mirror_error,
         mirror_read_through=_iso(view.mirror_read_through),
-        canary_percent=view.canary_percent,
         classifier_mode=view.classifier_mode,
         reply_gate_mode=view.reply_gate_mode,
     )

@@ -6,7 +6,7 @@ export type DialogState =
   | "product_removed"
   | "exhausted"
   | "closed";
-export type BotMode = "dry_run" | "canary" | "live";
+export type BotMode = "dry_run" | "live";
 export type DialogFlag = "no_contact" | "attention" | "excluded";
 export type SendStatus =
   "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";
@@ -27,7 +27,6 @@ export interface SupportBot {
   templates: Template[];
   mirror_error: string | null;
   mirror_read_through: string | null;
-  canary_percent: number;
   classifier_mode: ClassifierMode;
   reply_gate_mode: ReplyGateMode;
 }

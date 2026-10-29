@@ -27,7 +27,6 @@ from backend.modules.wb_support_bot.domain import (
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
-    MODE_CANARY,
     MODE_DRY_RUN,
     MODE_LIVE,
     DialogKey,
@@ -40,7 +39,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
 )
 
 MAX_TEMPLATE_LENGTH = 1000
-MODES = (MODE_DRY_RUN, MODE_CANARY, MODE_LIVE)
+MODES = (MODE_DRY_RUN, MODE_LIVE)
 
 
 class NotEnrolledError(Exception):
@@ -79,7 +78,6 @@ class SellerBotView:
     mirror_error: str | None
     mirror_read_through: datetime | None
     dry_run: bool
-    canary_percent: int
     classifier_mode: str
     reply_gate_mode: str
 
@@ -259,13 +257,11 @@ class SupportBotService(ReplyStatsMixin):
         sellers: SellerRepository,
         repository: SupportBotRepository,
         *,
-        canary_percent: int = 10,
         classifier_mode: str = MODE_OFF,
         classifier_prompt_version: str = "v2",
         reply_gate_mode: str = MODE_OFF,
         reply_prompt_version: str = "r2",
     ) -> None:
-        self.canary_percent = canary_percent
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
         self.reply_gate_mode = reply_gate_mode
@@ -316,7 +312,6 @@ class SupportBotService(ReplyStatsMixin):
             mirror_error=state.error if state else None,
             mirror_read_through=state.read_through if state else None,
             dry_run=tracked.mode == MODE_DRY_RUN,
-            canary_percent=self.canary_percent,
             classifier_mode=self.classifier_mode,
             reply_gate_mode=self.reply_gate_mode,
         )
@@ -357,7 +352,7 @@ class SupportBotService(ReplyStatsMixin):
         await self._tracked(seller_id)
         if mode not in MODES:
             raise BotRequestError(f"Неизвестный режим: {mode}")
-        await self.repository.set_mode(seller_id, mode, self.canary_percent)
+        await self.repository.set_mode(seller_id, mode)
         await self.session.commit()
 
     async def set_paused(self, paused: bool) -> None:

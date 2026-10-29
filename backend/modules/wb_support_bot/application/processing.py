@@ -22,7 +22,6 @@ from backend.modules.wb_support_bot.domain import (
     SentMessage,
     first_send_at,
     gate_decision,
-    in_canary,
     is_wb_notice,
     may_send,
     next_send_at,
@@ -34,7 +33,6 @@ from backend.modules.wb_support_bot.domain import (
     tail_message,
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
-    MODE_CANARY,
     MODE_LIVE,
     SEND_DRY_RUN,
     SEND_FAILED,
@@ -69,7 +67,6 @@ class BotPolicy:
     batch: int = 20
     history: timedelta = timedelta(days=12)
     mirror_stale: timedelta = timedelta(minutes=90)
-    canary_percent: int = 10
     classifier_mode: str = MODE_OFF
     classifier_prompt_version: str = "v2"
     classifier_retry: timedelta = timedelta(minutes=15)
@@ -530,7 +527,7 @@ class SupportBotProcessor:
                 report.held += 1
                 await self.repository.session.commit()
                 continue
-            live = self._is_live(mode, dialog)
+            live = mode == MODE_LIVE
             text_model = self._pick_template(templates, await self._last_template(dialog))
             sends = await self.repository.dialog_sends(_key(dialog))
             seq = (max((send.seq for send in sends), default=0)) + 1
@@ -593,14 +590,6 @@ class SupportBotProcessor:
             return await self.sender.reply_signs(str(seller_id))
         except (WBPermanentError, WBTemporaryError):
             return {}
-
-    def _is_live(self, mode: str, dialog: DialogModel) -> bool:
-        """Уйдёт ли по диалогу настоящее сообщение: весь кабинет в live либо диалог попал в канарейку."""
-        if mode == MODE_LIVE:
-            return True
-        if mode == MODE_CANARY:
-            return in_canary(dialog.chat_id, dialog.prompt_at, self.policy.canary_percent)
-        return False
 
     def _mark_sent(self, dialog: DialogModel, now: datetime) -> None:
         dialog.sent_count += 1

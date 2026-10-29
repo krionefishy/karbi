@@ -11,7 +11,6 @@ class WBSupportBotBase(DeclarativeBase):
 
 
 MODE_DRY_RUN = "dry_run"
-MODE_CANARY = "canary"
 MODE_LIVE = "live"
 
 
@@ -198,7 +197,6 @@ class ModeChangeModel(WBSupportBotBase):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
-    canary_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (Index("ix_wb_support_bot_mode_changes_seller", "seller_id", "changed_at"),)
@@ -236,7 +234,6 @@ class SendModel(WBSupportBotBase):
 
 
 __all__ = [
-    "MODE_CANARY",
     "MODE_DRY_RUN",
     "MODE_LIVE",
     "SEND_DRY_RUN",

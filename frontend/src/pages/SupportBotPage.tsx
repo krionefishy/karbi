@@ -60,7 +60,6 @@ const stamp = (value: string | null) => (value ? momentFormatter.format(new Date
 
 const MODE_OPTIONS: { value: BotMode; label: string }[] = [
   { value: "dry_run", label: "Сухой прогон" },
-  { value: "canary", label: "Канарейка" },
   { value: "live", label: "Вся рассылка" },
 ];
 
@@ -84,7 +83,7 @@ export function SupportBotPage() {
   const [journalFilter, setJournalFilter] = useState<JournalFilter>({ status: "", page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
-  const [pendingMode, setPendingMode] = useState<"canary" | "live" | null>(null);
+  const [pendingMode, setPendingMode] = useState<"live" | null>(null);
   const [tab, setTab] = useState<"dialogs" | "replies">("dialogs");
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -307,7 +306,7 @@ export function SupportBotPage() {
                       else setPendingMode(option.value);
                     }}
                   >
-                    {option.value === "canary" ? `Канарейка ${view.canary_percent}%` : option.label}
+                    {option.label}
                   </button>
                 ))}
               </span>
@@ -534,12 +533,8 @@ export function SupportBotPage() {
       )}
       {pendingMode && (
         <ConfirmDialog
-          title={pendingMode === "canary" ? "Включить канарейку?" : "Включить отправку по всем диалогам?"}
-          description={
-            pendingMode === "canary"
-              ? `Настоящие сообщения начнут уходить покупателям примерно ${view?.canary_percent ?? 10}% диалогов этого кабинета: окно 9:00–22:00 по Москве. По остальным диалогам останется сухой прогон. Вернуть сухой прогон можно в любой момент.`
-              : "Бот начнёт писать покупателям всех диалогов этого кабинета по расписанию: окно 9:00–22:00 по Москве, около 12 сообщений в сутки на диалог. Вернуть сухой прогон можно в любой момент."
-          }
+          title="Включить отправку по всем диалогам?"
+          description="Бот начнёт писать покупателям всех диалогов этого кабинета по расписанию: окно 9:00–22:00 по Москве, около 12 сообщений в сутки на диалог. Вернуть сухой прогон можно в любой момент."
           confirmLabel="Включить"
           pendingLabel="Включаем…"
           pending={modeMutation.isPending}

@@ -63,8 +63,8 @@ class SupportBotRepository:
         ):
             await self.session.execute(delete(model).where(model.seller_id == seller_id))
 
-    async def set_mode(self, seller_id: uuid.UUID, mode: str, canary_percent: int | None = None) -> None:
-        self.session.add(ModeChangeModel(seller_id=seller_id, mode=mode, canary_percent=canary_percent))
+    async def set_mode(self, seller_id: uuid.UUID, mode: str) -> None:
+        self.session.add(ModeChangeModel(seller_id=seller_id, mode=mode))
         await self.session.execute(
             update(TrackedSellerModel)
             .where(TrackedSellerModel.seller_id == seller_id)

@@ -34,7 +34,6 @@ export const SEND_LABEL: Record<SendStatus, string> = {
 
 export const MODE_LABEL: Record<BotMode, string> = {
   dry_run: "Сухой прогон",
-  canary: "Канарейка",
   live: "Отправка включена",
 };
 
@@ -53,14 +52,11 @@ export function totalDialogs(bot: Pick<SupportBot, "counts">): number {
 }
 
 export function statusLine(
-  bot: Pick<SupportBot, "mode" | "paused_reason" | "globally_paused"> & { canary_percent?: number },
+  bot: Pick<SupportBot, "mode" | "paused_reason" | "globally_paused">,
 ): string {
   if (bot.globally_paused) return "Рассылка остановлена общим выключателем";
   if (bot.paused_reason) return `Отправка остановлена: ${bot.paused_reason}`;
   if (bot.mode === "live") return "Бот отправляет сообщения";
-  if (bot.mode === "canary") {
-    return `Канарейка: сообщения уходят только по ${bot.canary_percent ?? 10}% диалогов, по остальным сухой прогон`;
-  }
   return "Сухой прогон: бот считает, но ничего не отправляет";
 }
 

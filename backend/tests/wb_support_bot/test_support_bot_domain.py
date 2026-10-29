@@ -250,22 +250,6 @@ def test_chat_link_uses_the_uuid_without_the_feed_prefix():
     assert chat_url("", "1:abc") is None
 
 
-def test_canary_membership_is_stable_and_roughly_the_requested_share():
-    from backend.modules.wb_support_bot.domain import canary_bucket, in_canary
-
-    chats = [f"1:chat-{number}" for number in range(2000)]
-    first = [in_canary(chat, PROMPT, 10) for chat in chats]
-    again = [in_canary(chat, PROMPT, 10) for chat in chats]
-
-    assert first == again
-    assert 140 <= sum(first) <= 260
-    assert all(0 <= canary_bucket(chat, PROMPT) < 100 for chat in chats)
-    wider = [in_canary(chat, PROMPT, 30) for chat in chats]
-    assert all(wide for narrow, wide in zip(first, wider, strict=True) if narrow)
-    assert not in_canary("1:x", PROMPT, 0)
-    assert in_canary("1:x", PROMPT, 100)
-
-
 def test_a_campaign_does_not_start_for_a_conversation_that_ended_long_ago():
     rules = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_idle=timedelta(days=2))
     events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "Опишите проблему")]

@@ -354,7 +354,6 @@ class SupportBotConfig:
     history_days: int = 12
     mirror_stale_minutes: int = 90
     max_idle_days: int = 5
-    canary_percent: int = 10
     classifier_mode: str = "shadow"
     classifier_prompt_version: str = "v2"
     classifier_retry_minutes: int = 15
@@ -851,8 +850,6 @@ class Settings:
             or bot.min_gap_seconds < 0
         ):
             raise ValueError("support_bot.* limits must be positive")
-        if not 1 <= bot.canary_percent <= 100:
-            raise ValueError("support_bot.canary_percent must be between 1 and 100")
         if bot.max_idle_days < 1:
             raise ValueError("support_bot.max_idle_days must be positive")
         if bot.history_days <= bot.campaign_days:
