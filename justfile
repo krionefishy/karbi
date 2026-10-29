@@ -182,3 +182,25 @@ prod-backup-list:
 # Restore a named dump over the current database. DESTRUCTIVE: stop the app first.
 prod-restore dump:
     {{ prod_compose }} exec -T pg-backup sh -c 'pg_restore --clean --if-exists --no-owner --dbname="$PGDATABASE" /backups/{{ dump }}'
+
+# Локальный стенд «Контроль скриншотов ДБС» (docs/STAND.md): свой профиль Colima, фейковая модель, MinIO.
+stand-up:
+    deploy/stand/stand.sh up
+
+stand-down:
+    deploy/stand/stand.sh down
+
+# Стереть данные стенда (базу, Kafka, MinIO) и поднять заново; логины из .credentials.txt сохраняются.
+stand-reset:
+    deploy/stand/stand.sh reset
+
+stand-logs *services:
+    deploy/stand/stand.sh logs {{ services }}
+
+# Синтетические скриншоты в deploy/stand/samples (`--random 10` — ещё десять уникальных).
+stand-samples *args:
+    uv run python deploy/stand/make_samples.py {{ args }}
+
+# Распакованное расширение стенда в deploy/stand/extension/unpacked (адрес http://localhost:8090).
+stand-extension:
+    deploy/stand/build-extension.sh http://localhost:8090 deploy/stand/extension

@@ -16,3 +16,7 @@ extension/node_modules
 extension/dist
 extension/dist-screens
 extension/*.zip
+deploy/stand/.env.stand
+deploy/stand/.credentials.txt
+deploy/stand/samples
+deploy/stand/extension
