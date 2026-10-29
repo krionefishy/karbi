@@ -26,6 +26,7 @@ from backend.modules.wb_screenshot_control.application.ingest import IngestResul
 from backend.modules.wb_screenshot_control.application.outcomes import expire_outcomes
 from backend.modules.wb_screenshot_control.application.pipeline import (
     MAX_DEFERRALS,
+    MAX_ORDER_WAIT,
     PARKED_NOTE,
     RETRY_DELAYS,
     case_keys,
@@ -262,7 +263,9 @@ async def test_a_later_screen_waits_for_an_earlier_one(pipeline: Pipeline) -> No
     await pipeline.decide(late_extracted)
     assert (await pipeline.submission(late.submission_id)).stage == "extracted"
     deferred = await take(pipeline.database, EVENT_EXTRACTED)
-    assert deferred[0].payload["deferrals"] == 1 and deferred[0].next_attempt_at > pipeline.clock.now
+    assert deferred[0].payload["deferrals"] == 1
+    # Первая перепроверка через секунды: пачка не выстраивается в очередь по полминуты.
+    assert pipeline.clock.now < deferred[0].next_attempt_at <= pipeline.clock.now + timedelta(seconds=5)
     assert pipeline.decider.calls == []
 
     await pipeline.extract(submitted[str(early.submission_id)])
@@ -278,6 +281,7 @@ async def test_a_later_screen_waits_for_an_earlier_one(pipeline: Pipeline) -> No
 
 
 async def test_waiting_is_bounded(pipeline: Pipeline) -> None:
+    assert timedelta(minutes=3) >= MAX_ORDER_WAIT
     await pipeline.ingest(6)
     late = await pipeline.ingest(7)
     submitted = {row.payload["submission_id"]: row.payload for row in await take(pipeline.database, EVENT_SUBMITTED)}

@@ -57,10 +57,12 @@ from backend.storage.pg import Database
 
 # Паузы перед повтором распознавания: после 1-й, 2-й, 3-й, 4-й неудачи.
 RETRY_DELAYS = (timedelta(seconds=15), timedelta(seconds=60), timedelta(minutes=5), timedelta(minutes=20))
-# Решение ждёт более ранний скрин моложе получаса, перепроверяя раз в 30 секунд.
+# Решение ждёт более ранний скрин моложе получаса. Перепроверки сначала частые (ранний обычно решается
+# за секунды, и пачка не должна выстраиваться в очередь по 30 с), потом реже; в сумме не больше 3 минут.
 ORDER_WINDOW = timedelta(minutes=30)
-DEFER_DELAY = timedelta(seconds=30)
-MAX_DEFERRALS = 6
+DEFER_DELAYS = tuple(timedelta(seconds=seconds) for seconds in (2, 2, 4, 4, 8, 8, 15, 15, 30, 30, 30, 30))
+MAX_DEFERRALS = len(DEFER_DELAYS)
+MAX_ORDER_WAIT = sum(DEFER_DELAYS, timedelta())
 MIN_MESSAGE_LEN = 8
 
 Clock = Callable[[], datetime]
@@ -445,7 +447,7 @@ class DecisionService:
             if event.deferrals < MAX_DEFERRALS and await repository.earlier_undecided(submission, now - ORDER_WINDOW):
                 # Более ранний скрин ещё в работе: решать после него, иначе поздний займёт место оригинала.
                 later = event.model_copy(update={"event_id": None, "deferrals": event.deferrals + 1})
-                publish(session, later, not_before=now + DEFER_DELAY)
+                publish(session, later, not_before=now + DEFER_DELAYS[event.deferrals])
                 repository.mark_inbox(event_id, EVENT_EXTRACTED)
                 await session.commit()
                 return
