@@ -17,7 +17,6 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 BARCODE = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
 
 
-
 class BoardInputError(Exception):
     """Вписано то, что таблица принять не может, или строки, которой нет."""
 
