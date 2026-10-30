@@ -8,7 +8,7 @@ from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from backend.modules.wb_turnover.application.board import FBS_NO, FBS_YES, BoardView
+from backend.modules.wb_turnover.application.board import BoardView
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -25,8 +25,6 @@ COLUMNS = (
     ("Средние продажи в день", 14),
     ("Остатки ФБС", 12),
 )
-
-FBS_LABELS = {FBS_YES: "Есть", FBS_NO: "Нет"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +70,7 @@ def render_board(view: BoardView) -> BoardReportFile:
                 row.stock,
                 row.orders,
                 f"=I{number}/{view.window_days}",
-                FBS_LABELS.get(row.fbs),
+                row.fbs,
             ]
         )
         sheet.cell(row=number, column=4).number_format = "@"

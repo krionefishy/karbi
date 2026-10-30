@@ -200,10 +200,10 @@ async def test_an_article_without_orders_is_no_sales(
     assert (row["stock"], row["orders"], row["days"], row["status"]) == (12, 0, None, "no_sales")
 
 
-async def test_fbs_is_yes_no_or_unknown(application: Application, seller: uuid.UUID, client: AsyncClient) -> None:
+async def test_fbs_is_the_quantity_or_unknown(application: Application, seller: uuid.UUID, client: AsyncClient) -> None:
     await seed_stock(application, seller, {})
     await add(client, seller, DRILL, SAW)
-    assert {row["fbs"] for row in own((await client.get(API)).json()).values()} == {"unknown"}
+    assert {row["fbs"] for row in own((await client.get(API)).json()).values()} == {None}
 
     async with application.database.session() as session:
         repository = TurnoverRepository(session)
@@ -211,7 +211,7 @@ async def test_fbs_is_yes_no_or_unknown(application: Application, seller: uuid.U
         await repository.replace_warehouse_stocks(seller, {("1271611253", 7): 4, ("1466514852", 8): 9})
         await session.commit()
     rows = own((await client.get(API)).json())
-    assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == ("yes", "no")
+    assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == (4, 0)
 
 
 async def test_fbs_counts_only_the_chosen_warehouses_and_the_list_can_grow(
@@ -234,7 +234,7 @@ async def test_fbs_counts_only_the_chosen_warehouses_and_the_list_can_grow(
         keys = [item["key"] for item in options if item["selected"]] + [by_label["ФФ Казань"]["key"]]
         assert (await client.put(f"{API}/fbs-warehouses", json={"keys": keys})).status_code == 200
         rows = own((await client.get(API)).json())
-        assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == ("yes", "yes")
+        assert (rows[DRILL]["fbs"], rows[SAW]["fbs"]) == (4, 9)
     finally:
         async with application.database.session() as session:
             await TurnoverRepository(session).set_board_fbs_warehouses(

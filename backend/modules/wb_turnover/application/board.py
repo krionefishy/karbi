@@ -16,9 +16,6 @@ from backend.modules.wb_turnover.infrastructure.postgres import TurnoverReposito
 MOSCOW = ZoneInfo("Europe/Moscow")
 BARCODE = re.compile(r"^[A-Za-z0-9_-]{3,64}$")
 
-FBS_YES = "yes"
-FBS_NO = "no"
-FBS_UNKNOWN = "unknown"
 
 
 class BoardInputError(Exception):
@@ -54,7 +51,7 @@ class BoardRow:
     days: int | None
     status: str
     tone: str
-    fbs: str
+    fbs: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,14 +232,13 @@ class BoardService:
                     orders=orders.get(item.barcode, 0), stock=stock, window_days=self.window_days
                 )
                 if fbs_at is None or not article:
-                    fbs = FBS_UNKNOWN
+                    fbs = None
                 else:
-                    on_shelf = sum(
+                    fbs = sum(
                         quantity
                         for warehouse_id, quantity in fbs_by_article.get(article, {}).items()
                         if warehouse_id in chosen_ids
                     )
-                    fbs = FBS_YES if on_shelf > 0 else FBS_NO
                 rows.append(
                     BoardRow(
                         seller_id=seller.id,

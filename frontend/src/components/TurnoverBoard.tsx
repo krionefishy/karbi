@@ -331,7 +331,7 @@ export function TurnoverBoard() {
               <span className={`stocks-cell ${row.stock === 0 ? "stocks-zero" : ""}`}>{row.stock ?? "—"}</span>
               <span className="stocks-cell">{row.orders}</span>
               <span className="stocks-cell">{row.rate.toFixed(1)}</span>
-              <span className={`stocks-cell ${row.fbs === "no" ? "stocks-zero" : ""}`}>{fbsText[row.fbs]}</span>
+              <span className={`stocks-cell ${row.fbs === 0 ? "stocks-zero" : ""}`}>{fbsText(row)}</span>
               <button
                 type="button"
                 className="stocks-remove"

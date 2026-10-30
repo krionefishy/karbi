@@ -67,7 +67,7 @@ class BoardRowResponse(BaseModel):
     days: int | None
     status: str
     tone: str
-    fbs: str
+    fbs: int | None
 
 
 class BoardHiddenRowResponse(BaseModel):
