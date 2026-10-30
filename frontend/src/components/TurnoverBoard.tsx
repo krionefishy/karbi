@@ -25,7 +25,7 @@ import {
   type BoardSortKey,
 } from "../features/turnover/board";
 
-const TEMPLATE = "120px 220px 130px 140px 380px 110px 110px 110px 90px 44px";
+const TEMPLATE = "220px 130px 140px 380px 120px 110px 110px 110px 90px 44px";
 
 const message = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
 
@@ -271,13 +271,13 @@ export function TurnoverBoard() {
       ) : (
         <section className="checklist-scroll stocks-scroll" style={{ "--stocks-template": TEMPLATE } as CSSProperties}>
           <div className="stocks-head">
-            <button type="button" className="stocks-group-head" onClick={() => toggleSort("days")}>
-              Хватит на {sortMark("days")}
-            </button>
             <span>Комментарии</span>
             <span>Кабинет</span>
             <span>Баркод</span>
             <span>Товар</span>
+            <button type="button" className="stocks-group-head" onClick={() => toggleSort("days")}>
+              Хватит на {sortMark("days")}
+            </button>
             <button type="button" className="stocks-group-head" onClick={() => toggleSort("stock")}>
               Остаток WB {sortMark("stock")}
             </button>
@@ -290,7 +290,6 @@ export function TurnoverBoard() {
           </div>
           {rows.map((row) => (
             <div className="stocks-row" key={`${row.seller_id}:${row.barcode}`}>
-              <span className={`stocks-cell cover cover-${row.tone}`}>{daysText(row)}</span>
               <div className="checklist-comment">
                 <input
                   key={`${row.barcode}:${row.note}`}
@@ -328,6 +327,7 @@ export function TurnoverBoard() {
                   <em className="stocks-unknown">нет в каталоге кабинета</em>
                 )}
               </span>
+              <span className={`stocks-cell cover cover-${row.tone}`}>{daysText(row)}</span>
               <span className={`stocks-cell ${row.stock === 0 ? "stocks-zero" : ""}`}>{row.stock ?? "—"}</span>
               <span className="stocks-cell">{row.orders}</span>
               <span className="stocks-cell">{row.rate.toFixed(1)}</span>

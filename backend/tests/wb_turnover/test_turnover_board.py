@@ -335,13 +335,13 @@ async def test_the_workbook_has_the_analysts_columns_and_live_formulas(
     sheet = load_workbook(io.BytesIO(response.content))["Оборачиваемость"]
     header = [cell.value for cell in sheet[1]]
     assert header == [
-        "Хватит на, дн.",
         "Комментарии",
         "Кабинет",
         "Артикул WB",
         "Баркод",
         "Артикул продавца",
         "Номенклатура 1С",
+        "Хватит на, дн.",
         "Остатки ФБО (Склад ВБ РФ)",
         "Продажи за 7 дней",
         "Средние продажи в день",
