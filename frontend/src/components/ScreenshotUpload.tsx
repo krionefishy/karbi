@@ -15,9 +15,12 @@ function imageFiles(list: FileList | null | undefined): File[] {
 interface ScreenshotUploadProps {
   limits: UploadLimits | undefined;
   onUploaded: () => void;
+  /** «Москва, UTC+3»: пояс, в котором читается время отзыва; пока не загружен — подсказки нет. */
+  timezoneLabel?: string;
+  onChangeTimezone?: () => void;
 }
 
-export function ScreenshotUpload({ limits, onUploaded }: ScreenshotUploadProps) {
+export function ScreenshotUpload({ limits, onUploaded, timezoneLabel, onChangeTimezone }: ScreenshotUploadProps) {
   const queue = useUploadQueue(limits, onUploaded);
   const [bulk, setBulk] = useState<Outcome | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -132,6 +135,16 @@ export function ScreenshotUpload({ limits, onUploaded }: ScreenshotUploadProps) 
       <ul className="sc-hints">
         <li>Расширение Chrome: Alt+Shift+S, исход выбирается в попапе.</li>
         <li>Скриншот окна целиком, не фото экрана; с телефона — нативный скриншот.</li>
+        {timezoneLabel && (
+          <li>
+            Время отзыва читается в вашем поясе: {timezoneLabel}.{" "}
+            {onChangeTimezone && (
+              <button type="button" className="link-button" onClick={onChangeTimezone}>
+                Изменить
+              </button>
+            )}
+          </li>
+        )}
       </ul>
     </section>
   );

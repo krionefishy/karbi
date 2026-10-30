@@ -13,6 +13,7 @@ import {
   statusBadgeClass,
   statusLabel,
   submissionNote,
+  zoneLabel,
 } from "./format";
 import type { Submission } from "./types";
 
@@ -142,5 +143,10 @@ describe("screenshot control format", () => {
     expect(formatBytes(15 * 1024 * 1024)).toBe("15 МБ");
     expect(formatBytes(2.5 * 1024 * 1024)).toBe("2,5 МБ");
     expect(formatBytes(300 * 1024)).toBe("300 КБ");
+  });
+  it("labels the manager timezone from the list", () => {
+    const zones = [{ id: "Europe/Moscow", label: "Москва, UTC+3", utc_offset_minutes: 180 }];
+    expect(zoneLabel({ timezone: "Europe/Moscow", zones })).toBe("Москва, UTC+3");
+    expect(zoneLabel({ timezone: "Asia/Tokyo", zones })).toBe("Asia/Tokyo");
   });
 });

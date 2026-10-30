@@ -95,7 +95,8 @@ export type ErrorCode =
   | "duplicate_target_invalid"
   | "telegram_disabled"
   | "transition_not_allowed"
-  | "bad_cursor";
+  | "bad_cursor"
+  | "bad_timezone";
 
 export interface ErrorResponse {
   detail: string;
@@ -178,6 +179,20 @@ export interface ManagerConfig {
   bot_username: string | null;
 }
 
+/** Часовой пояс из списка допустимых: id — IANA, label — «Москва, UTC+3». */
+export interface Zone {
+  id: string;
+  label: string;
+  utc_offset_minutes: number;
+}
+
+/** Настройки менеджера: пояс, в котором кабинет WB показывает ему время отзыва (по умолчанию Москва). */
+export interface ManagerSettings {
+  timezone: string;
+  zones: Zone[];
+  default: string;
+}
+
 export interface PairingCode {
   /** 8 символов Crockford base32. */
   code: string;
@@ -244,6 +259,8 @@ export interface ExtensionMe {
   allowed_url_prefixes: string[];
   summary: Summary;
   server_time: string;
+  /** Пояс менеджера (IANA), в котором читается время отзыва. */
+  timezone: string;
 }
 
 export interface ExtensionSubmissionList {
@@ -312,6 +329,8 @@ export interface AdminFields {
   buyer_name_seen: boolean;
   quality: QualityFlags | null;
   confidence: FieldConfidence;
+  /** Пояс менеджера (IANA), в котором прочитано время отзыва; null — пояс модуля, Москва. */
+  review_tz?: string | null;
 }
 
 export interface AdminSubmission {

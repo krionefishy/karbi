@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getQueue, getSubmissions, getSummary, resolveSubmission, setOutcome, uploadSubmission } from "./api";
+import {
+  getQueue,
+  getSettings,
+  getSubmissions,
+  getSummary,
+  resolveSubmission,
+  setOutcome,
+  updateSettings,
+  uploadSubmission,
+} from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,5 +78,20 @@ describe("screenshot control api", () => {
       code: "note_required",
       message: "Нужен комментарий",
     });
+  });
+  it("reads and saves the manager timezone", async () => {
+    const answer = { timezone: "Asia/Vladivostok", zones: [], default: "Europe/Moscow" };
+    const request = vi.fn(async (_url: string, _init?: RequestInit) => json(answer));
+    vi.stubGlobal("fetch", request);
+
+    await getSettings();
+    expect(await updateSettings("Asia/Vladivostok")).toEqual(answer);
+
+    expect(request.mock.calls[0][0]).toBe("/api/v1/wb/screenshot-control/settings");
+    expect(request.mock.calls[0][1]?.method).toBeUndefined();
+    const [url, init] = request.mock.calls[1];
+    expect(url).toBe("/api/v1/wb/screenshot-control/settings");
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({ timezone: "Asia/Vladivostok" });
   });
 });

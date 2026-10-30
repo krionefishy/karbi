@@ -4,10 +4,17 @@ import { useState } from "react";
 import { ScreenshotConnections } from "../components/ScreenshotConnections";
 import { ScreenshotKpi } from "../components/ScreenshotKpi";
 import { POLL_MS, ScreenshotList, SUBMISSIONS_KEY } from "../components/ScreenshotList";
+import { useManagerSettings } from "../components/ScreenshotTimezone";
 import { ScreenshotUpload } from "../components/ScreenshotUpload";
 import { Shell } from "../components/Shell";
 import { getConfig, getSummary } from "../features/screenshotControl/api";
-import { customRangeError, periodRange, type PeriodKind, type PeriodRange } from "../features/screenshotControl/format";
+import {
+  customRangeError,
+  periodRange,
+  type PeriodKind,
+  type PeriodRange,
+  zoneLabel,
+} from "../features/screenshotControl/format";
 
 const TITLE = "Контроль скриншотов ДБС";
 const SUMMARY_KEY = "sc-summary";
@@ -28,6 +35,7 @@ export function ScreenshotControlPage() {
   const [custom, setCustom] = useState<PeriodRange>(() => periodRange("week"));
 
   const config = useQuery({ queryKey: ["sc-config"], queryFn: getConfig, staleTime: 5 * 60_000 });
+  const settings = useManagerSettings();
   const rangeError = periodKind === "custom" ? customRangeError(custom) : "";
   const period = periodKind === "custom" ? custom : periodRange(periodKind);
   const summary = useQuery({
@@ -139,7 +147,12 @@ export function ScreenshotControlPage() {
             )}
 
             <div className="sc-columns">
-              <ScreenshotUpload limits={config.data} onUploaded={onUploaded} />
+              <ScreenshotUpload
+                limits={config.data}
+                onUploaded={onUploaded}
+                timezoneLabel={settings.data ? zoneLabel(settings.data) : undefined}
+                onChangeTimezone={() => setTab("connections")}
+              />
               <ScreenshotList />
             </div>
           </>

@@ -9,6 +9,7 @@ import { clearImageCache } from "../features/screenshotControl/images";
 import type {
   ExtensionInstall,
   ManagerConfig,
+  ManagerSettings,
   Submission,
   SubmissionPage,
   Summary,
@@ -36,6 +37,14 @@ const config: ManagerConfig = {
   extension_min_version: "1.0.0",
   bot_username: null,
 };
+
+const zones = [
+  { id: "Europe/Kaliningrad", label: "Калининград, UTC+2", utc_offset_minutes: 120 },
+  { id: "Europe/Moscow", label: "Москва, UTC+3", utc_offset_minutes: 180 },
+  { id: "Asia/Yekaterinburg", label: "Екатеринбург, UTC+5", utc_offset_minutes: 300 },
+];
+
+const settingsOf = (timezone = "Europe/Moscow"): ManagerSettings => ({ timezone, zones, default: "Europe/Moscow" });
 
 function summary(overrides: Partial<Summary> = {}): Summary {
   return {
@@ -85,6 +94,7 @@ function renderPage(handler: Handler = () => undefined) {
     if (url.startsWith(`${root}/submissions`) && init?.method === "POST") return json(submission("new"), 201);
     if (url.startsWith(`${root}/submissions`)) return json(page([]));
     if (url === `${root}/extension/installs`) return json([]);
+    if (url === `${root}/settings` && !init?.method) return json(settingsOf());
     return json(null);
   });
   vi.stubGlobal("fetch", request);
@@ -524,5 +534,65 @@ describe("ScreenshotControlPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: /Получить код/ }));
 
     expect(await screen.findByText("Код истёк. Получите новый.")).toBeInTheDocument();
+  });
+  it("says which timezone the review time is read in and leads to the setting", async () => {
+    renderPage();
+
+    const hint = await screen.findByText(/Время отзыва читается в вашем поясе: Москва, UTC\+3\./);
+    await userEvent.click(within(hint).getByRole("button", { name: "Изменить" }));
+
+    expect(screen.getByRole("tab", { name: "Подключения" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { name: "Часовой пояс" })).toBeInTheDocument();
+    expect(screen.getByText("Укажите пояс, в котором кабинет WB показывает вам время отзыва.")).toBeInTheDocument();
+    expect(screen.getByLabelText("Пояс")).toHaveValue("Europe/Moscow");
+  });
+
+  it("saves the chosen timezone with PUT and updates the hint", async () => {
+    const request = renderPage((url, init) =>
+      url === `${root}/settings` && init?.method === "PUT"
+        ? json(settingsOf(JSON.parse(String(init.body)).timezone))
+        : undefined,
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: "Подключения" }));
+    const select = await screen.findByLabelText("Пояс");
+    expect(screen.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+    await userEvent.selectOptions(select, "Asia/Yekaterinburg");
+    await userEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Сохранено");
+    const puts = request.mock.calls.filter(([url, init]) => url === `${root}/settings` && init?.method === "PUT");
+    expect(puts).toHaveLength(1);
+    expect(JSON.parse(String(puts[0][1]?.body))).toEqual({ timezone: "Asia/Yekaterinburg" });
+
+    await userEvent.click(screen.getByRole("tab", { name: "Мои скриншоты" }));
+    expect(await screen.findByText(/читается в вашем поясе: Екатеринбург, UTC\+5\./)).toBeInTheDocument();
+  });
+
+  it("shows why the timezone was not saved", async () => {
+    renderPage((url, init) =>
+      url === `${root}/settings` && init?.method === "PUT"
+        ? new Response(JSON.stringify({ detail: "Такого часового пояса нет в списке" }), {
+            status: 422,
+            headers: { "Content-Type": "application/json", "X-Error-Code": "bad_timezone" },
+          })
+        : undefined,
+    );
+
+    await userEvent.click(screen.getByRole("tab", { name: "Подключения" }));
+    await userEvent.selectOptions(await screen.findByLabelText("Пояс"), "Europe/Kaliningrad");
+    await userEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Такого часового пояса нет в списке");
+  });
+
+  it("offers a retry when the timezone does not load", async () => {
+    renderPage((url) => (url === `${root}/settings` ? json({ detail: "Сервер недоступен" }, 503) : undefined));
+
+    await userEvent.click(screen.getByRole("tab", { name: "Подключения" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Не удалось загрузить часовой пояс");
+    expect(within(alert).getByRole("button", { name: "Повторить" })).toBeInTheDocument();
+    expect(screen.queryByText(/читается в вашем поясе/)).not.toBeInTheDocument();
   });
 });

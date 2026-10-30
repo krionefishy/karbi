@@ -273,7 +273,12 @@ export function ScreenshotAdminCard({ item, panel, onPanel, onResolve, pending, 
           <BadgeView badge={agreementBadge(item.agreement?.chat_id)} />
         </Field>
         <Field label="Время отзыва">
-          <span>{formatReviewAt(fields?.review_at ?? null, fields?.key_time_precision ?? "minute")}</span>
+          <span>
+            {formatReviewAt(fields?.review_at ?? null, fields?.key_time_precision ?? "minute", fields?.review_tz)}
+          </span>
+          {fields?.review_tz && fields.review_tz !== "Europe/Moscow" && (
+            <span className="sca-muted-small">пояс менеджера: {fields.review_tz}</span>
+          )}
           <BadgeView badge={agreementBadge(item.agreement?.time)} />
         </Field>
         <Field label="Текст отзыва">

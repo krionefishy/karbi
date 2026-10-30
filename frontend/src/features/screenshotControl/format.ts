@@ -148,3 +148,8 @@ export function formatBytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return `${mb.toLocaleString("ru-RU", { maximumFractionDigits: mb < 10 ? 1 : 0 })} МБ`;
 }
+
+/** Подпись пояса менеджера: «Москва, UTC+3»; пояса нет в списке — его id как есть. */
+export function zoneLabel(settings: { timezone: string; zones: { id: string; label: string }[] }): string {
+  return settings.zones.find((zone) => zone.id === settings.timezone)?.label ?? settings.timezone;
+}
