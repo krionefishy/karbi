@@ -127,6 +127,9 @@ class SubmissionModel(WBScreenshotControlBase):
     text_minhash: Mapped[list[int] | None] = mapped_column(ARRAY(BigInteger), nullable=True)
     buyer_hmac: Mapped[str | None] = mapped_column(CHAR(16), nullable=True)
     article_norm: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Пояс менеджера (IANA), в котором прочитано время отзыва этого скрина: ставится при распознавании
+    # и дальше не меняется. NULL — скрин до пояса менеджера, время в поясе модуля (`screenshot_control.timezone`).
+    review_tz: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     verdict: Mapped[str | None] = mapped_column(String(12), nullable=True)
     auto_verdict: Mapped[str | None] = mapped_column(String(12), nullable=True)
@@ -338,3 +341,13 @@ class TelegramLinkModel(WBScreenshotControlBase):
         Index("uq_sc_tg_user_live", "telegram_user_id", unique=True, postgresql_where=text("revoked_at IS NULL")),
         Index("uq_sc_tg_staff_live", "user_id", unique=True, postgresql_where=text("revoked_at IS NULL")),
     )
+
+
+class UserSettingsModel(WBScreenshotControlBase):
+    """Настройки менеджера в модуле. Пояс — в нём кабинет WB показывает ему время отзыва."""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Europe/Moscow")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

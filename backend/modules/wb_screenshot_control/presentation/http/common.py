@@ -58,6 +58,7 @@ STATUS_BY_CODE: dict[str, int] = {
     "telegram_disabled": 503,
     "transition_not_allowed": 409,
     "bad_cursor": 422,
+    "bad_timezone": 422,
 }
 _BEARER = {"bad_token", "install_revoked"}
 

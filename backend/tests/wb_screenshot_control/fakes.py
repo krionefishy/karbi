@@ -34,7 +34,7 @@ from backend.storage.pg import Database
 BASE = load_settings("backend/shared/settings/config.test.yaml")
 SCHEMA = "wb_screenshot_control"
 EVENT_TYPES = (EVENT_SUBMITTED, EVENT_EXTRACTED, EVENT_VERDICT_READY, EVENT_UPLOAD, EVENT_DELETE)
-TABLES = ("verdict_events", "storage_objects", "extractions", "submissions", "files")
+TABLES = ("verdict_events", "storage_objects", "extractions", "submissions", "files", "user_settings")
 
 
 def settings_for(staging: Path, **overrides: Any) -> Settings:
@@ -108,9 +108,17 @@ class FakeExtractor:
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     async def extract(
-        self, image: bytes, *, channel: str, hints: ClientHints, received_at: datetime
+        self,
+        image: bytes,
+        *,
+        channel: str,
+        hints: ClientHints,
+        received_at: datetime,
+        timezone: str | None = None,
     ) -> ExtractionResult:
-        self.calls.append({"size": len(image), "channel": channel, "hints": hints, "received_at": received_at})
+        self.calls.append(
+            {"size": len(image), "channel": channel, "hints": hints, "received_at": received_at, "timezone": timezone}
+        )
         answer = self.script[min(len(self.calls) - 1, len(self.script) - 1)]
         if isinstance(answer, Exception):
             raise answer

@@ -5,9 +5,10 @@
 уникальности и эвристиках подлинности.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, tzinfo
 from typing import Any, Literal, get_args
+from zoneinfo import ZoneInfo
 
 from backend.modules.wb_screenshot_control.domain.pipeline_types import (
     Candidate,
@@ -28,6 +29,7 @@ from backend.modules.wb_screenshot_control.domain.similarity import (
     text_similarity,
     time_similarity,
 )
+from backend.modules.wb_screenshot_control.domain.timezones import messages_in_zone
 from backend.shared.settings.config import ScreenshotControlConfig
 
 ReasonCode = Literal[
@@ -191,10 +193,18 @@ def has_time(fields: ExtractedFields) -> bool:
 
 
 def compare_case(x: ExtractedFields, candidate: Candidate, cfg: ScreenshotControlConfig, tz: tzinfo) -> CaseHit | None:
-    """Ключ кейса (7.4–7.5 с правками ревью) против одного кандидата."""
+    """Ключ кейса (7.4–7.5 с правками ревью) против одного кандидата.
+
+    `tz` — пояс загрузившего этот скрин. Моменты отзыва обоих уже в UTC и сравниваются в нём; дата
+    «только день» берётся в поясе той стороны, у которой она такая. Время реплик — как на экране,
+    поэтому реплики кандидата из другого пояса сначала переводятся в пояс этого скрина.
+    """
     y = candidate.fields
     if y is None:
         return None
+    x_zone, y_zone = x.timezone or cfg.timezone, y.timezone or cfg.timezone
+    if x_zone != y_zone:
+        y = replace(y, messages=messages_in_zone(y.messages, source=y_zone, target=x_zone, at=candidate.received_at))
     t = cfg.thresholds
     s_text = text_similarity(
         x.text_norm,
@@ -203,7 +213,9 @@ def compare_case(x: ExtractedFields, candidate: Candidate, cfg: ScreenshotContro
         b_truncated=y.text_truncated,
         min_text_len=t.min_text_len,
     )
-    s_time = time_similarity(x.review_at, x.review_time_precision, y.review_at, y.review_time_precision, tz)
+    s_time = time_similarity(
+        x.review_at, x.review_time_precision, y.review_at, y.review_time_precision, tz, b_tz=ZoneInfo(y_zone)
+    )
     if x.chat_id and y.chat_id:
         return _compare_with_chats(x, y, candidate, cfg, s_text, s_time)
     return _compare_without_chat(x, y, candidate, cfg, s_text, s_time)

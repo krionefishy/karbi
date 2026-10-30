@@ -51,12 +51,13 @@ def decide(
     *,
     rng: random.Random | None = None,
 ) -> Decision:
-    tz = ZoneInfo(cfg.timezone)
     pool = sorted(
         (c for c in candidates if c.submission_id != inp.submission_id and c.verdict != "rejected"),
         key=lambda c: (c.received_at, c.submission_id),
     )
     fields = inp.extraction.fields if inp.extraction.status == "ok" else None
+    # Пояс загрузившего: в нём «только день» и правдоподобие даты; у старых скринов — пояс модуля.
+    tz = ZoneInfo((fields.timezone if fields is not None else None) or cfg.timezone)
     findings: list[Finding] = []
     matches: list[Match] = []
 

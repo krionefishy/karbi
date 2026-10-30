@@ -164,10 +164,19 @@ def sent_image(body: dict[str, Any]) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1])))
 
 
-async def run(fake: FakeVlm, image: bytes, *, channel: str = "web", hints: ClientHints | None = None) -> Any:
+async def run(
+    fake: FakeVlm,
+    image: bytes,
+    *,
+    channel: str = "web",
+    hints: ClientHints | None = None,
+    timezone: str | None = None,
+) -> Any:
     with respx.mock:
         respx.post(URL).mock(side_effect=fake)
-        return await extractor().extract(image, channel=channel, hints=hints or ClientHints(), received_at=RECEIVED)
+        return await extractor().extract(
+            image, channel=channel, hints=hints or ClientHints(), received_at=RECEIVED, timezone=timezone
+        )
 
 
 async def test_a_desktop_screenshot_is_read_and_its_chat_id_is_checked_on_the_address_bar_crop() -> None:
@@ -217,7 +226,9 @@ async def test_a_phone_screenshot_keys_on_the_last_client_message() -> None:
     assert fields.review_text == "Ужасное качество, шов разошёлся после первой стирки"
     assert fields.article_norm == "987654321"
     assert fields.messages == (
-        ChatMessage(text_norm="здравствуйте все ли в порядке", hour=20, minute=50, day=22, month=10, side="seller"),
+        ChatMessage(
+            text_norm="здравствуйте все ли в порядке", hour=20, minute=50, day=22, month=10, side="seller", days_ago=1
+        ),
         ChatMessage(
             text_norm="ужасное качество шов разошелся после первой стирки",
             hour=21,
@@ -225,11 +236,43 @@ async def test_a_phone_screenshot_keys_on_the_last_client_message() -> None:
             day=22,
             month=10,
             side="client",
+            days_ago=1,
         ),
     )
     assert fields.agreement == {"time": 1.0, "text": 1.0} and fields.disagreements == ()
     assert result.ocr_json is None
     assert "экран телефона" in fake.bodies[0]["messages"][1]["content"][0]["text"]
+
+
+@pytest.mark.parametrize(
+    ("timezone", "expected"),
+    [
+        (None, datetime(2026, 10, 22, 3, 39, tzinfo=UTC)),  # пояс модуля по умолчанию — Москва
+        ("Europe/Moscow", datetime(2026, 10, 22, 3, 39, tzinfo=UTC)),
+        ("Asia/Yekaterinburg", datetime(2026, 10, 22, 1, 39, tzinfo=UTC)),
+        ("Asia/Vladivostok", datetime(2026, 10, 21, 20, 39, tzinfo=UTC)),
+    ],
+)
+async def test_the_review_time_is_read_in_the_uploaders_timezone(timezone: str | None, expected: datetime) -> None:
+    image, _ = desktop_screenshot()
+    fake = FakeVlm([desktop_answer()], [{"url": CHAT_URL, "chat_id": GUID}])
+
+    fields = (await run(fake, image, timezone=timezone)).fields
+
+    assert fields.review_at == expected and fields.review_time_precision == "minute"
+    assert fields.timezone == (timezone or "Europe/Moscow")
+    # «как на экране» хранится, чтобы тот же файл от менеджера в другом поясе получил свой момент
+    assert (fields.review_screen.day, fields.review_screen.hour, fields.review_screen.minute) == (22, 6, 39)
+
+
+async def test_yesterday_on_a_phone_is_counted_from_the_uploaders_date() -> None:
+    # 23.10 09:00 UTC — во Владивостоке уже 19:00 23.10, «вчера, 21:15» — 22.10 по Владивостоку.
+    fake = FakeVlm([mobile_answer()])
+
+    fields = (await run(fake, phone_screenshot(), channel="telegram", timezone="Asia/Vladivostok")).fields
+
+    assert fields.review_at == datetime(2026, 10, 22, 11, 15, tzinfo=UTC)
+    assert fields.messages[-1].days_ago == 1 and (fields.messages[-1].day, fields.messages[-1].month) == (22, 10)
 
 
 async def test_a_phone_message_list_disagreeing_with_the_last_message_is_flagged() -> None:

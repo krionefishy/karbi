@@ -10,6 +10,7 @@ from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_screenshot_control.application.errors import ServiceError
 from backend.modules.wb_screenshot_control.application.extension_service import ExtensionService
 from backend.modules.wb_screenshot_control.application.kpi import KpiService
+from backend.modules.wb_screenshot_control.application.settings_service import SettingsService
 from backend.modules.wb_screenshot_control.infrastructure.postgres.queries import TelegramLinks
 from backend.modules.wb_screenshot_control.infrastructure.wiring import build_ingest
 from backend.modules.wb_screenshot_control.presentation.http.common import (
@@ -28,6 +29,8 @@ from backend.modules.wb_screenshot_control.presentation.http.schemas import (
     ExtensionInstallOut,
     ImageUrlOut,
     ManagerConfigOut,
+    ManagerSettingsOut,
+    ManagerSettingsUpdate,
     Outcome,
     OutcomeUpdate,
     PairingCodeOut,
@@ -197,6 +200,37 @@ async def summary(
 async def config(_: CurrentPrincipal, settings: FromDishka[Settings]) -> ManagerConfigOut:
     """Отвечает и при mode=off: по нему страница понимает, что модуль выключен."""
     return manager_config(settings)
+
+
+@router.get("/settings", response_model=ManagerSettingsOut, responses=documented(503))
+@inject
+async def manager_settings(
+    principal: CurrentPrincipal, settings: FromDishka[Settings], session: FromDishka[AsyncSession]
+) -> ManagerSettingsOut:
+    """Свой часовой пояс (по умолчанию Москва) и список допустимых."""
+    ensure_enabled(settings)
+    found = await SettingsService(session, settings.screenshot_control).get(principal.user_id)
+    return ManagerSettingsOut.model_validate(found)
+
+
+@router.put("/settings", response_model=ManagerSettingsOut, responses=documented(422, 503))
+@inject
+async def update_manager_settings(
+    payload: ManagerSettingsUpdate,
+    principal: CurrentPrincipal,
+    settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
+) -> ManagerSettingsOut:
+    """Пояс, в котором кабинет WB показывает менеджеру время отзыва. Действует для следующих скринов:
+    уже прочитанные не пересчитываются. Пояс не из `zones` — 422 bad_timezone."""
+    ensure_enabled(settings)
+    try:
+        found = await SettingsService(session, settings.screenshot_control).set_timezone(
+            principal.user_id, payload.timezone
+        )
+    except ServiceError as error:
+        raise http_error(error) from error
+    return ManagerSettingsOut.model_validate(found)
 
 
 @router.post("/extension/pairing-code", response_model=PairingCodeOut, responses=documented(429, 503))

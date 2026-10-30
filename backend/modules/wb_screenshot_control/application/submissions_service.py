@@ -51,12 +51,19 @@ def manager_status(submission: SubmissionModel) -> str:
     return "processing" if submission.outcome else "awaiting_outcome"
 
 
-def manager_fields(extraction: ExtractionModel | None) -> dict[str, Any] | None:
-    """Что прочитано — для проверки глазами: от chatId только хвост, имени покупателя нет вовсе."""
+def manager_fields(
+    extraction: ExtractionModel | None, submission: SubmissionModel | None = None
+) -> dict[str, Any] | None:
+    """Что прочитано — для проверки глазами: от chatId только хвост, имени покупателя нет вовсе.
+
+    Время отзыва — момент этого сабмишена (в поясе загрузившего), а не первого распознавания файла.
+    """
     if extraction is None or extraction.status != "ok" or not extraction.fields:
         return None
     fields = extraction.fields
     review_at = fields.get("review_at")
+    if submission is not None and submission.review_tz is not None:
+        review_at = submission.key_time.isoformat() if submission.key_time else None
     stars = fields.get("stars")
     text = fields.get("review_text") or fields.get("text_norm")
     chat_id = fields.get("chat_id")
@@ -219,7 +226,7 @@ class SubmissionsService:
             "reason_code": reason.code if reason else None,
             "reason_text": reason.text if reason else None,
             "duplicate_received_at": original.received_at if original and submission.verdict == "duplicate" else None,
-            "fields": manager_fields(extraction),
+            "fields": manager_fields(extraction, submission),
             "thumb_url": self.images.link(thumb),
         }
 
