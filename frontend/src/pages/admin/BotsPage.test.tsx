@@ -22,6 +22,7 @@ const bot: NotificationBot = {
   code: "turnover-alerts",
   title: "Оборачиваемость",
   invite_link_template: "https://t.me/mplace_auto_bot?start={token}",
+  interactive: false,
   delivery: { last_sent_at: "2026-09-28T15:04:05Z", failed_count: 0, failed_since: null, last_error: null },
 };
 
@@ -89,6 +90,21 @@ describe("BotsPage", () => {
 
     await waitFor(() => expect(createBot).toHaveBeenCalled());
     expect(createBot.mock.calls[0][0]).toEqual({ code: "reviews-alerts", title: "", token: "1234:secret" });
+  });
+
+  it("sends interactive when the automation box is ticked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("turnover-alerts");
+
+    await user.click(screen.getByRole("button", { name: "Подключить бота" }));
+    await user.type(screen.getByPlaceholderText("turnover-alerts"), "screens");
+    await user.type(screen.getByPlaceholderText("123456789:AA..."), "1234:secret");
+    await user.click(screen.getByRole("checkbox", { name: /Бот автоматизации/ }));
+    await user.click(screen.getByRole("button", { name: "Подключить" }));
+
+    await waitFor(() => expect(createBot).toHaveBeenCalled());
+    expect(createBot.mock.calls[0][0]).toEqual({ code: "screens", title: "", token: "1234:secret", interactive: true });
   });
 
   it("asks before disconnecting, because subscriptions go with it", async () => {

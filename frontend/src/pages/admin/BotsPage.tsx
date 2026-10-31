@@ -59,8 +59,8 @@ export function BotsPage() {
           <div>
             <h1>Боты</h1>
             <p className="muted">
-              Через них уходят уведомления селлерам. Токены хранятся в сервисе доставки за пределами РФ и в
-              эту систему не попадают.
+              Через них уходят уведомления селлерам. Токены хранятся в сервисе доставки и в эту систему не
+              попадают.
             </p>
           </div>
           <div className="registry-actions">
@@ -106,7 +106,10 @@ export function BotsPage() {
                   <td>
                     <strong>{bot.code}</strong>
                   </td>
-                  <td>{bot.title || "—"}</td>
+                  <td>
+                    {bot.title || "—"}
+                    {bot.interactive && <span className="muted"> · автоматизация</span>}
+                  </td>
                   <td className="muted">{bot.invite_link_template.replace("{token}", "…")}</td>
                   <td>
                     <DeliveryState delivery={bot.delivery} />
