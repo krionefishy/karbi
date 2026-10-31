@@ -209,11 +209,6 @@ def parse_arbiter_choice(raw: str) -> tuple[str, str] | None:
     return None
 
 
-def action_system_prompt(extra: str = "") -> str:
-    """Промпт судьи; `extra` дописывается в конец (так подключают варианты промпта в A/B)."""
-    return ACTION_SYSTEM_PROMPT + (f"\n{extra.strip()}\n" if extra.strip() else "")
-
-
 def swap_candidates(seed: str) -> bool:
     """Порядок вердиктов у арбитра: от ключа среза, чтобы повтор запроса давал тот же порядок."""
     return bool(hashlib.sha1(seed.encode("utf-8"), usedforsecurity=False).digest()[0] & 1)

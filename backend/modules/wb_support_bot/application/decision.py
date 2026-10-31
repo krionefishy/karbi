@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from backend.modules.wb_support_bot.domain.decision import (
+    ACTION_SYSTEM_PROMPT,
     ARBITER_SYSTEM_PROMPT,
     CHOICE_A,
     CHOICE_NEITHER,
@@ -21,7 +22,6 @@ from backend.modules.wb_support_bot.domain.decision import (
     VOTE_RESERVE,
     Decision,
     Vote,
-    action_system_prompt,
     apply_vote_rules,
     arbiter_user_message,
     flags_of,
@@ -77,10 +77,18 @@ class DecisionEngine:
     диалог ждёт, а предварительные вердикты судей остаются в журнале.
     """
 
-    def __init__(self, llm: Completer, spec: PanelSpec, *, extra_prompt: str = "") -> None:
+    def __init__(
+        self,
+        llm: Completer,
+        spec: PanelSpec,
+        *,
+        system_prompt: str = ACTION_SYSTEM_PROMPT,
+        arbiter_prompt: str = ARBITER_SYSTEM_PROMPT,
+    ) -> None:
         self.llm = llm
         self.spec = spec
-        self.system = action_system_prompt(extra_prompt)
+        self.system = system_prompt
+        self.arbiter_system = arbiter_prompt
 
     async def decide(
         self,
@@ -161,7 +169,7 @@ class DecisionEngine:
         swapped = swap_candidates(seed)
         first, second = (votes[1], votes[0]) if swapped else (votes[0], votes[1])
         result = await self.llm.complete(
-            ARBITER_SYSTEM_PROMPT,
+            self.arbiter_system,
             arbiter_user_message(context, messages, first, second),
             model=spec.model,
             max_tokens=spec.max_tokens,

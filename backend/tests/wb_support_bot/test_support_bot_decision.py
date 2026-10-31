@@ -22,7 +22,6 @@ from backend.modules.wb_support_bot.domain.decision import (
     RULE_CONFLICT_STOP,
     RULE_NOISE_AFTER_MANAGER,
     Vote,
-    action_system_prompt,
     last_reply_is_from_manager,
     parse_arbiter_choice,
     parse_panel_verdict,
@@ -164,11 +163,6 @@ def test_the_order_of_the_candidates_follows_the_key_and_is_not_one_sided() -> N
     assert {swap_candidates(str(uuid.UUID(int=number))) for number in range(40)} == {True, False}
 
 
-def test_extra_prompt_is_appended_to_the_judge_prompt_only_when_given() -> None:
-    assert action_system_prompt() == action_system_prompt("  ")
-    assert action_system_prompt("Дополнение").endswith("Дополнение\n")
-
-
 # ---- движок ----
 
 
@@ -285,6 +279,15 @@ async def test_when_a_judge_fails_the_arbiter_classifies_the_slice_itself() -> N
     assert (decision.action, decision.category, decision.path) == (Gate.STOP, "waiting_seller", PATH_ARBITER)
     assert [vote.role for vote in decision.votes] == ["judge_b", "arbiter"]
     assert llm.calls[-1][1] == llm.calls[0][1]
+
+
+async def test_the_prompts_can_be_replaced_for_an_experiment() -> None:
+    llm = PanelLLM({QWEN: verdict("refuses"), GPT: verdict("question", True), ARBITER: prefer("refuses")})
+    machine = DecisionEngine(llm, SPEC, system_prompt="судья", arbiter_prompt="арбитр")
+
+    await decide(machine)
+
+    assert {call[0]: call[1] for call in llm.calls} == {QWEN: "судья", GPT: "судья", ARBITER: "арбитр"}
 
 
 async def test_a_noise_reply_to_a_live_manager_is_a_stop_that_needs_no_arbiter() -> None:
