@@ -36,7 +36,7 @@ export function SupportBotJournal({ page, filter, onFilter }: Props) {
   return (
     <div className="bot-journal">
       <div className="bot-pills" role="tablist" aria-label="Статус отправки">
-        {FILTERS.map((option) => (
+        {FILTERS.filter((option) => option.value !== "dry_run" || countOf("dry_run") > 0).map((option) => (
           <button
             key={option.value || "all"}
             type="button"

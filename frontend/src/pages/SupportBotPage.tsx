@@ -59,11 +59,6 @@ const AUTOMATION_TITLE = "Бот поддержки в чатах";
 const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 const stamp = (value: string | null) => (value ? momentFormatter.format(new Date(value)) : "—");
 
-const MODE_OPTIONS: { value: BotMode; label: string }[] = [
-  { value: "dry_run", label: "Сухой прогон" },
-  { value: "live", label: "Вся рассылка" },
-];
-
 const FLAG_OPTIONS: { value: DialogFlag | ""; label: string }[] = [
   { value: "", label: "Любые флаги" },
   { value: "no_contact", label: "Просили не писать" },
@@ -285,33 +280,23 @@ export function SupportBotPage() {
           <div className="loading-block">Загружаем данные…</div>
         ) : (
           <>
-            <div className="checklist-notice" role="status">
-              <strong>{MODE_LABEL[view.mode]}.</strong> {statusLine(view)}
-              {view.mirror_read_through && <> · чаты прочитаны {stamp(view.mirror_read_through)}</>}{" "}
-              <span className="bot-actions" role="group" aria-label="Режим кабинета" style={{ marginLeft: 8 }}>
-                {MODE_OPTIONS.map((option) => (
+            {(view.mode !== "live" || view.globally_paused || view.paused_reason) && (
+              <div className="checklist-notice" role="status">
+                <strong>{MODE_LABEL[view.mode]}.</strong> {statusLine(view)}{" "}
+                {view.mode !== "live" && (
                   <button
-                    key={option.value}
                     type="button"
-                    className={view.mode === option.value ? "primary-button" : "secondary-button"}
-                    aria-pressed={view.mode === option.value}
-                    disabled={
-                      view.mode !== option.value &&
-                      option.value !== "dry_run" &&
-                      view.templates.filter((item) => item.active).length === 0
-                    }
-                    title={option.value !== "dry_run" && !hasActiveText ? "Сначала добавьте активный текст" : undefined}
-                    onClick={() => {
-                      if (view.mode === option.value) return;
-                      if (option.value === "dry_run") modeMutation.mutate("dry_run");
-                      else setPendingMode(option.value);
-                    }}
+                    className="primary-button"
+                    style={{ marginLeft: 8 }}
+                    disabled={!hasActiveText}
+                    title={!hasActiveText ? "Сначала добавьте активный текст" : undefined}
+                    onClick={() => setPendingMode("live")}
                   >
-                    {option.label}
+                    Включить рассылку
                   </button>
-                ))}
-              </span>
-            </div>
+                )}
+              </div>
+            )}
 
             <div className="chats-summary" aria-label="Диалоги по состояниям">
               {STATE_ORDER.map((state) => (

@@ -35,7 +35,6 @@ def healthy(**changes: object) -> Snapshot:
         sends_failed_24h=0,
         sends_unknown_24h=0,
         unknown_stuck=0,
-        dry_run_24h=0,
         sent_today=100,
         daily_cap=2500,
         active_templates=3,
@@ -89,11 +88,6 @@ def test_send_problems_have_two_levels() -> None:
     assert level(healthy(sends_failed_24h=3, sends_unknown_24h=2), "send_failures") is Severity.WARN
     assert level(healthy(sends_failed_24h=20), "send_failures") is Severity.CRIT
     assert level(healthy(unknown_stuck=1), "unknown_stuck") is Severity.CRIT
-
-
-def test_dry_run_sends_in_live_mode_are_a_mismatch() -> None:
-    assert level(healthy(dry_run_24h=2), "mode_consistent") is Severity.CRIT
-    assert "mode_consistent" not in {c.id for c in evaluate(healthy(mode="dry_run", dry_run_24h=9), LIMITS)}
 
 
 def test_model_quality_is_a_share_with_a_minimum_sample() -> None:
@@ -241,38 +235,3 @@ async def test_a_page_without_any_recording_says_no_data(client: AsyncClient, ht
     assert body["monitor_overall"] == "nodata"
     assert next(item for item in monitor["checks"] if item["id"] == "worker_alive")["severity"] == "nodata"
     assert (await client.get(f"{API}/sellers/{uuid.uuid4()}/monitor")).status_code == 404
-
-
-async def test_dry_run_sends_before_the_switch_to_live_are_not_a_mismatch(
-    database: Database, seller: uuid.UUID
-) -> None:
-    from backend.modules.wb_support_bot.infrastructure.postgres import SEND_DRY_RUN, SendModel
-
-    moment = datetime.now(UTC)
-    async with database.session() as session:
-        repository = SupportBotRepository(session)
-        await repository.set_mode(seller, "live")
-        session.add(
-            SendModel(
-                seller_id=seller,
-                chat_id="1:a",
-                prompt_at=moment - timedelta(days=2),
-                seq=1,
-                text="т",
-                status=SEND_DRY_RUN,
-                planned_at=moment - timedelta(hours=3),
-            )
-        )
-        await session.commit()
-
-    async def mismatch() -> Severity:
-        async with database.session() as session:
-            monitor = BotMonitor(
-                session, SupportBotRepository(session), daily_cap=2500, reply_gate_mode="off", reply_prompt_version="r3"
-            )
-            tracked = await SupportBotRepository(session).tracked(seller)
-            assert tracked is not None
-            snapshot = await monitor.snapshot(seller, moment, worker_checked_at=None, check_worker=False)
-            return next(check.severity for check in evaluate(snapshot) if check.id == "mode_consistent")
-
-    assert await mismatch() is Severity.OK
