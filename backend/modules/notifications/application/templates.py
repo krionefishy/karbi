@@ -24,6 +24,22 @@ RETURNS_UNKNOWN = "returns.unknown"
 CARD_DOCUMENTS_ALERT = "card_documents.alert"
 CARD_DOCUMENTS_BASELINE = "card_documents.baseline"
 CARD_DOCUMENTS_DIGEST = "card_documents.digest"
+SCREENS_LINKED = "screens.linked"
+SCREENS_LINK_INVALID = "screens.link_invalid"
+SCREENS_LINK_TAKEN = "screens.link_taken"
+SCREENS_NOT_LINKED = "screens.not_linked"
+SCREENS_NO_ACCESS = "screens.no_access"
+SCREENS_PRIVATE_ONLY = "screens.private_only"
+SCREENS_DISABLED = "screens.disabled"
+SCREENS_RECEIVED = "screens.received"
+SCREENS_OUTCOME_SET = "screens.outcome_set"
+SCREENS_CALLBACK = "screens.callback"
+SCREENS_VERDICT = "screens.verdict"
+SCREENS_REJECTED_FILE = "screens.rejected_file"
+SCREENS_HELP = "screens.help"
+SCREENS_SUMMARY = "screens.summary"
+SCREENS_LAST = "screens.last"
+SCREENS_UNLINKED = "screens.unlinked"
 
 _DIGEST_LIMIT = 25
 _MESSAGE_BUDGET = 3900
@@ -416,6 +432,157 @@ def _card_documents_digest(params: dict[str, Any]) -> str:
     return text
 
 
+_SCREENS_PAGE = "«Контроль скриншотов ДБС» → «Подключения»"
+_SCREENS_COMMANDS = (
+    "/summary — итоги за сегодня\n"
+    "/last — пять последних скриншотов\n"
+    "/unlink — отвязать этот Telegram\n"
+    "/help — эта подсказка"
+)
+
+
+def _screens_linked(params: dict[str, Any]) -> str:
+    head = "Этот Telegram уже привязан" if params.get("already") else "Готово: Telegram привязан"
+    return (
+        f"{head} к учётной записи {params.get('username') or '—'} в Marketplace Auto.\n\n"
+        "Присылайте сюда скриншоты разобранных отзывов — по одному в сообщении, картинкой или файлом. "
+        "К каждому бот пришлёт кнопки: выберите исход.\n\n" + _SCREENS_COMMANDS
+    )
+
+
+def _screens_link_invalid(_: dict[str, Any]) -> str:
+    return (
+        "Ссылка не подошла: её уже использовали или у неё вышел срок. "
+        f"Получите новую на сайте: {_SCREENS_PAGE} → «Привязать Telegram»."
+    )
+
+
+def _screens_link_taken(params: dict[str, Any]) -> str:
+    if params.get("reason") == "staff":
+        return (
+            "К вашей учётной записи уже привязан другой Telegram. "
+            f"Сначала отвяжите его на сайте: {_SCREENS_PAGE}, затем получите новую ссылку."
+        )
+    return (
+        "Этот Telegram уже привязан к другой учётной записи. "
+        "Отвяжите его командой /unlink или на сайте, затем откройте ссылку ещё раз."
+    )
+
+
+def _screens_not_linked(_: dict[str, Any]) -> str:
+    return (
+        "Этот Telegram не привязан к Marketplace Auto. "
+        f"Привяжите аккаунт на сайте: {_SCREENS_PAGE} → «Привязать Telegram» — и откройте ссылку."
+    )
+
+
+def _screens_no_access(_: dict[str, Any]) -> str:
+    return "Приём скриншотов для вашей учётной записи недоступен. Обратитесь к администратору."
+
+
+def _screens_private_only(_: dict[str, Any]) -> str:
+    return "Скриншоты принимаются только в личном чате с ботом."
+
+
+def _screens_disabled(_: dict[str, Any]) -> str:
+    return "Приём скриншотов через Telegram сейчас выключен. Загрузите скриншот на сайте."
+
+
+def _screens_received(params: dict[str, Any]) -> str:
+    if params.get("decided"):
+        return "Скриншот получен."
+    return "Скриншот получен. Выберите исход:"
+
+
+def _screens_outcome_set(params: dict[str, Any]) -> str:
+    return (
+        f"Скриншот получен. Исход: {params.get('outcome_label') or '—'}.\n"
+        "Принят в проверку — результат пришлю ответом на ваше сообщение."
+    )
+
+
+_SCREENS_CALLBACK_TEXTS = {
+    "saved": "Исход записан",
+    "locked": "Решение по скриншоту уже принято, исход не поменять",
+    "not_found": "Скриншот не найден",
+    "no_access": "Нет доступа",
+}
+
+
+def _screens_callback(params: dict[str, Any]) -> str:
+    return _SCREENS_CALLBACK_TEXTS.get(str(params.get("result")), "Не получилось, попробуйте ещё раз")
+
+
+def _screens_verdict(params: dict[str, Any]) -> str:
+    verdict = params.get("verdict")
+    reason = str(params.get("reason_text") or "").rstrip(".")
+    if verdict == "accepted":
+        return "Результат проверки: скриншот принят."
+    if verdict == "needs_review":
+        return "Принят, проверяется: результат пришлю, когда администратор посмотрит скриншот."
+    return f"Результат проверки: скриншот не засчитан. {reason}." if reason else "Результат проверки: не засчитан."
+
+
+def _screens_rejected_file(params: dict[str, Any]) -> str:
+    reason = params.get("reason")
+    if reason == "file_too_large":
+        return f"Файл слишком большой: принимаю до {params.get('max_mb') or 15} МБ."
+    if reason == "too_small":
+        return f"Картинка слишком маленькая: нужен скриншот не меньше {params.get('min_side') or 500} px по стороне."
+    if reason == "unsupported_type":
+        return "Принимаю только картинки PNG, JPEG или WEBP — пришлите скриншот."
+    if reason == "bad_image":
+        return "Файл не открывается как картинка. Пришлите скриншот ещё раз."
+    if reason == "rate_limited":
+        return "Слишком много скриншотов подряд. Подождите немного и пришлите снова."
+    if reason == "no_file":
+        return "Пришлите скриншот картинкой или файлом. Команды — /help."
+    return "Не получилось принять скриншот. Пришлите его ещё раз чуть позже."
+
+
+def _screens_help(_: dict[str, Any]) -> str:
+    return (
+        "Присылайте скриншоты разобранных отзывов — по одному в сообщении, картинкой или файлом. "
+        "К каждому бот пришлёт кнопки исхода; результат проверки придёт ответом на ваше сообщение.\n\n"
+        + _SCREENS_COMMANDS
+    )
+
+
+def _screens_summary(params: dict[str, Any]) -> str:
+    def count(key: str) -> int:
+        return int(params.get(key) or 0)
+
+    lines = [
+        f"Итоги за {_day(params.get('date')) if params.get('date') else 'сегодня'}:",
+        f"Засчитано: {count('accepted_total')} (положительных {count('positive')}, "
+        f"изменённых {count('amended')}, удалённых {count('deleted')})",
+        f"На проверке: {count('pending_review')}",
+        f"Ждут исхода: {count('awaiting_outcome')}",
+        f"Обрабатываются: {count('processing')}",
+        f"Повторы: {count('duplicates')}, не засчитано: {count('rejected')}",
+    ]
+    if params.get("preliminary"):
+        lines.append("Цифры предварительные.")
+    return "\n".join(lines)
+
+
+def _screens_last(params: dict[str, Any]) -> str:
+    items = [item for item in params.get("items") or [] if isinstance(item, dict)]
+    if not items:
+        return "Скриншотов пока нет."
+    lines = ["Последние скриншоты:"]
+    for item in items[:10]:
+        outcome = item.get("outcome_label") or "исход не выбран"
+        lines.append(f"• {item.get('at') or '—'} — {outcome} — {item.get('status_text') or '—'}")
+    return "\n".join(lines)
+
+
+def _screens_unlinked(params: dict[str, Any]) -> str:
+    if not params.get("linked", True):
+        return "Этот Telegram и так не привязан."
+    return "Telegram отвязан. Чтобы снова присылать скриншоты сюда, привяжите аккаунт на сайте."
+
+
 TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SUBSCRIPTION_CONFIRMED: _confirmed,
     SUBSCRIPTION_INVALID_LINK: _invalid_link,
@@ -434,6 +601,22 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     CARD_DOCUMENTS_ALERT: _card_documents_alert,
     CARD_DOCUMENTS_BASELINE: _card_documents_baseline,
     CARD_DOCUMENTS_DIGEST: _card_documents_digest,
+    SCREENS_LINKED: _screens_linked,
+    SCREENS_LINK_INVALID: _screens_link_invalid,
+    SCREENS_LINK_TAKEN: _screens_link_taken,
+    SCREENS_NOT_LINKED: _screens_not_linked,
+    SCREENS_NO_ACCESS: _screens_no_access,
+    SCREENS_PRIVATE_ONLY: _screens_private_only,
+    SCREENS_DISABLED: _screens_disabled,
+    SCREENS_RECEIVED: _screens_received,
+    SCREENS_OUTCOME_SET: _screens_outcome_set,
+    SCREENS_CALLBACK: _screens_callback,
+    SCREENS_VERDICT: _screens_verdict,
+    SCREENS_REJECTED_FILE: _screens_rejected_file,
+    SCREENS_HELP: _screens_help,
+    SCREENS_SUMMARY: _screens_summary,
+    SCREENS_LAST: _screens_last,
+    SCREENS_UNLINKED: _screens_unlinked,
 }
 
 

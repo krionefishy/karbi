@@ -38,6 +38,8 @@ class BotModel(NotificationsBase):
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     invite_link_template: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Апдейты интерактивного бота уходят его автоматизации целиком, подписки по ссылкам у него не работают.
+    interactive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -143,6 +145,11 @@ class OutgoingMessageModel(NotificationsBase):
     params: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     text: Mapped[str] = mapped_column(String, nullable=False)
     attachment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # message — новое сообщение; edit — правка сообщения `target_ref`; callback_answer — ответ на нажатие `target_ref`.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="message", server_default="message")
+    buttons: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    reply_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(
@@ -155,5 +162,6 @@ class OutgoingMessageModel(NotificationsBase):
 
     __table_args__ = (
         CheckConstraint("status IN ('queued', 'sent', 'failed')", name="ck_notifications_outgoing_status"),
+        CheckConstraint("kind IN ('message', 'edit', 'callback_answer')", name="ck_notifications_outgoing_kind"),
         Index("ix_notifications_outgoing_due", "status", "next_attempt_at"),
     )

@@ -12,3 +12,7 @@ class MessengerRateLimitError(MessengerTemporaryError):
     def __init__(self, description: str, retry_after: float | None = None) -> None:
         super().__init__(description)
         self.retry_after = retry_after
+
+
+class MessengerFileTooLargeError(MessengerPermanentError):
+    """The file is bigger than the caller agreed to take; it was not (fully) downloaded."""

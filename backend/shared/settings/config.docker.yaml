@@ -75,6 +75,8 @@ relay:
   jwt_ttl_seconds: ${RELAY_JWT_TTL_SECONDS:-300}
   updates_wait_seconds: ${RELAY_UPDATES_WAIT_SECONDS:-25}
   photos_enabled: ${RELAY_PHOTOS_ENABLED:-true}
+  interactive_enabled: ${RELAY_INTERACTIVE_ENABLED:-false}
+  file_timeout_seconds: ${RELAY_FILE_TIMEOUT_SECONDS:-120}
   verify: ${RELAY_VERIFY:-/etc/relay/relay.crt}
   request_timeout_seconds: ${RELAY_REQUEST_TIMEOUT_SECONDS:-60}
 turnover:

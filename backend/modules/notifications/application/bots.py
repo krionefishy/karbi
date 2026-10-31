@@ -25,19 +25,27 @@ class BotRegistry:
         self.session = session
         self.repository = repository
 
-    async def register(self, *, code: str, title: str, invite_link_template: str) -> Bot:
+    async def register(
+        self, *, code: str, title: str, invite_link_template: str, interactive: bool | None = None
+    ) -> Bot:
         """Record a bot the relay has already accepted.
 
         Idempotent on purpose: rotating a token re-registers the same code on the
-        relay, and this side must follow rather than refuse.
+        relay, and this side must follow rather than refuse. `interactive=None`
+        keeps what the bot already is (a new bot is not interactive), so a token
+        rotation cannot silently turn a button bot back into a subscription bot.
         """
         model = await self.repository.bot_by_code(code)
         if model is None:
-            model = self.repository.add_bot(code=code, title=title, invite_link_template=invite_link_template)
+            model = self.repository.add_bot(
+                code=code, title=title, invite_link_template=invite_link_template, interactive=bool(interactive)
+            )
         else:
             model.title = title
             model.invite_link_template = invite_link_template
             model.is_active = True
+            if interactive is not None:
+                model.interactive = interactive
         await self.session.commit()
         return self.to_domain(model)
 
@@ -58,4 +66,4 @@ class BotRegistry:
 
     @staticmethod
     def to_domain(model: BotModel) -> Bot:
-        return Bot(model.id, model.code, model.title, model.invite_link_template)
+        return Bot(model.id, model.code, model.title, model.invite_link_template, interactive=bool(model.interactive))

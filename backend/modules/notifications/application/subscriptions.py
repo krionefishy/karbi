@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import templates
-from backend.modules.notifications.domain import COMMAND_START, Bot, Invite, Update
+from backend.modules.notifications.domain import COMMAND_START, Bot, Invite, Update, UpdateEvent
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.shared.kafka_streams.topics import NotificationTopics
 from backend.shared.outbox import OutboxRepository
@@ -26,10 +26,12 @@ class SubscriptionService:
         repository: NotificationRepository,
         *,
         invite_ttl_hours: int = 72,
+        interactive_enabled: bool = False,
     ) -> None:
         self.session = session
         self.repository = repository
         self.invite_ttl_hours = invite_ttl_hours
+        self.interactive_enabled = interactive_enabled
 
     async def subscriber_count(self, bot: Bot, seller_id: uuid.UUID) -> int:
         """Сколько чатов сейчас подписано на кабинет через этого бота — для автоматизаций, без чужих таблиц."""
@@ -79,9 +81,9 @@ class SubscriptionService:
         """Handle one update at most once.
 
         The cursor here is the source of truth, not the relay's offset: the relay
-        advances only after this call answers, so a lost answer replays the
-        update and this check is what stops a second subscription. Returns False
-        when the update was already handled.
+        keeps a buffer and hands out everything past `after`, so a crash before
+        the commit replays the update and this check is what stops a second
+        subscription. Returns False when the update was already handled.
         """
         last = await self.repository.cursor(bot.id)
         if update.update_id <= last:
@@ -97,7 +99,14 @@ class SubscriptionService:
         The caller commits: `accept_update` advances the cursor in the same
         transaction, so a crash cannot subscribe a chat and then re-read the
         same /start with an already spent invitation.
+
+        An interactive bot (with `relay.interactive_enabled`) touches no
+        subscription and answers nothing itself: the whole update, `/start
+        <token>` included, goes to its automation through the outbox.
         """
+        if bot.interactive and self.interactive_enabled:
+            self._publish_update(bot, update)
+            return
         command, _, argument = update.text.strip().partition(" ")
         command = command.partition("@")[0]
         if command == "/start":
@@ -151,6 +160,14 @@ class SubscriptionService:
             template=template,
             params=params,
             text=templates.render(template, params),
+        )
+
+    def _publish_update(self, bot: Bot, update: Update) -> None:
+        OutboxRepository(self.session).add(
+            aggregate_id=bot.id,
+            event_type="TelegramUpdateReceived",
+            topic=NotificationTopics.TELEGRAM_UPDATE_RECEIVED,
+            payload=UpdateEvent.from_update(bot.code, update).payload(),
         )
 
     async def _publish_command(self, bot: Bot, update: Update, command: str, argument: str) -> None:

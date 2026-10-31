@@ -234,6 +234,10 @@ class RelayConfig:
     inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
     photos_enabled: bool = False
+    # Контракт релея v1.1: кнопки, ответ-цитата, правка, ответ на нажатие, вложения и скачивание файлов.
+    # Выключено — всё как в v1: интерактивные боты живут как обычные, кнопки не уходят.
+    interactive_enabled: bool = False
+    file_timeout_seconds: int = 120
     jwt_leeway_seconds: int = 30
     updates_wait_seconds: int = 25
     verify: str = "true"
@@ -788,7 +792,14 @@ class Settings:
                 del vision[key]
         relay = dict(data.get("relay", {}))
         relay["photos_enabled"] = _as_bool(relay.get("photos_enabled", False))
-        for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
+        relay["interactive_enabled"] = _as_bool(relay.get("interactive_enabled", False))
+        for key in (
+            "jwt_ttl_seconds",
+            "jwt_leeway_seconds",
+            "updates_wait_seconds",
+            "request_timeout_seconds",
+            "file_timeout_seconds",
+        ):
             if key in relay:
                 relay[key] = int(relay[key])
         settings = cls(

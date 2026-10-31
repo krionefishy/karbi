@@ -27,7 +27,7 @@ class BotAdminService:
     async def delivery(self) -> dict[uuid.UUID, BotDelivery]:
         return await self.repository.delivery_by_bot()
 
-    async def register(self, *, code: str, title: str, token: str) -> Bot:
+    async def register(self, *, code: str, title: str, token: str, interactive: bool | None = None) -> Bot:
         """Hand the token to the relay first, record the bot only if it took it.
 
         The order matters: a bot recorded here but unknown to the relay would
@@ -44,6 +44,7 @@ class BotAdminService:
             code=code,
             title=title or identity.title,
             invite_link_template=identity.invite_link_template,
+            interactive=interactive,
         )
         self.logger.info("bot_registered", extra={"bot": code})
         return bot
