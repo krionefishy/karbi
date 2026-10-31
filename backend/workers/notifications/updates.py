@@ -21,14 +21,12 @@ class UpdateFetcher:
         *,
         invite_ttl_hours: int,
         wait_seconds: int,
-        interactive_enabled: bool = False,
     ) -> None:
         self.database = database
         self.client = client
         self.bot = bot
         self.invite_ttl_hours = invite_ttl_hours
         self.wait_seconds = wait_seconds
-        self.interactive_enabled = interactive_enabled
         self.logger = logging.getLogger("notifications.updates")
 
     async def run_forever(self) -> None:
@@ -76,7 +74,6 @@ class UpdateFetcher:
                 session,
                 repository,
                 invite_ttl_hours=self.invite_ttl_hours,
-                interactive_enabled=self.interactive_enabled,
             )
             return await service.accept_update(self.bot, _to_domain(update))
 

@@ -519,7 +519,7 @@ class AdminService:
 
     # --- конвейер ---
 
-    async def pipeline(self, *, telegram_enabled: bool) -> dict[str, Any]:
+    async def pipeline(self) -> dict[str, Any]:
         now = self.now()
         midnight = now.astimezone(self.tz).replace(hour=0, minute=0, second=0, microsecond=0)
         stages = await self.queries.stage_counts()
@@ -531,7 +531,6 @@ class AdminService:
         channels = await self.queries.channel_counts(midnight)
         return {
             "mode": self.config.mode,
-            "telegram_enabled": telegram_enabled,
             "stages": {"processing": stages.get("processing", 0), "extracted": stages.get("extracted", 0)},
             "oldest_processing_age_s": _age(now, oldest),
             "p50_s": round(p50, 1) if p50 is not None else None,

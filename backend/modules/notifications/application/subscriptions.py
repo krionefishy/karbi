@@ -26,12 +26,10 @@ class SubscriptionService:
         repository: NotificationRepository,
         *,
         invite_ttl_hours: int = 72,
-        interactive_enabled: bool = False,
     ) -> None:
         self.session = session
         self.repository = repository
         self.invite_ttl_hours = invite_ttl_hours
-        self.interactive_enabled = interactive_enabled
 
     async def subscriber_count(self, bot: Bot, seller_id: uuid.UUID) -> int:
         """Сколько чатов сейчас подписано на кабинет через этого бота — для автоматизаций, без чужих таблиц."""
@@ -100,11 +98,11 @@ class SubscriptionService:
         transaction, so a crash cannot subscribe a chat and then re-read the
         same /start with an already spent invitation.
 
-        An interactive bot (with `relay.interactive_enabled`) touches no
+        An interactive bot touches no
         subscription and answers nothing itself: the whole update, `/start
         <token>` included, goes to its automation through the outbox.
         """
-        if bot.interactive and self.interactive_enabled:
+        if bot.interactive:
             self._publish_update(bot, update)
             return
         command, _, argument = update.text.strip().partition(" ")

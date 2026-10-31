@@ -35,7 +35,6 @@ x-environment: &environment
   SCREENSHOT_CONTROL_MODE: ${SCREENSHOT_CONTROL_MODE:-shadow}
   SCREENSHOT_CONTROL_HMAC_KEY: ${SCREENSHOT_CONTROL_HMAC_KEY:?run just stand-up}
   SCREENSHOT_CONTROL_KPI_FROM: ${SCREENSHOT_CONTROL_KPI_FROM:-}
-  SCREENSHOT_CONTROL_TELEGRAM: "false"
   # Модель: по умолчанию поддельная (fake-vlm). Настоящий Cloud.ru — две строки в .env.stand:
   # LLM_BASE_URL и FOUNDATION_MODELS_API_KEY (docs/STAND.md). VISION_MODEL сюда не передаётся: пустая
   # переменная окружения в конфиге — пустая строка, а не значение по умолчанию.

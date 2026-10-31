@@ -30,7 +30,6 @@ SCREENS_LINK_TAKEN = "screens.link_taken"
 SCREENS_NOT_LINKED = "screens.not_linked"
 SCREENS_NO_ACCESS = "screens.no_access"
 SCREENS_PRIVATE_ONLY = "screens.private_only"
-SCREENS_DISABLED = "screens.disabled"
 SCREENS_RECEIVED = "screens.received"
 SCREENS_OUTCOME_SET = "screens.outcome_set"
 SCREENS_CALLBACK = "screens.callback"
@@ -484,10 +483,6 @@ def _screens_private_only(_: dict[str, Any]) -> str:
     return "Скриншоты принимаются только в личном чате с ботом."
 
 
-def _screens_disabled(_: dict[str, Any]) -> str:
-    return "Приём скриншотов через Telegram сейчас выключен. Загрузите скриншот на сайте."
-
-
 def _screens_received(params: dict[str, Any]) -> str:
     if params.get("decided"):
         return "Скриншот получен."
@@ -506,7 +501,6 @@ _SCREENS_CALLBACK_TEXTS = {
     "locked": "Решение по скриншоту уже принято, исход не поменять",
     "not_found": "Скриншот не найден",
     "no_access": "Нет доступа",
-    "disabled": "Приём через Telegram сейчас выключен",
 }
 
 
@@ -608,7 +602,6 @@ TEMPLATES: dict[str, Callable[[dict[str, Any]], str]] = {
     SCREENS_NOT_LINKED: _screens_not_linked,
     SCREENS_NO_ACCESS: _screens_no_access,
     SCREENS_PRIVATE_ONLY: _screens_private_only,
-    SCREENS_DISABLED: _screens_disabled,
     SCREENS_RECEIVED: _screens_received,
     SCREENS_OUTCOME_SET: _screens_outcome_set,
     SCREENS_CALLBACK: _screens_callback,

@@ -24,7 +24,7 @@ from backend.modules.wb_screenshot_control.presentation.http.common import (
     report_period,
     submissions_service,
 )
-from backend.modules.wb_screenshot_control.presentation.http.errors import api_error, documented
+from backend.modules.wb_screenshot_control.presentation.http.errors import documented
 from backend.modules.wb_screenshot_control.presentation.http.limits import limit_user
 from backend.modules.wb_screenshot_control.presentation.http.schemas import (
     ExtensionInstallOut,
@@ -286,12 +286,10 @@ async def telegram_link_token(
 ) -> TelegramLinkOut:
     """Одноразовая ссылка `t.me/<бот>?start=<токен>` на `link_token_ttl_minutes`; новая гасит прежнюю.
 
-    503 telegram_disabled — флаг `telegram_enabled` выключен или интерактивный бот модуля не зарегистрирован.
+    503 telegram_unavailable — интерактивный бот модуля не зарегистрирован.
     Привязка — по id отправителя в Telegram; отвязать — `DELETE /telegram` или `/unlink` в боте.
     """
     ensure_enabled(settings)
-    if not settings.screenshot_control.telegram_enabled:
-        raise api_error(503, "telegram_disabled", "Приём скриншотов через Telegram выключен")
     await limit_user(request, settings, principal.user_id, "pairing_code")
     try:
         link = await TelegramLinkService(session, settings.screenshot_control).issue(principal.user_id)
@@ -308,8 +306,10 @@ async def telegram_status(
     ensure_enabled(settings)
     links = await TelegramLinks(session).live(principal.user_id)
     link = links[0] if links else None
+    available, bot_username = await TelegramLinkService(session, settings.screenshot_control).availability()
     return TelegramStatusOut(
-        enabled=settings.screenshot_control.telegram_enabled,
+        available=available,
+        bot_username=bot_username,
         linked=link is not None,
         username=link.username or None if link else None,
         linked_at=link.linked_at if link else None,

@@ -26,12 +26,8 @@ EDIT_PATH = "/api/v1/messages/edit"
 CALLBACK_ANSWER_PATH = "/api/v1/callbacks/answer"
 FILES_PATH = "/api/v1/files"
 UPDATES_PATH = "/api/v1/updates"
-CAPABILITIES_PATH = "/api/v1/capabilities"
-# Что нужно от релея интерактивным ботам (контракт v1.1, `GET /api/v1/capabilities`).
-INTERACTIVE_FEATURES = frozenset({"attachments_in", "files", "buttons", "reply_to", "callbacks", "edit"})
 # Контракт v1.1: file_ref непрозрачен, но в путь URL попадает только такой.
 _FILE_REF = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-INTERACTIVE_DISABLED = "interactive relay features are disabled (relay.interactive_enabled)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,8 +73,6 @@ class RelayClient:
         elif config.verify.lower() in {"false", "0", "no"}:
             self._verify = False
         self._timeout = httpx.Timeout(config.request_timeout_seconds, connect=10.0)
-        # Флаг из настроек; воркер уведомлений гасит его, если релей не подтвердил контракт v1.1.
-        self.interactive_enabled = config.interactive_enabled
         self.logger = logging.getLogger("notifications.relay")
 
     async def send(
@@ -96,8 +90,7 @@ class RelayClient:
 
         `attachment` travels only when the relay is known to understand it
         (`relay.photos_enabled`); an older relay would refuse the whole message.
-        `buttons` and `reply_to` are contract v1.1 and travel only with
-        `relay.interactive_enabled` — without it the message goes out plain.
+        `buttons` and `reply_to` are contract v1.1.
         """
         payload: dict[str, object] = {
             "bot_code": bot_code,
@@ -107,11 +100,10 @@ class RelayClient:
         }
         if attachment and self._config.photos_enabled:
             payload["attachment"] = attachment
-        if self.interactive_enabled:
-            if buttons:
-                payload["buttons"] = buttons
-            if reply_to and reply_to.isdigit():
-                payload["reply_to"] = reply_to
+        if buttons:
+            payload["buttons"] = buttons
+        if reply_to and reply_to.isdigit():
+            payload["reply_to"] = reply_to
         response = await self._post(SEND_PATH, payload)
         body = self._body(response)
         if response.status_code == 200:
@@ -151,7 +143,6 @@ class RelayClient:
         idempotency_key: str,
     ) -> None:
         """Rewrite a message the bot sent; `buttons=None` takes the keyboard away."""
-        self._require_interactive()
         response = await self._post(
             EDIT_PATH,
             {
@@ -168,7 +159,6 @@ class RelayClient:
 
     async def answer_callback(self, *, bot_code: str, callback_id: str, text: str = "", alert: bool = False) -> None:
         """Stop the spinner on a pressed button; a too old press answers 422 and is not retried."""
-        self._require_interactive()
         payload: dict[str, object] = {"bot_code": bot_code, "callback_id": callback_id, "alert": alert}
         if text:
             payload["text"] = text[:200]
@@ -184,7 +174,6 @@ class RelayClient:
         lying header costs at most `max_bytes` of memory. The whole call has one
         deadline (`relay.file_timeout_seconds`), not a per-read one.
         """
-        self._require_interactive()
         if not _FILE_REF.fullmatch(file_ref):
             raise MessengerPermanentError("file reference is not in the relay format")
         url = f"{self._config.base_url.rstrip('/')}{FILES_PATH}/{file_ref}"
@@ -218,26 +207,6 @@ class RelayClient:
             raise MessengerTemporaryError("relay file download timed out") from error
         except httpx.HTTPError as error:
             raise MessengerTemporaryError(f"relay unreachable: {type(error).__name__}") from error
-
-    def _require_interactive(self) -> None:
-        if not self.interactive_enabled:
-            raise MessengerPermanentError(INTERACTIVE_DISABLED)
-
-    async def supports_interactive(self) -> bool:
-        """Знает ли релей контракт v1.1. Релей v1.0 отвечает на capabilities 404 — это «нет».
-
-        Сетевая ошибка или 5xx — `MessengerTemporaryError`: ответа ещё нет, спросить позже.
-        """
-        response = await self._get(CAPABILITIES_PATH, {})
-        if response.status_code == 404:
-            return False
-        body = self._body(response)
-        if response.status_code != 200:
-            raise self._delivery_error(response, body)
-        features = body.get("features")
-        contract = str(body.get("contract") or "")
-        known = {str(item) for item in features} if isinstance(features, list) else set()
-        return _version(contract) >= (1, 1) and known >= INTERACTIVE_FEATURES
 
     def _file_error(self, response: httpx.Response) -> Exception:
         body = self._body(response)
@@ -351,8 +320,3 @@ class RelayClient:
 
 def _ref(value: object) -> str:
     return str(value)[:64] if value is not None and value != "" else ""
-
-
-def _version(value: str) -> tuple[int, ...]:
-    parts = value.split(".")
-    return tuple(int(part) for part in parts) if all(part.isdigit() for part in parts) else (0,)

@@ -292,10 +292,6 @@ class TelegramBotService:
 
     async def _process(self, session: AsyncSession, event: UpdateEvent) -> list[Reply]:
         intent = classify(event)
-        if not self.config.telegram_enabled:
-            if intent.intent == "callback" and event.callback:
-                return [self._answer(event, "disabled")]
-            return [Reply(messages.SCREENS_DISABLED)]
         if intent.intent == "start" and intent.argument:
             return await self._link(session, event, intent.argument)
         access = await self._access(session, event.user_id)
@@ -549,7 +545,7 @@ class TelegramBotService:
             if await repository.inbox_processed(event_id):
                 return
             submission = await repository.submission(event.submission_id)
-            send = self.config.telegram_enabled and submission is not None and submission.tg_chat_id is not None
+            send = submission is not None and submission.tg_chat_id is not None
             if send and submission is not None:
                 link = await TelegramStore(session).link_of_user(submission.user_id)
                 users = UserRepository(session)

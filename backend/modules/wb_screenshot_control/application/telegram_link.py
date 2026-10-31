@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import re
 import secrets
 import uuid
 from collections.abc import Callable
@@ -14,12 +15,14 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.notifications.application import BotNotFoundError, BotRegistry
+from backend.modules.notifications.domain import Bot
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.wb_screenshot_control.application.errors import ServiceError
 from backend.modules.wb_screenshot_control.infrastructure.postgres.telegram import TelegramStore
 from backend.shared.settings.config import ScreenshotControlConfig
 
 Clock = Callable[[], datetime]
+_BOT_NAME = re.compile(r"^https://t\.me/([A-Za-z0-9_]{3,64})(?:[/?]|$)")
 TOKEN_BYTES = 24
 BOT_MISSING = "Telegram-бот ещё не подключён администратором"
 
@@ -39,18 +42,29 @@ class TelegramLinkService:
         self.store = TelegramStore(session)
         self.now = now
 
-    async def issue(self, user_id: uuid.UUID) -> dict[str, Any]:
-        """Новая ссылка гасит прежние неиспользованные. Без флага или без интерактивного бота — `telegram_disabled`."""
-        if not self.config.telegram_enabled:
-            raise ServiceError("telegram_disabled", "Приём скриншотов через Telegram выключен")
+    async def _bot(self) -> Bot | None:
+        """Интерактивный бот модуля с шаблоном ссылки привязки; `None`, пока админ его не зарегистрировал."""
         try:
             bot = await BotRegistry(self.session, NotificationRepository(self.session)).by_code(
                 self.config.notification_bot
             )
-        except BotNotFoundError as error:
-            raise ServiceError("telegram_disabled", BOT_MISSING) from error
-        if not bot.interactive or "{token}" not in bot.invite_link_template:
-            raise ServiceError("telegram_disabled", BOT_MISSING)
+        except BotNotFoundError:
+            return None
+        return bot if bot.interactive and "{token}" in bot.invite_link_template else None
+
+    async def availability(self) -> tuple[bool, str | None]:
+        """Подключён ли бот и его имя из шаблона ссылки (`https://t.me/<имя>?start={token}`)."""
+        bot = await self._bot()
+        if bot is None:
+            return False, None
+        match = _BOT_NAME.match(bot.invite_link_template)
+        return True, match.group(1) if match else None
+
+    async def issue(self, user_id: uuid.UUID) -> dict[str, Any]:
+        """Новая ссылка гасит прежние неиспользованные. Без интерактивного бота — `telegram_unavailable`."""
+        bot = await self._bot()
+        if bot is None:
+            raise ServiceError("telegram_unavailable", BOT_MISSING)
         now = self.now()
         expires_at = now + timedelta(minutes=self.config.link_token_ttl_minutes)
         token = secrets.token_urlsafe(TOKEN_BYTES)

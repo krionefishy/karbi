@@ -2,27 +2,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ManagerConfig, TelegramStatus } from "../features/screenshotControl/types";
+import type { TelegramStatus } from "../features/screenshotControl/types";
 import { ScreenshotTelegram, TELEGRAM_POLL_MS } from "./ScreenshotTelegram";
 
 const root = "/api/v1/wb/screenshot-control";
 const URL_ = "https://t.me/dbs_shots_bot?start=tok123";
 
-const config: ManagerConfig = {
-  mode: "enforce",
-  telegram_enabled: true,
-  outcomes: [],
-  max_upload_bytes: 15 * 1024 * 1024,
-  accepted_types: ["image/png"],
-  min_side_px: 600,
-  extension_url: "/downloads/screenshot-control.zip",
-  extension_min_version: "1.0.0",
+const unlinked: TelegramStatus = {
+  available: true,
   bot_username: "dbs_shots_bot",
+  linked: false,
+  username: null,
+  linked_at: null,
 };
-
-const unlinked: TelegramStatus = { enabled: true, linked: false, username: null, linked_at: null };
 const linkedAs = (username: string | null = "ivan_m"): TelegramStatus => ({
-  enabled: true,
+  available: true,
+  bot_username: "dbs_shots_bot",
   linked: true,
   username,
   linked_at: "2026-10-30T09:15:00Z",
@@ -36,13 +31,13 @@ function json(body: unknown, status = 200, code?: string) {
 
 type Handler = (url: string, init?: RequestInit) => Response | undefined;
 
-function renderBlock(handler: Handler, cfg: ManagerConfig | undefined = config) {
+function renderBlock(handler: Handler) {
   const request = vi.fn(async (url: string, init?: RequestInit) => handler(url, init) ?? json(null, 404));
   vi.stubGlobal("fetch", request);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <ScreenshotTelegram config={cfg} />
+      <ScreenshotTelegram />
     </QueryClientProvider>,
   );
   return request;
@@ -68,19 +63,10 @@ afterEach(() => {
 });
 
 describe("ScreenshotTelegram", () => {
-  it("stays a calm «Скоро» without buttons while Telegram is off", () => {
-    const request = renderBlock(() => undefined, { ...config, telegram_enabled: false });
+  it("says the bot is not connected yet when the server has none", async () => {
+    renderBlock((url) => (url === `${root}/telegram` ? json({ ...unlinked, available: false, bot_username: null }) : undefined));
 
-    expect(screen.getByRole("heading", { name: "Telegram" })).toBeInTheDocument();
-    expect(screen.getByText("Скоро")).toBeInTheDocument();
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("falls back to «Скоро» when the server reports the bot as off", async () => {
-    renderBlock((url) => (url === `${root}/telegram` ? json({ ...unlinked, enabled: false }) : undefined));
-
-    expect(await screen.findByText("Скоро")).toBeInTheDocument();
+    expect(await screen.findByText("Не подключён")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Привязать/ })).not.toBeInTheDocument();
   });
 
@@ -105,7 +91,7 @@ describe("ScreenshotTelegram", () => {
     renderBlock(linkFlow(() => unlinked));
 
     expect(await screen.findByRole("heading", { name: "Как отправлять скриншоты в бот" })).toBeInTheDocument();
-    expect(screen.getByText(/боту @dbs_shots_bot нативный скриншот чата из приложения WB Partners/)).toBeInTheDocument();
+    expect(await screen.findByText(/боту @dbs_shots_bot нативный скриншот чата из приложения WB Partners/)).toBeInTheDocument();
     expect(screen.getByText(/Полож, Доп или Удален/)).toBeInTheDocument();
     expect(screen.getByText(/Бот ответит вердиктом/)).toBeInTheDocument();
   });
@@ -185,10 +171,10 @@ describe("ScreenshotTelegram", () => {
     expect(await screen.findByRole("button", { name: "Скопировано" })).toBeInTheDocument();
   });
 
-  it("explains a 503 telegram_disabled without a pointless retry", async () => {
+  it("explains a 503 telegram_unavailable without a pointless retry", async () => {
     renderBlock((url, init) => {
       if (url === `${root}/telegram/link-token` && init?.method === "POST") {
-        return json({ detail: "Telegram-бот подключается во втором релизе" }, 503, "telegram_disabled");
+        return json({ detail: "Telegram-бот ещё не подключён администратором" }, 503, "telegram_unavailable");
       }
       if (url === `${root}/telegram`) return json(unlinked);
       return undefined;

@@ -17,7 +17,6 @@ from backend.modules.notifications.domain import (
     Bot,
     Callback,
     MessageRequest,
-    MessengerPermanentError,
     Update,
     UpdateEvent,
 )
@@ -78,9 +77,9 @@ def photo_update(update_id: int = 10, text: str = "") -> Update:
     )
 
 
-async def accept(database: Database, bot: Bot, update: Update, *, interactive_enabled: bool) -> bool:
+async def accept(database: Database, bot: Bot, update: Update) -> bool:
     async with database.session() as session:
-        service = SubscriptionService(session, NotificationRepository(session), interactive_enabled=interactive_enabled)
+        service = SubscriptionService(session, NotificationRepository(session))
         return await service.accept_update(bot, update)
 
 
@@ -109,7 +108,7 @@ class TestInboundInteractive:
     async def test_a_photo_goes_to_the_topic_whole_and_nothing_is_answered(self, stand) -> None:
         database, bot, _ = stand
 
-        assert await accept(database, bot, photo_update(), interactive_enabled=True)
+        assert await accept(database, bot, photo_update())
 
         [event] = await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED)
         parsed = UpdateEvent.parse(event)
@@ -130,7 +129,7 @@ class TestInboundInteractive:
     async def test_start_with_a_token_is_the_automations_business(self, stand) -> None:
         database, bot, _ = stand
 
-        await accept(database, bot, photo_update(update_id=11, text="/start abc"), interactive_enabled=True)
+        await accept(database, bot, photo_update(update_id=11, text="/start abc"))
 
         [event] = await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED)
         assert event["text"] == "/start abc"
@@ -144,7 +143,7 @@ class TestInboundInteractive:
             photo_update(update_id=12), kind="callback", attachments=(), callback=Callback("cb-1", "sc:o:x:p", "4530")
         )
 
-        await accept(database, bot, update, interactive_enabled=True)
+        await accept(database, bot, update)
 
         [event] = await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED)
         assert event["kind"] == "callback"
@@ -153,19 +152,10 @@ class TestInboundInteractive:
     async def test_a_repeated_update_is_published_once(self, stand) -> None:
         database, bot, _ = stand
 
-        assert await accept(database, bot, photo_update(update_id=13), interactive_enabled=True)
-        assert not await accept(database, bot, photo_update(update_id=13), interactive_enabled=True)
+        assert await accept(database, bot, photo_update(update_id=13))
+        assert not await accept(database, bot, photo_update(update_id=13))
 
         assert len(await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED)) == 1
-
-    async def test_with_the_flag_off_an_interactive_bot_lives_the_old_way(self, stand) -> None:
-        database, bot, _ = stand
-
-        await accept(database, bot, photo_update(update_id=14), interactive_enabled=False)
-
-        assert await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED) == []
-        [message] = await queued(database, bot)
-        assert "персональную ссылку" in message.text
 
 
 class TestOldBotsUnchanged:
@@ -174,7 +164,7 @@ class TestOldBotsUnchanged:
     async def test_a_photo_to_an_old_bot_gets_the_no_token_answer(self, stand) -> None:
         database, _, plain = stand
 
-        await accept(database, plain, photo_update(update_id=20), interactive_enabled=True)
+        await accept(database, plain, photo_update(update_id=20))
 
         assert await outbox(database, plain, NotificationTopics.TELEGRAM_UPDATE_RECEIVED) == []
         [message] = await queued(database, plain)
@@ -189,9 +179,7 @@ class TestOldBotsUnchanged:
                 plain, seller_id=seller_id, seller_name="ООО Ромашка"
             )
 
-        await accept(
-            database, plain, photo_update(update_id=21, text=f"/start {invite.token}"), interactive_enabled=True
-        )
+        await accept(database, plain, photo_update(update_id=21, text=f"/start {invite.token}"))
 
         async with database.session() as session:
             assert await NotificationRepository(session).subscribers(plain.id, seller_id) == [555]
@@ -201,7 +189,7 @@ class TestOldBotsUnchanged:
     async def test_a_command_still_goes_to_command_received(self, stand) -> None:
         database, _, plain = stand
 
-        await accept(database, plain, photo_update(update_id=22, text="/returns"), interactive_enabled=True)
+        await accept(database, plain, photo_update(update_id=22, text="/returns"))
 
         [command] = await outbox(database, plain, NotificationTopics.TELEGRAM_COMMAND_RECEIVED)
         assert command["command"] == "returns"
@@ -236,7 +224,7 @@ class TestOldBotsUnchanged:
                     )
                 ]
 
-        fetcher = UpdateFetcher(database, Relay(), bot, invite_ttl_hours=72, wait_seconds=0, interactive_enabled=True)  # type: ignore[arg-type]
+        fetcher = UpdateFetcher(database, Relay(), bot, invite_ttl_hours=72, wait_seconds=0)  # type: ignore[arg-type]
         assert await fetcher.fetch_once() == 1
         [event] = await outbox(database, bot, NotificationTopics.TELEGRAM_UPDATE_RECEIVED)
         assert event["attachments"][0]["mime"] == "image/png"
@@ -244,8 +232,8 @@ class TestOldBotsUnchanged:
 
 
 class RecordingRelay(RelayClient):
-    def __init__(self, *, interactive: bool = True) -> None:
-        super().__init__(dataclasses.replace(SETTINGS.relay, interactive_enabled=interactive))
+    def __init__(self) -> None:
+        super().__init__(SETTINGS.relay)
         self.calls: list[tuple[str, dict]] = []
 
     async def send(self, **kwargs) -> str | None:  # type: ignore[override]
@@ -253,11 +241,9 @@ class RecordingRelay(RelayClient):
         return "900"
 
     async def edit_message(self, **kwargs) -> None:  # type: ignore[override]
-        self._require_interactive()
         self.calls.append(("edit", kwargs))
 
     async def answer_callback(self, **kwargs) -> None:  # type: ignore[override]
-        self._require_interactive()
         self.calls.append(("answer", kwargs))
 
 
@@ -327,21 +313,6 @@ class TestOutgoing:
         assert relay.calls[1][1] == {"bot_code": bot.code, "callback_id": "cb-1", "text": "Исход записан"}
         assert {row.status for row in await queued(database, bot)} == {"sent"}
 
-    async def test_with_the_flag_off_edits_fail_with_a_reason_and_buttons_stay_home(self, stand) -> None:
-        database, bot, _ = stand
-        relay = RecordingRelay(interactive=False)
-
-        await queue_and_deliver(
-            database,
-            bot,
-            relay,
-            request(bot, kind="edit", target_ref="4530", template="screens.outcome_set"),
-        )
-
-        [row] = await queued(database, bot)
-        assert row.status == "failed"
-        assert "interactive" in (row.error or "")
-
     async def test_bad_buttons_are_a_producer_bug(self, stand) -> None:
         database, bot, _ = stand
         async with database.session() as session:
@@ -384,11 +355,3 @@ class TestRegistry:
                 code=bot.code, title="", invite_link_template=bot.invite_link_template, interactive=False
             )
         assert again.interactive is False
-
-
-def test_the_permanent_error_of_a_disabled_relay_is_not_a_dead_chat_marker() -> None:
-    from backend.modules.notifications.application.dispatch import DEAD_CHAT_MARKERS
-    from backend.modules.notifications.infrastructure.relay.client import INTERACTIVE_DISABLED
-
-    assert not any(marker in INTERACTIVE_DISABLED for marker in DEAD_CHAT_MARKERS)
-    assert issubclass(MessengerPermanentError, Exception)

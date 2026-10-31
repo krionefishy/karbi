@@ -415,13 +415,20 @@ def test_storage_subscribers_start_only_with_s3(tmp_path: Path, monkeypatch: pyt
 
     without = application(tmp_path, s3=False)
     assert without.worker.services.blobs is None
-    assert set(without.consumers()) == {"screenshot-extract", "screenshot-decide"}
+    assert set(without.consumers()) == {
+        "screenshot-extract",
+        "screenshot-decide",
+        "screenshot-telegram",
+        "screenshot-telegram-verdict",
+    }
 
     with_s3 = application(tmp_path, s3=True)
     assert with_s3.worker.services.bucket == "shared"
     assert set(with_s3.consumers()) == {
         "screenshot-extract",
         "screenshot-decide",
+        "screenshot-telegram",
+        "screenshot-telegram-verdict",
         "screenshot-s3-upload",
         "screenshot-s3-delete",
     }

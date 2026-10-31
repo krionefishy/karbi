@@ -1,6 +1,6 @@
 """Клиент релея по контракту v1.1: новые поля апдейта, кнопки, правка, ответ на нажатие, файлы.
 
-Всё новое — только за `relay.interactive_enabled`; без флага клиент ведёт себя как v1.
+Обычное сообщение уходит тем же телом, что и в v1; кнопки и ответ-цитата добавляются, только когда они есть.
 """
 
 import asyncio
@@ -22,12 +22,11 @@ from backend.modules.notifications.domain import (
 from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.shared.settings import RelayConfig
 
-V1 = RelayConfig(
+CONFIG = RelayConfig(
     base_url="https://relay.invalid",
     jwt_secret="a-relay-secret-that-is-long-enough-for-tests",
     verify="false",
 )
-V11 = dataclasses.replace(V1, interactive_enabled=True)
 SEND = "https://relay.invalid/api/v1/messages/send"
 EDIT = "https://relay.invalid/api/v1/messages/edit"
 ANSWER = "https://relay.invalid/api/v1/callbacks/answer"
@@ -39,7 +38,7 @@ BUTTONS = [[{"label": "Положительный", "action": "sc:o:AAAAAAAAAAAA
 async def updates(items: list[dict]) -> list:
     with respx.mock:
         respx.get(UPDATES).mock(return_value=Response(200, json={"updates": items}))
-        return await RelayClient(V1).updates(bot_code="screens", after=0, wait=0)
+        return await RelayClient(CONFIG).updates(bot_code="screens", after=0, wait=0)
 
 
 class TestUpdates:
@@ -117,35 +116,27 @@ class TestUpdates:
 
 
 class TestSendingV11:
-    async def test_without_the_flag_buttons_and_reply_stay_home(self) -> None:
+    async def test_buttons_and_reply_travel(self) -> None:
         with respx.mock:
             route = respx.post(SEND).mock(return_value=Response(200, json={"message_ref": "1"}))
-            await RelayClient(V1).send(
-                bot_code="screens", recipient="1", text="t", idempotency_key="k", buttons=BUTTONS, reply_to="4521"
-            )
-        assert set(json.loads(route.calls.last.request.content)) == {"bot_code", "recipient", "text", "idempotency_key"}
-
-    async def test_with_the_flag_buttons_and_reply_travel(self) -> None:
-        with respx.mock:
-            route = respx.post(SEND).mock(return_value=Response(200, json={"message_ref": "1"}))
-            await RelayClient(V11).send(
+            await RelayClient(CONFIG).send(
                 bot_code="screens", recipient="1", text="t", idempotency_key="k", buttons=BUTTONS, reply_to="4521"
             )
         payload = json.loads(route.calls.last.request.content)
         assert payload["buttons"] == BUTTONS
         assert payload["reply_to"] == "4521"
 
-    async def test_a_plain_message_is_the_v1_payload_even_with_the_flag(self) -> None:
+    async def test_a_plain_message_is_the_v1_payload(self) -> None:
         with respx.mock:
             route = respx.post(SEND).mock(return_value=Response(200, json={"message_ref": "1"}))
-            await RelayClient(V11).send(bot_code="b", recipient="1", text="t", idempotency_key="k")
+            await RelayClient(CONFIG).send(bot_code="b", recipient="1", text="t", idempotency_key="k")
         assert set(json.loads(route.calls.last.request.content)) == {"bot_code", "recipient", "text", "idempotency_key"}
 
     async def test_edit_and_answer_go_to_their_endpoints(self) -> None:
         with respx.mock:
             edit = respx.post(EDIT).mock(return_value=Response(200, json={"status": "edited"}))
             answer = respx.post(ANSWER).mock(return_value=Response(200, json={"status": "answered"}))
-            client = RelayClient(V11)
+            client = RelayClient(CONFIG)
             await client.edit_message(
                 bot_code="screens", recipient="1", message_ref="4530", text="Исход", buttons=None, idempotency_key="e"
             )
@@ -169,21 +160,7 @@ class TestSendingV11:
         with respx.mock:
             respx.post(ANSWER).mock(return_value=Response(422, json={"detail": "query is too old"}))
             with pytest.raises(MessengerPermanentError, match="too old"):
-                await RelayClient(V11).answer_callback(bot_code="screens", callback_id="cb-1")
-
-    async def test_without_the_flag_edit_answer_and_files_never_call_the_relay(self) -> None:
-        client = RelayClient(V1)
-        with respx.mock(assert_all_called=False) as mock:
-            route = mock.route().mock(return_value=Response(200))
-            with pytest.raises(MessengerPermanentError, match="interactive"):
-                await client.edit_message(
-                    bot_code="b", recipient="1", message_ref="1", text="t", buttons=None, idempotency_key="k"
-                )
-            with pytest.raises(MessengerPermanentError, match="interactive"):
-                await client.answer_callback(bot_code="b", callback_id="c")
-            with pytest.raises(MessengerPermanentError, match="interactive"):
-                await client.fetch_file(bot_code="b", file_ref="AbC_12-x", max_bytes=10)
-        assert not route.called
+                await RelayClient(CONFIG).answer_callback(bot_code="screens", callback_id="cb-1")
 
 
 class TestFiles:
@@ -193,12 +170,12 @@ class TestFiles:
                 respx.get(FILE).mock(side_effect=response)
             else:
                 respx.get(FILE).mock(return_value=response)
-            return await RelayClient(V11).fetch_file(bot_code="screens", file_ref="AbC_12-x", max_bytes=max_bytes)
+            return await RelayClient(CONFIG).fetch_file(bot_code="screens", file_ref="AbC_12-x", max_bytes=max_bytes)
 
     async def test_the_bytes_come_back_and_the_limit_is_asked_for(self) -> None:
         with respx.mock:
             route = respx.get(FILE).mock(return_value=Response(200, content=b"\x89PNG-data"))
-            data = await RelayClient(V11).fetch_file(bot_code="screens", file_ref="AbC_12-x", max_bytes=100)
+            data = await RelayClient(CONFIG).fetch_file(bot_code="screens", file_ref="AbC_12-x", max_bytes=100)
         assert data == b"\x89PNG-data"
         assert route.calls.last.request.url.params["max_bytes"] == "100"
         assert route.calls.last.request.url.params["bot_code"] == "screens"
@@ -236,63 +213,26 @@ class TestFiles:
     @pytest.mark.parametrize("file_ref", ["../bots", "a/b", "", "x" * 200, "a?b=c"])
     async def test_a_file_ref_outside_the_format_never_reaches_a_url(self, file_ref: str) -> None:
         with pytest.raises(MessengerPermanentError):
-            await RelayClient(V11).fetch_file(bot_code="screens", file_ref=file_ref, max_bytes=10)
+            await RelayClient(CONFIG).fetch_file(bot_code="screens", file_ref=file_ref, max_bytes=10)
 
     async def test_a_hanging_download_ends_on_the_deadline(self) -> None:
         async def slow(_: httpx.Request) -> Response:
             await asyncio.sleep(5)
             return Response(200, content=b"x")
 
-        config = dataclasses.replace(V11, file_timeout_seconds=0)
+        config = dataclasses.replace(CONFIG, file_timeout_seconds=0)
         with respx.mock:
             respx.get(FILE).mock(side_effect=slow)
             with pytest.raises(MessengerTemporaryError, match="timed out"):
                 await RelayClient(config).fetch_file(bot_code="screens", file_ref="AbC_12-x", max_bytes=10)
 
 
-CAPABILITIES = "https://relay.invalid/api/v1/capabilities"
-FULL = {
-    "contract": "1.1",
-    "features": ["attachments_in", "files", "buttons", "reply_to", "callbacks", "edit"],
-    "limits": {"file_max_bytes": 20971520},
-}
-
-
-class TestCapabilities:
-    @pytest.mark.parametrize(
-        ("response", "expected"),
-        [
-            (Response(200, json=FULL), True),
-            (Response(200, json={**FULL, "contract": "1.10"}), True),
-            (Response(404, json={"detail": "Not Found"}), False),
-            (Response(200, json={**FULL, "features": ["buttons"]}), False),
-            (Response(200, json={**FULL, "contract": "1.0"}), False),
-        ],
-    )
-    async def test_only_a_full_v11_relay_counts(self, response: Response, expected: bool) -> None:
-        with respx.mock:
-            respx.get(CAPABILITIES).mock(return_value=response)
-            assert await RelayClient(V11).supports_interactive() is expected
-
-    async def test_no_answer_yet_is_temporary(self) -> None:
-        with respx.mock:
-            respx.get(CAPABILITIES).mock(return_value=Response(502, text="bad gateway"))
-            with pytest.raises(MessengerTemporaryError):
-                await RelayClient(V11).supports_interactive()
-
-
 class TestContractDetails:
     async def test_a_reply_to_that_is_not_a_message_number_is_not_sent(self) -> None:
         with respx.mock:
             route = respx.post(SEND).mock(return_value=Response(200, json={"message_ref": "1"}))
-            await RelayClient(V11).send(bot_code="b", recipient="1", text="t", idempotency_key="k", reply_to="abc")
+            await RelayClient(CONFIG).send(bot_code="b", recipient="1", text="t", idempotency_key="k", reply_to="abc")
         assert "reply_to" not in json.loads(route.calls.last.request.content)
-
-    async def test_a_flag_switched_off_at_runtime_wins_over_the_settings(self) -> None:
-        client = RelayClient(V11)
-        client.interactive_enabled = False
-        with pytest.raises(MessengerPermanentError, match="interactive"):
-            await client.answer_callback(bot_code="b", callback_id="c")
 
     async def test_a_v11_update_with_nulls_reads_as_defaults(self) -> None:
         [item] = await updates(
@@ -316,34 +256,3 @@ class TestContractDetails:
         assert (item.reply_to_ref, item.media_group_id, item.caption) == ("", "", "")
         [attachment] = item.attachments
         assert (attachment.size, attachment.mime, attachment.file_name) == (None, "", "")
-
-
-class TestWorkerConfirmsTheRelay:
-    """Флаг включён, а релей старый: интерактив гаснет, а не ломает доставку."""
-
-    def app(self):
-        from backend.shared.settings import load_settings
-        from backend.workers.notifications.main import NotificationsWorkerApplication
-
-        settings = load_settings("backend/shared/settings/config.test.yaml")
-        settings = dataclasses.replace(settings, relay=dataclasses.replace(V11))
-        return NotificationsWorkerApplication(settings)
-
-    @pytest.mark.parametrize(("response", "expected"), [(Response(200, json=FULL), True), (Response(404), False)])
-    async def test_the_answer_decides(self, response: Response, expected: bool) -> None:
-        application = self.app()
-        with respx.mock:
-            respx.get(CAPABILITIES).mock(return_value=response)
-            await application._check_interactive()
-        assert application.client.interactive_enabled is expected
-
-    async def test_until_the_relay_answers_interactive_stays_off_and_is_asked_again(self) -> None:
-        application = self.app()
-        with respx.mock:
-            route = respx.get(CAPABILITIES).mock(side_effect=[httpx.ConnectError("down"), Response(200, json=FULL)])
-            await application._check_interactive()
-            assert application.client.interactive_enabled is False
-            await application._check_interactive()
-            await application._check_interactive()
-        assert application.client.interactive_enabled is True
-        assert route.call_count == 2

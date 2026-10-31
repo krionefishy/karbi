@@ -76,7 +76,7 @@ export const getInstalls = () => apiRequest<ExtensionInstall[]>(`${root}/extensi
 export const revokeInstall = (installId: string) =>
   apiRequest<void>(`${root}/extension/installs/${installId}`, { method: "DELETE" });
 
-/** Одноразовая ссылка t.me/<бот>?start=<токен> на 15 минут; 503 telegram_disabled, пока бот выключен. */
+/** Одноразовая ссылка t.me/<бот>?start=<токен> на 15 минут; 503 telegram_unavailable, пока бот выключен. */
 export const createTelegramLink = () =>
   apiRequest<TelegramLink>(`${root}/telegram/link-token`, { method: "POST" });
 

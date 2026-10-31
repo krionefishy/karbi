@@ -105,7 +105,6 @@ const managers: Managers = {
 
 const pipeline: Pipeline = {
   mode: "shadow",
-  telegram_enabled: false,
   stages: { processing: 2, extracted: 0 },
   oldest_processing_age_s: 8,
   p50_s: 9,

@@ -70,7 +70,7 @@ class FakeFiles:
 @pytest_asyncio.fixture
 async def bot_stand(tmp_path: Path) -> AsyncIterator[Stand]:
     roles = ("admin", "manager", "other", "outsider")
-    async with open_stand(tmp_path, roles=roles, without_service=("outsider",), telegram_enabled=True) as stand:
+    async with open_stand(tmp_path, roles=roles, without_service=("outsider",)) as stand:
         async with stand.database.session() as session:
             await session.execute(delete(BotModel).where(BotModel.code == BOT))
             await BotRegistry(session, NotificationRepository(session)).register(
@@ -526,15 +526,6 @@ class TestAccess:
 
         assert await templates(bot_stand) == [t.SCREENS_PRIVATE_ONLY]
 
-    async def test_with_the_flag_off_the_bot_only_says_so(self, bot_stand: Stand) -> None:
-        await link(bot_stand)
-        files = FakeFiles({"ph1": screen(6)})
-
-        await bot(bot_stand, files, telegram_enabled=False).handle(photo())
-
-        assert await templates(bot_stand) == [t.SCREENS_DISABLED]
-        assert files.asked == []
-
     async def test_another_bots_updates_are_not_ours(self, bot_stand: Stand) -> None:
         await link(bot_stand)
 
@@ -748,7 +739,7 @@ class TestLinkHttp:
         assert await templates(bot_stand) == [t.SCREENS_LINK_INVALID, t.SCREENS_LINKED]
 
         status = await bot_stand.client.get(f"{MANAGER}/telegram", headers=manager)
-        assert status.json()["linked"] is True and status.json()["enabled"] is True
+        assert status.json()["linked"] is True and status.json()["available"] is True
         assert status.json()["username"] == "ivan"
         assert (await bot_stand.client.delete(f"{MANAGER}/telegram", headers=manager)).status_code == 204
         assert (await bot_stand.client.get(f"{MANAGER}/telegram", headers=manager)).json()["linked"] is False
@@ -761,7 +752,9 @@ class TestLinkHttp:
 
         response = await bot_stand.client.post(f"{MANAGER}/telegram/link-token", headers=manager)
 
-        assert (response.status_code, response.headers["X-Error-Code"]) == (503, "telegram_disabled")
+        assert (response.status_code, response.headers["X-Error-Code"]) == (503, "telegram_unavailable")
+        status = await bot_stand.client.get(f"{MANAGER}/telegram", headers=manager)
+        assert status.json()["available"] is False
 
     async def test_a_manager_without_the_service_gets_403(self, bot_stand: Stand) -> None:
         outsider = await bot_stand.sign_in("outsider")

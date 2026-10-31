@@ -17,34 +17,25 @@ const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", t
 const handle = (username: string | null) => (username ? `@${username}` : "Telegram");
 
 /** Блок «Telegram» во вкладке «Подключения»: привязка аккаунта к боту по одноразовой ссылке. */
-export function ScreenshotTelegram({ config }: { config: ManagerConfig | undefined }) {
-  if (!config) {
-    return (
-      <section className="sc-panel sc-connection">
-        <h2>Telegram</h2>
-        <p className="muted">Загружаем настройки…</p>
-      </section>
-    );
-  }
-  if (!config.telegram_enabled) return <TelegramSoon />;
-  return <TelegramPanel botUsername={config.bot_username} />;
+export function ScreenshotTelegram() {
+  return <TelegramPanel />;
 }
 
-function TelegramSoon() {
+function TelegramUnavailable() {
   return (
     <section className="sc-panel sc-connection">
       <div className="sc-connection-head">
         <h2>Telegram</h2>
-        <span className="status-badge">Скоро</span>
+        <span className="status-badge">Не подключён</span>
       </div>
       <p className="muted">
-        Отправка скриншотов боту появится в следующем релизе. Пока присылайте их через расширение или с этой страницы.
+        Бот ещё не подключён администратором. Пока присылайте скриншоты через расширение или с этой страницы.
       </p>
     </section>
   );
 }
 
-function TelegramPanel({ botUsername }: { botUsername: string | null }) {
+function TelegramPanel() {
   const queryClient = useQueryClient();
   const [link, setLink] = useState<TelegramLink | null>(null);
   const [linkedNow, setLinkedNow] = useState(false);
@@ -59,6 +50,7 @@ function TelegramPanel({ botUsername }: { botUsername: string | null }) {
     refetchInterval: (query) => (waiting && !query.state.data?.linked ? TELEGRAM_POLL_MS : false),
   });
   const linked = status.data?.linked ?? false;
+  const botUsername = status.data?.bot_username ?? null;
 
   const issue = useMutation({
     mutationFn: createTelegramLink,
@@ -70,7 +62,7 @@ function TelegramPanel({ botUsername }: { botUsername: string | null }) {
     onError: (err) =>
       setError({
         text: apiErrorText(err, "Не удалось получить ссылку"),
-        retry: isErrorCode(err, "telegram_disabled") ? null : () => issue.mutate(),
+        retry: isErrorCode(err, "telegram_unavailable") ? null : () => issue.mutate(),
       }),
   });
   const unlink = useMutation({
@@ -81,7 +73,8 @@ function TelegramPanel({ botUsername }: { botUsername: string | null }) {
       setLinkedNow(false);
       setLink(null);
       queryClient.setQueryData<TelegramStatus>([TELEGRAM_KEY], (current) => ({
-        enabled: current?.enabled ?? true,
+        available: current?.available ?? true,
+        bot_username: current?.bot_username ?? null,
         linked: false,
         username: null,
         linked_at: null,
@@ -116,9 +109,8 @@ function TelegramPanel({ botUsername }: { botUsername: string | null }) {
     );
   } else if (!status.data) {
     body = <p className="muted">Загружаем статус Telegram…</p>;
-  } else if (!status.data.enabled) {
-    // Флаг на сервере выключили после загрузки настроек страницы.
-    return <TelegramSoon />;
+  } else if (!status.data.available) {
+    return <TelegramUnavailable />;
   } else if (linked) {
     const since = status.data.linked_at ? `, привязан ${momentFormatter.format(new Date(status.data.linked_at))}` : "";
     body = (

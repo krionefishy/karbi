@@ -77,14 +77,13 @@ def test_screenshot_control_comes_from_docker_yaml_with_keys_out_of_the_repr(mon
     for name in ("SCREENSHOT_CONTROL_MODE", "SCREENSHOT_CONTROL_S3_BUCKET", "VISION_MODEL", "VISION_FALLBACK_MODEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("SCREENSHOT_CONTROL_HMAC_KEY", "hmac-secret-that-is-long-enough-0123456789")
-    monkeypatch.setenv("SCREENSHOT_CONTROL_TELEGRAM", "false")
     load_settings.cache_clear()
 
     settings = load_settings("backend/shared/settings/config.docker.yaml")
     load_settings.cache_clear()
 
     screens = settings.screenshot_control
-    assert screens.mode == "shadow" and screens.telegram_enabled is False
+    assert screens.mode == "shadow"
     assert (screens.retention_original_days, screens.retention_thumb_days) == (365, 365)
     assert screens.thresholds.text_dup == 0.90 and screens.thresholds.min_text_len == 25
     assert screens.staging_root == "/data/screenshots-staging"

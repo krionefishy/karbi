@@ -158,11 +158,7 @@ class DispatchService:
 
     @staticmethod
     async def _deliver(client: RelayClient, bot_code: str, message: OutgoingMessageModel) -> str | None:
-        """One queued row, by its kind. A plain message calls `send` exactly as before v1.1.
-
-        Edits and button answers need `relay.interactive_enabled`; without it the
-        client refuses permanently and the row ends up `failed` with that reason.
-        """
+        """One queued row, by its kind. A plain message calls `send` exactly as before v1.1."""
         if message.kind == EDIT_KIND:
             await client.edit_message(
                 bot_code=bot_code,

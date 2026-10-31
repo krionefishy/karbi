@@ -19,7 +19,7 @@ export function ScreenshotConnections({ config }: { config: ManagerConfig | unde
     <div className="sc-connections">
       <ExtensionPanel config={config} />
       <ScreenshotTimezone />
-      <ScreenshotTelegram config={config} />
+      <ScreenshotTelegram />
       <section className="sc-panel sc-connection">
         <h2>Как делать скриншот</h2>
         <ul className="sc-rules">

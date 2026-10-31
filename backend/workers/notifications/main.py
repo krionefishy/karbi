@@ -6,7 +6,7 @@ import structlog
 
 from backend.infrastructure.logging import configure_logging
 from backend.modules.notifications.application import BotRegistry
-from backend.modules.notifications.domain import Bot, MessengerTemporaryError
+from backend.modules.notifications.domain import Bot
 from backend.modules.notifications.infrastructure.postgres import NotificationRepository
 from backend.modules.notifications.infrastructure.relay import RelayClient
 from backend.shared.heartbeat import touch_heartbeat
@@ -41,9 +41,7 @@ class NotificationsWorkerApplication:
         )
         self._deliveries: dict[uuid.UUID, asyncio.Task[None]] = {}
         self._fetchers: dict[uuid.UUID, asyncio.Task[None]] = {}
-        self._fetcher_bots: dict[uuid.UUID, tuple[Bot, bool]] = {}
-        # Флаг relay.interactive_enabled действует, только когда релей подтвердил контракт v1.1.
-        self._interactive_checked = not self.client.interactive_enabled
+        self._fetcher_bots: dict[uuid.UUID, Bot] = {}
         self._sender_task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self.logger = structlog.get_logger("notifications_worker")
@@ -56,7 +54,6 @@ class NotificationsWorkerApplication:
         while not self._stop.is_set():
             touch_heartbeat()
             try:
-                await self._check_interactive()
                 self._sync_sender()
                 bots = await self._active_bots()
                 self._sync_deliveries(bots)
@@ -67,29 +64,6 @@ class NotificationsWorkerApplication:
                 await asyncio.wait_for(self._stop.wait(), timeout=self.settings.telegram.bot_refresh_seconds)
             except TimeoutError:
                 continue
-
-    async def _check_interactive(self) -> None:
-        """Включённый флаг при релее v1.0 сломал бы доставку (кнопки — 422): такой релей флаг гасит.
-
-        Пока релей не ответил, интерактив выключен; спрашиваем на каждом круге супервизора.
-        """
-        if self._interactive_checked:
-            return
-        self.client.interactive_enabled = False
-        try:
-            supported = await self.client.supports_interactive()
-        except MessengerTemporaryError as error:
-            self.logger.warning("relay_capabilities_unknown", error=str(error))
-            return
-        self._interactive_checked = True
-        self.client.interactive_enabled = supported
-        if supported:
-            self.logger.info("relay_interactive_enabled")
-        else:
-            self.logger.error(
-                "relay_interactive_unsupported",
-                hint="RELAY_INTERACTIVE_ENABLED=true, но релей не знает контракт v1.1: интерактив выключен",
-            )
 
     async def _active_bots(self) -> list[Bot]:
         async with self.database.session() as session:
@@ -128,11 +102,10 @@ class NotificationsWorkerApplication:
     def _sync_fetchers(self, bots: list[Bot]) -> None:
         """An inbound loop per bot, kept in step with the bot table like delivery.
 
-        A bot whose row changed (say, it became interactive), or a relay that
-        confirmed contract v1.1 late, gets a fresh loop: the fetcher reads both
-        once, at start.
+        A bot whose row changed (say, it became interactive) gets a fresh loop:
+        the fetcher reads the row once, at start.
         """
-        current = {bot.id: (bot, self.client.interactive_enabled) for bot in bots}
+        current = {bot.id: bot for bot in bots}
         for bot_id, task in list(self._fetchers.items()):
             if current.get(bot_id) != self._fetcher_bots.get(bot_id) or task.done():
                 task.cancel()
@@ -146,12 +119,11 @@ class NotificationsWorkerApplication:
                     bot,
                     invite_ttl_hours=self.settings.telegram.invite_link_ttl_hours,
                     wait_seconds=self.settings.relay.updates_wait_seconds,
-                    interactive_enabled=self.client.interactive_enabled,
                 )
                 self._fetchers[bot.id] = asyncio.create_task(
                     fetcher.run_forever(), name=f"notification-updates-{bot.code}"
                 )
-                self._fetcher_bots[bot.id] = (bot, self.client.interactive_enabled)
+                self._fetcher_bots[bot.id] = bot
                 self.logger.info("bot_update_fetcher_scheduled", bot=bot.code)
 
     async def run(self) -> None:

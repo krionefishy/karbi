@@ -55,7 +55,7 @@ STATUS_BY_CODE: dict[str, int] = {
     "exact_key_conflict": 409,
     "note_required": 422,
     "duplicate_target_invalid": 422,
-    "telegram_disabled": 503,
+    "telegram_unavailable": 503,
     "transition_not_allowed": 409,
     "bad_cursor": 422,
     "bad_timezone": 422,
@@ -117,7 +117,6 @@ def manager_config(settings: Settings) -> ManagerConfigOut:
     screens = settings.screenshot_control
     return ManagerConfigOut(
         mode=screens.mode,  # type: ignore[arg-type]
-        telegram_enabled=screens.telegram_enabled,
         outcomes=[
             OutcomeOption(value=value, caption=OUTCOME_CAPTIONS[value], label=OUTCOME_LABELS[value])  # type: ignore[arg-type]
             for value in OUTCOMES
@@ -127,7 +126,6 @@ def manager_config(settings: Settings) -> ManagerConfigOut:
         min_side_px=screens.min_side_px,
         extension_url=screens.public_base_url.rstrip("/") + screens.extension_download_path,
         extension_min_version=screens.extension_min_version,
-        bot_username=None,
     )
 
 

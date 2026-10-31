@@ -239,9 +239,7 @@ async def managers_export(
 async def pipeline(
     request: Request, _: CurrentAdmin, settings: FromDishka[Settings], session: FromDishka[AsyncSession]
 ) -> PipelineOut:
-    answer = await admin_service(request, session, settings).pipeline(
-        telegram_enabled=settings.screenshot_control.telegram_enabled
-    )
+    answer = await admin_service(request, session, settings).pipeline()
     return PipelineOut.model_validate(answer)
 
 
@@ -254,7 +252,6 @@ async def config(_: CurrentAdmin, settings: FromDishka[Settings]) -> AdminConfig
     return AdminConfigOut(
         mode=screens.mode,  # type: ignore[arg-type]
         kpi_from=date.fromisoformat(screens.kpi_from) if screens.kpi_from else None,
-        telegram_enabled=screens.telegram_enabled,
         pipeline_version=screens.pipeline_version,
         vision_model=settings.vision.model or None,
         s3_bucket=screens.bucket(settings.s3),
