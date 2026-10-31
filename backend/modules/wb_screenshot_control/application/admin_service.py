@@ -278,11 +278,15 @@ class AdminService:
         chat: dict[str, Any] = vlm["chat_id"] if isinstance(vlm.get("chat_id"), dict) else {}
         stars = fields.get("stars")
         review_at = fields.get("review_at")
+        if submission.review_tz is not None:
+            # Распознавание общее у файла, время отзыва — в поясе загрузившего этот скрин.
+            review_at = submission.key_time.isoformat() if submission.key_time else None
+        tz = ZoneInfo(submission.review_tz) if submission.review_tz else self.tz
         messages = []
         for message in fields.get("messages") or []:
             if not isinstance(message, dict) or message.get("side") == "seller" or not message.get("text_norm"):
                 continue
-            at, precision = _message_time(message, submission.received_at, self.tz)
+            at, precision = _message_time(message, submission.received_at, tz)
             messages.append({"text": message["text_norm"], "at": at, "time_precision": precision})
         quality = fields.get("quality") or {}
         return {
@@ -292,6 +296,7 @@ class AdminService:
             "chat_id_source": fields.get("chat_id_source"),
             "key_time": submission.key_time,
             "key_time_precision": submission.key_time_precision,
+            "review_tz": submission.review_tz,
             "review_at": datetime.fromisoformat(review_at) if review_at else None,
             "review_text": fields.get("review_text"),
             "review_text_truncated": bool(fields.get("text_truncated")),

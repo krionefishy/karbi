@@ -5,6 +5,7 @@ from dataclasses import asdict, fields
 from datetime import date, datetime
 from typing import Any
 
+from backend.modules.wb_screenshot_control.domain.normalize import ScreenDateTime
 from backend.modules.wb_screenshot_control.domain.pipeline_types import (
     ChatMessage,
     ExtractedFields,
@@ -50,6 +51,8 @@ def fields_from_json(data: dict[str, Any]) -> ExtractedFields:
     values["quality"] = QualityFlags(**(values.get("quality") or {}))
     values["agreement"] = dict(values.get("agreement") or {})
     values["disagreements"] = tuple(values.get("disagreements") or ())
+    screen = values.get("review_screen")
+    values["review_screen"] = ScreenDateTime(**screen) if isinstance(screen, dict) else None
     return ExtractedFields(**values)
 
 

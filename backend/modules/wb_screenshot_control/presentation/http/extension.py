@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_screenshot_control.application.errors import ServiceError
 from backend.modules.wb_screenshot_control.application.extension_service import ExtensionCaller, ExtensionService
 from backend.modules.wb_screenshot_control.application.kpi import KpiService
+from backend.modules.wb_screenshot_control.application.settings_service import user_timezone
 from backend.modules.wb_screenshot_control.infrastructure.postgres.queries import Window
 from backend.modules.wb_screenshot_control.infrastructure.wiring import build_ingest
 from backend.modules.wb_screenshot_control.presentation.http.common import (
@@ -100,6 +101,7 @@ async def me(
         allowed_url_prefixes=list(screens.allowed_url_prefixes),
         summary=Summary.model_validate(await kpi.summary(caller.user_id, report_period(settings, None, None))),
         server_time=datetime.now(UTC),
+        timezone=await user_timezone(session, caller.user_id, screens),
     )
 
 

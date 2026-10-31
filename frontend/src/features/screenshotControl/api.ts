@@ -8,6 +8,7 @@ import type {
   ImageKind,
   ImageUrl,
   ManagerConfig,
+  ManagerSettings,
   Managers,
   Outcome,
   PairingCode,
@@ -59,6 +60,11 @@ export const getSummary = (period: { from?: string; to?: string } = {}) =>
   apiRequest<Summary>(withQuery(`${root}/summary`, period));
 
 export const getConfig = () => apiRequest<ManagerConfig>(`${root}/config`);
+
+export const getSettings = () => apiRequest<ManagerSettings>(`${root}/settings`);
+
+export const updateSettings = (timezone: string) =>
+  apiRequest<ManagerSettings>(`${root}/settings`, json("PUT", { timezone }));
 
 export const createPairingCode = () =>
   apiRequest<PairingCode>(`${root}/extension/pairing-code`, { method: "POST" });

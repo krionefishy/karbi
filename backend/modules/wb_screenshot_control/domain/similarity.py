@@ -149,18 +149,28 @@ def time_similarity(
     b: datetime | None,
     b_precision: Literal["minute", "day"] | None,
     tz: tzinfo,
+    *,
+    b_tz: tzinfo | None = None,
 ) -> float:
-    """S_time по времени отзыва, как его видно на экране (часовой пояс портала).
+    """S_time по времени отзыва, как его видно на экране в поясе `tz` (пояс загрузившего `a`).
 
     1.0 — тот же день и минута; 0.9 — тот же день, время расходится одной цифрой путаницы;
     0.5 — у одной из сторон только день, и дни равны; иначе 0.
+
+    `b_tz` — пояс, в котором прочитан `b` (по умолчанию тот же). Дата «только день» — полночь в поясе
+    своего менеджера, поэтому день сравнивается в поясе той стороны, у которой точность `day`.
     """
     if a is None or b is None:
         return 0.0
+    if a_precision == "day" or b_precision == "day":
+        if a_precision == "day" and b_precision == "day":
+            same = a.astimezone(tz).date() == b.astimezone(b_tz or tz).date()
+        else:
+            zone = tz if a_precision == "day" else (b_tz or tz)
+            same = a.astimezone(zone).date() == b.astimezone(zone).date()
+        return TIME_SAME_DAY if same else 0.0
     if a.astimezone(tz).date() != b.astimezone(tz).date():
         return 0.0
-    if a_precision == "day" or b_precision == "day":
-        return TIME_SAME_DAY
     clock_a, clock_b = _clock(a, tz), _clock(b, tz)
     if clock_a == clock_b:
         return TIME_EXACT

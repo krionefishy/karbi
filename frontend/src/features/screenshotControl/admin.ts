@@ -257,18 +257,27 @@ export function agreementBadge(value: number | null | undefined): Badge | null {
 /** Хвост chatId для показа: последние 12 символов. */
 export const chatTail = (chatId: string | null): string => (chatId ? `…${chatId.slice(-12)}` : "не прочитан");
 
-const reviewFormatter = new Intl.DateTimeFormat("ru-RU", {
-  day: "numeric",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  timeZone: "Europe/Moscow",
-});
-const reviewDayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", timeZone: "Europe/Moscow" });
+const reviewFormatters = new Map<string, Intl.DateTimeFormat>();
 
-export function formatReviewAt(iso: string | null, precision: "minute" | "day" | null = "minute"): string {
+function reviewFormatter(timeZone: string, day: boolean): Intl.DateTimeFormat {
+  const key = `${timeZone}|${day}`;
+  let formatter = reviewFormatters.get(key);
+  if (!formatter) {
+    const clock = day ? {} : ({ hour: "2-digit", minute: "2-digit" } as const);
+    formatter = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "short", ...clock, timeZone });
+    reviewFormatters.set(key, formatter);
+  }
+  return formatter;
+}
+
+/** Время отзыва как его видел менеджер: в его поясе (по умолчанию Москва). */
+export function formatReviewAt(
+  iso: string | null,
+  precision: "minute" | "day" | null = "minute",
+  timeZone: string | null = "Europe/Moscow",
+): string {
   if (!iso) return "не прочитано";
-  return (precision === "day" ? reviewDayFormatter : reviewFormatter).format(new Date(iso)).replace(".", "");
+  return reviewFormatter(timeZone || "Europe/Moscow", precision === "day").format(new Date(iso)).replace(".", "");
 }
 
 // --- журнал решений ---

@@ -8,6 +8,7 @@ import {
   confidenceBadge,
   duplicateTargets,
   formatAge,
+  formatReviewAt,
   formatStorage,
   keyAction,
   managerSignals,
@@ -252,5 +253,13 @@ describe("конвейер", () => {
     expect(formatStorage(0)).toBe("0 МБ");
     expect(queuePeriodRange("all")).toEqual({});
     expect(queuePeriodRange("day", new Date("2026-10-23T09:00:00Z"))).toEqual({ from: "2026-10-23", to: "2026-10-23" });
+  });
+  it("formats the review time in the manager's timezone", () => {
+    const iso = "2026-10-21T19:00:00Z"; // полночь 22.10 по Екатеринбургу, 22:00 21.10 по Москве
+    expect(formatReviewAt(iso, "day", "Asia/Yekaterinburg")).toBe("22 окт");
+    expect(formatReviewAt(iso, "day")).toBe("21 окт");
+    expect(formatReviewAt("2026-10-22T03:39:00Z", "minute", "Asia/Yekaterinburg")).toMatch(/22 окт.*08:39/);
+    expect(formatReviewAt("2026-10-22T03:39:00Z", "minute", null)).toMatch(/22 окт.*06:39/);
+    expect(formatReviewAt(null)).toBe("не прочитано");
   });
 });

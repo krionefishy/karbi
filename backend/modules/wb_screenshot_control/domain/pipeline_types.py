@@ -7,13 +7,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from backend.modules.wb_screenshot_control.domain.normalize import ScreenDateTime
+
 Severity = Literal["info", "warn", "high"]
 ChatSide = Literal["client", "seller"]
 
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
-    """Видимое сообщение переписки: время как на экране и нормализованный текст."""
+    """Видимое сообщение переписки: время как на экране и нормализованный текст.
+
+    `days_ago` — дата была словом («вчера»): день и месяц тогда достроены от даты приёма в поясе менеджера.
+    """
 
     text_norm: str
     hour: int | None = None
@@ -21,6 +26,7 @@ class ChatMessage:
     day: int | None = None
     month: int | None = None
     side: ChatSide | None = None
+    days_ago: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +50,12 @@ class ClientHints:
 
 @dataclass(frozen=True, slots=True)
 class ExtractedFields:
-    """Нормализованные поля. Имя покупателя здесь только как HMAC, в открытом виде не живёт нигде."""
+    """Нормализованные поля. Имя покупателя здесь только как HMAC, в открытом виде не живёт нигде.
+
+    `review_screen` — дата и время отзыва ровно как на экране, `timezone` — пояс, в котором из них получен
+    `review_at`. Распознавание общее у файла, а пояс у каждого загрузившего свой: момент пересчитывается
+    под сабмишен (`timezones.rebase_fields`). У распознаваний до пояса менеджера обоих полей нет.
+    """
 
     layout: str
     is_wb_seller_chat: bool
@@ -62,6 +73,8 @@ class ExtractedFields:
     quality: QualityFlags = QualityFlags()
     agreement: dict[str, float] = field(default_factory=dict)
     disagreements: tuple[Literal["chat_id", "time", "text"], ...] = ()
+    review_screen: ScreenDateTime | None = None
+    timezone: str | None = None
 
     @property
     def case_kind(self) -> Literal["desktop", "mobile"]:

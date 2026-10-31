@@ -621,6 +621,12 @@
 .sc-installs-title { margin: var(--space-6) 0 var(--space-3); }
 .sc-installs { border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .sc-installs-action { width: 1%; text-align: right; }
+.sc-timezone { margin-top: var(--space-4); }
+.sc-timezone-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.sc-timezone-row select { flex: 1 1 220px; max-width: 320px; }
+.sc-timezone-note { margin: var(--space-2) 0 0; color: var(--ink-muted); font-size: 12px; line-height: 16px; }
+.sc-timezone .form-error { margin: var(--space-2) 0 0; }
+.sc-hints .link-button { font-size: inherit; }
 .sc-rules { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 18px; color: var(--ink-secondary); font-size: 13px; line-height: 18px; }
 
 /* Админка «Контроль скриншотов ДБС»: очередь слева, карточка справа; менеджеры; конвейер. */

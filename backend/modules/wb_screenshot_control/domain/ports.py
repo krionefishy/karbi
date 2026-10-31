@@ -17,8 +17,16 @@ class Extractor(Protocol):
     """Картинка → нормализованные поля. Исключение или `status="failed"` — неудачная попытка, конвейер повторит."""
 
     async def extract(
-        self, image: bytes, *, channel: str, hints: ClientHints, received_at: datetime
-    ) -> ExtractionResult: ...
+        self,
+        image: bytes,
+        *,
+        channel: str,
+        hints: ClientHints,
+        received_at: datetime,
+        timezone: str | None = None,
+    ) -> ExtractionResult:
+        """`timezone` — пояс загрузившего менеджера (IANA): в нём читается время на экране."""
+        ...
 
 
 class Decider(Protocol):

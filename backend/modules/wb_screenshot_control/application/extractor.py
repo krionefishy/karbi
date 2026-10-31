@@ -138,8 +138,16 @@ class Extractor:
         self.repair_model = repair_model
 
     async def extract(
-        self, image: bytes, *, channel: str, hints: ClientHints, received_at: datetime
+        self,
+        image: bytes,
+        *,
+        channel: str,
+        hints: ClientHints,
+        received_at: datetime,
+        timezone: str | None = None,
     ) -> ExtractionResult:
+        """`timezone` — пояс загрузившего менеджера; не задан — пояс модуля по умолчанию."""
+        zone = timezone or self.timezone
         try:
             frame = await asyncio.to_thread(open_frame, image)
         except ImageUnreadable:
@@ -157,7 +165,7 @@ class Extractor:
         address = None
         if url_chat_id is None and answer.layout == "desktop_window":
             address = await self._read_address_bar(frame, usage)
-        fields = self._fields(answer, address, url_chat_id, received_at)
+        fields = self._fields(answer, address, url_chat_id, received_at, zone)
         return ExtractionResult(
             status="ok",
             fields=fields,
@@ -218,6 +226,7 @@ class Extractor:
         address: AddressBarAnswerV1 | None,
         url_chat_id: str | None,
         received_at: datetime,
+        zone: str,
     ) -> ExtractedFields:
         agreement: dict[str, float] = {}
         chat_id, chat_source = self._chat_id(answer, address, url_chat_id, agreement)
@@ -247,7 +256,7 @@ class Extractor:
             _put(agreement, "time", datetime_agreement(from_text, from_numbers))
             moment = _pick(from_text, from_numbers)
             truncated = review.text_truncated or has_truncation_tail(text)
-        review_at, precision = resolve_screen_datetime(moment, received_at=received_at, timezone=self.timezone)
+        review_at, precision = resolve_screen_datetime(moment, received_at=received_at, timezone=zone)
         raw_text = text.strip() if text and text.strip() else None
         names: tuple[Field, ...] = ("chat_id", "time", "text")
         disagreements = tuple(name for name in names if name in agreement and agreement[name] < self.text_threshold)
@@ -265,11 +274,13 @@ class Extractor:
             article_norm=normalize_article(answer.article.value) or normalize_article(answer.review.article),
             buyer_hmac=buyer_hmac(answer.buyer_name.value, self.hmac_key),
             messages=tuple(
-                message for item in answer.messages if (message := self._message(item, received_at)) is not None
+                message for item in answer.messages if (message := self._message(item, received_at, zone)) is not None
             ),
             quality=QualityFlags(**answer.quality.model_dump()),
             agreement=agreement,
             disagreements=disagreements,
+            review_screen=moment,
+            timezone=zone,
         )
 
     def _chat_id(
@@ -290,7 +301,7 @@ class Extractor:
         chosen = crop_id or frame_id
         return chosen, ("image" if chosen else None)
 
-    def _message(self, item: VisibleMessage, received_at: datetime) -> ChatMessage | None:
+    def _message(self, item: VisibleMessage, received_at: datetime, zone: str) -> ChatMessage | None:
         text = normalize_text(item.text)
         moment = _message_datetime(item.date_text, item.time_text)
         if not text and moment is None:
@@ -298,10 +309,10 @@ class Extractor:
         day = month = None
         if moment is not None and moment.days_ago is not None:
             resolved, _ = resolve_screen_datetime(
-                ScreenDateTime(days_ago=moment.days_ago), received_at=received_at, timezone=self.timezone
+                ScreenDateTime(days_ago=moment.days_ago), received_at=received_at, timezone=zone
             )
             if resolved is not None:
-                local = resolved.astimezone(ZoneInfo(self.timezone))
+                local = resolved.astimezone(ZoneInfo(zone))
                 day, month = local.day, local.month
         elif moment is not None:
             day, month = moment.day, moment.month
@@ -312,6 +323,7 @@ class Extractor:
             day=day,
             month=month,
             side="client" if item.side == "client" else "seller" if item.side == "seller" else None,
+            days_ago=moment.days_ago if moment else None,
         )
 
     def _failed(self, usage: _Usage, error: str) -> ExtractionResult:

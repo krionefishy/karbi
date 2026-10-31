@@ -32,6 +32,7 @@ from backend.modules.wb_screenshot_control.application.serialization import (
     reason_to_json,
     without_personal,
 )
+from backend.modules.wb_screenshot_control.application.settings_service import user_timezone
 from backend.modules.wb_screenshot_control.application.storage import ObjectReader
 from backend.modules.wb_screenshot_control.application.thumbnails import Rendered, render
 from backend.modules.wb_screenshot_control.application.verdicts import decide_system, reason
@@ -46,6 +47,7 @@ from backend.modules.wb_screenshot_control.domain.pipeline_types import (
 )
 from backend.modules.wb_screenshot_control.domain.ports import Decider, Extractor, Staging
 from backend.modules.wb_screenshot_control.domain.similarity import text_minhash
+from backend.modules.wb_screenshot_control.domain.timezones import rebase_fields
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import ExtractionModel, SubmissionModel
 from backend.modules.wb_screenshot_control.infrastructure.postgres.repository import (
     CandidateQuery,
@@ -161,6 +163,7 @@ class _Work:
     sha256: str
     channel: str
     received_at: datetime
+    timezone: str
     hints: ClientHints
     reuse: bool
     render: bool
@@ -211,7 +214,11 @@ class ExtractionService:
                         await self.staging.write(staging_path(object_key(work.sha256, "thumb")), rendered.thumbnail)
                 if not work.reuse:
                     result = await self.extractor.extract(
-                        data, channel=work.channel, hints=work.hints, received_at=work.received_at
+                        data,
+                        channel=work.channel,
+                        hints=work.hints,
+                        received_at=work.received_at,
+                        timezone=work.timezone,
                     )
                     if result.status != "ok" or result.fields is None:
                         error = (result.error or "extraction returned no fields")[:500]
@@ -238,12 +245,15 @@ class ExtractionService:
             assert file is not None
             extraction = await repository.extraction(file.id, self.config.pipeline_version)
             thumb = await repository.storage_object(file.id, "thumb")
+            # Пояс фиксируется при первом распознавании: повтор и перепроверка админом читают в том же.
+            timezone = submission.review_tz or await user_timezone(session, submission.user_id, self.config)
             return _Work(
                 submission_id=submission.id,
                 file_id=file.id,
                 sha256=file.sha256,
                 channel=submission.channel,
                 received_at=submission.received_at,
+                timezone=timezone,
                 hints=ClientHints(
                     url=submission.client_url,
                     captured_at=submission.client_captured_at,
@@ -273,7 +283,7 @@ class ExtractionService:
                 if rendered is not None:
                     await self._store_render(session, repository, work, rendered)
                 if error is None:
-                    await self._extracted(session, repository, submission, result)
+                    await self._extracted(session, repository, submission, result, work.timezone)
                 else:
                     await self._failed(session, repository, submission, event, error, now)
             repository.mark_inbox(event_id, EVENT_SUBMITTED)
@@ -330,7 +340,11 @@ class ExtractionService:
         repository: ScreenshotRepository,
         submission: SubmissionModel,
         result: ExtractionResult | None,
+        timezone: str,
     ) -> None:
+        """Распознавание общее у файла; время отзыва — в поясе загрузившего: ключи кейса пересчитываются
+        под сабмишен из времени «как на экране» (повторный файл от менеджера в другом поясе не
+        перераспознаётся, а получает свой момент в UTC)."""
         version = self.config.pipeline_version
         if result is not None and result.fields is not None:
             extraction_id = await repository.upsert_extraction(
@@ -358,6 +372,8 @@ class ExtractionService:
             current = await repository.extraction(submission.file_id, version)
             assert current is not None and current.fields is not None
             extraction_id, fields = current.id, fields_from_json(current.fields)
+        fields = rebase_fields(fields, timezone=timezone, received_at=submission.received_at)
+        submission.review_tz = timezone
         for name, value in case_keys(fields).items():
             setattr(submission, name, value)
         submission.stage = STAGE_EXTRACTED
@@ -484,7 +500,7 @@ class DecisionService:
         if extraction is not None and extraction.status == "ok" and extraction.fields is not None:
             result = ExtractionResult(
                 status="ok",
-                fields=fields_from_json(extraction.fields),
+                fields=self._fields(extraction.fields, submission),
                 vlm_model=extraction.vlm_model,
                 vlm_prompt=extraction.vlm_prompt,
                 vlm_json=extraction.vlm_json,
@@ -541,8 +557,14 @@ class DecisionService:
             return ()
         return tuple(submission.text_minhash)
 
-    @staticmethod
-    def _candidate(row: CandidateRow) -> Candidate:
+    def _fields(self, data: dict[str, Any], submission: SubmissionModel) -> ExtractedFields:
+        """Поля файла в поясе того, кто прислал этот сабмишен (у старых скринов — пояс модуля)."""
+        fields = fields_from_json(data)
+        if submission.review_tz is None:
+            return fields
+        return rebase_fields(fields, timezone=submission.review_tz, received_at=submission.received_at)
+
+    def _candidate(self, row: CandidateRow) -> Candidate:
         return Candidate(
             submission_id=row.submission.id,
             user_id=row.submission.user_id,
@@ -551,5 +573,5 @@ class DecisionService:
             outcome=row.submission.outcome,
             file_sha256=row.sha256,
             dhash=from_bits(row.dhash_bits) if row.dhash_bits else None,
-            fields=fields_from_json(row.extraction_fields) if row.extraction_fields else None,
+            fields=self._fields(row.extraction_fields, row.submission) if row.extraction_fields else None,
         )

@@ -123,3 +123,40 @@ async def test_the_database_guards_uniqueness_and_vocabularies() -> None:
             await connection.execute(text(f"DELETE FROM {SCHEMA}.submissions WHERE file_id = :file"), {"file": file_id})
             await connection.execute(text(f"DELETE FROM {SCHEMA}.files WHERE id = :file"), {"file": file_id})
         await engine.dispose()
+
+
+async def test_sc004_adds_the_manager_timezone_and_rolls_back() -> None:
+    engine = create_async_engine(SETTINGS.database.url)
+    user = uuid.uuid4()
+    columns = text(
+        "SELECT count(*) FROM information_schema.columns "
+        "WHERE table_schema = :schema AND table_name = 'submissions' AND column_name = 'review_tz'"
+    )
+    tables = text("SELECT count(*) FROM information_schema.tables WHERE table_schema = :schema AND table_name = :name")
+    try:
+        alembic("downgrade", "sc003")
+        async with engine.connect() as connection:
+            assert await connection.scalar(columns, {"schema": SCHEMA}) == 0
+            assert await connection.scalar(tables, {"schema": SCHEMA, "name": "user_settings"}) == 0
+        alembic("upgrade", "head")
+        async with engine.connect() as connection:
+            assert await connection.scalar(columns, {"schema": SCHEMA}) == 1
+            assert await connection.run_sync(_differences) == []
+
+        insert = text(f"INSERT INTO {SCHEMA}.user_settings (user_id) VALUES (:user)")
+        async with engine.begin() as connection:
+            await connection.execute(insert, {"user": user})
+            row = (
+                await connection.execute(
+                    text(f"SELECT timezone, updated_at FROM {SCHEMA}.user_settings WHERE user_id = :user"),
+                    {"user": user},
+                )
+            ).one()
+        assert row.timezone == "Europe/Moscow" and row.updated_at is not None
+        with pytest.raises(IntegrityError):
+            async with engine.begin() as connection:
+                await connection.execute(insert, {"user": user})
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(text(f"DELETE FROM {SCHEMA}.user_settings WHERE user_id = :user"), {"user": user})
+        await engine.dispose()

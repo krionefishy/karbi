@@ -34,6 +34,7 @@ from backend.modules.wb_screenshot_control.application.pipeline import (
     queued_at,
 )
 from backend.modules.wb_screenshot_control.application.submissions_service import SubmissionsService
+from backend.modules.wb_screenshot_control.domain.normalize import ScreenDateTime, resolve_screen_datetime
 from backend.modules.wb_screenshot_control.domain.pipeline_types import ExtractionResult
 from backend.modules.wb_screenshot_control.domain.similarity import text_minhash
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
@@ -43,6 +44,7 @@ from backend.modules.wb_screenshot_control.infrastructure.postgres.models import
     SubmissionModel,
     VerdictEventModel,
 )
+from backend.modules.wb_screenshot_control.infrastructure.postgres.user_settings import UserSettingsRepository
 from backend.modules.wb_screenshot_control.infrastructure.wiring import ScreenshotControlServices, build_ingest
 from backend.storage.pg import Database
 from backend.tests.wb_screenshot_control.fakes import (
@@ -507,3 +509,133 @@ def test_a_capture_from_the_future_is_a_clock_problem_not_a_queue() -> None:
     assert queued_at(received + timedelta(minutes=40), received) is None  # часы впереди → clock_skew
     assert queued_at(received - timedelta(days=4), received) == received - timedelta(days=4)  # → late_upload
     assert queued_at(None, received) is None
+
+
+# --- пояс менеджера ---
+
+
+@dataclass
+class ScreenExtractor:
+    """Читает время «как на экране» по очереди из `screens` и, как настоящий, разрешает его в поясе загрузившего."""
+
+    screens: list[tuple[int, int, int, int]]
+    chat_id: str = "5a1c2e3f-4b6d-4e8f-9a0b-1c2d3e4f5a6b"
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def extract(
+        self, image: bytes, *, channel: str, hints: Any, received_at: datetime, timezone: str | None = None
+    ) -> ExtractionResult:
+        day, month, hour, minute = self.screens[len(self.calls)]
+        self.calls.append({"timezone": timezone, "received_at": received_at})
+        zone = timezone or "Europe/Moscow"
+        screen_time = ScreenDateTime(day=day, month=month, hour=hour, minute=minute)
+        review_at, precision = resolve_screen_datetime(screen_time, received_at=received_at, timezone=zone)
+        fields = replace(
+            desktop_fields(self.chat_id),
+            review_at=review_at,
+            review_time_precision=precision,
+            review_screen=screen_time,
+            timezone=zone,
+        )
+        return ok_result(fields)
+
+
+async def set_zone(database: Database, user: uuid.UUID, zone: str) -> None:
+    async with database.session() as session:
+        await UserSettingsRepository(session).set_timezone(user, zone, datetime.now(UTC))
+        await session.commit()
+
+
+async def decide_for_real(pipeline: Pipeline, payload: dict[str, Any]) -> None:
+    service = pipeline.services.decision()
+    service.now = pipeline.clock
+    await service.handle(payload)
+
+
+async def test_the_same_file_from_another_zone_is_not_reread_but_gets_its_own_moment(pipeline: Pipeline) -> None:
+    pipeline.extractor = ScreenExtractor([(22, 10, 6, 39)])  # type: ignore[assignment]
+    await set_zone(pipeline.database, OTHER, "Asia/Yekaterinburg")
+    first = await pipeline.ingest(7)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    async with pipeline.database.session() as session:
+        # Копия отклонённого идёт по конвейеру (копия живого решается сразу при приёме, без распознавания).
+        await session.execute(
+            update(SubmissionModel)
+            .where(SubmissionModel.id == first.submission_id)
+            .values(verdict="rejected", stage="decided")
+        )
+        await session.commit()
+    second = await pipeline.ingest(7, user=OTHER)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+
+    assert [call["timezone"] for call in pipeline.extractor.calls] == ["Europe/Moscow"]  # файл прочитан один раз
+    msk, ekb = await pipeline.submission(first.submission_id), await pipeline.submission(second.submission_id)
+    assert (msk.review_tz, ekb.review_tz) == ("Europe/Moscow", "Asia/Yekaterinburg")
+    assert msk.key_time is not None and ekb.key_time is not None
+    year = msk.key_time.year
+    assert msk.key_time == datetime(year, 10, 22, 3, 39, tzinfo=UTC)
+    assert ekb.key_time == datetime(year, 10, 22, 1, 39, tzinfo=UTC)
+    assert msk.text_key != ekb.text_key and msk.chat_id_norm == ekb.chat_id_norm
+
+    # Решение видит поля сабмишена в поясе его менеджера.
+    service = pipeline.services.decision(pipeline.decider)
+    service.now = pipeline.clock
+    extracted = [row.payload for row in await take(pipeline.database, EVENT_EXTRACTED)]
+    await service.handle(next(item for item in extracted if item["submission_id"] == str(second.submission_id)))
+    inp, _ = pipeline.decider.calls[0]
+    assert inp.extraction.fields is not None
+    assert inp.extraction.fields.review_at == ekb.key_time and inp.extraction.fields.timezone == "Asia/Yekaterinburg"
+
+    # Смена пояса не пересчитывает уже прочитанное: карточка и пояс скрина прежние.
+    await set_zone(pipeline.database, OTHER, "Asia/Vladivostok")
+    async with pipeline.database.session() as session:
+        view = await SubmissionsService(session, pipeline.services.config, ImageLinks(None, 300)).card(
+            OTHER, second.submission_id
+        )
+    assert view["fields"]["review_at"] == datetime(year, 10, 22, 1, 39, tzinfo=UTC)
+    assert (await pipeline.submission(second.submission_id)).review_tz == "Asia/Yekaterinburg"
+
+
+async def test_the_same_file_from_managers_in_different_zones_is_a_duplicate(pipeline: Pipeline) -> None:
+    pipeline.extractor = ScreenExtractor([(22, 10, 6, 39)])  # type: ignore[assignment]
+    await set_zone(pipeline.database, OTHER, "Asia/Yekaterinburg")
+    first = await pipeline.ingest(12)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    await decide_for_real(pipeline, await one(pipeline.database, EVENT_EXTRACTED))
+    second = await pipeline.ingest(12, user=OTHER)
+    copy = await pipeline.submission(second.submission_id)
+    assert second.verdict == "duplicate" and copy.duplicate_of == first.submission_id
+    assert len(pipeline.extractor.calls) == 1
+
+
+async def test_two_screens_of_one_review_from_managers_in_different_zones_meet_in_utc(pipeline: Pipeline) -> None:
+    # Москва видит 06:39, Екатеринбург — 08:39: у честных менеджеров с верным поясом это один момент.
+    pipeline.extractor = ScreenExtractor([(22, 10, 6, 39), (22, 10, 8, 39)])  # type: ignore[assignment]
+    await set_zone(pipeline.database, OTHER, "Asia/Yekaterinburg")
+    first = await pipeline.ingest(8)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    second = await pipeline.ingest(9, user=OTHER)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    assert [call["timezone"] for call in pipeline.extractor.calls] == ["Europe/Moscow", "Asia/Yekaterinburg"]
+    msk, ekb = await pipeline.submission(first.submission_id), await pipeline.submission(second.submission_id)
+    assert msk.key_time == ekb.key_time and msk.text_key == ekb.text_key
+
+    for row in await take(pipeline.database, EVENT_EXTRACTED):
+        await decide_for_real(pipeline, row.payload)
+    ekb = await pipeline.submission(second.submission_id)
+    assert ekb.verdict == "duplicate" and ekb.duplicate_of == first.submission_id
+    assert {"case_key", "cross_user_duplicate"} <= {reason["code"] for reason in ekb.reasons}
+
+
+async def test_a_manager_with_a_wrong_zone_goes_to_review(pipeline: Pipeline) -> None:
+    # Менеджер в Омске (09:39 на экране) оставил Москву: момент на 3 часа позже — «тот же чат, другое время».
+    pipeline.extractor = ScreenExtractor([(22, 10, 6, 39), (22, 10, 9, 39)])  # type: ignore[assignment]
+    await pipeline.ingest(10)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    second = await pipeline.ingest(11, user=OTHER)
+    await pipeline.extract(await one(pipeline.database, EVENT_SUBMITTED))
+    for row in await take(pipeline.database, EVENT_EXTRACTED):
+        await decide_for_real(pipeline, row.payload)
+    late = await pipeline.submission(second.submission_id)
+    assert late.verdict == "needs_review"
+    assert "same_chat_same_text_other_time" in {reason["code"] for reason in late.reasons}

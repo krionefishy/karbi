@@ -7,6 +7,7 @@ from backend.modules.wb_screenshot_control.infrastructure.postgres.models import
     SubmissionModel,
     TelegramLinkModel,
     TelegramLinkTokenModel,
+    UserSettingsModel,
     VerdictEventModel,
     WBScreenshotControlBase,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "SubmissionModel",
     "TelegramLinkModel",
     "TelegramLinkTokenModel",
+    "UserSettingsModel",
     "VerdictEventModel",
     "WBScreenshotControlBase",
 ]

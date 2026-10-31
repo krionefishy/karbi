@@ -19,7 +19,7 @@ function row(barcode: string, patch: Partial<BoardRow> = {}): BoardRow {
     days: 5,
     status: "ok",
     tone: "critical",
-    fbs: "no",
+    fbs: 0,
     ...patch,
   };
 }

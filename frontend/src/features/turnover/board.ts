@@ -2,7 +2,6 @@ import { apiDownload, apiRequest } from "../../api/http";
 
 export type BoardTone = "critical" | "warning" | "calm" | "neutral";
 export type BoardStatus = "ok" | "no_sales" | "no_data";
-export type BoardFbs = "yes" | "no" | "unknown";
 export type BoardSortKey = "days" | "orders" | "stock";
 
 export interface BoardSeller {
@@ -30,7 +29,7 @@ export interface BoardRow {
   days: number | null;
   status: BoardStatus;
   tone: BoardTone;
-  fbs: BoardFbs;
+  fbs: number | null;
 }
 
 export interface BoardHiddenRow {
@@ -122,7 +121,7 @@ export function daysText(row: BoardRow): string {
   return `${row.days} дн.`;
 }
 
-export const fbsText: Record<BoardFbs, string> = { yes: "Есть", no: "Нет", unknown: "—" };
+export const fbsText = (row: BoardRow): string => (row.fbs === null ? "—" : String(row.fbs));
 
 export function visibleBoardRows(rows: BoardRow[], sellerId: string, search: string): BoardRow[] {
   const needle = search.trim().toLowerCase();

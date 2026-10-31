@@ -119,6 +119,7 @@ ErrorCode = Literal[
     "telegram_disabled",
     "transition_not_allowed",
     "bad_cursor",
+    "bad_timezone",
 ]
 
 
@@ -226,6 +227,25 @@ class ManagerConfigOut(BaseModel):
     bot_username: str | None
 
 
+# --- настройки менеджера ---
+
+
+class ZoneOut(BaseModel):
+    id: str = Field(description="IANA, например Europe/Moscow")
+    label: str = Field(description="Москва, UTC+3")
+    utc_offset_minutes: int = Field(description="Смещение от UTC сейчас, минуты")
+
+
+class ManagerSettingsOut(BaseModel):
+    timezone: str = Field(description="Пояс, в котором менеджер видит время отзыва в кабинете WB")
+    zones: list[ZoneOut] = Field(description="Допустимые пояса, по порядку для списка")
+    default: str = Field(description="Пояс по умолчанию (Москва)")
+
+
+class ManagerSettingsUpdate(_Request):
+    timezone: str = Field(min_length=1, max_length=64, description="Один из `zones[].id`; иначе 422 bad_timezone")
+
+
 # --- подключения менеджера ---
 
 
@@ -279,6 +299,7 @@ class ExtensionMeOut(BaseModel):
     allowed_url_prefixes: list[str]
     summary: Summary
     server_time: datetime
+    timezone: str = Field(default="Europe/Moscow", description="Пояс менеджера для времени отзыва")
 
 
 class ExtensionSubmissionList(BaseModel):
@@ -352,6 +373,9 @@ class AdminFields(BaseModel):
     buyer_name_seen: bool
     quality: QualityFlags | None
     confidence: FieldConfidence
+    review_tz: str | None = Field(
+        default=None, description="Пояс менеджера (IANA), в котором прочитано время; null — пояс модуля, Москва"
+    )
 
 
 class AdminSubmission(BaseModel):

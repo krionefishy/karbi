@@ -182,7 +182,10 @@ async def test_mode_off_closes_manager_and_extension_but_not_admin(tmp_path: Pat
             if not route.path.startswith(MANAGER) or not web_part or route.path.endswith("/config"):
                 continue
             for method in route.methods:
-                if method == "PATCH" or method == "POST" and not route.path.endswith(("/pairing-code", "/link-token")):
+                # PATCH и PUT без тела отвечают 422 раньше проверки режима: они проверены ниже с телом.
+                if method in ("PATCH", "PUT") or (
+                    method == "POST" and not route.path.endswith(("/pairing-code", "/link-token"))
+                ):
                     continue
                 response = await stand.client.request(method, concrete(route.path), headers=manager)
                 assert (response.status_code, response.headers.get("X-Error-Code")) == (503, "module_off"), (
@@ -199,7 +202,8 @@ async def test_mode_off_closes_manager_and_extension_but_not_admin(tmp_path: Pat
         pair = await stand.client.post(
             f"{EXTENSION}/pair", json={"code": "ABCD2345", "install_id": "chrome-test-install", "ext_version": "0.1.0"}
         )
-        for response in (upload, patch, pair):
+        timezone = await stand.client.put(f"{MANAGER}/settings", json={"timezone": "Asia/Omsk"}, headers=manager)
+        for response in (upload, patch, pair, timezone):
             assert (response.status_code, response.headers.get("X-Error-Code")) == (503, "module_off")
 
         config = await stand.client.get(f"{MANAGER}/config", headers=manager)
