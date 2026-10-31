@@ -309,7 +309,7 @@ class PairingCodeModel(WBScreenshotControlBase):
 
 
 class TelegramLinkTokenModel(WBScreenshotControlBase):
-    """Одноразовая ссылка t.me/<бот>?start=<токен>; в базе только хеш. Telegram — второй релиз."""
+    """Одноразовая ссылка t.me/<бот>?start=<токен>; в базе только хеш, 15 минут, одна живая на сотрудника."""
 
     __tablename__ = "telegram_link_tokens"
 

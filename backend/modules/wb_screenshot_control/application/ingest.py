@@ -138,6 +138,9 @@ class IngestService:
         client_meta: dict[str, Any] | None = None,
         caption_raw: str | None = None,
         install_id: uuid.UUID | None = None,
+        tg_chat_id: int | None = None,
+        tg_message_id: int | None = None,
+        tg_media_group_id: str | None = None,
     ) -> IngestResult:
         if channel not in CHANNELS:
             raise ValueError(f"Unknown channel: {channel!r}")
@@ -168,6 +171,10 @@ class IngestService:
             "channel": channel,
             "client_submission_id": client_submission_id,
             "install_id": install_id,
+            # Куда отвечать в Telegram: чат и сообщение менеджера (вердикт приходит ответом на него).
+            "tg_chat_id": tg_chat_id,
+            "tg_message_id": tg_message_id,
+            "tg_media_group_id": tg_media_group_id[:64] if tg_media_group_id else None,
             "client_url": client_url[:2048] if client_url else None,
             "client_captured_at": client_captured_at,
             "client_tz_offset_min": tz_offset_min,

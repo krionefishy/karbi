@@ -208,7 +208,7 @@ screenshot_control:
   extension_token_idle_days: 60
   link_token_ttl_minutes: 15
   notification_bot: ${SCREENSHOT_CONTROL_BOT:-screens}
-  # Telegram — второй релиз: нужен релей с фото и кнопками.
+  # Бот Telegram: включать после RELAY_INTERACTIVE_ENABLED и регистрации интерактивного бота screens.
   telegram_enabled: ${SCREENSHOT_CONTROL_TELEGRAM:-false}
   pipeline_version: v1
   public_base_url: https://${PUBLIC_DOMAIN:-localhost}

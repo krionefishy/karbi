@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 from backend.modules.wb_screenshot_control.infrastructure.wiring import log_startup_state
-from backend.shared.kafka_streams.topics import ScreenshotControlTopics, StorageTopics
+from backend.shared.kafka_streams.topics import NotificationTopics, ScreenshotControlTopics, StorageTopics
 from backend.shared.worker import WorkerApplication, run_application
 from backend.workers.wb_screenshot_control.consumers import EventConsumer, Handler, PoisonHandler
 from backend.workers.wb_screenshot_control.worker import ScreenshotControlWorker
@@ -11,7 +11,9 @@ from backend.workers.wb_screenshot_control.worker import ScreenshotControlWorker
 class ScreenshotControlWorkerApplication(WorkerApplication[ScreenshotControlWorker]):
     """Отдельный процесс контроля скриншотов ДБС, ровно одна реплика.
 
-    Консьюмеры: распознавание (`submitted`), решение (`extracted`, один ключ партиции) и, если S3
+    Консьюмеры: распознавание (`submitted`), решение (`extracted`, один ключ партиции), при
+    `telegram_enabled` — бот Telegram (апдейты интерактивного бота модуля и вердикты скринов из
+    Telegram; без флага апдейты ждут в топике, вердикты прочитаются после включения) и, если S3
     настроен, выгрузка и удаление объектов (`storage.s3.wb-screenshot-control.*`). Без S3 подписчики
     хранилища не стартуют: файлы копятся в staging, приём и конвейер работают, сверка выгрузит их,
     когда S3 появится. Распознавание и решение собираются швами `wiring.build_extractor/build_decider`.
@@ -37,6 +39,10 @@ class ScreenshotControlWorkerApplication(WorkerApplication[ScreenshotControlWork
             "screenshot-extract": (ScreenshotControlTopics.SUBMITTED, services.extraction().handle, services.park),
             "screenshot-decide": (ScreenshotControlTopics.EXTRACTED, services.decision().handle, services.park),
         }
+        if self.settings.screenshot_control.telegram_enabled:
+            bot = services.telegram_bot()
+            handlers["screenshot-telegram"] = (NotificationTopics.TELEGRAM_UPDATE_RECEIVED, bot.handle, bot.park)
+            handlers["screenshot-telegram-verdict"] = (ScreenshotControlTopics.VERDICT_READY, bot.verdict, None)
         storage = services.object_storage()
         if storage is not None:
             handlers["screenshot-s3-upload"] = (StorageTopics.WB_SCREENSHOT_CONTROL_UPLOAD, storage.upload, None)
