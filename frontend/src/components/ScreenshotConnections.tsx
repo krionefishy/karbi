@@ -7,6 +7,7 @@ import { apiErrorText } from "../features/screenshotControl/errors";
 import { formatCountdown } from "../features/screenshotControl/format";
 import { useCountdown } from "../features/screenshotControl/hooks";
 import type { ManagerConfig, PairingCode } from "../features/screenshotControl/types";
+import { ScreenshotTelegram } from "./ScreenshotTelegram";
 import { ScreenshotTimezone } from "./ScreenshotTimezone";
 
 const INSTALLS_KEY = "sc-installs";
@@ -18,15 +19,7 @@ export function ScreenshotConnections({ config }: { config: ManagerConfig | unde
     <div className="sc-connections">
       <ExtensionPanel config={config} />
       <ScreenshotTimezone />
-      <section className="sc-panel sc-connection">
-        <div className="sc-connection-head">
-          <h2>Telegram</h2>
-          <span className="status-badge">Скоро</span>
-        </div>
-        <p className="muted">
-          Отправка скриншотов боту появится в следующем релизе. Пока присылайте их через расширение или с этой страницы.
-        </p>
-      </section>
+      <ScreenshotTelegram config={config} />
       <section className="sc-panel sc-connection">
         <h2>Как делать скриншот</h2>
         <ul className="sc-rules">
