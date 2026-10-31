@@ -20,9 +20,9 @@ from backend.workers.notifications.updates import UpdateFetcher
 class NotificationsWorkerApplication:
     """One process: queueing from Kafka, plus a delivery and a fetch loop per bot.
 
-    Talking to the messenger itself belongs to the relay — it is the only host
-    that can reach it. Inbound messages are fetched from the relay rather than
-    pushed here, because from abroad this server is unreachable on every port.
+    Talking to the messenger itself belongs to the relay, the intermediary
+    service. Inbound messages are fetched from the relay rather than pushed
+    here: this server always opens the connection.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:

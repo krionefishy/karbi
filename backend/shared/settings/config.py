@@ -221,7 +221,7 @@ class CardDocumentsConfig:
 
 @dataclass(frozen=True, slots=True)
 class RelayConfig:
-    """The messenger relay outside Russia: the only host allowed to reach the messenger.
+    """The messenger relay: the intermediary service between this server and the messenger.
 
     No bot tokens here — they live on the relay. This side knows an address, a
     shared JWT secret and the certificate it pins.

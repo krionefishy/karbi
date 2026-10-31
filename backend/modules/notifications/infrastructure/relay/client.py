@@ -122,8 +122,8 @@ class RelayClient:
     async def updates(self, *, bot_code: str, after: int, wait: int, limit: int = 50) -> list[RelayUpdate]:
         """Ask the relay for everything past our cursor.
 
-        We fetch rather than being pushed to: from abroad this server cannot be
-        reached at all, so the relay holds updates and we come for them. There is
+        We fetch rather than being pushed to: this server always opens the
+        connection, so the relay holds updates and we come for them. There is
         no acknowledgement — `after` is the whole protocol, and the cursor behind
         it lives in our own database.
         """
