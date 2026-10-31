@@ -60,7 +60,6 @@ class Snapshot:
     sends_failed_24h: int
     sends_unknown_24h: int
     unknown_stuck: int
-    dry_run_24h: int
     sent_today: int
     daily_cap: int
     active_templates: int
@@ -216,17 +215,6 @@ def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Chec
         "0 дольше часа",
         "Статус «неизвестно» должен закрываться сверкой с лентой за 45 минут. Проверьте зеркало чатов.",
     )
-
-    if s.mode == "live":
-        add(
-            "mode_consistent",
-            GROUP_DELIVERY,
-            "Режим и отправки совпадают",
-            Severity.CRIT if s.dry_run_24h else Severity.OK,
-            f"сухих отправок за сутки: {s.dry_run_24h}",
-            "в режиме «вся рассылка» сухих отправок нет",
-            "Кабинет в режиме live, но часть сообщений уходит в сухой прогон. Проверьте настройки режима.",
-        )
 
     add(
         "daily_cap",

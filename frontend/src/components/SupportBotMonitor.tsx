@@ -67,7 +67,6 @@ export function SupportBotMonitor({ sellerId }: { sellerId: string }) {
     refetchInterval: REFRESH_MS,
   });
   const data = monitor.data;
-  const tone = data ? severityTone(data.overall) : "neutral";
   const bars = data ? dayBars(data.days) : [];
   const scale = Math.max(60, ...bars.map((bar) => bar.warn + bar.crit));
 
@@ -80,10 +79,6 @@ export function SupportBotMonitor({ sellerId }: { sellerId: string }) {
         !monitor.error && <div className="loading-block">Загружаем состояние…</div>
       ) : (
         <>
-          <div className={`mon-overall mon-overall-${tone}`} role="status">
-            <strong>{severityLabel(data.overall)}</strong>
-            <span className="muted">Проверено {stamp(data.checked_at)}</span>
-          </div>
           {workerStale(data.worker_checked_at) && (
             <div className="inline-error">Воркер бота не отвечает с {stamp(data.worker_checked_at)}</div>
           )}
