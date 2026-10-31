@@ -1,7 +1,7 @@
 import base64
 import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -110,14 +110,28 @@ class LLMClient:
     def model(self) -> str:
         return self.config.model
 
-    async def complete(self, system: str, user: str) -> LLMResult:
-        """Один запрос без повторов: повтор решает вызывающий код, чтобы не множить расход."""
-        body = {
-            "model": self.config.model,
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        max_tokens: int | None = None,
+        extra_body: Mapping[str, Any] | None = None,
+    ) -> LLMResult:
+        """Один запрос без повторов: повтор решает вызывающий код, чтобы не множить расход.
+
+        `model`, `max_tokens` и `extra_body` (например, `reasoning_effort`) переопределяют настройки на один вызов.
+        Рассуждения, которые модель отдаёт отдельным полем, в `text` не попадают.
+        """
+        body: dict[str, Any] = {
+            "model": model or self.config.model,
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": max_tokens or self.config.max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
+        if extra_body:
+            body.update(extra_body)
         started = time.monotonic()
         data = await self._post(body, wait_seconds=self.config.timeout_seconds)
         content, tokens_in, tokens_out = _content(data)
@@ -126,7 +140,7 @@ class LLMClient:
             raise LLMAnswerError("модель вернула пустой ответ")
         return LLMResult(
             text=text,
-            model=str(data.get("model") or self.config.model),
+            model=str(data.get("model") or body["model"]),
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             latency_ms=int((time.monotonic() - started) * 1000),

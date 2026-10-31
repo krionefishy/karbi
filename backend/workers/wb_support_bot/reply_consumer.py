@@ -9,12 +9,15 @@ from aiokafka import AIOKafkaConsumer, TopicPartition
 from backend.modules.wb_core.application import ChatMirror
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_support_bot.application.decision import DecisionEngine
 from backend.modules.wb_support_bot.domain import (
     REPLY_SYSTEM_PROMPT,
+    Gate,
     is_wb_notice,
     parse_reply_verdict,
     reply_user_message,
 )
+from backend.modules.wb_support_bot.domain.decision import ROLE_BOT, ROLE_BUYER, ROLE_SELLER, Decision
 from backend.modules.wb_support_bot.domain.reply import CONTEXT_MESSAGES
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     VERDICT_DONE,
@@ -30,9 +33,6 @@ EVENT_TYPE = "SupportBotReplyRequested"
 POLL_INTERVAL_MARGIN_MS = 60_000
 POLL_INTERVAL_BASE_MS = 300_000
 CONTEXT_LOOKBACK = timedelta(days=14)
-ROLE_BUYER = "покупатель"
-ROLE_SELLER = "продавец"
-ROLE_BOT = "напоминание бота"
 
 
 class InvalidPayloadError(Exception):
@@ -46,11 +46,19 @@ class ReplyConsumer:
     сам поставит заново на следующем проходе, не больше `reply_max_attempts` раз.
     """
 
-    def __init__(self, database: Database, bootstrap_servers: str, group_id: str, llm: LLMClient) -> None:
+    def __init__(
+        self,
+        database: Database,
+        bootstrap_servers: str,
+        group_id: str,
+        llm: LLMClient,
+        decider: DecisionEngine | None = None,
+    ) -> None:
         self.database = database
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
         self.llm = llm
+        self.decider = decider
         self.logger = logging.getLogger("wb.support_bot.reply")
 
     async def run(self) -> None:
@@ -115,6 +123,7 @@ class ReplyConsumer:
         messages, context = self._split(events, first_at, last_at, reminders)
 
         result = None
+        decision: Decision | None = None
         error: str | None = None
         if not messages:
             error = "сообщений среза нет в зеркале чатов"
@@ -122,7 +131,12 @@ class ReplyConsumer:
             masked_context = [(role, mask_pii(text)) for role, text in context]
             masked = [mask_pii(text) for text in messages]
             try:
-                result = await self.llm.complete(REPLY_SYSTEM_PROMPT, reply_user_message(masked_context, masked))
+                if self.decider is not None:
+                    decision = await self.decider.decide(masked_context, masked, seed=str(verdict_id))
+                    if decision.action is Gate.WAIT:
+                        error = decision.reason
+                else:
+                    result = await self.llm.complete(REPLY_SYSTEM_PROMPT, reply_user_message(masked_context, masked))
             except LLMError as failure:
                 error = str(failure)
 
@@ -132,7 +146,20 @@ class ReplyConsumer:
                 return
             row = await SupportBotRepository(session).get_reply_verdict(verdict_id)
             if row is not None and row.status != VERDICT_DONE:
-                if result is not None:
+                if decision is not None:
+                    row.decision_path = decision.path
+                    row.decision_votes = decision.log()
+                    row.needs_manager = decision.needs_manager
+                if decision is not None and decision.action is not Gate.WAIT:
+                    row.status = VERDICT_DONE
+                    row.category = decision.category
+                    row.reason = decision.reason
+                    row.model = decision.model
+                    row.tokens_in = decision.tokens_in
+                    row.tokens_out = decision.tokens_out
+                    row.latency_ms = decision.latency_ms
+                    row.error = None
+                elif result is not None:
                     category, reason = parse_reply_verdict(result.text)
                     row.status = VERDICT_DONE
                     row.category = category

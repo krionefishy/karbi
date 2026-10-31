@@ -143,6 +143,18 @@ support_bot:
   # shadow — классы считаются и пишутся, рассылка не меняется.
   reply_gate_mode: ${SUPPORT_BOT_REPLY_GATE_MODE:-enforce}
   reply_prompt_version: r3
+  # single | panel: кто решает по ответу. single — одна модель из `llm`; panel — слой принятия решения:
+  # два судьи, при расхождении арбитр, затем резервный арбитр. Смена движка требует новой reply_prompt_version.
+  reply_engine: ${SUPPORT_BOT_REPLY_ENGINE:-single}
+  reply_judge_a_model: Qwen/Qwen3-30B-A3B
+  reply_judge_a_max_tokens: 150
+  reply_judge_b_model: openai/gpt-oss-120b
+  reply_judge_b_max_tokens: 400
+  reply_judge_b_reasoning_effort: low
+  reply_arbiter_model: deepseek-ai/DeepSeek-V4-Flash
+  reply_arbiter_max_tokens: 1500
+  reply_reserve_model: z-ai/glm-4.5-air
+  reply_reserve_max_tokens: 1500
 
 llm:
   # Модель меняется здесь: правка строки и перераскатка. Ключ — только из окружения.

@@ -363,6 +363,16 @@ class SupportBotConfig:
     reply_prompt_version: str = "r3"
     reply_retry_minutes: int = 15
     reply_max_attempts: int = 10
+    reply_engine: str = "single"
+    reply_judge_a_model: str = "Qwen/Qwen3-30B-A3B"
+    reply_judge_a_max_tokens: int = 150
+    reply_judge_b_model: str = "openai/gpt-oss-120b"
+    reply_judge_b_max_tokens: int = 400
+    reply_judge_b_reasoning_effort: str = "low"
+    reply_arbiter_model: str = "deepseek-ai/DeepSeek-V4-Flash"
+    reply_arbiter_max_tokens: int = 1500
+    reply_reserve_model: str = "z-ai/glm-4.5-air"
+    reply_reserve_max_tokens: int = 1500
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
 
 
@@ -712,6 +722,12 @@ class Settings:
                 "classifier_prompt_version",
                 "reply_gate_mode",
                 "reply_prompt_version",
+                "reply_engine",
+                "reply_judge_a_model",
+                "reply_judge_b_model",
+                "reply_judge_b_reasoning_effort",
+                "reply_arbiter_model",
+                "reply_reserve_model",
             ):
                 support_bot[key] = int(value)
         llm = dict(data.get("llm", {}))

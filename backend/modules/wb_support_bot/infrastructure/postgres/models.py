@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, MetaData, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -169,6 +170,9 @@ class ReplyVerdictModel(WBSupportBotBase):
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    needs_manager: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    decision_path: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    decision_votes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
