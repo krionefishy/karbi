@@ -116,7 +116,7 @@ ErrorCode = Literal[
     "exact_key_conflict",
     "note_required",
     "duplicate_target_invalid",
-    "telegram_disabled",
+    "telegram_unavailable",
     "transition_not_allowed",
     "bad_cursor",
     "bad_timezone",
@@ -217,14 +217,12 @@ class OutcomeOption(BaseModel):
 
 class ManagerConfigOut(BaseModel):
     mode: Mode
-    telegram_enabled: bool
     outcomes: list[OutcomeOption]
     max_upload_bytes: int
     accepted_types: list[str]
     min_side_px: int
     extension_url: str
     extension_min_version: str
-    bot_username: str | None
 
 
 # --- настройки менеджера ---
@@ -269,7 +267,8 @@ class TelegramLinkOut(BaseModel):
 
 
 class TelegramStatusOut(BaseModel):
-    enabled: bool
+    available: bool
+    bot_username: str | None
     linked: bool
     username: str | None
     linked_at: datetime | None
@@ -585,7 +584,6 @@ class PipelineOut(BaseModel):
     """Экран «Конвейер»: очередь, задержка «приём → вердикт», распознавание, хранилище."""
 
     mode: Mode
-    telegram_enabled: bool
     stages: PipelineStages
     oldest_processing_age_s: int | None
     p50_s: float | None
@@ -613,7 +611,6 @@ class AdminConfigOut(BaseModel):
 
     mode: Mode
     kpi_from: date | None
-    telegram_enabled: bool
     pipeline_version: str
     vision_model: str | None
     s3_bucket: str

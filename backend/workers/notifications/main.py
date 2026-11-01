@@ -20,9 +20,9 @@ from backend.workers.notifications.updates import UpdateFetcher
 class NotificationsWorkerApplication:
     """One process: queueing from Kafka, plus a delivery and a fetch loop per bot.
 
-    Talking to the messenger itself belongs to the relay — it is the only host
-    that can reach it. Inbound messages are fetched from the relay rather than
-    pushed here, because from abroad this server is unreachable on every port.
+    Talking to the messenger itself belongs to the relay, the intermediary
+    service. Inbound messages are fetched from the relay rather than pushed
+    here: this server always opens the connection.
     """
 
     def __init__(self, settings: Settings | None = None) -> None:
@@ -41,6 +41,7 @@ class NotificationsWorkerApplication:
         )
         self._deliveries: dict[uuid.UUID, asyncio.Task[None]] = {}
         self._fetchers: dict[uuid.UUID, asyncio.Task[None]] = {}
+        self._fetcher_bots: dict[uuid.UUID, Bot] = {}
         self._sender_task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self.logger = structlog.get_logger("notifications_worker")
@@ -99,12 +100,17 @@ class NotificationsWorkerApplication:
                 self.logger.info("bot_delivery_scheduled", bot=bot.code)
 
     def _sync_fetchers(self, bots: list[Bot]) -> None:
-        """An inbound loop per bot, kept in step with the bot table like delivery."""
-        active_ids = {bot.id for bot in bots}
+        """An inbound loop per bot, kept in step with the bot table like delivery.
+
+        A bot whose row changed (say, it became interactive) gets a fresh loop:
+        the fetcher reads the row once, at start.
+        """
+        current = {bot.id: bot for bot in bots}
         for bot_id, task in list(self._fetchers.items()):
-            if bot_id not in active_ids or task.done():
+            if current.get(bot_id) != self._fetcher_bots.get(bot_id) or task.done():
                 task.cancel()
                 del self._fetchers[bot_id]
+                self._fetcher_bots.pop(bot_id, None)
         for bot in bots:
             if bot.id not in self._fetchers:
                 fetcher = UpdateFetcher(
@@ -117,6 +123,7 @@ class NotificationsWorkerApplication:
                 self._fetchers[bot.id] = asyncio.create_task(
                     fetcher.run_forever(), name=f"notification-updates-{bot.code}"
                 )
+                self._fetcher_bots[bot.id] = bot
                 self.logger.info("bot_update_fetcher_scheduled", bot=bot.code)
 
     async def run(self) -> None:

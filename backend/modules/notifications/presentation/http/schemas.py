@@ -12,6 +12,8 @@ class BotCreate(BaseModel):
     code: BotCode
     title: Annotated[str, Field(max_length=255)] = ""
     token: SecretStr
+    # Кнопки и файлы, апдейты целиком — автоматизации. Не задано — бот остаётся каким был (новый — обычный).
+    interactive: bool | None = None
 
 
 class BotDeliveryResponse(BaseModel):
@@ -28,4 +30,5 @@ class BotResponse(BaseModel):
     code: str
     title: str
     invite_link_template: str
+    interactive: bool = False
     delivery: BotDeliveryResponse = BotDeliveryResponse()

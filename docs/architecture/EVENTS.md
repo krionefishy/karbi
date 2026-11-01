@@ -48,6 +48,8 @@ flowchart LR
 | `wb.support-bot.classify.requested` | воркер бота поддержки, через outbox | консьюмер вердиктов в `wb-support-bot-worker` |
 | `wb.support-bot.reply.requested` | воркер бота поддержки, через outbox | консьюмер ответов в `wb-support-bot-worker` |
 | `notifications.telegram.message.requested` | автоматизации | воркер уведомлений |
+| `notifications.telegram.command.received` | воркер уведомлений (команды обычных ботов) | автоматизация бота (возвраты) |
+| `notifications.telegram.update.received` | воркер уведомлений (все апдейты интерактивных ботов) | автоматизация бота (скриншоты ДБС) |
 | `storage.s3.*.upload` / `.delete` | код, которому нужно записать в S3 | подписчик хранилища |
 
 Имена валидируются в реестре топиков, автосоздание на брокере выключено: недостающие

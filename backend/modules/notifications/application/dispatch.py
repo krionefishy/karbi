@@ -8,13 +8,17 @@ from backend.modules.notifications.application.bots import BotNotFoundError, Bot
 from backend.modules.notifications.application.pacing import SendPacer
 from backend.modules.notifications.application.templates import UnknownTemplateError, render, render_attachment
 from backend.modules.notifications.domain import (
+    CALLBACK_ANSWER_KIND,
     CHAT_AUDIENCE,
+    EDIT_KIND,
     MessageRequest,
     MessengerPermanentError,
     MessengerRateLimitError,
     MessengerTemporaryError,
+    buttons_payload,
+    parse_buttons,
 )
-from backend.modules.notifications.infrastructure.postgres import NotificationRepository
+from backend.modules.notifications.infrastructure.postgres import NotificationRepository, OutgoingMessageModel
 from backend.modules.notifications.infrastructure.relay import RelayClient
 
 DEAD_CHAT_MARKERS = ("bot was blocked", "chat not found", "bot was kicked", "user is deactivated")
@@ -64,6 +68,14 @@ class DispatchService:
             attachment = render_attachment(request.template, request.params)
         except UnknownTemplateError:
             return QueueResult(0, 0, rejected=f"unknown template: {request.template}")
+        # Кнопки и ответ-цитата приходят в params шаблона; отправит их только интерактивный релей.
+        try:
+            buttons = buttons_payload(parse_buttons(request.params.get("buttons")))
+        except ValueError as error:
+            return QueueResult(0, 0, rejected=f"bad buttons: {error}")
+        # Контракт релея: `reply_to` — номер сообщения цифрами; иное релей отверг бы вместе с сообщением.
+        raw_reply = str(request.params.get("reply_to") or "")
+        reply_to = raw_reply if raw_reply.isdigit() and len(raw_reply) <= 20 else None
 
         if request.audience.kind == CHAT_AUDIENCE:
             chat_ids = [int(request.audience.chat_id or 0)]
@@ -81,6 +93,10 @@ class DispatchService:
                 params=request.params,
                 text=text,
                 attachment=attachment,
+                kind=request.kind,
+                buttons=buttons,
+                reply_to=reply_to,
+                target_ref=request.target_ref,
             )
             queued += int(fresh)
             skipped += int(not fresh)
@@ -116,13 +132,7 @@ class DispatchService:
             if pacer is not None:
                 await pacer.wait_turn(message.chat_id)
             try:
-                message_ref = await client.send(
-                    bot_code=codes[message.bot_id],
-                    recipient=str(message.chat_id),
-                    text=message.text,
-                    idempotency_key=str(message.id),
-                    attachment=message.attachment,
-                )
+                message_ref = await self._deliver(client, codes[message.bot_id], message)
             except MessengerPermanentError as error:
                 await self.repository.mark_failed(message.id, str(error))
                 if any(marker in str(error).lower() for marker in DEAD_CHAT_MARKERS):
@@ -145,3 +155,34 @@ class DispatchService:
                 sent += 1
             await self.session.commit()
         return DeliveryReport(sent, retried, failed)
+
+    @staticmethod
+    async def _deliver(client: RelayClient, bot_code: str, message: OutgoingMessageModel) -> str | None:
+        """One queued row, by its kind. A plain message calls `send` exactly as before v1.1."""
+        if message.kind == EDIT_KIND:
+            await client.edit_message(
+                bot_code=bot_code,
+                recipient=str(message.chat_id),
+                message_ref=str(message.target_ref or ""),
+                text=message.text,
+                buttons=message.buttons,
+                idempotency_key=str(message.id),
+            )
+            return message.target_ref
+        if message.kind == CALLBACK_ANSWER_KIND:
+            callback_id = str(message.target_ref or "")
+            await client.answer_callback(bot_code=bot_code, callback_id=callback_id, text=message.text)
+            return None
+        extra: dict[str, object] = {}
+        if message.buttons:
+            extra["buttons"] = message.buttons
+        if message.reply_to:
+            extra["reply_to"] = message.reply_to
+        return await client.send(
+            bot_code=bot_code,
+            recipient=str(message.chat_id),
+            text=message.text,
+            idempotency_key=str(message.id),
+            attachment=message.attachment,
+            **extra,  # type: ignore[arg-type]
+        )

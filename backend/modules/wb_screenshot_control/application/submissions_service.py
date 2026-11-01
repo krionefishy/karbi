@@ -21,7 +21,7 @@ from backend.modules.wb_screenshot_control.application.events import ScreenshotE
 from backend.modules.wb_screenshot_control.application.images import ImageLinks
 from backend.modules.wb_screenshot_control.application.ingest import IngestError, IngestService
 from backend.modules.wb_screenshot_control.application.outbox import publish
-from backend.modules.wb_screenshot_control.domain import STAGE_EXTRACTED, STAGE_PROCESSING
+from backend.modules.wb_screenshot_control.domain import OUTCOME_SOURCES, STAGE_EXTRACTED, STAGE_PROCESSING
 from backend.modules.wb_screenshot_control.domain.manager_reasons import manager_reason
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtractionModel,
@@ -135,13 +135,17 @@ class SubmissionsService:
             raise not_found()
         return (await self.views([submission]))[0]
 
-    async def change_outcome(self, user_id: uuid.UUID, submission_id: uuid.UUID, outcome: str) -> dict[str, Any]:
-        """Исход меняется, пока вердикта нет; дальше только админ.
+    async def change_outcome(
+        self, user_id: uuid.UUID, submission_id: uuid.UUID, outcome: str, *, source: str = "form"
+    ) -> dict[str, Any]:
+        """Исход меняется, пока вердикта нет; дальше только админ. `source` — форма сайта или кнопка бота.
 
         Распознанный скрин без исхода ждёт решения (`awaiting_outcome`): выбор исхода запускает решение
         тем же консьюмером (новое `screenshot.extracted`). Пока идёт распознавание, исход просто
         записывается — решение возьмёт его само.
         """
+        if source not in OUTCOME_SOURCES:
+            raise ValueError(f"Unknown outcome source: {source!r}")
         now = self.now()
         submission = await self.queries.own_submission(user_id, submission_id, for_update=True)
         if submission is None:
@@ -150,7 +154,7 @@ class SubmissionsService:
             raise ServiceError("outcome_locked", "Исход уже не поменять: решение по скриншоту принято")
         waiting = submission.outcome is None and submission.stage == STAGE_EXTRACTED
         submission.outcome = outcome
-        submission.outcome_source = "form"
+        submission.outcome_source = source
         submission.outcome_set_at = now
         submission.updated_at = now
         if waiting:

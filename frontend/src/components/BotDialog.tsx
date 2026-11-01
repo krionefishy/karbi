@@ -20,6 +20,7 @@ export function BotDialog({ pending, error, onClose, onSubmit }: Props) {
       code: String(form.get("code")).trim(),
       title: String(form.get("title")).trim(),
       token: String(form.get("token")).trim(),
+      ...(form.get("interactive") ? { interactive: true } : {}),
     });
   }
 
@@ -67,6 +68,15 @@ export function BotDialog({ pending, error, onClose, onSubmit }: Props) {
               <button type="button" onClick={() => setVisible((value) => !value)}>
                 {visible ? "Скрыть" : "Показать"}
               </button>
+            </span>
+          </label>
+          <label className="checkbox-field">
+            <input name="interactive" type="checkbox" />
+            <span>
+              Бот автоматизации: принимает файлы и нажатия кнопок
+              <span className="muted field-note">
+                Нужен для бота «Контроля скриншотов ДБС». Обычному боту уведомлений не отмечайте.
+              </span>
             </span>
           </label>
           {error && (

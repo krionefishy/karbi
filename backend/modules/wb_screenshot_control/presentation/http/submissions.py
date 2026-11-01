@@ -11,6 +11,7 @@ from backend.modules.wb_screenshot_control.application.errors import ServiceErro
 from backend.modules.wb_screenshot_control.application.extension_service import ExtensionService
 from backend.modules.wb_screenshot_control.application.kpi import KpiService
 from backend.modules.wb_screenshot_control.application.settings_service import SettingsService
+from backend.modules.wb_screenshot_control.application.telegram_link import TelegramLinkService
 from backend.modules.wb_screenshot_control.infrastructure.postgres.queries import TelegramLinks
 from backend.modules.wb_screenshot_control.infrastructure.wiring import build_ingest
 from backend.modules.wb_screenshot_control.presentation.http.common import (
@@ -23,7 +24,7 @@ from backend.modules.wb_screenshot_control.presentation.http.common import (
     report_period,
     submissions_service,
 )
-from backend.modules.wb_screenshot_control.presentation.http.errors import api_error, documented
+from backend.modules.wb_screenshot_control.presentation.http.errors import documented
 from backend.modules.wb_screenshot_control.presentation.http.limits import limit_user
 from backend.modules.wb_screenshot_control.presentation.http.schemas import (
     ExtensionInstallOut,
@@ -275,12 +276,26 @@ async def revoke_install(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/telegram/link-token", response_model=TelegramLinkOut, responses=documented(503))
+@router.post("/telegram/link-token", response_model=TelegramLinkOut, responses=documented(429, 503))
 @inject
-async def telegram_link_token(_: CurrentPrincipal, settings: FromDishka[Settings]) -> TelegramLinkOut:
-    """Telegram — второй релиз: пока бот не подключён, привязка недоступна при любом флаге."""
+async def telegram_link_token(
+    request: Request,
+    principal: CurrentPrincipal,
+    settings: FromDishka[Settings],
+    session: FromDishka[AsyncSession],
+) -> TelegramLinkOut:
+    """Одноразовая ссылка `t.me/<бот>?start=<токен>` на `link_token_ttl_minutes`; новая гасит прежнюю.
+
+    503 telegram_unavailable — интерактивный бот модуля не зарегистрирован.
+    Привязка — по id отправителя в Telegram; отвязать — `DELETE /telegram` или `/unlink` в боте.
+    """
     ensure_enabled(settings)
-    raise api_error(503, "telegram_disabled", "Telegram-бот подключается во втором релизе")
+    await limit_user(request, settings, principal.user_id, "pairing_code")
+    try:
+        link = await TelegramLinkService(session, settings.screenshot_control).issue(principal.user_id)
+    except ServiceError as error:
+        raise http_error(error) from error
+    return TelegramLinkOut.model_validate(link)
 
 
 @router.get("/telegram", response_model=TelegramStatusOut)
@@ -291,8 +306,10 @@ async def telegram_status(
     ensure_enabled(settings)
     links = await TelegramLinks(session).live(principal.user_id)
     link = links[0] if links else None
+    available, bot_username = await TelegramLinkService(session, settings.screenshot_control).availability()
     return TelegramStatusOut(
-        enabled=settings.screenshot_control.telegram_enabled,
+        available=available,
+        bot_username=bot_username,
         linked=link is not None,
         username=link.username or None if link else None,
         linked_at=link.linked_at if link else None,

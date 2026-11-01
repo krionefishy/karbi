@@ -10,7 +10,7 @@ from backend.shared.settings import load_settings
 from backend.storage.pg import Database
 
 
-async def register_bot(code: str, title: str, token: str) -> None:
+async def register_bot(code: str, title: str, token: str, interactive: bool | None = None) -> None:
     settings = load_settings()
     relay = RelayClient(settings.relay)
 
@@ -27,8 +27,10 @@ async def register_bot(code: str, title: str, token: str) -> None:
                 code=code,
                 title=title or identity.title,
                 invite_link_template=identity.invite_link_template,
+                interactive=interactive,
             )
-        print(f"Registered bot {bot.code} ({bot.id}) through the relay")
+        kind = "interactive" if bot.interactive else "subscription"
+        print(f"Registered {kind} bot {bot.code} ({bot.id}) through the relay")
     finally:
         await database.disconnect()
 
@@ -37,12 +39,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Register a notification bot on the relay")
     parser.add_argument("--code", required=True, help="stable id producers address, e.g. turnover-alerts")
     parser.add_argument("--title", default="", help="what subscribers see in the greeting")
+    parser.add_argument(
+        "--interactive",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="buttons and files: every update goes to the bot's automation (omit to keep the current mode)",
+    )
     args = parser.parse_args()
     token = getpass.getpass("Bot token: ").strip()
     if not token:
         parser.error("bot token is required")
     try:
-        asyncio.run(register_bot(args.code.strip(), args.title.strip(), token))
+        asyncio.run(register_bot(args.code.strip(), args.title.strip(), token, args.interactive))
     except MessengerPermanentError as error:
         parser.error(f"the relay rejected the token: {error}")
     except MessengerTemporaryError as error:

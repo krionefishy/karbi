@@ -52,7 +52,7 @@ WB её выставил, и предупреждать об истекающи�
   допускаются ([WB_EGRESS](../architecture/WB_EGRESS.md)). Своего HTTP-клиента не пишем.
 - **Telegram.** Воркер сам в мессенджер не ходит. Он кладёт событие в outbox
   (`NotificationTopics.TELEGRAM_MESSAGE_REQUESTED`) с кодом бота, аудиторией, шаблоном и
-  `dedupe_key`. Дальше его забирает `notifications-worker`, а отправляет релей вне РФ. Токена
+  `dedupe_key`. Дальше его забирает `notifications-worker`, а отправляет сервис-посредник (релей). Токена
   бота у нас нет ([NETWORK_AND_EGRESS](../architecture/NETWORK_AND_EGRESS.md)).
 - **Бот.** Заводим отдельным кодом (рабочее название `card-documents`) через
   `register_bot` или админку. Сначала токен принимает релей, потом появляется строка

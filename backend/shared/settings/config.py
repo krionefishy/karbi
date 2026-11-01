@@ -221,7 +221,7 @@ class CardDocumentsConfig:
 
 @dataclass(frozen=True, slots=True)
 class RelayConfig:
-    """The messenger relay outside Russia: the only host allowed to reach the messenger.
+    """The messenger relay: the intermediary service between this server and the messenger.
 
     No bot tokens here — they live on the relay. This side knows an address, a
     shared JWT secret and the certificate it pins.
@@ -234,6 +234,7 @@ class RelayConfig:
     inbound_audience: str = "main"
     jwt_ttl_seconds: int = 300
     photos_enabled: bool = False
+    file_timeout_seconds: int = 120
     jwt_leeway_seconds: int = 30
     updates_wait_seconds: int = 25
     verify: str = "true"
@@ -500,7 +501,6 @@ class ScreenshotControlConfig:
     extension_token_idle_days: int = 60
     link_token_ttl_minutes: int = 15
     notification_bot: str = "screens"
-    telegram_enabled: bool = False
     pipeline_version: str = "v1"
     public_base_url: str = "http://localhost:5173"
     extension_download_path: str = "/extension/marketplace-auto-screenshots.zip"
@@ -804,7 +804,13 @@ class Settings:
                 del vision[key]
         relay = dict(data.get("relay", {}))
         relay["photos_enabled"] = _as_bool(relay.get("photos_enabled", False))
-        for key in ("jwt_ttl_seconds", "jwt_leeway_seconds", "updates_wait_seconds", "request_timeout_seconds"):
+        for key in (
+            "jwt_ttl_seconds",
+            "jwt_leeway_seconds",
+            "updates_wait_seconds",
+            "request_timeout_seconds",
+            "file_timeout_seconds",
+        ):
             if key in relay:
                 relay[key] = int(relay[key])
         settings = cls(
@@ -1249,8 +1255,6 @@ def _screenshot_control(raw: dict[str, Any]) -> ScreenshotControlConfig:
             config[key] = ScreenshotThresholds(**thresholds)
         elif key == "allowed_url_prefixes":
             config[key] = tuple(str(prefix) for prefix in value)
-        elif key == "telegram_enabled":
-            config[key] = _as_bool(value)
         elif key == "audit_percent":
             config[key] = float(value)
         elif key in _SCREENSHOT_TEXT_KEYS:

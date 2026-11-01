@@ -74,5 +74,4 @@ screenshot_control:
   hmac_key: test-screenshot-hmac-key-that-is-long-enough
   staging_root: /tmp/karbi-test-screenshots-staging
   public_base_url: https://test.local
-  telegram_enabled: false
   pair_attempts_per_window: 3

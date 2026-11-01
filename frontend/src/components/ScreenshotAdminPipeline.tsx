@@ -105,8 +105,7 @@ export function ScreenshotAdminPipeline() {
       </div>
       <p className="sca-foot">
         Сегодня: расширение {data.channels_today.extension}, Telegram {data.channels_today.telegram}, сайт{" "}
-        {data.channels_today.web} · не распознано {data.extraction_failed_today} · медиана {formatAge(data.p50_s)} ·
-        Telegram {data.telegram_enabled ? "включён" : "выключен"}
+        {data.channels_today.web} · не распознано {data.extraction_failed_today} · медиана {formatAge(data.p50_s)}
       </p>
     </div>
   );

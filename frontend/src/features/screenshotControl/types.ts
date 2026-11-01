@@ -93,7 +93,7 @@ export type ErrorCode =
   | "exact_key_conflict"
   | "note_required"
   | "duplicate_target_invalid"
-  | "telegram_disabled"
+  | "telegram_unavailable"
   | "transition_not_allowed"
   | "bad_cursor"
   | "bad_timezone";
@@ -169,14 +169,12 @@ export interface OutcomeOption {
 
 export interface ManagerConfig {
   mode: Mode;
-  telegram_enabled: boolean;
   outcomes: OutcomeOption[];
   max_upload_bytes: number;
   accepted_types: string[];
   min_side_px: number;
   extension_url: string;
   extension_min_version: string;
-  bot_username: string | null;
 }
 
 /** Часовой пояс из списка допустимых: id — IANA, label — «Москва, UTC+3». */
@@ -214,7 +212,8 @@ export interface TelegramLink {
 }
 
 export interface TelegramStatus {
-  enabled: boolean;
+  available: boolean;
+  bot_username: string | null;
   linked: boolean;
   username: string | null;
   linked_at: string | null;
@@ -495,7 +494,6 @@ export interface Managers {
 
 export interface Pipeline {
   mode: Mode;
-  telegram_enabled: boolean;
   stages: { processing: number; extracted: number };
   oldest_processing_age_s: number | null;
   p50_s: number | null;
@@ -526,7 +524,6 @@ export interface Thresholds {
 export interface AdminConfig {
   mode: Mode;
   kpi_from: string | null;
-  telegram_enabled: boolean;
   pipeline_version: string;
   vision_model: string | null;
   s3_bucket: string;

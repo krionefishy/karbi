@@ -45,14 +45,19 @@ class WBReviewsTopics:
 
 
 class NotificationTopics:
-    """Outgoing notifications. The payload names the bot to speak through."""
+    """Outgoing notifications. The payload names the bot to speak through.
+
+    `update.received` carries every update of an interactive bot as is (key: the bot id, so one
+    bot's updates stay in order); subscription bots keep `command.received`.
+    """
 
     TELEGRAM_MESSAGE_REQUESTED = validate_topic_name("notifications.telegram.message.requested")
     TELEGRAM_COMMAND_RECEIVED = validate_topic_name("notifications.telegram.command.received")
+    TELEGRAM_UPDATE_RECEIVED = validate_topic_name("notifications.telegram.update.received")
 
     @classmethod
     def all(cls) -> tuple[str, ...]:
-        return (cls.TELEGRAM_MESSAGE_REQUESTED, cls.TELEGRAM_COMMAND_RECEIVED)
+        return (cls.TELEGRAM_MESSAGE_REQUESTED, cls.TELEGRAM_COMMAND_RECEIVED, cls.TELEGRAM_UPDATE_RECEIVED)
 
 
 class SupportBotTopics:

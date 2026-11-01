@@ -28,14 +28,12 @@ const root = "/api/v1/wb/screenshot-control";
 
 const config: ManagerConfig = {
   mode: "shadow",
-  telegram_enabled: false,
   outcomes: [],
   max_upload_bytes: 15 * 1024 * 1024,
   accepted_types: ["image/png", "image/jpeg", "image/webp"],
   min_side_px: 600,
   extension_url: "/downloads/screenshot-control.zip",
   extension_min_version: "1.0.0",
-  bot_username: null,
 };
 
 const zones = [
@@ -508,7 +506,7 @@ describe("ScreenshotControlPage", () => {
       "href",
       "/downloads/screenshot-control.zip",
     );
-    expect(screen.getByText("Скоро")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Telegram" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Получить код/ }));
     expect(await screen.findByText("7KQ4M2XZ")).toBeInTheDocument();

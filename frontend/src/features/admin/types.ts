@@ -30,6 +30,7 @@ export interface NotificationBot {
   code: string;
   title: string;
   invite_link_template: string;
+  interactive: boolean;
   delivery: BotDelivery;
 }
 
@@ -37,6 +38,7 @@ export interface BotCreate {
   code: string;
   title: string;
   token: string;
+  interactive?: boolean;
 }
 
 export interface ServiceInfo {

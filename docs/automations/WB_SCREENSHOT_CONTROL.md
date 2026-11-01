@@ -4,7 +4,8 @@
 админа, страницы и расширение Chrome готовы и покрыты тестами на PostgreSQL и Redis, включая
 сквозной тест через настоящие `Extractor` и `decide` и набор «красной команды». S3 в тестах —
 фейк, модель — заготовленные ответы. На живом S3, живой модели и живом Kafka не проверялось;
-пороги дедупа не откалиброваны на реальных скринах (см. «Оценка»). Telegram — второй релиз.
+пороги дедупа не откалиброваны на реальных скринах (см. «Оценка»). Telegram-бот (раздел «Telegram»)
+работает всегда, проверен тестами на фейковом сервисе-посреднике; с живым ботом не проверялся.
 
 ## Зачем
 
@@ -27,7 +28,7 @@
 | --- | --- | --- |
 | Веб | `POST /api/v1/wb/screenshot-control/submissions`, multipart; исход можно выбрать позже | JWT сотрудника |
 | Расширение Chrome | `…/extension/*`, снимок видимой вкладки, URL вкладки из `tab.url`; исход обязателен | токен установки `mas_…`, выдаётся по коду сопряжения из 8 символов; обмен кода под жёстким лимитом на IP |
-| Telegram | второй релиз | флаг `telegram_enabled=false`; таблицы привязки уже есть |
+| Telegram | фото или документ в личке бота `screens`, по одному скрину в сообщении; исход — inline-кнопкой | привязка Telegram к сотруднику по одноразовой ссылке со страницы (раздел «Telegram») |
 
 Админ-панель — `/api/v1/admin/screenshot-control/*`, только `CurrentAdmin`, на рабочем
 домене префикс закрыт nginx. Контракт целиком — `presentation/http/schemas.py`, JSON-схема —
@@ -220,6 +221,72 @@ inbox общие (`wb_core`), повторная доставка любого �
 - **часы расширения отстают** меньше чем на 72 ч — неотличимо от выгрузки из оффлайн-очереди
   (спешащие часы ловятся как `clock_skew`).
 
+## Telegram
+
+Бот `screens` — интерактивный бот модуля уведомлений (`notifications.bots.interactive=true`): его
+апдейты не идут в подписки по ссылкам, а целиком уходят событием
+`notifications.telegram.update.received` (ключ партиции — бот, порядок сохраняется). Модуль
+читает их консьюмером `screenshot-telegram` в своём воркере (`application/telegram_bot.py`), файлы
+скачивает через порт уведомлений `MessengerFiles` (поток с лимитом `max_upload_bytes` и общим
+дедлайном), отвечает событиями `notifications.telegram.message.requested` — сообщением, правкой
+сообщения (`kind=edit`) или ответом на нажатие (`kind=callback_answer`).
+
+**Событие `update.received`** (`notifications.domain.UpdateEvent`): `bot, update_id, kind
+(message|callback), chat_id, chat_type, user_id, username, first_name, message_ref, reply_to_ref,
+text, caption, media_group_id, forwarded, attachments[{kind, file_ref, size, width, height, mime,
+file_name}], callback{id, data, message_ref}|null, event_id`. `file_ref` — непрозрачная ссылка
+посредника, скачать можно только через него и только для того же бота.
+
+**Привязка.** Страница выдаёт ссылку `t.me/<бот>?start=<токен>` (24 случайных байта, 15 минут,
+одноразовая, в базе sha256). `/start <токен>` в личке: токен гасится в любом случае; сотрудник
+должен быть активен и иметь сервис `wb-screenshot-control`; привязка — по неизменяемому id
+отправителя. Отказ, если этот Telegram уже привязан к другому сотруднику или у сотрудника уже есть
+другой Telegram (сначала отвязать). Отвязка — `/unlink`, страница или админ.
+
+**Доступ.** Telegram идёт мимо `require_service`, поэтому каждый апдейт сам проверяет: живая
+привязка, сотрудник активен, сервис выдан. Нет — «приём недоступен» без подробностей. Группы и
+каналы — отказ: только личный чат.
+
+**Скриншот.** Фото (Telegram пережимает его в JPEG; принимается как есть, `client_meta.telegram_compressed=true`)
+или документ PNG/JPEG/WEBP. До скачивания: тип документа и размер из апдейта; лимит загрузок на
+сотрудника — те же `uploads_per_minute/hour`, но по базе (все каналы). Дальше обычный приём
+(`IngestService`, сигнатура, Pillow, лимит пикселей) с `channel=telegram`,
+`client_submission_id=tg:<update_id>:<n>`, `tg_chat_id/tg_message_id/tg_media_group_id`, подписью в
+`caption_raw`. Ответ — цитатой на сообщение менеджера, с кнопками «Положительный / Изменён / Удалён».
+Альбом не собирается: каждое фото — отдельный кейс со своими кнопками. Подпись-исход текстом не
+разбирается.
+
+**Кнопки.** `callback_data` = `sc:o:<id скрина base64url без паддинга>:<p|a|d>` (29 байт из 64).
+Нажатие — `change_outcome(source="button")` только по своему скрину; бот отвечает на нажатие
+(«Исход записан» / «уже не поменять» / «не найден») и правит сообщение: кнопки убираются, текст —
+«Исход: …, принят в проверку». Без исхода скрин ждёт, как веб-загрузка (`outcome_ttl_hours`).
+
+**Вердикт.** Консьюмер `screenshot-telegram-verdict` читает `screenshot.verdict-ready` и для скринов
+из Telegram отвечает на сообщение менеджера фразой из узкого словаря (`domain/manager_reasons.py`):
+«принят», «принят, проверяется» (needs_review), «не засчитан: <причина>». Пороги и совпавшие поля не
+раскрываются. Переоценка админом — новое сообщение; тот же вердикт повторно — молчим. Пишем только в
+живую привязку того же чата активному сотруднику с сервисом.
+
+**Команды.** `/summary` — KPI за сегодня (МСК), `/last` — пять последних скринов, `/unlink`,
+`/help`; прочий текст — подсказка.
+
+**Повторы.** Курсор уведомлений, `inbox_events` по uuid5 от `(бот, update_id)` (вердикт — по
+`event_id`), `UNIQUE(user_id, client_submission_id)` и ключи дедупа ответов от `update_id`.
+Временная ошибка скачивания — повтор консьюмера; после 5 падений апдейт закрывается ответом
+«не получилось, пришлите ещё раз».
+
+**Без бота.** Пока интерактивный бот `screens` не зарегистрирован, ссылка привязки отвечает 503
+`telegram_unavailable`, а на странице менеджера блок Telegram показывает «Не подключён»; расширение и
+сайт работают. Апдейты бота читаются всегда.
+
+**Подключение бота.**
+1. Сервис-посредник с контрактом v1.1 (отдельный репозиторий) выложен; основной сервис требует его всегда.
+2. Бот в BotFather (владелец): имя без «karbi», `/setjoingroups` Disable, команды `/help /summary /last /unlink`.
+3. Регистрация: `python -m backend.commands.register_bot --code screens --title "…" --interactive`
+   (токен вводится в getpass) или форма админки ботов с `interactive=true`. Воркеры подхватывают бота
+   сами, перезапуск не нужен.
+4. Сервис выдать сначала тестовому менеджеру и пройти привязку, фото, кнопку, вердикт.
+
 ## Режимы
 
 | `mode` | Приём | Конвейер | KPI |
@@ -314,7 +381,8 @@ S3 возраст старейшего невыгруженного файла �
 | `PUT /wb/screenshot-control/settings` | `{timezone}` из `zones[].id`; иначе 422 `bad_timezone`; действует для следующих скринов |
 | `GET /wb/screenshot-control/config` | режим, исходы, лимиты файла, ссылка на расширение; отвечает и при `mode=off` |
 | `POST …/extension/pairing-code`, `GET/DELETE …/extension/installs[/{id}]` | код сопряжения (новый гасит прежний), свои установки; чужая установка — 404 |
-| `…/telegram*` | `link-token` — 503 `telegram_disabled` до второго релиза; статус и отвязка работают |
+| `POST …/telegram/link-token` | `{url, expires_at}`: `t.me/<бот>?start=<токен>` на `link_token_ttl_minutes` (15), одноразовая, новая гасит прежние; в базе sha256 токена. 503 `telegram_unavailable` — интерактивный бот `screens` не зарегистрирован; лимит как у кода сопряжения |
+| `GET …/telegram`, `DELETE …/telegram` | статус привязки (`available` — бот подключён, `bot_username`, `linked`, `username`, `linked_at`) и отвязка |
 
 ### Расширение (`Authorization: Bearer mas_…`, `X-Extension-Version`)
 
@@ -402,7 +470,8 @@ allowed_url_prefixes}`; код гасится атомарно, повтор —
 | `max_extension_installs`, `extension_token_idle_days` | 3, 60 | живых установок на сотрудника, срок простоя токена |
 | `extension_min_version` | `0.1.0` | ниже — 426 `upgrade_required` |
 | `image_url_ttl_seconds` | 300 | срок presigned-ссылки |
-| `telegram_enabled` (`SCREENSHOT_CONTROL_TELEGRAM`) | `false` | второй релиз |
+| `notification_bot` | `screens` | код интерактивного бота модуля в уведомлениях |
+| `link_token_ttl_minutes` | 15 | срок ссылки привязки |
 | `vision.model` (`VISION_MODEL`) | `Qwen/Qwen3.6-35B-A3B` | модель кадра, выбрана пробным прогоном (этап 0), рассуждения выключены |
 | `vision.fallback_model` (`VISION_FALLBACK_MODEL`) | `Qwen/Qwen3.5-397B-A17B` | ремонтный запрос при невалидном JSON |
 | `vision.api_key` (`FOUNDATION_MODELS_API_KEY`) | — | ключ Cloud.ru Foundation Models; только у воркера |
@@ -418,7 +487,6 @@ allowed_url_prefixes}`; код гасится атомарно, повтор —
 | `SCREENSHOT_CONTROL_HMAC_KEY` | api, воркер | 32+ символов; без него при `mode≠off` модуль переходит в `off` (503 `module_off`, ERROR `screenshot_control_disabled` при старте), а api и остальные воркеры стартуют. Сменить потом — значит потерять сравнение имён покупателей со старыми скринами |
 | `SCREENSHOT_CONTROL_KPI_FROM` | api | `YYYY-MM-DD` начала боевого KPI |
 | `SCREENSHOT_CONTROL_S3_BUCKET` | api, воркер | отдельный бакет под скрины; пусто — общий `S3_BUCKET` |
-| `SCREENSHOT_CONTROL_TELEGRAM` | api, воркер | `false` до второго релиза |
 | `S3_ENABLED`, `S3_ENDPOINT_URL`, `S3_TENANT_ID`, `S3_KEY_ID`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_REGION`, `S3_VERIFY_TLS` | api, воркер | общий доступ к Object Storage Cloud.ru |
 | `FOUNDATION_MODELS_API_KEY` | воркер | ключ модели. Пусто — воркер стартует с WARNING `screenshot_control_model_key_missing`, но каждое распознавание после 4 попыток уходит в `extraction_failed` |
 | `VISION_MODEL` | воркер | пусто — модель по умолчанию |
@@ -468,6 +536,10 @@ allowed_url_prefixes}`; код гасится атомарно, повтор —
 
 ## Не сделано
 
+- **Telegram: что не проверено и не сделано.** С живым ботом и живым сервисом-посредником не
+  прогонялось (только фейки). Точность распознавания на пережатых Telegram JPEG не мерилась.
+  Напоминания «выберите исход» до `outcome_ttl_hours` нет. Пересланные скрины принимаются как обычные
+  (отметка `client_meta.telegram_forwarded`). Отвязка на сайте боту не сообщается.
 - **Снимок KPI закрытого периода.** KPI считается по текущему `verdict`: решение админа или
   пересчёт меняют прошлые месяцы задним числом. Нужна таблица снимков (период, менеджер, счётчики,
   кто и когда закрыл) и выгрузка из неё; до этого цифры прошлого периода могут меняться.

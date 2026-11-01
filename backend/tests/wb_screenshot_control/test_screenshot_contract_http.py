@@ -75,7 +75,6 @@ async def test_admin_routes_refuse_a_manager_and_serve_an_admin(stand: Stand) ->
     config = await stand.client.get(f"{ADMIN}/config", headers=admin)
     parsed = AdminConfigOut.model_validate(config.json())
     assert (parsed.retention_original_days, parsed.retention_thumb_days) == (365, 365)
-    assert parsed.telegram_enabled is False
     secret = stand.application.settings.screenshot_control.hmac_key
     assert secret and secret not in config.text and "hmac" not in config.text
 
@@ -154,9 +153,15 @@ async def test_manager_basics_answer_with_the_contract(stand: Stand) -> None:
     assert code.status_code == 200 and re.fullmatch(PAIRING_CODE_PATTERN, code.json()["code"])
 
     telegram = await stand.client.post(f"{MANAGER}/telegram/link-token", headers=manager)
-    assert (telegram.status_code, telegram.headers["X-Error-Code"]) == (503, "telegram_disabled")
+    assert (telegram.status_code, telegram.headers["X-Error-Code"]) == (503, "telegram_unavailable")
     status = await stand.client.get(f"{MANAGER}/telegram", headers=manager)
-    assert status.json() == {"enabled": False, "linked": False, "username": None, "linked_at": None}
+    assert status.json() == {
+        "available": False,
+        "bot_username": None,
+        "linked": False,
+        "username": None,
+        "linked_at": None,
+    }
     assert (await stand.client.delete(f"{MANAGER}/telegram", headers=manager)).status_code == 204
 
 

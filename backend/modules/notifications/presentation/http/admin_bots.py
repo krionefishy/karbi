@@ -22,6 +22,7 @@ def bot_response(bot: Bot, delivery: BotDelivery | None = None) -> BotResponse:
         code=bot.code,
         title=bot.title,
         invite_link_template=bot.invite_link_template,
+        interactive=bot.interactive,
     )
 
 
@@ -44,6 +45,7 @@ async def register_bot(
             code=payload.code,
             title=payload.title.strip(),
             token=payload.token.get_secret_value().strip(),
+            interactive=payload.interactive,
         )
     except BotRejectedError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Мессенджер отклонил токен: {error}") from error

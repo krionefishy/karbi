@@ -75,6 +75,7 @@ relay:
   jwt_ttl_seconds: ${RELAY_JWT_TTL_SECONDS:-300}
   updates_wait_seconds: ${RELAY_UPDATES_WAIT_SECONDS:-25}
   photos_enabled: ${RELAY_PHOTOS_ENABLED:-true}
+  file_timeout_seconds: ${RELAY_FILE_TIMEOUT_SECONDS:-120}
   verify: ${RELAY_VERIFY:-/etc/relay/relay.crt}
   request_timeout_seconds: ${RELAY_REQUEST_TIMEOUT_SECONDS:-60}
 turnover:
@@ -218,8 +219,6 @@ screenshot_control:
   extension_token_idle_days: 60
   link_token_ttl_minutes: 15
   notification_bot: ${SCREENSHOT_CONTROL_BOT:-screens}
-  # Telegram — второй релиз: нужен релей с фото и кнопками.
-  telegram_enabled: ${SCREENSHOT_CONTROL_TELEGRAM:-false}
   pipeline_version: v1
   public_base_url: https://${PUBLIC_DOMAIN:-localhost}
   extension_download_path: /extension/marketplace-auto-screenshots.zip

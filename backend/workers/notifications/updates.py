@@ -70,7 +70,11 @@ class UpdateFetcher:
             return False
         async with self.database.session() as session:
             repository = NotificationRepository(session)
-            service = SubscriptionService(session, repository, invite_ttl_hours=self.invite_ttl_hours)
+            service = SubscriptionService(
+                session,
+                repository,
+                invite_ttl_hours=self.invite_ttl_hours,
+            )
             return await service.accept_update(self.bot, _to_domain(update))
 
 
@@ -82,6 +86,15 @@ def _to_domain(update: RelayUpdate) -> Update:
         user_id=int(update.external_id) if update.external_id and _is_number(update.external_id) else None,
         username=update.username,
         first_name=update.display_name,
+        kind=update.kind,
+        chat_type=update.chat_type,
+        message_ref=update.message_ref,
+        reply_to_ref=update.reply_to_ref,
+        media_group_id=update.media_group_id,
+        caption=update.caption,
+        forwarded=update.forwarded,
+        attachments=update.attachments,
+        callback=update.callback,
     )
 
 

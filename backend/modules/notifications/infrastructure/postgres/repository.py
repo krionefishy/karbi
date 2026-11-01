@@ -77,8 +77,8 @@ class NotificationRepository:
     async def delete_bot(self, bot_id: uuid.UUID) -> None:
         await self.session.execute(delete(BotModel).where(BotModel.id == bot_id))
 
-    def add_bot(self, *, code: str, title: str, invite_link_template: str) -> BotModel:
-        bot = BotModel(code=code, title=title, invite_link_template=invite_link_template)
+    def add_bot(self, *, code: str, title: str, invite_link_template: str, interactive: bool = False) -> BotModel:
+        bot = BotModel(code=code, title=title, invite_link_template=invite_link_template, interactive=interactive)
         self.session.add(bot)
         return bot
 
@@ -226,6 +226,10 @@ class NotificationRepository:
         params: dict,
         text: str,
         attachment: dict | None = None,
+        kind: str = "message",
+        buttons: list | None = None,
+        reply_to: str | None = None,
+        target_ref: str | None = None,
     ) -> bool:
         """Returns False when this exact message was already queued before."""
         statement = insert(OutgoingMessageModel).values(
@@ -236,6 +240,10 @@ class NotificationRepository:
             params=params,
             text=text,
             attachment=attachment,
+            kind=kind,
+            buttons=buttons,
+            reply_to=reply_to,
+            target_ref=target_ref,
         )
         result = await self.session.execute(
             statement.on_conflict_do_nothing(index_elements=["dedupe_key"]).returning(OutgoingMessageModel.id)

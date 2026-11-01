@@ -10,6 +10,7 @@ from typing import Any
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.notifications.application import MessengerFiles, messenger_files
 from backend.modules.wb_screenshot_control.application.ingest import IngestService
 from backend.modules.wb_screenshot_control.application.pipeline import (
     DecisionService,
@@ -18,6 +19,7 @@ from backend.modules.wb_screenshot_control.application.pipeline import (
 )
 from backend.modules.wb_screenshot_control.application.reconcile import StorageReconciler
 from backend.modules.wb_screenshot_control.application.storage import ObjectReader, ObjectStorageService
+from backend.modules.wb_screenshot_control.application.telegram_bot import TelegramBotService
 from backend.modules.wb_screenshot_control.domain.pipeline_types import Candidate, Decision, DecisionInput
 from backend.modules.wb_screenshot_control.domain.ports import BlobStore, Decider, Extractor
 from backend.modules.wb_screenshot_control.infrastructure.storage import S3BlobStore, StagingStore
@@ -160,6 +162,16 @@ class ScreenshotControlServices:
         if self.blobs is None:
             return None
         return ObjectStorageService(self.database, self.staging, self.blobs)
+
+    def telegram_bot(self, files: MessengerFiles | None = None) -> TelegramBotService:
+        """Бот приёма скриншотов: файлы — через порт уведомлений (релей), приём — тот же, что у веба."""
+        return TelegramBotService(
+            self.database,
+            self.staging,
+            files or messenger_files(self.settings.relay),
+            self.config,
+            bucket=self.bucket,
+        )
 
     def reconciler(self) -> StorageReconciler:
         return StorageReconciler(self.database, self.staging, self.blobs, self.config)

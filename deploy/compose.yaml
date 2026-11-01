@@ -68,7 +68,7 @@ services:
       EGRESS_URL: https://egress.internal:${EGRESS_TLS_PORT:-8443}
       EGRESS_JWT_SECRET: ${EGRESS_JWT_SECRET:?set EGRESS_JWT_SECRET in .env - no default in production}
       EGRESS_VERIFY: ${EGRESS_VERIFY:-/etc/egress/egress.crt}
-      # The relay outside Russia is the only way to the messenger. The secret is
+      # The relay is the intermediary service to the messenger. The secret is
       # shared with it; the bot tokens themselves never come back here.
       RELAY_BASE_URL: ${RELAY_BASE_URL:?set RELAY_BASE_URL in .env}
       RELAY_JWT_SECRET: ${RELAY_JWT_SECRET:?set RELAY_JWT_SECRET in .env - no default in production}
@@ -86,7 +86,6 @@ services:
       SCREENSHOT_CONTROL_HMAC_KEY: ${SCREENSHOT_CONTROL_HMAC_KEY:-}
       SCREENSHOT_CONTROL_KPI_FROM: ${SCREENSHOT_CONTROL_KPI_FROM:-}
       SCREENSHOT_CONTROL_S3_BUCKET: ${SCREENSHOT_CONTROL_S3_BUCKET:-}
-      SCREENSHOT_CONTROL_TELEGRAM: ${SCREENSHOT_CONTROL_TELEGRAM:-false}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -378,6 +377,10 @@ services:
       VISION_MODEL: ${VISION_MODEL:-}
     volumes:
       - screenshots_staging:/data/screenshots-staging
+      # Скриншоты из Telegram воркер скачивает через сервис-посредник.
+      - ./relay-tls:/etc/relay:ro
+    extra_hosts:
+      - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -386,7 +389,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck: *worker-healthcheck
-    # egress: S3 Cloud.ru и модель распознавания снаружи; в WB не ходит.
+    # egress: S3 Cloud.ru, модель распознавания и сервис-посредник мессенджера; в WB не ходит.
     networks:
       - internal
       - egress
@@ -429,11 +432,8 @@ services:
       - "${RELAY_HOST_NAME:?set RELAY_HOST_NAME in .env}:${RELAY_HOST_IP:?set RELAY_HOST_IP in .env}"
     environment:
       <<: *application-environment
-      # api.telegram.org is blocked upstream of some hosts, this one included.
-      # httpx trusts the environment, so setting TELEGRAM_HTTPS_PROXY in .env
-      # sends Telegram calls through a proxy with no code change; left empty the
-      # variable is ignored and nothing is proxied. This worker speaks HTTP to
-      # nobody but Telegram, so the proxy can never touch Wildberries traffic.
+      # Optional outbound HTTP proxy for this worker only (TELEGRAM_HTTPS_PROXY in .env);
+      # left empty, nothing is proxied. This worker talks to nobody but the relay.
       HTTPS_PROXY: ${TELEGRAM_HTTPS_PROXY:-}
       NO_PROXY: ${TELEGRAM_NO_PROXY:-db,redis,kafka,localhost,127.0.0.1}
     depends_on:

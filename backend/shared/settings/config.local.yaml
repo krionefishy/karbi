@@ -75,4 +75,3 @@ screenshot_control:
   hmac_key: local-development-screenshot-hmac-key-not-real
   staging_root: /tmp/karbi-screenshots-staging
   public_base_url: http://localhost:5173
-  telegram_enabled: false
