@@ -9,8 +9,8 @@ from backend.app.factory import Application
 from backend.modules.wb_core.domain import MIRROR_CHATS
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_support_bot.infrastructure.postgres import (
-    SEND_DRY_RUN,
     SEND_SENT,
+    SEND_UNKNOWN,
     DialogModel,
     ReplyVerdictModel,
     SendModel,
@@ -74,7 +74,7 @@ async def seed(
                 prompt_at=PROMPT_AT,
                 seq=2,
                 text="Напоминание",
-                status=SEND_DRY_RUN,
+                status=SEND_UNKNOWN,
                 planned_at=first_send + timedelta(hours=1),
             )
         )

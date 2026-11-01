@@ -137,11 +137,11 @@ card_documents:
   stock_fresh_hours: 48
 
 support_bot:
-  # off | shadow | enforce: как вердикт нейросети влияет на отправку (shadow — только записываем).
+  # off | enforce: как вердикт нейросети влияет на отправку (off — не влияет).
   classifier_mode: ${SUPPORT_BOT_CLASSIFIER_MODE:-enforce}
   classifier_prompt_version: v2
-  # off | shadow | enforce: слой ответов покупателей. enforce — класс ответа решает, продолжать ли рассылку;
-  # shadow — классы считаются и пишутся, рассылка не меняется.
+  # off | enforce: слой ответов покупателей. enforce — класс ответа решает, продолжать ли рассылку;
+  # off — любой ответ покупателя останавливает кампанию.
   reply_gate_mode: ${SUPPORT_BOT_REPLY_GATE_MODE:-enforce}
   reply_prompt_version: r3
   # single | panel: кто решает по ответу. single — одна модель из `llm`; panel — слой принятия решения:

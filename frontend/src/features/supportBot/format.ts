@@ -34,11 +34,10 @@ export const SEND_LABEL: Record<SendStatus, string> = {
   sent: "Отправлено",
   unknown: "Неизвестно",
   failed: "Не ушло",
-  dry_run: "Сухой прогон",
 };
 
 export const MODE_LABEL: Record<BotMode, string> = {
-  dry_run: "Сухой прогон",
+  stopped: "Рассылка не включена",
   live: "Отправка включена",
 };
 
@@ -62,7 +61,7 @@ export function statusLine(
   if (bot.globally_paused) return "Рассылка остановлена общим выключателем";
   if (bot.paused_reason) return `Отправка остановлена: ${bot.paused_reason}`;
   if (bot.mode === "live") return "Бот отправляет сообщения";
-  return "Сухой прогон: бот считает, но ничего не отправляет";
+  return "Рассылка не включена: бот читает чаты, но ничего не отправляет";
 }
 
 export const VERDICT_LABEL: Record<Verdict, string> = {
@@ -142,7 +141,6 @@ export function replyLabel(bucket: string): string {
 
 export const GATE_NOTE: Record<ReplyGateMode, string> = {
   off: "Слой ответов выключен",
-  shadow: "Только запись классов, рассылка не меняется",
   enforce: "Слой ответов управляет рассылкой",
 };
 

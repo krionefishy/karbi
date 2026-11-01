@@ -123,7 +123,6 @@ class SupportBotWorker(PollingWorker):
                 dialogs=report.dialogs,
                 campaigns_started=report.campaigns_started,
                 sent=report.sent,
-                dry_run=report.dry_run,
                 failed=report.failed,
                 held=report.held,
                 verdicts_requested=report.verdicts_requested,

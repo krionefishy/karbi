@@ -14,7 +14,6 @@ const dayFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "
 const FILTERS: { value: JournalStatus | ""; label: string }[] = [
   { value: "", label: "Все" },
   { value: "sent", label: "Отправлено" },
-  { value: "dry_run", label: "Сухой прогон" },
   { value: "failed", label: "Не ушло" },
   { value: "unknown", label: "Неизвестно" },
 ];
@@ -36,7 +35,7 @@ export function SupportBotJournal({ page, filter, onFilter }: Props) {
   return (
     <div className="bot-journal">
       <div className="bot-pills" role="tablist" aria-label="Статус отправки">
-        {FILTERS.filter((option) => option.value !== "dry_run" || countOf("dry_run") > 0).map((option) => (
+        {FILTERS.map((option) => (
           <button
             key={option.value || "all"}
             type="button"

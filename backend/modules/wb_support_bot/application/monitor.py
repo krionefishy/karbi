@@ -166,7 +166,7 @@ class BotMonitor:
             now=now,
             worker_checked_at=worker_checked_at,
             check_worker=check_worker,
-            mode=tracked.mode if tracked else "dry_run",
+            mode=tracked.mode if tracked else "stopped",
             paused_reason=tracked.paused_reason if tracked else None,
             globally_paused=await repository.is_paused(),
             # Свежесть — когда дочитали ленту до конца, а не время последнего события: ночью событий нет часами.

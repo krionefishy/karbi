@@ -9,7 +9,7 @@ const page: SendPage = {
   total: 3,
   page: 1,
   page_size: 50,
-  counts: { dry_run: 2, failed: 1 },
+  counts: { sent: 2, failed: 1 },
   sends: [
     {
       id: 3,
@@ -19,7 +19,7 @@ const page: SendPage = {
       chat_url: "https://seller.wildberries.ru/chat-with-clients?chatId=aaaa",
       seq: 3,
       text: "Здравствуйте! Как дела?",
-      status: "dry_run",
+      status: "sent",
       planned_at: "2026-10-13T11:12:00+00:00",
       sent_at: null,
       error: null,
@@ -45,9 +45,8 @@ describe("SupportBotJournal", () => {
     render(<SupportBotJournal page={page} filter={{ status: "", page: 1 }} onFilter={vi.fn()} />);
 
     expect(screen.getByRole("tab", { name: "Все · 3" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Сухой прогон · 2" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Отправлено · 2" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Не ушло · 1" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Отправлено · 0" })).toBeInTheDocument();
   });
 
   it("строка со ссылкой ведёт в чат WB, а у неудачной отправки вместо текста причина", () => {

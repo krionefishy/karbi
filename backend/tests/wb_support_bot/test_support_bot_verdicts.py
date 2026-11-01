@@ -10,7 +10,6 @@ from backend.modules.wb_support_bot.domain import (
     MANUAL_DENY,
     MODE_ENFORCE,
     MODE_OFF,
-    MODE_SHADOW,
     SentMessage,
     may_send,
     parse_verdict,
@@ -95,10 +94,10 @@ def test_a_long_reason_is_cut() -> None:
     assert len(reason) == 200
 
 
-@pytest.mark.parametrize("mode", [MODE_OFF, MODE_SHADOW])
+@pytest.mark.parametrize("mode", [MODE_OFF])
 @pytest.mark.parametrize("verdict", [None, "open", "closing", "unclear"])
 @pytest.mark.parametrize("manual", [None, MANUAL_ALLOW, MANUAL_DENY])
-def test_outside_enforce_the_verdict_never_blocks(mode: str, verdict: str | None, manual: str | None) -> None:
+def test_when_off_the_verdict_never_blocks(mode: str, verdict: str | None, manual: str | None) -> None:
     assert may_send(mode, verdict, manual) is True
 
 

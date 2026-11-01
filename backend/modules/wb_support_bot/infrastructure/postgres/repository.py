@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from backend.modules.wb_support_bot.infrastructure.postgres.models import (
-    MODE_DRY_RUN,
     MODE_LIVE,
+    MODE_STOPPED,
     SEND_DRY_RUN,
     SEND_FAILED,
     SEND_SENT,
@@ -26,7 +26,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     VerdictModel,
 )
 
-JOURNAL_STATUSES = (SEND_SENT, SEND_UNKNOWN, SEND_FAILED, SEND_DRY_RUN)
+JOURNAL_STATUSES = (SEND_SENT, SEND_UNKNOWN, SEND_FAILED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +47,7 @@ class SupportBotRepository:
         return await self.session.get(TrackedSellerModel, seller_id)
 
     async def track(self, seller_id: uuid.UUID) -> None:
-        statement = insert(TrackedSellerModel).values(seller_id=seller_id, mode=MODE_DRY_RUN)
+        statement = insert(TrackedSellerModel).values(seller_id=seller_id, mode=MODE_STOPPED)
         await self.session.execute(statement.on_conflict_do_nothing(index_elements=["seller_id"]))
 
     async def untrack(self, seller_id: uuid.UUID) -> None:

@@ -6,10 +6,10 @@ export type DialogState =
   | "product_removed"
   | "exhausted"
   | "closed";
-export type BotMode = "dry_run" | "live";
+export type BotMode = "stopped" | "live";
 export type DialogFlag = "no_contact" | "attention" | "excluded";
 export type SendStatus =
-  "planned" | "sending" | "sent" | "unknown" | "failed" | "dry_run";
+  "planned" | "sending" | "sent" | "unknown" | "failed";
 
 export interface Template {
   id: number;
@@ -32,7 +32,7 @@ export interface SupportBot {
   monitor_overall: Severity;
 }
 
-export type ClassifierMode = "off" | "shadow" | "enforce";
+export type ClassifierMode = "off" | "enforce";
 export type Verdict = "open" | "closing" | "unclear";
 export type ManualVerdict = "allow" | "deny";
 
@@ -81,7 +81,7 @@ export interface BotSend {
   error: string | null;
 }
 
-export type JournalStatus = "sent" | "dry_run" | "failed" | "unknown";
+export type JournalStatus = "sent" | "failed" | "unknown";
 
 export interface SendPage {
   sends: BotSend[];
@@ -102,7 +102,7 @@ export interface DialogFilter {
   page: number;
 }
 
-export type ReplyGateMode = "off" | "shadow" | "enforce";
+export type ReplyGateMode = "off" | "enforce";
 export type ReplyCategory =
   | "threat"
   | "stop_request"

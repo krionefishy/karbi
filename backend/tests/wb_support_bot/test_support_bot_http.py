@@ -56,12 +56,12 @@ async def test_a_seller_that_is_not_connected_has_no_page(client: AsyncClient, s
     assert (await client.get(f"{API}/sellers/{seller}/dialogs")).status_code == 404
 
 
-async def test_a_connected_seller_starts_in_dry_run_without_texts(client: AsyncClient, seller: uuid.UUID) -> None:
+async def test_a_connected_seller_starts_stopped_without_texts(client: AsyncClient, seller: uuid.UUID) -> None:
     assert (await client.post(AUTOMATION, json={"seller_id": str(seller)})).status_code == 201
 
     body = (await client.get(f"{API}/sellers/{seller}")).json()
 
-    assert body["mode"] == "dry_run" and body["templates"] == [] and body["globally_paused"] is False
+    assert body["mode"] == "stopped" and body["templates"] == [] and body["globally_paused"] is False
     assert body["counts"] == {}
 
 
@@ -132,7 +132,7 @@ async def test_the_journal_is_filtered_counted_and_linked(
                 seller_id=seller, chat_id="1:aaaa-bbbb", prompt_at=prompt, state="in_campaign", nm_id=1304195061
             )
         )
-        for seq, status in enumerate(["dry_run", "dry_run", "failed"], start=1):
+        for seq, status in enumerate(["sent", "sent", "failed"], start=1):
             session.add(
                 SendModel(
                     seller_id=seller,
@@ -150,7 +150,7 @@ async def test_the_journal_is_filtered_counted_and_linked(
     everything = (await client.get(f"{API}/sellers/{seller}/sends")).json()
     failed = (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "failed"})).json()
 
-    assert everything["total"] == 3 and everything["counts"] == {"dry_run": 2, "failed": 1}
+    assert everything["total"] == 3 and everything["counts"] == {"sent": 2, "failed": 1}
     assert everything["sends"][0]["text"] == "текст 3"
     assert everything["sends"][0]["nm_id"] == 1304195061
     assert everything["sends"][0]["chat_url"].endswith("chatId=aaaa-bbbb")

@@ -32,7 +32,7 @@ describe("supportBot format", () => {
   it("общий выключатель и причина остановки перекрывают режим", () => {
     const base = { mode: "live" as const, paused_reason: null, globally_paused: false };
     expect(statusLine(base)).toBe("Бот отправляет сообщения");
-    expect(statusLine({ ...base, mode: "dry_run" })).toMatch(/Сухой прогон/);
+    expect(statusLine({ ...base, mode: "stopped" })).toMatch(/Рассылка не включена/);
     expect(statusLine({ ...base, paused_reason: "ключ без права записи" })).toMatch(/ключ без права записи/);
     expect(statusLine({ ...base, paused_reason: "ключ", globally_paused: true })).toMatch(/общим выключателем/);
   });
@@ -55,7 +55,7 @@ describe("supportBot format", () => {
   it("отметка «писать / не писать» нужна, пока нейросеть не подтвердила, что покупателя ждут", () => {
     const base = { state: "in_campaign" as const, verdict: "closing" as const, manual_verdict: null };
     expect(needsDecision(base, "enforce")).toBe(true);
-    expect(needsDecision({ ...base, verdict: "unclear" }, "shadow")).toBe(true);
+    expect(needsDecision({ ...base, verdict: "unclear" }, "enforce")).toBe(true);
     expect(needsDecision({ ...base, verdict: null }, "enforce")).toBe(true);
     expect(needsDecision({ ...base, verdict: "open" }, "enforce")).toBe(false);
     expect(needsDecision({ ...base, verdict: "open", manual_verdict: "deny" }, "enforce")).toBe(true);

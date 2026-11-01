@@ -57,7 +57,7 @@ def test_the_default_model_is_the_one_chosen_for_the_bot(monkeypatch: pytest.Mon
     assert settings.support_bot.classifier_mode == "enforce"
 
 
-@pytest.mark.parametrize("mode", ["", "on", "ENFORCE", "shadows"])
+@pytest.mark.parametrize("mode", ["", "on", "ENFORCE", "shadow"])
 def test_an_unknown_classifier_mode_is_refused(mode: str) -> None:
     settings = load_settings("backend/shared/settings/config.test.yaml")
     broken = replace(settings, support_bot=replace(settings.support_bot, classifier_mode=mode))
@@ -66,7 +66,7 @@ def test_an_unknown_classifier_mode_is_refused(mode: str) -> None:
         broken.validate_values()
 
 
-@pytest.mark.parametrize("mode", ["off", "shadow", "enforce"])
+@pytest.mark.parametrize("mode", ["off", "enforce"])
 def test_known_classifier_modes_are_accepted(mode: str) -> None:
     settings = load_settings("backend/shared/settings/config.test.yaml")
 

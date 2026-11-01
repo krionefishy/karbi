@@ -1,6 +1,6 @@
 from backend.modules.wb_support_bot.infrastructure.postgres.models import (
-    MODE_DRY_RUN,
     MODE_LIVE,
+    MODE_STOPPED,
     SEND_DRY_RUN,
     SEND_FAILED,
     SEND_PLANNED,
@@ -32,7 +32,7 @@ __all__ = [
     "JOURNAL_STATUSES",
     "DialogKey",
     "SupportBotRepository",
-    "MODE_DRY_RUN",
+    "MODE_STOPPED",
     "MODE_LIVE",
     "SEND_DRY_RUN",
     "SEND_FAILED",

@@ -494,7 +494,6 @@
 .bot-journal-error { font-style: normal; color: var(--danger, #c62828); }
 .bot-badge { display: inline-block; padding: 2px 8px; font-size: 12px; white-space: nowrap; border-radius: var(--radius-full); background: var(--surface-hover); color: var(--ink-secondary); }
 .bot-badge-sent { background: color-mix(in srgb, #2e7d32 16%, transparent); color: #2e7d32; }
-.bot-badge-dry_run { background: var(--accent-soft); color: var(--accent); }
 .bot-badge-unknown { background: color-mix(in srgb, #b26a00 16%, transparent); color: #b26a00; }
 .bot-badge-failed { background: color-mix(in srgb, #c62828 14%, transparent); color: #c62828; }
 

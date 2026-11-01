@@ -11,22 +11,22 @@ class WBSupportBotBase(DeclarativeBase):
     metadata = MetaData(schema="wb_support_bot")
 
 
-MODE_DRY_RUN = "dry_run"
+MODE_STOPPED = "stopped"
 MODE_LIVE = "live"
 
 
 class TrackedSellerModel(WBSupportBotBase):
     """Подключённые кабинеты и режим отправки.
 
-    Подключение не включает отправку: кабинет стартует в `dry_run`, бот считает,
-    кому и что отправил бы, и пишет это в журнал. В `live` его переводит человек.
+    Подключение не включает отправку: кабинет стартует в `stopped`, бот читает чаты
+    и ведёт диалоги, но ничего не пишет покупателям. В `live` его переводит человек.
     """
 
     __tablename__ = "tracked_sellers"
 
     seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    mode: Mapped[str] = mapped_column(String(16), nullable=False, server_default=MODE_DRY_RUN)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, server_default=MODE_STOPPED)
     paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -242,6 +242,7 @@ SEND_SENDING = "sending"
 SEND_SENT = "sent"
 SEND_UNKNOWN = "unknown"
 SEND_FAILED = "failed"
+# Строки сухого прогона до 29.10.2026: новые не пишутся, читаем только для контрольной группы эффекта.
 SEND_DRY_RUN = "dry_run"
 
 
@@ -269,7 +270,7 @@ class SendModel(WBSupportBotBase):
 
 
 __all__ = [
-    "MODE_DRY_RUN",
+    "MODE_STOPPED",
     "MODE_LIVE",
     "SEND_DRY_RUN",
     "SEND_FAILED",

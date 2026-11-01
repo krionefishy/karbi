@@ -21,9 +21,8 @@ from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_support_bot.application import BotPolicy, SupportBotProcessor
 from backend.modules.wb_support_bot.infrastructure.postgres import (
-    MODE_DRY_RUN,
     MODE_LIVE,
-    SEND_DRY_RUN,
+    MODE_STOPPED,
     SEND_FAILED,
     SEND_SENT,
     SEND_UNKNOWN,
@@ -165,19 +164,17 @@ async def dialog(database: Database, seller_id: uuid.UUID) -> DialogModel:
         return (await session.scalars(select(DialogModel).where(DialogModel.seller_id == seller_id))).one()
 
 
-async def test_dry_run_counts_the_send_but_does_not_call_wb(database: Database, seller: uuid.UUID) -> None:
+async def test_a_stopped_cabinet_starts_the_campaign_but_sends_nothing(database: Database, seller: uuid.UUID) -> None:
     await feed(database, seller, BASE_FEED, read_at=NOW)
     sender = FakeSender()
 
     report = await run(database, seller, sender)
 
-    assert report.campaigns_started == 1 and report.dry_run == 1 and report.sent == 0
-    assert sender.calls == []
-    rows = await sends(database, seller)
-    assert [row.status for row in rows] == [SEND_DRY_RUN] and rows[0].text == TEXT
+    assert report.campaigns_started == 1 and report.sent == 0
+    assert report.skipped == "рассылка кабинета не включена"
+    assert sender.calls == [] and await sends(database, seller) == []
     state = await dialog(database, seller)
-    assert state.state == "in_campaign" and state.sent_count == 1
-    assert state.next_send_at is not None and state.next_send_at > NOW + timedelta(hours=1)
+    assert state.state == "in_campaign" and state.sent_count == 0
 
 
 async def test_live_sends_once_and_waits_for_the_next_slot(database: Database, seller: uuid.UUID) -> None:
@@ -315,11 +312,10 @@ async def test_a_key_without_write_access_pauses_the_seller(database: Database, 
     assert sender.calls == [] and again.skipped is not None
 
 
-@pytest.mark.parametrize("mode", [MODE_DRY_RUN])
-async def test_a_new_seller_starts_in_dry_run(database: Database, seller: uuid.UUID, mode: str) -> None:
+async def test_a_new_seller_starts_stopped(database: Database, seller: uuid.UUID) -> None:
     async with database.session() as session:
         tracked = await SupportBotRepository(session).tracked(seller)
-        assert tracked is not None and tracked.mode == mode
+        assert tracked is not None and tracked.mode == MODE_STOPPED
 
 
 async def test_a_dialog_that_left_the_history_window_is_taken_out_of_the_campaign(
@@ -490,13 +486,13 @@ async def decide(database: Database, seller_id: uuid.UUID, verdict: str, *, stat
         await session.commit()
 
 
-async def test_shadow_mode_asks_the_model_but_does_not_hold_the_send(database: Database, seller: uuid.UUID) -> None:
+async def test_a_stopped_cabinet_still_asks_the_model_for_verdicts(database: Database, seller: uuid.UUID) -> None:
     await feed(database, seller, BASE_FEED, read_at=NOW)
 
-    report = await run_with(database, seller, FakeSender(), "shadow")
-    again = await run_with(database, seller, FakeSender(), "shadow", now=NOW + timedelta(minutes=10))
+    report = await run_with(database, seller, FakeSender(), "enforce")
+    again = await run_with(database, seller, FakeSender(), "enforce", now=NOW + timedelta(minutes=10))
 
-    assert report.dry_run == 1 and report.held == 0 and report.verdicts_requested == 1
+    assert report.held == 0 and report.verdicts_requested == 1
     assert again.verdicts_requested == 0
     rows = await verdicts(database, seller)
     state = await dialog(database, seller)
@@ -511,7 +507,7 @@ async def test_mode_off_does_not_touch_the_model(database: Database, seller: uui
 
     report = await run_with(database, seller, FakeSender(), "off")
 
-    assert report.dry_run == 1 and report.verdicts_requested == 0
+    assert report.verdicts_requested == 0
     assert await verdicts(database, seller) == [] and await classify_events(database, seller) == []
 
 
@@ -601,7 +597,7 @@ async def test_a_manual_decision_expires_when_the_specialist_writes_again(
     database: Database, seller: uuid.UUID
 ) -> None:
     await feed(database, seller, BASE_FEED, read_at=NOW)
-    await run_with(database, seller, FakeSender(), "shadow")
+    await run_with(database, seller, FakeSender(), "enforce")
     state = await dialog(database, seller)
     async with database.session() as session:
         await SupportBotRepository(session).set_manual_verdict(
@@ -612,7 +608,7 @@ async def test_a_manual_decision_expires_when_the_specialist_writes_again(
 
     later = BASE_FEED + [event(90, "specialist", "Уточните номер заказа")]
     await feed(database, seller, later, read_at=NOW + timedelta(minutes=30))
-    await run_with(database, seller, FakeSender(), "shadow", now=NOW + timedelta(minutes=30))
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + timedelta(minutes=30))
 
     after = await dialog(database, seller)
     assert after.tail_fingerprint != first_tail and after.tail_event_id == "specialist-90"
@@ -621,12 +617,12 @@ async def test_a_manual_decision_expires_when_the_specialist_writes_again(
 
 async def test_a_stuck_request_is_asked_again_but_only_a_few_times(database: Database, seller: uuid.UUID) -> None:
     await feed(database, seller, BASE_FEED, read_at=NOW)
-    await run_with(database, seller, FakeSender(), "shadow")
+    await run_with(database, seller, FakeSender(), "enforce")
     step = timedelta(minutes=16)
 
-    await run_with(database, seller, FakeSender(), "shadow", now=NOW + step)
-    await run_with(database, seller, FakeSender(), "shadow", now=NOW + 2 * step)
-    await run_with(database, seller, FakeSender(), "shadow", now=NOW + 3 * step)
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + step)
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + 2 * step)
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + 3 * step)
 
     (row,) = await verdicts(database, seller)
     assert row.attempts == 3

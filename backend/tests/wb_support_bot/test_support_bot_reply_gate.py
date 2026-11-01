@@ -51,6 +51,7 @@ from backend.tests.wb_support_bot.test_support_bot_processor import (  # noqa: F
     database,
     event,
     feed,
+    go_live,
     no_sleep,
     seller,
 )
@@ -271,6 +272,7 @@ async def finish(database: Database, row_id: uuid.UUID, category: str | None, *,
 
 
 async def start_campaign(database: Database, seller_id: uuid.UUID, mode: str) -> None:
+    await go_live(database, seller_id)
     await feed(database, seller_id, BASE_FEED, read_at=NOW)
     await go(database, seller_id, mode=mode, now=NOW)
     state = await dialog_of(database, seller_id)
@@ -303,19 +305,6 @@ async def test_with_the_layer_off_a_reply_stops_the_campaign_as_before(database:
     state = await dialog_of(database, seller)
     assert state.state == "awaiting_us" and state.campaign_started_at is None and not state.reply_hold
     assert await rows_of(database, seller) == [] and await outbox_count(database) == 0
-
-
-async def test_in_shadow_the_class_is_recorded_but_the_campaign_still_stops(
-    database: Database, seller: uuid.UUID
-) -> None:
-    await start_campaign(database, seller, "shadow")
-
-    await buyer_replies(database, seller, "shadow", REPLY)
-
-    state = await dialog_of(database, seller)
-    rows = await rows_of(database, seller)
-    assert state.state == "awaiting_us" and not state.reply_hold and state.reply_cleared_through is None
-    assert [row.status for row in rows] == [VERDICT_PENDING] and await outbox_count(database) == 1
 
 
 async def test_a_reply_holds_the_campaign_until_the_class_arrives(database: Database, seller: uuid.UUID) -> None:
@@ -467,7 +456,7 @@ async def test_a_new_reply_after_a_continued_one_gets_its_own_verdict(database: 
     assert state.state == "in_campaign" and state.reply_hold
 
 
-async def test_a_virtual_reminder_of_a_dry_run_dialog_does_not_reopen_the_cleared_slice(
+async def test_a_reminder_after_a_cleared_reply_does_not_reopen_the_cleared_slice(
     database: Database, seller: uuid.UUID
 ) -> None:
     await start_campaign(database, seller, "enforce")

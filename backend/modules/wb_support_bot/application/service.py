@@ -28,8 +28,8 @@ from backend.modules.wb_support_bot.domain import (
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
-    MODE_DRY_RUN,
     MODE_LIVE,
+    MODE_STOPPED,
     DialogKey,
     DialogModel,
     ReplyVerdictModel,
@@ -40,7 +40,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
 )
 
 MAX_TEMPLATE_LENGTH = 1000
-MODES = (MODE_DRY_RUN, MODE_LIVE)
+MODES = (MODE_STOPPED, MODE_LIVE)
 
 
 class NotEnrolledError(Exception):
@@ -78,7 +78,6 @@ class SellerBotView:
     templates: tuple[TemplateModel, ...]
     mirror_error: str | None
     mirror_read_through: datetime | None
-    dry_run: bool
     classifier_mode: str
     reply_gate_mode: str
     monitor_overall: str
@@ -316,7 +315,6 @@ class SupportBotService(ReplyStatsMixin):
             templates=tuple(await self.repository.templates(seller_id)),
             mirror_error=state.error if state else None,
             mirror_read_through=state.read_through if state else None,
-            dry_run=tracked.mode == MODE_DRY_RUN,
             classifier_mode=self.classifier_mode,
             reply_gate_mode=self.reply_gate_mode,
             monitor_overall=(await self._monitor().overall(seller_id)).value,

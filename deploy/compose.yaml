@@ -59,7 +59,7 @@ services:
       S3_VERIFY_TLS: ${S3_VERIFY_TLS:-true}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - no default in production}
       WB_FEEDBACK_PAGE_SIZE: ${WB_FEEDBACK_PAGE_SIZE:-5000}
-      # Слой ответов покупателей бота поддержки: off | shadow | enforce. Нужен и воркеру, и API (страница показывает режим).
+      # Слой ответов покупателей бота поддержки: off | enforce. Нужен и воркеру, и API (страница показывает режим).
       # SUPPORT_BOT_REPLY_ENGINE: single | panel (слой принятия решения: два судьи и арбитр); panel — с новой reply_prompt_version.
       SUPPORT_BOT_REPLY_GATE_MODE: ${SUPPORT_BOT_REPLY_GATE_MODE:-enforce}
       SUPPORT_BOT_REPLY_ENGINE: ${SUPPORT_BOT_REPLY_ENGINE:-single}

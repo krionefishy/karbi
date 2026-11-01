@@ -34,7 +34,6 @@ from backend.modules.wb_support_bot.domain import (
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     MODE_LIVE,
-    SEND_DRY_RUN,
     SEND_FAILED,
     SEND_SENDING,
     SEND_SENT,
@@ -84,7 +83,6 @@ class SellerReport:
     dialogs: int = 0
     campaigns_started: int = 0
     sent: int = 0
-    dry_run: int = 0
     failed: int = 0
     held: int = 0
     verdicts_requested: int = 0
@@ -214,7 +212,10 @@ class SupportBotProcessor:
         if not self.policy.window.contains(now):
             report.skipped = "вне окна рассылки"
             return report
-        await self._send_due(seller_id, tracked.mode, segments, now, report)
+        if tracked.mode != MODE_LIVE:
+            report.skipped = "рассылка кабинета не включена"
+            return report
+        await self._send_due(seller_id, segments, now, report)
         return report
 
     async def _project(
@@ -316,7 +317,6 @@ class SupportBotProcessor:
         Срез — ещё не разобранные сообщения покупателя после старта кампании. По нему
         бот ставит запрос нейросети и не ждёт ответа. Пока вердикта нет, диалог держится
         в кампании без отправок: сбой модели рассылку не убивает, она истекает по сроку.
-        В режиме `shadow` классы только записываются, поведение прежнее.
         """
         if not self._reply_eligible(model, now):
             return _ReplyGate()
@@ -362,8 +362,6 @@ class SupportBotProcessor:
             row.attempts += 1
             row.requested_at = now
             self._request_reply(outbox, row, seller_id, report)
-        if policy.reply_gate_mode != MODE_ENFORCE:
-            return _ReplyGate()
         decision = gate_decision(guard=row.guard, status=row.status, category=row.category)
         if decision is Gate.WAIT:
             return _ReplyGate(pending=True)
@@ -394,7 +392,7 @@ class SupportBotProcessor:
         """Когда покупатель впервые ответил после первого сообщения бота (живого или сухого)."""
         if model.reply_first_at is not None:
             return
-        planned = [item.planned_at for item in sends if item.status in (SEND_SENT, SEND_UNKNOWN, SEND_DRY_RUN)]
+        planned = [item.planned_at for item in sends if item.status in (SEND_SENT, SEND_UNKNOWN)]
         if not planned:
             return
         first_send = min(planned)
@@ -495,7 +493,7 @@ class SupportBotProcessor:
         await self.repository.session.commit()
 
     async def _send_due(
-        self, seller_id: uuid.UUID, mode: str, segments: list[_Segment], now: datetime, report: SellerReport
+        self, seller_id: uuid.UUID, segments: list[_Segment], now: datetime, report: SellerReport
     ) -> None:
         local_midnight = now.astimezone(self.policy.window.timezone).replace(hour=0, minute=0, second=0, microsecond=0)
         spent = await self.repository.sent_today(seller_id, local_midnight.astimezone(UTC))
@@ -527,7 +525,6 @@ class SupportBotProcessor:
                 report.held += 1
                 await self.repository.session.commit()
                 continue
-            live = mode == MODE_LIVE
             text_model = self._pick_template(templates, await self._last_template(dialog))
             sends = await self.repository.dialog_sends(_key(dialog))
             seq = (max((send.seq for send in sends), default=0)) + 1
@@ -538,15 +535,10 @@ class SupportBotProcessor:
                 seq=seq,
                 template_id=text_model.id,
                 text=text_model.text,
-                status=SEND_SENDING if live else SEND_DRY_RUN,
+                status=SEND_SENDING,
                 planned_at=now,
             )
             await self.repository.add_send(send)
-            if not live:
-                self._mark_sent(dialog, now)
-                report.dry_run += 1
-                await self.repository.session.commit()
-                continue
             sign = signs.get(dialog.chat_id) or await self.chats.reply_sign(seller_id, dialog.chat_id)
             if not sign:
                 if fallback is None:

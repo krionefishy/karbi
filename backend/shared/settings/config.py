@@ -356,7 +356,7 @@ class SupportBotConfig:
     history_days: int = 12
     mirror_stale_minutes: int = 90
     max_idle_days: int = 5
-    classifier_mode: str = "shadow"
+    classifier_mode: str = "off"
     classifier_prompt_version: str = "v2"
     classifier_retry_minutes: int = 15
     classifier_max_attempts: int = 3
@@ -988,12 +988,12 @@ class Settings:
             raise ValueError("support_bot.max_idle_days must be positive")
         if bot.history_days <= bot.campaign_days:
             raise ValueError("support_bot.history_days must exceed campaign_days")
-        if bot.classifier_mode not in ("off", "shadow", "enforce"):
-            raise ValueError("support_bot.classifier_mode must be off, shadow or enforce")
+        if bot.classifier_mode not in ("off", "enforce"):
+            raise ValueError("support_bot.classifier_mode must be off or enforce")
         if min(bot.classifier_retry_minutes, bot.classifier_max_attempts) < 1:
             raise ValueError("support_bot.classifier_* limits must be positive")
-        if bot.reply_gate_mode not in ("off", "shadow", "enforce"):
-            raise ValueError("support_bot.reply_gate_mode must be off, shadow or enforce")
+        if bot.reply_gate_mode not in ("off", "enforce"):
+            raise ValueError("support_bot.reply_gate_mode must be off or enforce")
         if min(bot.reply_retry_minutes, bot.reply_max_attempts) < 1:
             raise ValueError("support_bot.reply_* limits must be positive")
         if self.llm.timeout_seconds < 1 or self.llm.max_tokens < 1:
