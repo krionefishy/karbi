@@ -17,7 +17,13 @@ from backend.modules.wb_support_bot.domain import (
     parse_reply_verdict,
     reply_user_message,
 )
-from backend.modules.wb_support_bot.domain.decision import ROLE_BOT, ROLE_BUYER, ROLE_SELLER, Decision
+from backend.modules.wb_support_bot.domain.decision import (
+    ROLE_BOT,
+    ROLE_BUYER,
+    ROLE_SELLER,
+    Decision,
+    manager_replied_before,
+)
 from backend.modules.wb_support_bot.domain.reply import CONTEXT_MESSAGES
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     VERDICT_DONE,
@@ -115,12 +121,13 @@ class ReplyConsumer:
             seller_id, chat_id = row.seller_id, row.chat_id
             first_at, last_at, prompt_at = row.first_event_at, row.last_event_at, row.prompt_at
             events = await ChatMirror(session).chat_events(
-                seller_id, chat_id, since=first_at - CONTEXT_LOOKBACK, until=last_at
+                seller_id, chat_id, since=min(first_at - CONTEXT_LOOKBACK, prompt_at), until=last_at
             )
             reminders = {
                 send.text.strip() for send in await repository.dialog_sends(DialogKey(seller_id, chat_id, prompt_at))
             }
         messages, context = self._split(events, first_at, last_at, reminders)
+        manager_replied = manager_replied_before(events, first_at, reminders)
 
         result = None
         decision: Decision | None = None
@@ -132,7 +139,9 @@ class ReplyConsumer:
             masked = [mask_pii(text) for text in messages]
             try:
                 if self.decider is not None:
-                    decision = await self.decider.decide(masked_context, masked, seed=str(verdict_id))
+                    decision = await self.decider.decide(
+                        masked_context, masked, seed=str(verdict_id), manager_replied=manager_replied
+                    )
                     if decision.action is Gate.WAIT:
                         error = decision.reason
                 else:

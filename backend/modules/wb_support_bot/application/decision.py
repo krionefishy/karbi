@@ -97,13 +97,14 @@ class DecisionEngine:
         *,
         seed: str,
         guard: str | None = None,
+        manager_replied: bool | None = None,
     ) -> Decision:
         started = time.monotonic()
         version = self.spec.policy_version
         if guard is not None:
             return Decision(Gate.STOP, None, True, (), f"остановлено без модели: {guard}", PATH_GUARD, version)
 
-        user = reply_user_message(context, messages)
+        user = reply_user_message(context, messages, manager_replied)
         results = await asyncio.gather(
             self._classify(VOTE_JUDGE_A, self.spec.judge_a, user),
             self._classify(VOTE_JUDGE_B, self.spec.judge_b, user),
@@ -120,7 +121,7 @@ class DecisionEngine:
         ):
             try:
                 if len(votes) == 2:
-                    verdict = await self._arbitrate(role, spec, context, messages, votes, seed)
+                    verdict = await self._arbitrate(role, spec, context, messages, votes, seed, manager_replied)
                 else:
                     verdict = apply_vote_rules(await self._classify_or_raise(role, spec, user), context)
             except LLMError as error:
@@ -165,12 +166,13 @@ class DecisionEngine:
         messages: list[str],
         votes: list[Vote],
         seed: str,
+        manager_replied: bool | None = None,
     ) -> Vote:
         swapped = swap_candidates(seed)
         first, second = (votes[1], votes[0]) if swapped else (votes[0], votes[1])
         result = await self.llm.complete(
             self.arbiter_system,
-            arbiter_user_message(context, messages, first, second),
+            arbiter_user_message(context, messages, first, second, manager_replied),
             model=spec.model,
             max_tokens=spec.max_tokens,
             extra_body=spec.extra_body or None,

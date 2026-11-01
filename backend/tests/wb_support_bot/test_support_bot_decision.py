@@ -3,6 +3,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Mapping
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -23,16 +24,26 @@ from backend.modules.wb_support_bot.domain.decision import (
     RULE_NOISE_AFTER_MANAGER,
     Vote,
     last_reply_is_from_manager,
+    manager_replied_before,
     parse_arbiter_choice,
     parse_panel_verdict,
     swap_candidates,
     vote_action,
 )
+from backend.modules.wb_support_bot.domain.reply import reply_user_message
 from backend.modules.wb_support_bot.infrastructure.postgres import VERDICT_DONE, VERDICT_FAILED
 from backend.shared.llm import LLMAnswerError, LLMClient, LLMError, LLMResult, LLMTransientError
 from backend.shared.settings.config import LLMConfig, SupportBotConfig
 from backend.storage.pg import Database
-from backend.tests.wb_support_bot.test_support_bot_processor import BASE_FEED, NOW, database, feed, seller  # noqa: F401
+from backend.tests.wb_support_bot.test_support_bot_processor import (  # noqa: F401
+    BASE_FEED,
+    NOW,
+    PROMPT_AT,
+    database,
+    event,
+    feed,
+    seller,
+)
 from backend.tests.wb_support_bot.test_support_bot_reply_gate import (
     REPLY,
     FakeLLM,
@@ -419,3 +430,36 @@ async def test_the_client_overrides_model_limit_and_extra_body_for_one_call() ->
     assert (first["model"], first["max_tokens"], first["reasoning_effort"]) == ("other", 900, "low")
     assert (second["model"], second["max_tokens"], "reasoning_effort" in second) == ("base", 150, False)
     assert (result.text, result.model, plain.model) == ("ok", "other", "base")
+
+
+# ---- пометка «менеджер уже отвечал» ----
+
+
+def test_the_user_message_says_whether_a_manager_has_replied_only_when_it_is_known() -> None:
+    assert "Менеджер уже отвечал в этом диалоге: нет" in reply_user_message([], ["x"], False)
+    assert "Менеджер уже отвечал в этом диалоге: да" in reply_user_message([], ["x"], True)
+    assert "Менеджер уже отвечал" not in reply_user_message([], ["x"])
+
+
+def test_only_a_live_seller_message_counts_as_a_manager_reply() -> None:
+    first_at = PROMPT_AT + timedelta(days=2)
+    reminders = {"Напоминание бота"}
+    auto = event(1, "specialist", "Сообщение выше автоматическое и ответа не требует.")
+    bot = event(2, "bot", "Напоминание бота")
+    notice = event(3, "specialist", "Мы удалили это сообщение — оно нарушает правила Wildberries")
+    buyer = event(4, "buyer", "не работает")
+    human = event(5, "specialist", "Опишите проблему подробнее")
+    later = event(60 * 72, "specialist", "Ответ уже после среза")
+
+    assert manager_replied_before([event(0, "prompt", "Отзыв"), auto, bot, notice, buyer], first_at, reminders) is False
+    assert manager_replied_before([auto, bot, buyer, human], first_at, reminders) is True
+    assert manager_replied_before([auto, later], first_at, reminders) is False
+
+
+async def test_the_note_about_the_manager_reaches_the_judges_and_the_arbiter() -> None:
+    machine, llm = engine({QWEN: verdict("refuses"), GPT: verdict("question", True), ARBITER: prefer("refuses")})
+
+    await machine.decide(BOT_CONTEXT, ["Второй"], seed="s", manager_replied=False)
+
+    assert all("Менеджер уже отвечал в этом диалоге: нет" in call[2] for call in llm.calls)
+    assert llm.models() == [QWEN, GPT, ARBITER]

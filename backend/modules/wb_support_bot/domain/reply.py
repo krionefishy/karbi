@@ -140,9 +140,15 @@ def slice_guard(slice_events: list[ChatEvent]) -> str | None:
     return None
 
 
-def reply_user_message(context: list[tuple[str, str]], messages: list[str]) -> str:
-    """Запрос к модели: до четырёх предыдущих сообщений с ролями и новые сообщения покупателя."""
-    lines = ["Фрагмент диалога (старые сверху):"]
+MANAGER_REPLIED_LINE = "Менеджер уже отвечал в этом диалоге: {} (напоминания бота и автоответы не считаются)"
+
+
+def reply_user_message(context: list[tuple[str, str]], messages: list[str], manager_replied: bool | None = None) -> str:
+    """Запрос к модели: пометка про менеджера, до четырёх предыдущих сообщений с ролями и новые сообщения покупателя."""
+    lines = []
+    if manager_replied is not None:
+        lines.extend([MANAGER_REPLIED_LINE.format("да" if manager_replied else "нет"), ""])
+    lines.append("Фрагмент диалога (старые сверху):")
     lines.extend(f"[{role}] {text[:TEXT_LIMIT].strip() or '(без текста)'}" for role, text in context)
     if not context:
         lines.append("(раньше ничего нет)")

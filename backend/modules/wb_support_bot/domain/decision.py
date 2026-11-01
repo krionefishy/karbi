@@ -4,8 +4,10 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
+from backend.modules.wb_core.domain import CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_support_bot.domain.reply import (
     CATEGORY_FLAGS,
     CONTINUE_CATEGORIES,
@@ -13,6 +15,7 @@ from backend.modules.wb_support_bot.domain.reply import (
     REPLY_NOISE,
     REPLY_WAITING_SELLER,
     Gate,
+    is_wb_notice,
     parse_reply_verdict,
     reply_user_message,
 )
@@ -214,9 +217,15 @@ def swap_candidates(seed: str) -> bool:
     return bool(hashlib.sha1(seed.encode("utf-8"), usedforsecurity=False).digest()[0] & 1)
 
 
-def arbiter_user_message(context: list[tuple[str, str]], messages: list[str], first: Vote, second: Vote) -> str:
+def arbiter_user_message(
+    context: list[tuple[str, str]],
+    messages: list[str],
+    first: Vote,
+    second: Vote,
+    manager_replied: bool | None = None,
+) -> str:
     """Запрос арбитру: диалог и два вердикта без имён моделей, под буквами A и B."""
-    lines = [reply_user_message(context, messages), ""]
+    lines = [reply_user_message(context, messages, manager_replied), ""]
     for label, vote in ((CHOICE_A, first), (CHOICE_B, second)):
         need = {True: "да", False: "нет", None: "не указано"}[vote.needs_manager]
         lines.append(f"Вердикт {label}: класс {vote.category}; нужен менеджер: {need}; причина: {vote.reason}")
@@ -229,6 +238,23 @@ def last_reply_is_from_manager(context: list[tuple[str, str]]) -> bool:
         if role == ROLE_BUYER:
             continue
         return role == ROLE_SELLER and not text.strip().lower().startswith(AUTOREPLY_PREFIX)
+    return False
+
+
+def manager_replied_before(events: list[ChatEvent], first_at: datetime, reminders: set[str]) -> bool:
+    """Отвечал ли в диалоге человек-менеджер до среза: напоминания бота, автоответы и служебные сообщения не в счёт."""
+    for event in events:
+        text = (event.text or "").strip()
+        if (
+            event.sender == CHAT_SENDER_SELLER
+            and event.added_at < first_at
+            and not event.review_prompt
+            and text
+            and text not in reminders
+            and not text.lower().startswith(AUTOREPLY_PREFIX)
+            and not is_wb_notice(event)
+        ):
+            return True
     return False
 
 
