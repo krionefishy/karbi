@@ -255,10 +255,11 @@ export const severityTone = (severity: Severity): SeverityTone => SEVERITY_TONE[
 export const GROUP_LABEL: Record<MonitorGroup, string> = {
   delivery: "Рассылка",
   model: "Нейросеть",
+  panel: "Панель решений",
   safety: "Безопасность ответов",
 };
 
-export const GROUP_ORDER: MonitorGroup[] = ["delivery", "model", "safety"];
+export const GROUP_ORDER: MonitorGroup[] = ["delivery", "model", "panel", "safety"];
 
 export const groupLabel = (group: MonitorGroup): string => GROUP_LABEL[group];
 

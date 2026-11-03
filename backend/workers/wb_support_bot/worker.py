@@ -8,7 +8,7 @@ from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_support_bot.application import BotPolicy, ChatSender, SupportBotProcessor
-from backend.modules.wb_support_bot.application.monitor import BotMonitor
+from backend.modules.wb_support_bot.application.monitor import BotMonitor, monitor_limits, monitor_prices
 from backend.modules.wb_support_bot.domain import CampaignRules, Pace, SendWindow
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.shared.heartbeat import touch_heartbeat
@@ -142,6 +142,9 @@ class SupportBotWorker(PollingWorker):
                     daily_cap=self.policy.daily_cap,
                     reply_gate_mode=self.policy.reply_gate_mode,
                     reply_prompt_version=self.policy.reply_prompt_version,
+                    reply_engine=self.settings.support_bot.reply_engine,
+                    prices=monitor_prices(self.settings.support_bot.panel),
+                    limits=monitor_limits(self.settings.support_bot.panel),
                 )
                 overall = await monitor.record(seller_id, now)
             self.logger.info("support_bot_monitor_recorded", seller_id=str(seller_id), overall=overall.value)

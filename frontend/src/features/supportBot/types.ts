@@ -221,7 +221,7 @@ export interface ReplyDialog {
 }
 
 export type Severity = "ok" | "warn" | "crit" | "nodata";
-export type MonitorGroup = "delivery" | "model" | "safety";
+export type MonitorGroup = "delivery" | "model" | "panel" | "safety";
 
 export interface MonitorCheck {
   id: string;

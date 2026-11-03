@@ -69,6 +69,7 @@ from backend.modules.wb_review_chats.infrastructure.postgres import ReviewChatsR
 from backend.modules.wb_reviews.application import ReviewReportService, ReviewsEnrollment, ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_support_bot.application import SupportBotEnrollment, SupportBotService
+from backend.modules.wb_support_bot.application.monitor import monitor_limits, monitor_prices
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.modules.wb_turnover.application import (
     BoardService,
@@ -469,7 +470,10 @@ class SessionProvider(Provider):
             classifier_prompt_version=settings.support_bot.classifier_prompt_version,
             reply_gate_mode=settings.support_bot.reply_gate_mode,
             reply_prompt_version=settings.support_bot.reply_prompt_version,
+            reply_engine=settings.support_bot.reply_engine,
             daily_cap=settings.support_bot.daily_cap_per_seller,
+            panel_prices=monitor_prices(settings.support_bot.panel),
+            limits=monitor_limits(settings.support_bot.panel),
         )
 
     @provide(scope=Scope.REQUEST)

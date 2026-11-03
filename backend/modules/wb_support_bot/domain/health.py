@@ -15,6 +15,9 @@ class Severity(StrEnum):
 GROUP_DELIVERY = "delivery"
 GROUP_MODEL = "model"
 GROUP_SAFETY = "safety"
+GROUP_PANEL = "panel"
+
+ENGINE_PANEL = "panel"
 
 _RANK = {Severity.NODATA: 0, Severity.OK: 1, Severity.WARN: 2, Severity.CRIT: 3}
 
@@ -43,6 +46,21 @@ class Thresholds:
     escalation_crit_count: int = 3
     escalated_after_continue_warn: float = 0.10
     continues_warn: int = 5
+    # Панель решений: пороги предварительные, подобраны по A/B (настройка support_bot.panel).
+    panel_window_days: int = 7
+    panel_min_sample: int = 20
+    panel_disagree_warn: float = 0.30
+    panel_disagree_crit: float = 0.45
+    panel_arbiter_warn: float = 0.35
+    panel_arbiter_crit: float = 0.50
+    panel_reserve_warn: float = 0.05
+    panel_reserve_crit: float = 0.20
+    panel_degraded_warn: int = 1
+    panel_degraded_crit: int = 3
+    panel_cost_warn: float = 0.06
+    panel_cost_crit: float = 0.12
+    panel_needs_manager_low: float = 0.20
+    panel_needs_manager_high: float = 0.90
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +97,21 @@ class Snapshot:
     continue_dialogs: int
     escalated_after_continue: int
     max_continues: int
+    # Панель решений (sb007): всё посчитано по срезам окна панели, пути — пары «путь, сколько».
+    reply_engine: str = "single"
+    panel_rows: int = 0
+    panel_decided: int = 0
+    panel_paths: tuple[tuple[str, int], ...] = ()
+    panel_judged: int = 0
+    panel_disagreed: int = 0
+    panel_arbiter: int = 0
+    panel_reserve: int = 0
+    panel_degraded: int = 0
+    panel_needs_known: int = 0
+    panel_needs_manager: int = 0
+    panel_costed: int = 0
+    panel_cost_rub: float = 0.0
+    panel_unpriced_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +148,180 @@ def _share_level(part: int, whole: int, warn: float, crit: float, min_sample: in
 
 def _age_minutes(now: datetime, moment: datetime) -> int:
     return max(0, int((now - moment).total_seconds() // 60))
+
+
+def _limit(share: float) -> str:
+    return f"{share * 100:.0f}%"
+
+
+def _rub(value: float, digits: int = 3) -> str:
+    return f"{value:.{digits}f} ₽".replace(".", ",")
+
+
+PATH_LABEL = {
+    "agree": "судьи согласны",
+    "arbiter": "арбитр",
+    "reserve": "резерв",
+    "degraded": "без решения",
+    "guard": "без модели",
+}
+
+
+def _count_level(count: int, warn: int, crit: int) -> Severity:
+    if count >= crit:
+        return Severity.CRIT
+    if count >= warn:
+        return Severity.WARN
+    return Severity.OK
+
+
+def panel_checks(s: Snapshot, limits: Thresholds) -> list[Check]:
+    """Метрики панели решений: расхождение судей, арбитр, резерв, цена, «нужен менеджер», пути.
+
+    Считаются по последнему состоянию среза: истории попыток нет, повтор упавшего диалога
+    перезаписывает путь и голоса. Токены берутся из голосов, поэтому degraded тоже с ценой.
+    """
+    window = f"за {limits.panel_window_days} дн."
+    if s.reply_gate_mode == "off" or s.reply_engine != ENGINE_PANEL:
+        return [
+            Check(
+                "panel_engine",
+                GROUP_PANEL,
+                "Панель решений",
+                Severity.NODATA,
+                "слой ответов выключен" if s.reply_gate_mode == "off" else "выключена: по ответу решает одна модель",
+                "включается SUPPORT_BOT_REPLY_ENGINE=panel",
+                "Пока движок single, судей и арбитра нет, считать нечего.",
+            )
+        ]
+    checks = [
+        Check(
+            "panel_disagreement",
+            GROUP_PANEL,
+            "Судьи сходятся по действию",
+            _share_level(
+                s.panel_disagreed,
+                s.panel_judged,
+                limits.panel_disagree_warn,
+                limits.panel_disagree_crit,
+                limits.panel_min_sample,
+            ),
+            f"расходятся {_percent(s.panel_disagreed, s.panel_judged)} "
+            f"({s.panel_disagreed} из {s.panel_judged} решений {window})",
+            f"до {_limit(limits.panel_disagree_warn)} — норма, от {_limit(limits.panel_disagree_crit)} — проблема "
+            f"(в A/B расхождение было 8–22%)",
+            "Судьи спорят чаще обычного: каждое расхождение зовёт арбитра и стоит денег. Проверьте промпт судей.",
+        ),
+        Check(
+            "panel_arbiter",
+            GROUP_PANEL,
+            "Арбитр нужен не часто",
+            _share_level(
+                s.panel_arbiter,
+                s.panel_decided,
+                limits.panel_arbiter_warn,
+                limits.panel_arbiter_crit,
+                limits.panel_min_sample,
+            ),
+            f"{_percent(s.panel_arbiter, s.panel_decided)} ({s.panel_arbiter} из {s.panel_decided} решений {window})",
+            f"до {_limit(limits.panel_arbiter_warn)} — норма, от {_limit(limits.panel_arbiter_crit)} — проблема "
+            f"(по A/B ожидается 8–21%)",
+            "Арбитра зовут и при расхождении судей, и когда судья не ответил: смотрите карточку расхождения "
+            "и отказы Cloud.ru.",
+        ),
+        Check(
+            "panel_fallback",
+            GROUP_PANEL,
+            "Резерв и диалоги без решения",
+            worst(
+                [
+                    _share_level(
+                        s.panel_reserve,
+                        s.panel_decided,
+                        limits.panel_reserve_warn,
+                        limits.panel_reserve_crit,
+                        limits.panel_min_sample,
+                    ),
+                    _count_level(s.panel_degraded, limits.panel_degraded_warn, limits.panel_degraded_crit),
+                ]
+            ),
+            f"резерв {_percent(s.panel_reserve, s.panel_decided)} ({s.panel_reserve}), "
+            f"без решения {s.panel_degraded} {window}",
+            f"резерв до {_limit(limits.panel_reserve_warn)} (от {_limit(limits.panel_reserve_crit)} — проблема), "
+            f"без решения от {limits.panel_degraded_warn} — внимание, от {limits.panel_degraded_crit} — проблема",
+            "Резерв значит, что основной арбитр не ответил; «без решения» — диалог держится без отправки. "
+            "Проверьте доступ к Cloud.ru и журнал консьюмера ответов.",
+        ),
+        _panel_cost(s, limits, window),
+        Check(
+            "panel_needs_manager",
+            GROUP_PANEL,
+            "Флаг «нужен менеджер» различает диалоги",
+            Severity.NODATA
+            if s.panel_needs_known < limits.panel_min_sample
+            else Severity.WARN
+            if not (
+                limits.panel_needs_manager_low
+                <= s.panel_needs_manager / s.panel_needs_known
+                <= limits.panel_needs_manager_high
+            )
+            else Severity.OK,
+            f"{_percent(s.panel_needs_manager, s.panel_needs_known)} "
+            f"({s.panel_needs_manager} из {s.panel_needs_known} решений {window})",
+            f"коридор {_limit(limits.panel_needs_manager_low)}–{_limit(limits.panel_needs_manager_high)}: "
+            f"это не качество, а проверка, что флаг не залип",
+            "Доля у края коридора: флаг ставится почти всегда или почти никогда. Проверьте промпт и разбор ответа.",
+        ),
+        Check(
+            "panel_paths",
+            GROUP_PANEL,
+            "Пути решений",
+            Severity.NODATA if not s.panel_rows else Severity.OK,
+            ", ".join(
+                f"{PATH_LABEL.get(path, path)} {_percent(count, s.panel_rows)} ({count})"
+                for path, count in s.panel_paths
+            )
+            or None,
+            f"без порога: смесь путей {window}",
+            "Распределение по decision_path: согласие судей, арбитр, резерв, без решения, остановка без модели.",
+        ),
+    ]
+    return checks
+
+
+def _panel_cost(s: Snapshot, limits: Thresholds, window: str) -> Check:
+    """Цена решения: средняя по токенам голосов и ценам моделей из настройки."""
+    threshold = (
+        f"до {_rub(limits.panel_cost_warn, 2)} — норма, от {_rub(limits.panel_cost_crit, 2)} — проблема "
+        f"(в A/B было около 0,03 ₽, максимум 0,055 ₽)"
+    )
+    hint = "Цена считается по токенам судей и арбитра и ценам моделей из настройки support_bot.panel.prices."
+    if s.panel_unpriced_models:
+        return Check(
+            "panel_cost",
+            GROUP_PANEL,
+            "Цена решения",
+            Severity.NODATA,
+            "нет цены для моделей: " + ", ".join(s.panel_unpriced_models),
+            threshold,
+            "Добавьте цену модели (рубли за 1 млн токенов) в support_bot.panel.prices, иначе цену считать не из чего.",
+        )
+    if s.panel_costed < limits.panel_min_sample:
+        return Check("panel_cost", GROUP_PANEL, "Цена решения", Severity.NODATA, None, threshold, hint)
+    average = s.panel_cost_rub / s.panel_costed
+    return Check(
+        "panel_cost",
+        GROUP_PANEL,
+        "Цена решения",
+        Severity.CRIT
+        if average >= limits.panel_cost_crit
+        else Severity.WARN
+        if average >= limits.panel_cost_warn
+        else Severity.OK,
+        f"в среднем {_rub(average)} за решение, всего {_rub(s.panel_cost_rub, 2)} {window} ({s.panel_costed} решений)",
+        threshold,
+        hint,
+    )
 
 
 def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Check]:
@@ -322,6 +529,9 @@ def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Chec
         "меньше 20",
         "Очередь outbox не публикуется в Kafka. Проверьте outbox-publisher и Kafka.",
     )
+
+    # ---- панель решений ----
+    checks.extend(panel_checks(s, limits))
 
     # ---- безопасность слоя ответов ----
     if not gate_on:

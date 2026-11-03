@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -26,6 +27,7 @@ from backend.modules.wb_support_bot.domain import (
     Gate,
     is_wb_notice,
 )
+from backend.modules.wb_support_bot.domain.health import Thresholds
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     JOURNAL_STATUSES,
     MODE_LIVE,
@@ -156,6 +158,9 @@ def _slice_row(row: ReplyVerdictModel) -> SliceRow:
         model=row.model,
         tokens_in=row.tokens_in,
         tokens_out=row.tokens_out,
+        decision_path=row.decision_path,
+        decision_votes=row.decision_votes,
+        needs_manager=row.needs_manager,
     )
 
 
@@ -262,13 +267,19 @@ class SupportBotService(ReplyStatsMixin):
         classifier_prompt_version: str = "v2",
         reply_gate_mode: str = MODE_OFF,
         reply_prompt_version: str = "r3",
+        reply_engine: str = "single",
         daily_cap: int = 2500,
+        panel_prices: Mapping[str, tuple[int, int]] | None = None,
+        limits: Thresholds = Thresholds(),
     ) -> None:
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
+        self.reply_engine = reply_engine
         self.daily_cap = daily_cap
+        self.panel_prices = dict(panel_prices or {})
+        self.limits = limits
         self.session = session
         self.sellers = sellers
         self.repository = repository
@@ -327,6 +338,9 @@ class SupportBotService(ReplyStatsMixin):
             daily_cap=self.daily_cap,
             reply_gate_mode=self.reply_gate_mode,
             reply_prompt_version=self.reply_prompt_version,
+            reply_engine=self.reply_engine,
+            prices=self.panel_prices,
+            limits=self.limits,
         )
 
     async def monitor_view(self, seller_id: uuid.UUID) -> MonitorView:

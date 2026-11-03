@@ -1,9 +1,11 @@
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_support_bot.application.reply_stats import (
     MSK,
     EffectRow,
+    PanelStats,
     SendRow,
     SliceRow,
     arm_stats,
@@ -13,6 +15,7 @@ from backend.modules.wb_support_bot.application.reply_stats import (
     health,
     late_sends,
     open_escalations,
+    panel_stats,
     worst_per_dialog,
 )
 
@@ -195,3 +198,105 @@ def test_a_young_day_has_no_eligible_dialogs_so_its_rate_is_not_a_zero() -> None
     )
     assert (young.started_live, young.eligible48_live, young.replied48_live) == (1, 0, 0)
     assert (old.started_live, old.eligible48_live, old.replied48_live) == (1, 1, 1)
+
+
+PRICES = {"judge-a": (16, 65), "judge-b": (16, 61), "arbiter": (43, 87)}
+
+
+def vote(role: str, model: str, action: str, *, tokens_in: int = 1000, tokens_out: int = 100) -> dict[str, object]:
+    return {
+        "role": role,
+        "model": model,
+        "category": "noise",
+        "needs_manager": False,
+        "action": action,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "latency_ms": 900,
+    }
+
+
+def panel_piece(
+    chat: str,
+    minutes: int,
+    path: str,
+    *,
+    actions: tuple[str, ...] = ("continue", "continue"),
+    needs_manager: bool | None = False,
+    arbiter_model: str | None = None,
+) -> SliceRow:
+    """Срез, решённый панелью: голоса судей, при арбитраже — ещё голос арбитра."""
+    votes = [
+        vote(role, model, action)
+        for role, model, action in zip(("judge_a", "judge_b"), ("judge-a", "judge-b"), actions, strict=False)
+    ]
+    if arbiter_model is not None:
+        votes.append(vote("arbiter", arbiter_model, actions[-1], tokens_in=430, tokens_out=300))
+    return replace(
+        piece(chat, minutes, "noise"),
+        decision_path=path,
+        decision_votes={"policy_version": "r4", "rules_applied": [], "votes": votes},
+        needs_manager=needs_manager,
+    )
+
+
+def test_panel_metrics_count_disagreement_arbiter_calls_and_paths() -> None:
+    rows = [
+        panel_piece("a", 1, "agree"),
+        panel_piece("b", 2, "agree"),
+        panel_piece("c", 3, "arbiter", actions=("continue", "stop"), arbiter_model="arbiter"),
+        panel_piece("d", 4, "reserve", actions=("continue", "stop"), arbiter_model="arbiter"),
+        panel_piece("e", 5, "degraded", actions=("continue", "stop")),
+        piece("f", 6, "noise"),
+    ]
+
+    stats = panel_stats(rows, PRICES)
+
+    assert (stats.rows, stats.decided) == (5, 5), "срез без decision_path — не панельный"
+    assert (stats.judged, stats.disagreed) == (5, 3)
+    assert (stats.arbiter, stats.reserve, stats.degraded) == (3, 1, 1)
+    assert dict(stats.paths) == {"agree": 2, "arbiter": 1, "degraded": 1, "reserve": 1}
+
+
+def test_a_guard_slice_is_a_path_but_not_a_decision() -> None:
+    stats = panel_stats([panel_piece("a", 1, "guard"), panel_piece("b", 2, "agree")], PRICES)
+
+    assert (stats.rows, stats.decided, stats.judged) == (2, 1, 1)
+    assert stats.arbiter == 0 and dict(stats.paths)["guard"] == 1
+
+
+def test_the_price_of_a_decision_comes_from_the_votes_even_without_token_columns() -> None:
+    judges = ((1000 * 16 + 100 * 65) + (1000 * 16 + 100 * 61)) / 1_000_000
+    arbiter = (430 * 43 + 300 * 87) / 1_000_000
+
+    cheap = panel_stats([panel_piece("a", 1, "agree")], PRICES)
+    held = panel_stats([panel_piece("b", 2, "degraded", actions=("continue", "stop"), arbiter_model="arbiter")], PRICES)
+
+    assert cheap.costed == 1 and round(cheap.cost_rub, 6) == round(judges, 6)
+    assert held.costed == 1 and round(held.cost_rub, 6) == round(judges + arbiter, 6)
+    assert not cheap.unpriced_models and not held.unpriced_models
+
+
+def test_a_model_without_a_price_is_named_instead_of_guessed() -> None:
+    stats = panel_stats(
+        [panel_piece("a", 1, "reserve", actions=("continue", "stop"), arbiter_model="reserve-model")], PRICES
+    )
+
+    assert stats.costed == 0 and stats.cost_rub == 0.0
+    assert stats.unpriced_models == ("reserve-model",)
+
+
+def test_the_needs_manager_share_counts_only_known_flags() -> None:
+    rows = [
+        panel_piece("a", 1, "agree", needs_manager=True),
+        panel_piece("b", 2, "agree", needs_manager=False),
+        panel_piece("c", 3, "agree", needs_manager=None),
+    ]
+
+    stats = panel_stats(rows, PRICES)
+
+    assert (stats.needs_manager_known, stats.needs_manager) == (2, 1)
+
+
+def test_slices_decided_by_one_model_give_no_panel_metrics() -> None:
+    assert panel_stats([piece("a", 1, "noise"), piece("b", 2, "thanks")], PRICES) == PanelStats()

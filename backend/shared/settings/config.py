@@ -337,6 +337,44 @@ class LLMConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelPrice:
+    """Цена модели в каталоге Cloud.ru: рубли за 1 млн токенов входа и выхода."""
+
+    model: str
+    rub_in: int
+    rub_out: int
+
+
+@dataclass(frozen=True, slots=True)
+class PanelMonitorConfig:
+    """Пороги панели решений во вкладке «Состояние». Предварительные: подобраны по A/B, не по проду.
+
+    Доли — целые проценты, цена — копейки за одно решение. Правятся конфигом без выкатки кода.
+    """
+
+    window_days: int = 7
+    min_sample: int = 20
+    disagree_warn_percent: int = 30
+    disagree_crit_percent: int = 45
+    arbiter_warn_percent: int = 35
+    arbiter_crit_percent: int = 50
+    reserve_warn_percent: int = 5
+    reserve_crit_percent: int = 20
+    degraded_warn: int = 1
+    degraded_crit: int = 3
+    cost_warn_kopecks: int = 6
+    cost_crit_kopecks: int = 12
+    needs_manager_low_percent: int = 20
+    needs_manager_high_percent: int = 90
+    # Цены за 1 млн токенов: без цены модели карточка честно говорит «мало данных», а не считает наугад.
+    prices: tuple[ModelPrice, ...] = (
+        ModelPrice("Qwen/Qwen3-30B-A3B", 16, 65),
+        ModelPrice("openai/gpt-oss-120b", 16, 61),
+        ModelPrice("deepseek-ai/DeepSeek-V4-Flash", 43, 87),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SupportBotConfig:
     """Бот поддержки в чатах WB: когда и как часто писать покупателю, который замолчал."""
 
@@ -374,6 +412,7 @@ class SupportBotConfig:
     reply_arbiter_max_tokens: int = 1500
     reply_reserve_model: str = "z-ai/glm-4.5-air"
     reply_reserve_max_tokens: int = 1500
+    panel: PanelMonitorConfig = PanelMonitorConfig()
     chat_url_template: str = "https://seller.wildberries.ru/chat-with-clients?chatId={chat_id}"
 
 
@@ -714,7 +753,11 @@ class Settings:
             if key in review_chats:
                 review_chats[key] = int(review_chats[key])
         support_bot = dict(data.get("support_bot", {}))
+        if "panel" in support_bot:
+            support_bot["panel"] = _panel_monitor(dict(support_bot["panel"] or {}))
         for key, value in list(support_bot.items()):
+            if key in ("panel",):
+                continue
             if key not in (
                 "timezone",
                 "chat_url_template",
@@ -1001,6 +1044,38 @@ class Settings:
             raise ValueError("support_bot.reply_prompt_version must be 1 to 16 characters")
         if min(bot.reply_retry_minutes, bot.reply_max_attempts) < 1:
             raise ValueError("support_bot.reply_* limits must be positive")
+        if bot.reply_engine not in ("single", "panel"):
+            raise ValueError("support_bot.reply_engine must be single or panel")
+        panel = bot.panel
+        if min(panel.window_days, panel.min_sample) < 1:
+            raise ValueError("support_bot.panel.window_days and min_sample must be positive")
+        percents = (
+            panel.disagree_warn_percent,
+            panel.disagree_crit_percent,
+            panel.arbiter_warn_percent,
+            panel.arbiter_crit_percent,
+            panel.reserve_warn_percent,
+            panel.reserve_crit_percent,
+            panel.needs_manager_low_percent,
+            panel.needs_manager_high_percent,
+        )
+        if not all(0 <= value <= 100 for value in percents):
+            raise ValueError("support_bot.panel.*_percent must be between 0 and 100")
+        if panel.needs_manager_low_percent > panel.needs_manager_high_percent:
+            raise ValueError("support_bot.panel.needs_manager_low_percent must not exceed the high one")
+        if min(panel.degraded_warn, panel.degraded_crit, panel.cost_warn_kopecks, panel.cost_crit_kopecks) < 1:
+            raise ValueError("support_bot.panel degraded and cost limits must be positive")
+        if any(price.rub_in < 0 or price.rub_out < 0 for price in panel.prices):
+            raise ValueError("support_bot.panel.prices must not be negative")
+        pairs = (
+            (panel.disagree_warn_percent, panel.disagree_crit_percent),
+            (panel.arbiter_warn_percent, panel.arbiter_crit_percent),
+            (panel.reserve_warn_percent, panel.reserve_crit_percent),
+            (panel.degraded_warn, panel.degraded_crit),
+            (panel.cost_warn_kopecks, panel.cost_crit_kopecks),
+        )
+        if any(warn > crit for warn, crit in pairs):
+            raise ValueError("support_bot.panel warn limits must not exceed the matching crit ones")
         if self.llm.timeout_seconds < 1 or self.llm.max_tokens < 1:
             raise ValueError("llm.timeout_seconds and llm.max_tokens must be positive")
         penalties = self.fbs_penalties
@@ -1229,6 +1304,19 @@ class Settings:
         # (`_screenshot_control`), а api и остальные воркеры стартуют.
         if invalid:
             raise ValueError(f"Unsafe or missing production settings: {', '.join(invalid)}")
+
+
+def _panel_monitor(raw: dict[str, Any]) -> PanelMonitorConfig:
+    """Пороги панели: все числа целые, `prices` — список записей `model`, `rub_in`, `rub_out`."""
+    config: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key == "prices":
+            config[key] = tuple(
+                ModelPrice(str(item["model"]), int(item["rub_in"]), int(item["rub_out"])) for item in value or ()
+            )
+        else:
+            config[key] = int(value)
+    return PanelMonitorConfig(**config)
 
 
 _SCREENSHOT_TEXT_KEYS = frozenset(
