@@ -1,7 +1,8 @@
 // Контракт «Контроля скриншотов ДБС». Источник — backend/modules/wb_screenshot_control/presentation/http/schemas.py;
-// типы повторяют его вручную, при правке схем правится и этот файл (словари union-литералов сверяет
-// backend/tests/wb_screenshot_control/test_frontend_types_contract.py). Полная схема:
-// `just openapi --tag wb-screenshot-control`. Время — ISO-8601 UTC, периоды — даты по Москве (YYYY-MM-DD).
+// типы повторяют его вручную, но расхождения не проходят молча: формы ответов сверяются со схемой
+// OpenAPI в schema.contract.ts (schema.d.ts генерируется командой `just screenshot-types`), а словари
+// union-литералов — тестом backend/tests/wb_screenshot_control/test_frontend_types_contract.py.
+// Время — ISO-8601 UTC, периоды — даты по Москве (YYYY-MM-DD).
 // Машинный код ошибки приходит заголовком X-Error-Code (ErrorCode), текст — в detail.
 
 export type Outcome = "positive" | "amended" | "deleted";
