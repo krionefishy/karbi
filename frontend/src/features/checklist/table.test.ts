@@ -7,6 +7,14 @@ const characteristics: ChecklistItem = {
   key: "characteristics",
   title: "Характеристики",
   meaning: "Заполнены все характеристики.",
+  counts_toward_ready: true,
+};
+
+const negative: ChecklistItem = {
+  key: "negative_recent",
+  title: "Негатив в 5 свежих",
+  meaning: "Среди пяти самых свежих отзывов нет оценок 1–3.",
+  counts_toward_ready: false,
 };
 
 function state(overrides: Partial<ItemState>): ItemState {
@@ -53,6 +61,12 @@ describe("checklist table", () => {
     expect(cellTone(state({ done: true }))).toBe("done");
     expect(cellTone(state({ done: false }))).toBe("missing");
     expect(cellTone(state({ done: null }))).toBe("neutral");
+  });
+
+  it("shows a failed warning item in amber, not red, and keeps a good one green", () => {
+    expect(cellTone(state({ done: false }), negative)).toBe("warning");
+    expect(cellTone(state({ done: true }), negative)).toBe("done");
+    expect(cellTone(state({ done: false }), characteristics)).toBe("missing");
   });
 
   it("puts WB's figure and the empty fields into the hint", () => {

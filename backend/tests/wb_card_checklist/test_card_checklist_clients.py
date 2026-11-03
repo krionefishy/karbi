@@ -3,7 +3,9 @@ from datetime import UTC, datetime
 import pytest
 import respx
 
+from backend.modules.wb_card_checklist.domain import DocumentFacts
 from backend.modules.wb_card_checklist.infrastructure.wb import WBCardClient, WBPricesClient
+from backend.modules.wb_card_checklist.infrastructure.wb.client import parse_card
 from backend.modules.wb_core.infrastructure.wb import WBPermanentError
 from backend.tests.egress_stub import EgressStub, make_gateway
 
@@ -132,3 +134,46 @@ async def test_a_refused_price_list_is_permanent() -> None:
 
         with pytest.raises(WBPermanentError, match="нет доступа"):
             await WBPricesClient(make_gateway()).prices(SELLER)
+
+
+def documents_block(*verdicts: dict | None, exclude: bool = False) -> dict:
+    return {
+        "items": [
+            {"id": f"doc-{index}", "type": 2, "number": "ЕАЭС N RU Д-CN.РА06.В.61297/26", "verdict": verdict}
+            for index, verdict in enumerate(verdicts)
+        ],
+        "overallVerdict": {"isFullyChecked": True, "status": 1, "reason": ""},
+        "excludeDocuments": exclude,
+    }
+
+
+def test_an_accepted_document_is_read_from_the_cards_block() -> None:
+    """Форма взята из живого ответа WB: вердикт документа лежит в items[].verdict."""
+    block = documents_block(
+        {"verified": True, "status": 1, "reason": "valid", "createdAt": "2026-10-26T22:14:54+03:00"}
+    )
+
+    documents = parse_card(raw_card(1, documents=block)).documents
+
+    assert documents == DocumentFacts(items=1, verified=1, rejected=0, rejection_reasons=(), excluded=False)
+
+
+def test_a_rejected_document_keeps_its_reason_and_one_on_review_is_neither() -> None:
+    block = documents_block(
+        {"verified": False, "status": 2, "reason": "document_not_found"},
+        {"verified": False, "status": 0, "reason": ""},
+        None,
+    )
+
+    documents = parse_card(raw_card(1, documents=block)).documents
+
+    assert documents == DocumentFacts(
+        items=3, verified=0, rejected=1, rejection_reasons=("document_not_found",), excluded=False
+    )
+
+
+def test_a_card_without_the_block_has_no_documents_but_the_read_is_known() -> None:
+    assert parse_card(raw_card(1)).documents == DocumentFacts(0, 0, 0, (), False)
+    assert parse_card(raw_card(1, documents={"items": [], "excludeDocuments": True})).documents == DocumentFacts(
+        0, 0, 0, (), True
+    )

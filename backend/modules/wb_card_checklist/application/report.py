@@ -9,7 +9,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from backend.modules.wb_card_checklist.application.view import ChecklistView
-from backend.modules.wb_card_checklist.domain import ITEMS
+from backend.modules.wb_card_checklist.domain import ITEMS, ITEMS_BY_KEY, READY_ITEMS
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -32,6 +32,8 @@ DONE_FILL = PatternFill("solid", fgColor="C6EFCE")
 DONE_FONT = Font(color="006100")
 MISSING_FILL = PatternFill("solid", fgColor="FFC7CE")
 MISSING_FONT = Font(color="9C0006")
+WARNING_FILL = PatternFill("solid", fgColor="FFEB9C")
+WARNING_FONT = Font(color="9C5700")
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +58,7 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Чек-лист"
-    total = len(ITEMS)
+    total = len(READY_ITEMS)
 
     headers = [*IDENTITY_HEADERS, *(item.title for item in ITEMS), f"Готово из {total}", "Примечание", "Комментарий"]
     sheet.append(headers)
@@ -90,7 +92,11 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
             sheet.cell(row=index, column=column).alignment = CENTERED
         sheet.cell(row=index, column=NOTE_COLUMN).alignment = WRAPPED
         for offset, item in enumerate(row.items):
-            _paint(sheet.cell(row=index, column=FIRST_ITEM_COLUMN + offset), item.done)
+            _paint(
+                sheet.cell(row=index, column=FIRST_ITEM_COLUMN + offset),
+                item.done,
+                ITEMS_BY_KEY[item.key].counts_toward_ready,
+            )
 
     for column, width in enumerate(IDENTITY_WIDTHS, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
@@ -108,8 +114,12 @@ def render_workbook(view: ChecklistView, timezone: ZoneInfo) -> bytes:
     return buffer.getvalue()
 
 
-def _paint(cell, done: bool | None) -> None:
+def _paint(cell, done: bool | None, counts_toward_ready: bool = True) -> None:
     if done is None:
+        return
+    if not done and not counts_toward_ready:
+        cell.fill = WARNING_FILL
+        cell.font = WARNING_FONT
         return
     cell.fill = DONE_FILL if done else MISSING_FILL
     cell.font = DONE_FONT if done else MISSING_FONT
@@ -118,15 +128,22 @@ def _paint(cell, done: bool | None) -> None:
 def _instruction(sheet, min_stock: int) -> None:
     bold = Font(bold=True)
     wrap = Alignment(wrap_text=True, vertical="top")
-    total = len(ITEMS)
+    total = len(READY_ITEMS)
     rows: list[tuple[str, str]] = [
         ("Чек-лист карточки товара — выгрузка из сервиса", ""),
         ("", ""),
         ("Какие товары в таблице", f"Все карточки кабинета с остатком от {min_stock} шт. (WB и свои склады)."),
         ("Откуда данные", "Всё берётся из данных WB, руками ничего не отмечается."),
-        ("Цвет ячейки", "Зелёный — пункт выполнен, красный — нет. В ячейке — то, что видит WB: «12 фото», «22/25»."),
+        (
+            "Цвет ячейки",
+            "Зелёный — пункт выполнен, красный — нет, жёлтый — предупреждение, в «Готово» оно не входит. "
+            "В ячейке — то, что видит WB: «12 фото», «22/25».",
+        ),
         ("Ячейка без цвета", "У WB нет данных по пункту: это «не знаем», а не «не выполнено»."),
-        (f"Колонка «Готово из {total}»", "Сколько пунктов из всех зелёные."),
+        (
+            f"Колонка «Готово из {total}»",
+            "Сколько обязательных пунктов зелёные. Пункты с предупреждением в счёт не идут.",
+        ),
         ("Колонка «Примечание»", "Чего не хватает и по каким пунктам у WB нет данных."),
         ("", ""),
         ("Пункт", "Что означает"),

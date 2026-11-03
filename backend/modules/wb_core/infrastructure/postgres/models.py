@@ -206,7 +206,7 @@ class WarehouseRemainModel(WBCoreBase):
 
 
 class ReviewFactModel(WBCoreBase):
-    """Отзывы карточки по звёздам на момент сбора. Медиа NULL — не считали."""
+    """Отзывы карточки по звёздам на момент сбора. Медиа и свежие оценки NULL — не считали."""
 
     __tablename__ = "review_facts"
 
@@ -221,6 +221,7 @@ class ReviewFactModel(WBCoreBase):
     count_rating_5: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latest_ratings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

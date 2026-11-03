@@ -2,6 +2,7 @@ export interface ChecklistItem {
   key: string;
   title: string;
   meaning: string;
+  counts_toward_ready: boolean;
 }
 
 export interface ItemState {

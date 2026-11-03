@@ -277,6 +277,7 @@
 .checklist-cell small { color: var(--ink-muted); font-size: 11px; line-height: 14px; }
 .checklist-cell-done { color: var(--positive); background: var(--positive-soft); }
 .checklist-cell-missing { color: var(--negative); }
+.checklist-cell-warning { color: var(--warning); background: var(--warning-soft); }
 .checklist-cell-neutral { color: var(--ink-muted); }
 .checklist-number { align-items: center; font-family: var(--font-mono); font-size: 12px; font-weight: 500; }
 .checklist-ready { color: var(--positive); }

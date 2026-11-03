@@ -73,6 +73,57 @@ def test_known_classifier_modes_are_accepted(mode: str) -> None:
     replace(settings, support_bot=replace(settings.support_bot, classifier_mode=mode)).validate_values()
 
 
+@pytest.mark.parametrize("engine", ["", "pannel", "PANEL", "two"])
+def test_an_unknown_reply_engine_is_refused(engine: str) -> None:
+    """Опечатка в SUPPORT_BOT_REPLY_ENGINE иначе молча оставляет одну модель вместо панели."""
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    broken = replace(settings, support_bot=replace(settings.support_bot, reply_engine=engine))
+
+    with pytest.raises(ValueError, match="reply_engine"):
+        broken.validate_values()
+
+
+@pytest.mark.parametrize("engine", ["single", "panel"])
+def test_known_reply_engines_are_accepted(engine: str) -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+
+    replace(settings, support_bot=replace(settings.support_bot, reply_engine=engine)).validate_values()
+
+
+@pytest.mark.parametrize("version", ["", "r4-with-a-very-long-name"])
+def test_a_reply_prompt_version_that_does_not_fit_the_column_is_refused(version: str) -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    broken = replace(settings, support_bot=replace(settings.support_bot, reply_prompt_version=version))
+
+    with pytest.raises(ValueError, match="reply_prompt_version"):
+        broken.validate_values()
+
+
+def test_the_reply_prompt_version_and_engine_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Панель включается в проде через .env, вместе с новой меткой версии промпта."""
+    monkeypatch.setenv("SUPPORT_BOT_REPLY_ENGINE", "panel")
+    monkeypatch.setenv("SUPPORT_BOT_REPLY_PROMPT_VERSION", "r4")
+    load_settings.cache_clear()
+
+    settings = load_settings("backend/shared/settings/config.docker.yaml")
+    load_settings.cache_clear()
+
+    assert settings.support_bot.reply_engine == "panel"
+    assert settings.support_bot.reply_prompt_version == "r4"
+
+
+def test_the_reply_prompt_version_defaults_to_the_single_model_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("SUPPORT_BOT_REPLY_ENGINE", "SUPPORT_BOT_REPLY_PROMPT_VERSION"):
+        monkeypatch.delenv(name, raising=False)
+    load_settings.cache_clear()
+
+    settings = load_settings("backend/shared/settings/config.docker.yaml")
+    load_settings.cache_clear()
+
+    assert settings.support_bot.reply_engine == "single"
+    assert settings.support_bot.reply_prompt_version == "r3"
+
+
 def test_screenshot_control_comes_from_docker_yaml_with_keys_out_of_the_repr(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("SCREENSHOT_CONTROL_MODE", "SCREENSHOT_CONTROL_S3_BUCKET", "VISION_MODEL", "VISION_FALLBACK_MODEL"):
         monkeypatch.delenv(name, raising=False)

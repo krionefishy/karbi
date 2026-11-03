@@ -14,11 +14,12 @@ export function visibleRows(rows: ChecklistRow[], filter: RowFilter): ChecklistR
   });
 }
 
-export type CellTone = "done" | "missing" | "neutral";
+export type CellTone = "done" | "missing" | "warning" | "neutral";
 
-export function cellTone(state: ItemState): CellTone {
+export function cellTone(state: ItemState, item?: ChecklistItem): CellTone {
   if (state.done === null) return "neutral";
-  return state.done ? "done" : "missing";
+  if (state.done) return "done";
+  return item && !item.counts_toward_ready ? "warning" : "missing";
 }
 
 export function cellHint(item: ChecklistItem, state: ItemState): string {

@@ -2,7 +2,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, SubjectCharacteristic
+from backend.modules.wb_card_checklist.domain import CardFacts, DocumentFacts, PriceFacts, SubjectCharacteristic
 from backend.modules.wb_core.infrastructure.wb import (
     EgressGateway,
     WBContentClient,
@@ -14,6 +14,7 @@ CONTENT_BUCKET = "content"
 PRICES_BUCKET = "prices"
 PRICES_PAGE_LIMIT = 1000
 PRICES_MAX_PAGES = 1000
+DOCUMENT_REJECTED = 2
 PHOTO_SIZES = ("c246x328", "square", "tm", "c516x688", "big")
 
 
@@ -98,6 +99,30 @@ def parse_card(raw: dict[str, Any]) -> CardFacts:
         has_video=bool(raw.get("video")),
         characteristic_ids=frozenset(_filled_characteristics(raw.get("characteristics"))),
         card_created_at=_moment(raw.get("createdAt")),
+        documents=parse_documents(raw.get("documents")),
+    )
+
+
+def parse_documents(block: Any) -> DocumentFacts:
+    """Блок `documents` карточки; нет блока — документов у карточки нет."""
+    data = block if isinstance(block, dict) else {}
+    items = [item for item in data.get("items") or [] if isinstance(item, dict)]
+    verified = rejected = 0
+    reasons: list[str] = []
+    for item in items:
+        raw_verdict = item.get("verdict")
+        verdict: dict[str, Any] = raw_verdict if isinstance(raw_verdict, dict) else {}
+        if verdict.get("status") == DOCUMENT_REJECTED:
+            rejected += 1
+            reasons.append(str(verdict.get("reason") or ""))
+        elif verdict.get("verified") is True:
+            verified += 1
+    return DocumentFacts(
+        items=len(items),
+        verified=verified,
+        rejected=rejected,
+        rejection_reasons=tuple(reason for reason in reasons if reason),
+        excluded=bool(data.get("excludeDocuments")),
     )
 
 

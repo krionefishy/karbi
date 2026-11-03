@@ -3,6 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,7 +24,13 @@ from backend.modules.wb_card_checklist.application import (
     MirrorReviewSource,
     MirrorStockSource,
 )
-from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, SubjectCharacteristic, Thresholds
+from backend.modules.wb_card_checklist.domain import (
+    CardFacts,
+    DocumentFacts,
+    PriceFacts,
+    SubjectCharacteristic,
+    Thresholds,
+)
 from backend.modules.wb_card_checklist.infrastructure.postgres import (
     ChecklistRepository,
     SubjectCharacteristicsModel,
@@ -54,6 +61,7 @@ class Totals:
     total: int
     with_photo: int | None
     with_video: int | None
+    latest: tuple[Any, ...] | None = None
 
 
 class FakeStock:
@@ -113,6 +121,7 @@ def card(article: str, *, title: str, imt_id: int = 1, photos: int = 5, descript
         has_video=True,
         characteristic_ids=frozenset({1, 2, 3}),
         card_created_at=datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+        documents=DocumentFacts(items=1, verified=1, rejected=0, rejection_reasons=(), excluded=False),
     )
 
 
@@ -200,7 +209,7 @@ async def test_the_table_takes_cards_with_stock_and_counts_reviews_per_card(
     assert (items["reviews_with_video"].done, items["reviews_with_video"].detail) == (False, "0 с видео")
     assert (items["discount"].done, items["discount"].detail) == (True, "−50% · 500 ₽")
     assert (items["club_discount"].done, items["club_discount"].detail) == (False, "без скидки")
-    assert (beta.done, beta.total, beta.ready) == (7, 9, False)
+    assert (beta.done, beta.total, beta.ready) == (8, 10, False)
     assert beta.note == "Не хватает: Скидка WB Клуба, Отзывы с видео"
     alpha_items = {state.key: state for state in alpha.items}
     assert alpha.note == "Не хватает: Отзывы с видео. Нет данных: Скидка / СПП, Скидка WB Клуба"
@@ -263,35 +272,39 @@ async def test_export_follows_the_managers_spreadsheet(database: Database, selle
     sheet = workbook["Чек-лист"]
     header = [cell.value for cell in sheet[1]]
     assert header[:6] == ["Дата заведения", "Артикул WB", "Артикул продавца", "Баркод", "Наименование товара", "ИП"]
-    assert header[6:15] == [
+    assert header[6:17] == [
         "Описание (SEO)",
         "Характеристики",
         "Фото",
         "Видео",
+        "Документы",
         "Скидка / СПП",
         "Скидка WB Клуба",
         "Отзывы есть",
         "Отзывы с фото",
         "Отзывы с видео",
+        "Негатив в 5 свежих",
     ]
-    assert header[15:] == ["Готово из 9", "Примечание", "Комментарий"]
+    assert header[17:] == ["Готово из 10", "Примечание", "Комментарий"]
     second = [cell.value for cell in sheet[3]]
     assert second[1:6] == ["A", "SKU-A", "20A", "Бета", "ИП Чек-лист"]
-    assert second[6:15] == [
+    assert second[6:17] == [
         "1500 симв.",
         "3/3",
         "5 фото",
         "есть",
+        "приняты (1)",
         "−50% · 500 ₽",
         "без скидки",
         "5 отз.",
         "1 с фото",
         "0 с видео",
+        "ещё не считали",
     ]
     green, red = "C6EFCE", "FFC7CE"
-    fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 16)]
-    assert fills == [green] * 5 + [red] + [green] * 2 + [red]
-    assert second[15:18] == [7, "Не хватает: Скидка WB Клуба, Отзывы с видео", "Проверить рич"]
+    fills = [sheet.cell(row=3, column=column).fill.fgColor.rgb[-6:] for column in range(7, 18)]
+    assert fills == [green] * 6 + [red] + [green] * 2 + [red, "000000"]
+    assert second[17:20] == [8, "Не хватает: Скидка WB Клуба, Отзывы с видео", "Проверить рич"]
     assert sheet["A3"].value.date() == date(2026, 8, 1)
     assert sheet.freeze_panes == "G2"
     assert report.filename.startswith("checklist_ИП-Чек-лист_")

@@ -36,6 +36,7 @@ from backend.modules.wb_core.domain import (
     ChatEvent,
     FbsOrder,
     FbsSupply,
+    LatestRating,
     OzonAccrualLine,
     OzonAdvertCampaign,
     OzonAdvertStat,
@@ -261,6 +262,7 @@ class MirrorRepository:
                     "count_rating_5": fact.ratings[4],
                     "count_with_photo": fact.with_photo,
                     "count_with_video": fact.with_video,
+                    "latest_ratings": _encode_latest(fact.latest),
                     "collected_at": now,
                 }
                 for fact in facts
@@ -281,6 +283,7 @@ class MirrorRepository:
                 ),
                 with_photo=row.count_with_photo,
                 with_video=row.count_with_video,
+                latest=_decode_latest(row.latest_ratings),
             )
             for row in rows
         }
@@ -1240,3 +1243,15 @@ def _any_of(column: InstrumentedAttribute[Any], values: Iterable[Any], item_type
     выгрузка штрафов за неделю спрашивает зеркало о десятках тысяч заданий.
     """
     return column == any_(bindparam(None, list(values), type_=ARRAY(item_type)))
+
+
+def _encode_latest(latest: tuple[LatestRating, ...] | None) -> list[list[object]] | None:
+    if latest is None:
+        return None
+    return [[item.created_at.isoformat(), item.rating] for item in latest]
+
+
+def _decode_latest(stored: list | None) -> tuple[LatestRating, ...] | None:
+    if stored is None:
+        return None
+    return tuple(LatestRating(datetime.fromisoformat(moment), rating) for moment, rating in stored)

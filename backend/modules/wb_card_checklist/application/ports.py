@@ -1,6 +1,6 @@
 import uuid
-from collections.abc import Mapping
-from datetime import date
+from collections.abc import Mapping, Sequence
+from datetime import date, datetime
 from typing import Protocol
 
 
@@ -12,6 +12,14 @@ class StockSource(Protocol):
         ...
 
 
+class RatedReview(Protocol):
+    @property
+    def created_at(self) -> datetime: ...
+
+    @property
+    def rating(self) -> int: ...
+
+
 class ReviewCounts(Protocol):
     @property
     def total(self) -> int: ...
@@ -21,6 +29,9 @@ class ReviewCounts(Protocol):
 
     @property
     def with_video(self) -> int | None: ...
+
+    @property
+    def latest(self) -> Sequence[RatedReview] | None: ...
 
 
 class ReviewSource(Protocol):

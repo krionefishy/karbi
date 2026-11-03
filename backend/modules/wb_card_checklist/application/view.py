@@ -2,7 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from backend.modules.wb_card_checklist.domain import ITEMS, ITEMS_BY_KEY, ItemState
+from backend.modules.wb_card_checklist.domain import ITEMS_BY_KEY, READY_ITEMS, ItemState
 
 STOCK_OK = "ok"
 STOCK_NOT_CONNECTED = "not_connected"
@@ -28,11 +28,11 @@ class ChecklistRow:
 
     @property
     def done(self) -> int:
-        return sum(1 for item in self.items if item.done is True)
+        return sum(1 for item in self.items if item.done is True and ITEMS_BY_KEY[item.key].counts_toward_ready)
 
     @property
     def total(self) -> int:
-        return len(ITEMS)
+        return len(READY_ITEMS)
 
     @property
     def ready(self) -> bool:
@@ -44,11 +44,19 @@ class ChecklistRow:
 
         Unknown items are named apart — «нет данных» is not «не хватает».
         """
-        missing = [ITEMS_BY_KEY[item.key].title for item in self.items if item.done is False]
-        unknown = [ITEMS_BY_KEY[item.key].title for item in self.items if item.done is None]
+        counted = [item for item in self.items if ITEMS_BY_KEY[item.key].counts_toward_ready]
+        missing = [ITEMS_BY_KEY[item.key].title for item in counted if item.done is False]
+        warnings = [
+            f"{ITEMS_BY_KEY[item.key].title} ({item.detail})"
+            for item in self.items
+            if not ITEMS_BY_KEY[item.key].counts_toward_ready and item.done is False
+        ]
+        unknown = [ITEMS_BY_KEY[item.key].title for item in counted if item.done is None]
         parts = []
         if missing:
             parts.append(f"Не хватает: {', '.join(missing)}")
+        if warnings:
+            parts.append(f"Внимание: {', '.join(warnings)}")
         if unknown:
             parts.append(f"Нет данных: {', '.join(unknown)}")
         return ". ".join(parts) or "Всё выполнено"
