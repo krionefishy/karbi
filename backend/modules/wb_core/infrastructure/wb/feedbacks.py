@@ -1,6 +1,7 @@
 import hashlib
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError
@@ -8,6 +9,7 @@ from backend.modules.wb_core.infrastructure.wb.egress import EgressGateway
 
 FEEDBACKS_BUCKET = "feedbacks"
 MAX_PAGINATION_DEPTH = 200_000
+LATEST_FEEDBACKS = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +26,7 @@ class FeedbackAggregation:
     products: dict[str, FeedbackProduct]
     feedback_count: int
     media: dict[str, tuple[int, int]] = field(default_factory=dict)
+    latest: dict[str, tuple[tuple[datetime, int], ...]] = field(default_factory=dict)
 
 
 class WBFeedbackClient:
@@ -47,13 +50,14 @@ class WBFeedbackClient:
         counts: dict[str, list[int]] = {}
         products: dict[str, FeedbackProduct] = {}
         media: dict[str, list[int]] = {}
+        latest: dict[str, list[tuple[datetime, int]]] = {}
         seen: set[bytes] = set()
         for path, extra_params in (
             ("/api/v1/feedbacks", {"isAnswered": "false"}),
             ("/api/v1/feedbacks", {"isAnswered": "true"}),
             ("/api/v1/feedbacks/archive", {}),
         ):
-            await self._consume_pages(seller_id, path, extra_params, counts, products, media, seen)
+            await self._consume_pages(seller_id, path, extra_params, counts, products, media, latest, seen)
         return FeedbackAggregation(
             counts={
                 article: (values[0], values[1], values[2], values[3], values[4]) for article, values in counts.items()
@@ -61,6 +65,7 @@ class WBFeedbackClient:
             products=products,
             feedback_count=len(seen),
             media={article: (values[0], values[1]) for article, values in media.items()},
+            latest={article: tuple(values) for article, values in latest.items() if values},
         )
 
     async def _consume_pages(
@@ -71,6 +76,7 @@ class WBFeedbackClient:
         counts: dict[str, list[int]],
         products: dict[str, FeedbackProduct],
         media: dict[str, list[int]],
+        latest: dict[str, list[tuple[datetime, int]]],
         seen: set[bytes],
     ) -> None:
         skip = 0
@@ -101,7 +107,7 @@ class WBFeedbackClient:
             if not isinstance(feedbacks, list):
                 raise WBPermanentError("WB returned an invalid feedback list")
             for feedback in feedbacks:
-                self._accumulate(feedback, counts, products, media, seen)
+                self._accumulate(feedback, counts, products, media, latest, seen)
             page_length = len(feedbacks)
             del feedbacks, payload
             if page_length < self.page_size:
@@ -114,6 +120,7 @@ class WBFeedbackClient:
         counts: dict[str, list[int]],
         products: dict[str, FeedbackProduct],
         media: dict[str, list[int]],
+        latest: dict[str, list[tuple[datetime, int]]],
         seen: set[bytes],
     ) -> None:
         feedback_id = feedback.get("id")
@@ -133,6 +140,7 @@ class WBFeedbackClient:
         tally = media.setdefault(article, [0, 0])
         tally[0] += 1 if photos else 0
         tally[1] += 1 if video else 0
+        WBFeedbackClient._remember_latest(latest.setdefault(article, []), feedback.get("createdDate"), rating_value)
         imt_value = str(details.get("imtId") or "")
         products.setdefault(
             article,
@@ -143,3 +151,17 @@ class WBFeedbackClient:
                 imt_id=int(imt_value) if imt_value.isdigit() else None,
             ),
         )
+
+    @staticmethod
+    def _remember_latest(recent: list[tuple[datetime, int]], created: object, rating: int) -> None:
+        """Держит по артикулу пять самых свежих отзывов: память не растёт вместе с лентой."""
+        if not isinstance(created, str):
+            return
+        try:
+            moment = datetime.fromisoformat(created)
+        except ValueError:
+            return
+        recent.append((moment, rating))
+        if len(recent) > LATEST_FEEDBACKS:
+            recent.sort(key=lambda item: item[0], reverse=True)
+            del recent[LATEST_FEEDBACKS:]

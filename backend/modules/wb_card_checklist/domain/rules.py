@@ -27,6 +27,17 @@ SERVICE_CHARACTERISTICS = frozenset(
     }
 )
 NAMED_MISSING = 5
+DECLARATION_CHARACTERISTICS = frozenset({15001135, 15001136})
+DOCUMENT_REASONS = {
+    "document_missing": "документ не найден",
+    "document_not_found": "нет в реестре",
+    "document_inactive": "недействителен",
+    "document_expired": "истёк",
+    "document_dates_mismatch": "даты не сходятся",
+    "document_type_mismatch": "не тот тип",
+    "applicant_mismatch": "заявитель не совпадает",
+    "trade_name_mismatch": "название не совпадает",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,11 +96,37 @@ def evaluate(facts: ArticleFacts, thresholds: Thresholds) -> list[ItemState]:
         "characteristics": _characteristics(facts),
         "photos": ItemState("photos", card.photo_count >= thresholds.min_photos, f"{card.photo_count} фото"),
         "video": ItemState("video", card.has_video, "есть" if card.has_video else "нет"),
+        "documents": _documents(card),
         "discount": _discount(facts.price),
         "club_discount": _club_discount(facts.price),
         **_reviews(facts.reviews),
     }
     return [computed[item.key] for item in ITEMS]
+
+
+def _documents(card: CardFacts) -> ItemState:
+    """Документы карточки: приняты WB, не приняты, не загружены или не нужны.
+
+    Нет документов и нет номера декларации в характеристиках — категории они не нужны
+    (фонари, фитолампы, отпариватели): это не проблема. Номер есть, документов нет — не загружены.
+    """
+    documents = card.documents
+    if documents is None:
+        return ItemState("documents", None, "ещё не считали")
+    if documents.excluded:
+        return ItemState("documents", True, "не требуются")
+    if documents.rejected:
+        reasons = ", ".join(
+            dict.fromkeys(DOCUMENT_REASONS.get(reason, reason) for reason in documents.rejection_reasons)
+        )
+        return ItemState("documents", False, f"отклонены: {reasons}" if reasons else "отклонены")
+    if not documents.items:
+        if card.characteristic_ids & DECLARATION_CHARACTERISTICS:
+            return ItemState("documents", False, "не загружены")
+        return ItemState("documents", True, "не требуются")
+    if documents.verified < documents.items:
+        return ItemState("documents", None, "на проверке")
+    return ItemState("documents", True, f"приняты ({documents.items})")
 
 
 def _characteristics(facts: ArticleFacts) -> ItemState:
@@ -139,10 +176,24 @@ def _reviews(reviews: ReviewFacts | None) -> dict[str, ItemState]:
         "reviews_present": ItemState("reviews_present", reviews.total > 0, f"{reviews.total} отз."),
         "reviews_with_photo": _media("reviews_with_photo", reviews.with_photo, "с фото"),
         "reviews_with_video": _media("reviews_with_video", reviews.with_video, "с видео"),
+        "negative_recent": _negative_recent(reviews.latest_ratings),
     }
 
 
-REVIEW_KEYS = ("reviews_present", "reviews_with_photo", "reviews_with_video")
+def _negative_recent(latest: tuple[int, ...] | None) -> ItemState:
+    """Оценки 1–3 среди пяти самых свежих отзывов склейки. Отзывов нет — «нет данных», а не «чисто»."""
+    if latest is None:
+        return ItemState("negative_recent", None, "ещё не считали")
+    if not latest:
+        return ItemState("negative_recent", None, "отзывов нет")
+    negative = sum(1 for rating in latest if rating <= NEGATIVE_MAX_RATING)
+    if negative == 0:
+        return ItemState("negative_recent", True, f"нет (из {len(latest)})")
+    return ItemState("negative_recent", False, f"есть: {negative} из {len(latest)}")
+
+
+REVIEW_KEYS = ("reviews_present", "reviews_with_photo", "reviews_with_video", "negative_recent")
+NEGATIVE_MAX_RATING = 3
 
 
 def _media(key: str, count: int | None, label: str) -> ItemState:

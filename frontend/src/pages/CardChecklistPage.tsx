@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, Minus, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, Check, Download, Minus, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { ApiError } from "../api/http";
@@ -366,11 +366,11 @@ function ChecklistRowView({ row, items, onComment }: RowProps) {
   );
 }
 
-const toneIcons = { done: Check, missing: X, neutral: Minus };
-const toneLabels = { done: "есть", missing: "нет", neutral: "нет данных" };
+const toneIcons = { done: Check, missing: X, warning: AlertTriangle, neutral: Minus };
+const toneLabels = { done: "есть", missing: "нет", warning: "внимание", neutral: "нет данных" };
 
 function ItemCell({ item, state }: { item: ChecklistItem; state: ItemState }) {
-  const tone = cellTone(state);
+  const tone = cellTone(state, item);
   const Icon = toneIcons[tone];
   return (
     <div className={`checklist-cell checklist-cell-${tone}`} title={cellHint(item, state)}>

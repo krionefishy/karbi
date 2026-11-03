@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_card_checklist.application.ports import ReviewCounts, ReviewSource, StockSource
+from backend.modules.wb_card_checklist.application.ports import RatedReview, ReviewCounts, ReviewSource, StockSource
 from backend.modules.wb_card_checklist.application.report import ChecklistReportFile, render_workbook
 from backend.modules.wb_card_checklist.application.view import (
     REVIEWS_NO_SNAPSHOT,
@@ -25,11 +25,21 @@ from backend.modules.wb_card_checklist.infrastructure.postgres import ChecklistR
 from backend.modules.wb_core.application import SellerNotFoundError
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 
+LATEST_REVIEWS = 5
+
 
 def _stock_state(stock: Mapping[str, int] | None) -> str:
     if stock is None:
         return STOCK_NOT_CONNECTED
     return STOCK_OK if stock else STOCK_STALE
+
+
+def _latest_ratings(groups: Sequence[Sequence[RatedReview]]) -> tuple[int, ...]:
+    """Пять самых свежих оценок склейки: у каждого артикула свои пять, общая лента — по дате."""
+    merged = sorted(
+        (review for group in groups for review in group), key=lambda review: review.created_at, reverse=True
+    )
+    return tuple(review.rating for review in merged[:LATEST_REVIEWS])
 
 
 def _reviews_state(totals: Mapping[str, ReviewCounts] | None) -> str:
@@ -174,10 +184,12 @@ class ChecklistService:
                 continue
             photos = [item.with_photo for item in known if item.with_photo is not None]
             videos = [item.with_video for item in known if item.with_video is not None]
+            recent = [item.latest for item in known if item.latest is not None]
             summary = ReviewFacts(
                 total=sum(item.total for item in known),
                 with_photo=sum(photos) if photos else None,
                 with_video=sum(videos) if videos else None,
+                latest_ratings=_latest_ratings(recent) if recent else None,
             )
             for article in articles:
                 facts[article] = summary

@@ -176,3 +176,49 @@ async def test_feedback_client_fails_loudly_at_the_pagination_ceiling(monkeypatc
             await client(page_size=1).aggregate(SELLER)
 
         assert len(stub.requests_to(FEEDBACKS)) == 2
+
+
+async def test_the_five_latest_ratings_of_an_article_are_kept_across_buckets() -> None:
+    """Свежие оценки собираются по дате, а не по порядку страниц и корзин."""
+
+    def dated(feedback_id: str, rating: int, day: int) -> dict:
+        return {**feedback(feedback_id, 101, rating), "createdDate": f"2026-11-{day:02d}T09:00:00.000Z"}
+
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            FEEDBACKS,
+            side_effect=[page(dated("a", 5, 1), dated("b", 1, 7), dated("c", 5, 3)), page()],
+        )
+        stub.on(
+            "GET", ARCHIVE, side_effect=[page(dated("d", 2, 9), dated("e", 5, 2), dated("f", 4, 5), dated("g", 3, 8))]
+        )
+        stub.on("GET", FEEDBACKS, side_effect=[page(), page()])
+
+        result = await client().aggregate(SELLER)
+
+    latest = result.latest["101"]
+    assert [(moment.day, rating) for moment, rating in sorted(latest, reverse=True)] == [
+        (9, 2),
+        (8, 3),
+        (7, 1),
+        (5, 4),
+        (3, 5),
+    ]
+
+
+async def test_a_feedback_without_a_valid_date_still_counts_but_is_not_a_latest_one() -> None:
+    with respx.mock as router:
+        stub = EgressStub(router)
+        stub.on(
+            "GET",
+            FEEDBACKS,
+            side_effect=[page({**feedback("a", 101, 1), "createdDate": "вчера"}, feedback("b", 101, 5)), page()],
+        )
+        stub.on("GET", ARCHIVE, side_effect=[page()])
+
+        result = await client().aggregate(SELLER)
+
+    assert result.counts["101"] == (1, 0, 0, 0, 1)
+    assert "101" not in result.latest

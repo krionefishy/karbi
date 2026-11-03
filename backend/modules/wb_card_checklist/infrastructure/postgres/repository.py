@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_card_checklist.domain import CardFacts, PriceFacts, SubjectCharacteristic
+from backend.modules.wb_card_checklist.domain import CardFacts, DocumentFacts, PriceFacts, SubjectCharacteristic
 from backend.modules.wb_card_checklist.infrastructure.postgres.models import (
     CardFactsModel,
     CommentModel,
@@ -327,6 +327,7 @@ class ChecklistRepository:
             "has_video": card.has_video,
             "characteristic_ids": sorted(card.characteristic_ids),
             "card_created_at": card.card_created_at,
+            "documents": _encode_documents(card.documents),
             "collected_at": now,
         }
 
@@ -346,4 +347,29 @@ class ChecklistRepository:
             has_video=row.has_video,
             characteristic_ids=frozenset(int(value) for value in row.characteristic_ids or []),
             card_created_at=row.card_created_at,
+            documents=_decode_documents(row.documents),
         )
+
+
+def _encode_documents(documents: DocumentFacts | None) -> dict[str, Any] | None:
+    if documents is None:
+        return None
+    return {
+        "items": documents.items,
+        "verified": documents.verified,
+        "rejected": documents.rejected,
+        "reasons": list(documents.rejection_reasons),
+        "excluded": documents.excluded,
+    }
+
+
+def _decode_documents(stored: dict[str, Any] | None) -> DocumentFacts | None:
+    if stored is None:
+        return None
+    return DocumentFacts(
+        items=int(stored.get("items", 0)),
+        verified=int(stored.get("verified", 0)),
+        rejected=int(stored.get("rejected", 0)),
+        rejection_reasons=tuple(str(reason) for reason in stored.get("reasons", [])),
+        excluded=bool(stored.get("excluded", False)),
+    )

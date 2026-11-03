@@ -7,6 +7,7 @@ class ChecklistItemResponse(BaseModel):
     key: str
     title: str
     meaning: str
+    counts_toward_ready: bool
 
 
 class ItemStateResponse(BaseModel):

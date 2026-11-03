@@ -83,13 +83,26 @@ class WarehouseRemain:
 
 
 @dataclass(frozen=True, slots=True)
+class LatestRating:
+    """Оценка одного из свежих отзывов: без текста, только когда и сколько."""
+
+    created_at: datetime
+    rating: int
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewFact:
-    """Отзывы карточки по звёздам. Медиа `None` — не считали, что не спутать с «ни одного»."""
+    """Отзывы карточки по звёздам. Медиа `None` — не считали, что не спутать с «ни одного».
+
+    `latest` — до пяти самых свежих отзывов по дате, новые первыми. `None` — свежие не
+    запоминали (сбор до появления поля), пустой кортеж — отзывов у карточки нет.
+    """
 
     article: str
     ratings: tuple[int, int, int, int, int]
     with_photo: int | None
     with_video: int | None
+    latest: tuple[LatestRating, ...] | None = None
 
     @property
     def total(self) -> int:

@@ -27,6 +27,7 @@ from backend.modules.wb_core.domain import (
     ChatEvent,
     FbsOrder,
     FbsSupply,
+    LatestRating,
     WbOffice,
 )
 from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
@@ -243,6 +244,9 @@ def mirror(
                 products={"3003": FeedbackProduct("3003", "SKU-3003", "Товар только в отзывах")},
                 feedback_count=11,
                 media={FAN: (4, 1)},
+                latest={
+                    FAN: ((datetime(2026, 9, 10, 8, 0, tzinfo=UTC), 2), (datetime(2026, 9, 12, 8, 0, tzinfo=UTC), 5))
+                },
             )
         ),
         chats=chats or FakeChats([]),
@@ -340,6 +344,12 @@ async def test_reviews_are_mirrored_for_every_known_card(database: Database, sel
     assert (totals[VACUUM].total, totals[VACUUM].with_photo) == (0, 0)
     assert totals["3003"].total == 1
     assert articles["3003"].state == "feedback_only"
+    assert totals[FAN].latest == (
+        LatestRating(datetime(2026, 9, 12, 8, 0, tzinfo=UTC), 5),
+        LatestRating(datetime(2026, 9, 10, 8, 0, tzinfo=UTC), 2),
+    )
+    assert totals[VACUUM].latest == ()
+    assert totals["3003"].latest is None
 
 
 async def test_catalog_sync_updates_the_registry_status(database: Database, seller: uuid.UUID) -> None:

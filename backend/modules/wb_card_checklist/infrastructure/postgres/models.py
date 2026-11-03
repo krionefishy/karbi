@@ -57,6 +57,7 @@ class CardFactsModel(WBCardChecklistBase):
     has_video: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     characteristic_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     card_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    documents: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

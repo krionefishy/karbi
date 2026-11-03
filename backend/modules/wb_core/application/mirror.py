@@ -23,6 +23,7 @@ from backend.modules.wb_core.domain import (
     SALES_REPORT_WEEKLY,
     ChatEvent,
     FbsOrder,
+    LatestRating,
     ReviewFact,
     SalesReportRow,
     SellerWarehouse,
@@ -342,6 +343,14 @@ class MirrorService:
         self.logger.info("remains_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
 
+    @staticmethod
+    def _latest_ratings(aggregation: FeedbackAggregation, article: str) -> tuple[LatestRating, ...] | None:
+        """Свежие отзывы карточки; `None`, если отзывы есть, а дат у них нет, — это «не знаем», не «пусто»."""
+        recent = aggregation.latest.get(article)
+        if recent:
+            return tuple(LatestRating(moment, rating) for moment, rating in sorted(recent, reverse=True))
+        return None if any(aggregation.counts.get(article, NO_RATINGS)) else ()
+
     async def collect_reviews(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> ReviewsOutcome:
         """Отзывы по звёздам на каждую известную карточку; нули — тоже факт.
 
@@ -371,6 +380,7 @@ class MirrorService:
                     ratings=aggregation.counts.get(article, NO_RATINGS),
                     with_photo=aggregation.media.get(article, NO_MEDIA)[0],
                     with_video=aggregation.media.get(article, NO_MEDIA)[1],
+                    latest=self._latest_ratings(aggregation, article),
                 )
                 for article in sorted(articles)
             ]
