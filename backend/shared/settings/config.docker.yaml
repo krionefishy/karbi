@@ -143,7 +143,10 @@ support_bot:
   # off | enforce: слой ответов покупателей. enforce — класс ответа решает, продолжать ли рассылку;
   # off — любой ответ покупателя останавливает кампанию.
   reply_gate_mode: ${SUPPORT_BOT_REPLY_GATE_MODE:-enforce}
-  reply_prompt_version: r3
+  # Метка версии промпта в журнале вердиктов: по ней считаются срезы и метрики и строится
+  # уникальный ключ среза. Смена движка требует новой метки, иначе вердикты панели смешаются
+  # с вердиктами одной модели. Не длиннее 16 символов (колонка prompt_version).
+  reply_prompt_version: ${SUPPORT_BOT_REPLY_PROMPT_VERSION:-r3}
   # single | panel: кто решает по ответу. single — одна модель из `llm`; panel — слой принятия решения:
   # два судьи, при расхождении арбитр, затем резервный арбитр. Смена движка требует новой reply_prompt_version.
   reply_engine: ${SUPPORT_BOT_REPLY_ENGINE:-single}

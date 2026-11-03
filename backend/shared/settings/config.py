@@ -994,6 +994,11 @@ class Settings:
             raise ValueError("support_bot.classifier_* limits must be positive")
         if bot.reply_gate_mode not in ("off", "enforce"):
             raise ValueError("support_bot.reply_gate_mode must be off or enforce")
+        if bot.reply_engine not in ("single", "panel"):
+            raise ValueError("support_bot.reply_engine must be single or panel")
+        # Метка версии промпта уходит в колонку prompt_version (16 символов) и в уникальный ключ среза.
+        if not 1 <= len(bot.reply_prompt_version) <= 16:
+            raise ValueError("support_bot.reply_prompt_version must be 1 to 16 characters")
         if min(bot.reply_retry_minutes, bot.reply_max_attempts) < 1:
             raise ValueError("support_bot.reply_* limits must be positive")
         if self.llm.timeout_seconds < 1 or self.llm.max_tokens < 1:
