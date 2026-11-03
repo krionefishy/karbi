@@ -164,11 +164,16 @@ describe("supportBot replies format", () => {
     expect(severityTone("nodata")).toBe("neutral");
     expect(groupLabel("delivery")).toBe("Рассылка");
     expect(groupLabel("model")).toBe("Нейросеть");
+    expect(groupLabel("panel")).toBe("Панель решений");
     expect(groupLabel("safety")).toBe("Безопасность ответов");
   });
 
   it("проверки: crit, warn, nodata, ok; порядок внутри уровня сохраняется", () => {
-    const check = (id: string, severity: "ok" | "warn" | "crit" | "nodata", group: "delivery" | "model" = "delivery") => ({
+    const check = (
+      id: string,
+      severity: "ok" | "warn" | "crit" | "nodata",
+      group: "delivery" | "model" | "panel" | "safety" = "delivery",
+    ) => ({
       id,
       group,
       title: id,
@@ -179,8 +184,14 @@ describe("supportBot replies format", () => {
     });
     const sorted = sortChecks([check("a", "ok"), check("b", "nodata"), check("c", "warn"), check("d", "crit"), check("e", "warn")]);
     expect(sorted.map((item) => item.id)).toEqual(["d", "c", "e", "b", "a"]);
-    const groups = groupChecks([check("a", "ok"), check("b", "crit", "model"), check("c", "crit")]);
-    expect(groups.map((item) => item.group)).toEqual(["delivery", "model"]);
+    const groups = groupChecks([
+      check("a", "ok"),
+      check("b", "crit", "model"),
+      check("c", "crit"),
+      check("d", "warn", "safety"),
+      check("e", "nodata", "panel"),
+    ]);
+    expect(groups.map((item) => item.group)).toEqual(["delivery", "model", "panel", "safety"]);
     expect(groups[0].checks.map((item) => item.id)).toEqual(["c", "a"]);
   });
 

@@ -7,17 +7,32 @@ from httpx import AsyncClient
 from sqlalchemy import select
 
 from backend.app.factory import Application
-from backend.modules.wb_support_bot.application.monitor import BotMonitor, history_days
+from backend.modules.wb_support_bot.application.monitor import (
+    BotMonitor,
+    history_days,
+    monitor_limits,
+    monitor_prices,
+)
 from backend.modules.wb_support_bot.domain.health import Severity, Snapshot, Thresholds, evaluate, worst
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     MonitorEventModel,
     MonitorStateModel,
+    ReplyVerdictModel,
     SupportBotRepository,
 )
+from backend.shared.settings.config import PanelMonitorConfig
 from backend.storage.pg import Database
 from backend.tests.wb_support_bot.test_support_bot_http import API, AUTOMATION, application, client  # noqa: F401
 from backend.tests.wb_support_bot.test_support_bot_http import seller as http_seller  # noqa: F401
-from backend.tests.wb_support_bot.test_support_bot_processor import BASE_FEED, NOW, database, feed, seller  # noqa: F401
+from backend.tests.wb_support_bot.test_support_bot_processor import (  # noqa: F401
+    BASE_FEED,
+    CHAT,
+    NOW,
+    PROMPT_AT,
+    database,
+    feed,
+    seller,
+)
 
 LIMITS = Thresholds()
 
@@ -54,6 +69,20 @@ def healthy(**changes: object) -> Snapshot:
         continue_dialogs=20,
         escalated_after_continue=0,
         max_continues=1,
+        reply_engine="panel",
+        panel_rows=104,
+        panel_decided=100,
+        panel_paths=(("agree", 84), ("arbiter", 15), ("guard", 4), ("reserve", 1)),
+        panel_judged=100,
+        panel_disagreed=16,
+        panel_arbiter=15,
+        panel_reserve=1,
+        panel_degraded=0,
+        panel_needs_known=100,
+        panel_needs_manager=60,
+        panel_costed=100,
+        panel_cost_rub=3.0,
+        panel_unpriced_models=(),
     )
     return replace(snapshot, **changes)  # type: ignore[arg-type]
 
@@ -67,7 +96,7 @@ def test_a_healthy_bot_has_every_check_green() -> None:
 
     assert worst([check.severity for check in checks]) is Severity.OK
     assert {check.severity for check in checks} == {Severity.OK}
-    assert {check.group for check in checks} == {"delivery", "model", "safety"}
+    assert {check.group for check in checks} == {"delivery", "model", "panel", "safety"}
 
 
 def test_the_worker_and_the_mirror_go_red_when_stale() -> None:
@@ -134,6 +163,76 @@ def test_with_the_reply_layer_off_the_safety_checks_have_no_data() -> None:
     assert safety and {check.severity for check in safety} == {Severity.NODATA}
     assert "reply_stuck" not in {check.id for check in checks}
     assert worst([check.severity for check in checks]) is Severity.OK
+
+
+def test_judges_disagreeing_too_often_is_a_warning_then_a_problem() -> None:
+    assert level(healthy(panel_judged=100, panel_disagreed=22), "panel_disagreement") is Severity.OK
+    assert level(healthy(panel_judged=100, panel_disagreed=30), "panel_disagreement") is Severity.WARN
+    assert level(healthy(panel_judged=100, panel_disagreed=45), "panel_disagreement") is Severity.CRIT
+    assert level(healthy(panel_judged=19, panel_disagreed=19), "panel_disagreement") is Severity.NODATA
+
+
+def test_arbiter_calls_are_judged_as_a_share_of_decisions() -> None:
+    assert level(healthy(panel_decided=100, panel_arbiter=21), "panel_arbiter") is Severity.OK
+    assert level(healthy(panel_decided=100, panel_arbiter=35), "panel_arbiter") is Severity.WARN
+    assert level(healthy(panel_decided=100, panel_arbiter=50), "panel_arbiter") is Severity.CRIT
+
+
+def test_the_reserve_and_held_dialogs_share_one_card() -> None:
+    assert level(healthy(panel_reserve=4), "panel_fallback") is Severity.OK
+    assert level(healthy(panel_reserve=5), "panel_fallback") is Severity.WARN
+    assert level(healthy(panel_reserve=20), "panel_fallback") is Severity.CRIT
+    assert level(healthy(panel_degraded=1), "panel_fallback") is Severity.WARN
+    assert level(healthy(panel_degraded=3), "panel_fallback") is Severity.CRIT
+
+
+def test_the_price_of_a_decision_has_two_levels_and_needs_prices() -> None:
+    assert level(healthy(panel_cost_rub=5.9), "panel_cost") is Severity.OK
+    assert level(healthy(panel_cost_rub=6.0), "panel_cost") is Severity.WARN
+    assert level(healthy(panel_cost_rub=12.0), "panel_cost") is Severity.CRIT
+    assert level(healthy(panel_costed=19), "panel_cost") is Severity.NODATA
+    unpriced = healthy(panel_unpriced_models=("z-ai/glm-4.5-air",))
+    card = next(check for check in evaluate(unpriced, LIMITS) if check.id == "panel_cost")
+    assert card.severity is Severity.NODATA and "glm-4.5-air" in (card.value or "")
+
+
+def test_the_needs_manager_flag_warns_only_at_the_edges() -> None:
+    assert level(healthy(panel_needs_manager=20), "panel_needs_manager") is Severity.OK
+    assert level(healthy(panel_needs_manager=19), "panel_needs_manager") is Severity.WARN
+    assert level(healthy(panel_needs_manager=91), "panel_needs_manager") is Severity.WARN
+    assert level(healthy(panel_needs_known=19, panel_needs_manager=19), "panel_needs_manager") is Severity.NODATA
+
+
+def test_the_paths_card_only_shows_the_mix() -> None:
+    card = next(check for check in evaluate(healthy(), LIMITS) if check.id == "panel_paths")
+
+    assert card.severity is Severity.OK
+    assert card.value is not None and "судьи согласны 80.8% (84)" in card.value and "арбитр" in card.value
+    assert level(healthy(panel_rows=0, panel_paths=()), "panel_paths") is Severity.NODATA
+
+
+def test_without_the_panel_the_group_has_one_card_with_no_data() -> None:
+    for snapshot in (healthy(reply_engine="single"), healthy(reply_gate_mode="off")):
+        panel = [check for check in evaluate(snapshot, LIMITS) if check.group == "panel"]
+        assert [check.id for check in panel] == ["panel_engine"]
+        assert panel[0].severity is Severity.NODATA
+    assert worst([check.severity for check in evaluate(healthy(reply_engine="single"), LIMITS)]) is Severity.OK
+
+
+def test_panel_thresholds_come_from_the_settings() -> None:
+    panel = PanelMonitorConfig(
+        disagree_warn_percent=50, disagree_crit_percent=70, cost_warn_kopecks=20, cost_crit_kopecks=30, min_sample=5
+    )
+    limits = monitor_limits(panel)
+
+    assert limits.panel_disagree_warn == 0.5 and limits.panel_cost_warn == 0.2
+    assert limits.panel_min_sample == 5 and limits.worker_stale == Thresholds().worker_stale
+    loose = healthy(panel_judged=100, panel_disagreed=55)
+    assert level(loose, "panel_disagreement") is Severity.CRIT, "по умолчанию 55% — красный"
+    assert (
+        next(check for check in evaluate(loose, limits) if check.id == "panel_disagreement").severity is Severity.WARN
+    )
+    assert monitor_prices(PanelMonitorConfig())["Qwen/Qwen3-30B-A3B"] == (16, 65)
 
 
 def test_the_overall_level_is_the_worst_one_and_no_data_does_not_count() -> None:
@@ -204,6 +303,77 @@ async def test_recording_opens_closes_and_updates_incidents(database: Database, 
     async with database.session() as session:
         state = await session.get(MonitorStateModel, seller)
         assert state is not None and state.overall == "ok" and state.checks
+
+
+async def test_panel_metrics_are_read_from_the_votes_in_the_database(database: Database, seller: uuid.UUID) -> None:
+    """Подставные срезы панели: монитор должен посчитать расхождение, арбитра и цену по JSON голосов."""
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    judge_a = {"role": "judge_a", "model": "judge-a", "action": "continue", "tokens_in": 1000, "tokens_out": 100}
+    judge_b = {"role": "judge_b", "model": "judge-b", "action": "stop", "tokens_in": 1000, "tokens_out": 100}
+    async with database.session() as session:
+        for index, (path, votes, needs) in enumerate(
+            (
+                ("agree", [judge_a, {**judge_b, "action": "continue"}], False),
+                ("arbiter", [judge_a, judge_b, {**judge_b, "role": "arbiter", "model": "arbiter"}], True),
+                ("degraded", [judge_a, judge_b], True),
+            )
+        ):
+            at = NOW - timedelta(hours=index + 1)
+            session.add(
+                ReplyVerdictModel(
+                    id=uuid.uuid4(),
+                    seller_id=seller,
+                    chat_id=CHAT,
+                    prompt_at=PROMPT_AT,
+                    slice_fingerprint=f"{index:040d}",
+                    first_event_id=f"reply-{index}",
+                    last_event_id=f"reply-{index}",
+                    first_event_at=at,
+                    last_event_at=at,
+                    messages=1,
+                    prompt_version="r4",
+                    status="done" if path != "degraded" else "failed",
+                    category="noise",
+                    needs_manager=needs,
+                    decision_path=path,
+                    decision_votes={"policy_version": "r4", "rules_applied": [], "votes": votes},
+                    attempts=1,
+                    requested_at=at,
+                    completed_at=at + timedelta(minutes=2),
+                )
+            )
+        await session.commit()
+
+    async with database.session() as session:
+        monitor = BotMonitor(
+            session,
+            SupportBotRepository(session),
+            daily_cap=2500,
+            reply_gate_mode="enforce",
+            reply_prompt_version="r4",
+            reply_engine="panel",
+            prices={"judge-a": (16, 65), "judge-b": (16, 61), "arbiter": (43, 87)},
+        )
+        snapshot = await monitor.snapshot(seller, NOW, worker_checked_at=NOW, check_worker=False)
+
+    assert (snapshot.panel_rows, snapshot.panel_decided) == (3, 3)
+    assert (snapshot.panel_judged, snapshot.panel_disagreed) == (3, 2)
+    assert (snapshot.panel_arbiter, snapshot.panel_degraded) == (2, 1)
+    assert (snapshot.panel_needs_known, snapshot.panel_needs_manager) == (3, 2)
+    judges = ((1000 * 16 + 100 * 65) + (1000 * 16 + 100 * 61)) / 1_000_000
+    arbiter = (1000 * 43 + 100 * 87) / 1_000_000
+    assert snapshot.panel_costed == 3 and round(snapshot.panel_cost_rub, 6) == round(3 * judges + arbiter, 6)
+    cards = {check.id: check for check in evaluate(snapshot, LIMITS) if check.group == "panel"}
+    assert set(cards) == {
+        "panel_disagreement",
+        "panel_arbiter",
+        "panel_fallback",
+        "panel_cost",
+        "panel_needs_manager",
+        "panel_paths",
+    }
+    assert cards["panel_fallback"].severity is Severity.WARN, "один диалог без решения — внимание"
+    assert cards["panel_disagreement"].severity is Severity.NODATA, "трёх решений для доли мало"
 
 
 async def test_the_monitor_page_shows_checks_and_history(

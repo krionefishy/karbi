@@ -7,6 +7,7 @@ import yaml
 
 from backend.modules.wb_screenshot_control.infrastructure.wiring import log_startup_state
 from backend.shared.settings import Settings, load_settings
+from backend.shared.settings.config import ModelPrice
 
 
 def test_test_settings_are_loaded_from_yaml() -> None:
@@ -176,3 +177,47 @@ def test_an_empty_vision_model_from_compose_keeps_the_chosen_model(monkeypatch: 
     load_settings.cache_clear()
 
     assert settings.vision.model == "Qwen/Qwen3.6-35B-A3B"
+
+
+def test_panel_thresholds_and_prices_come_from_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCREENSHOT_CONTROL_HMAC_KEY", "hmac-secret-that-is-long-enough-0123456789")
+    load_settings.cache_clear()
+
+    panel = load_settings("backend/shared/settings/config.docker.yaml").support_bot.panel
+    load_settings.cache_clear()
+
+    assert (panel.window_days, panel.min_sample) == (7, 20)
+    assert (panel.disagree_warn_percent, panel.disagree_crit_percent) == (30, 45)
+    assert (panel.cost_warn_kopecks, panel.cost_crit_kopecks) == (6, 12)
+    assert {price.model: (price.rub_in, price.rub_out) for price in panel.prices}["Qwen/Qwen3-30B-A3B"] == (16, 65)
+
+
+def test_panel_thresholds_are_read_from_a_custom_yaml_section() -> None:
+    raw = _raw_test_config()
+    raw["support_bot"] = {
+        "panel": {"window_days": 14, "disagree_warn_percent": 40, "prices": [{"model": "m", "rub_in": 1, "rub_out": 2}]}
+    }
+
+    panel = Settings.from_dict(raw).support_bot.panel
+
+    assert (panel.window_days, panel.disagree_warn_percent, panel.disagree_crit_percent) == (14, 40, 45)
+    assert panel.prices == (ModelPrice("m", 1, 2),)
+
+
+@pytest.mark.parametrize(
+    "panel",
+    [
+        {"disagree_warn_percent": 120},
+        {"disagree_warn_percent": 50},
+        {"needs_manager_low_percent": 95},
+        {"cost_warn_kopecks": 0},
+        {"window_days": 0},
+        {"prices": [{"model": "m", "rub_in": -1, "rub_out": 2}]},
+    ],
+)
+def test_broken_panel_thresholds_are_refused(panel: dict[str, Any]) -> None:
+    raw = _raw_test_config()
+    raw["support_bot"] = {"panel": panel}
+
+    with pytest.raises(ValueError, match="panel"):
+        Settings.from_dict(raw).validate_values()
