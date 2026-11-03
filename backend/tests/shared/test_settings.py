@@ -239,7 +239,7 @@ def test_panel_thresholds_and_prices_come_from_yaml(monkeypatch: pytest.MonkeyPa
 
     assert (panel.window_days, panel.min_sample) == (7, 20)
     assert (panel.disagree_warn_percent, panel.disagree_crit_percent) == (30, 45)
-    assert (panel.cost_warn_kopecks, panel.cost_crit_kopecks) == (6, 12)
+    assert (panel.cost_warn_kopecks, panel.cost_crit_kopecks) == (15, 25)
     assert {price.model: (price.rub_in, price.rub_out) for price in panel.prices}["Qwen/Qwen3-30B-A3B"] == (16, 65)
 
 

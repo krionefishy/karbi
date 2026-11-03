@@ -362,8 +362,8 @@ class PanelMonitorConfig:
     reserve_crit_percent: int = 20
     degraded_warn: int = 1
     degraded_crit: int = 3
-    cost_warn_kopecks: int = 6
-    cost_crit_kopecks: int = 12
+    cost_warn_kopecks: int = 15
+    cost_crit_kopecks: int = 25
     needs_manager_low_percent: int = 20
     needs_manager_high_percent: int = 90
     # Цены за 1 млн токенов: без цены модели карточка честно говорит «мало данных», а не считает наугад.
