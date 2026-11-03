@@ -156,6 +156,40 @@ support_bot:
   reply_arbiter_max_tokens: 1500
   reply_reserve_model: z-ai/glm-4.5-air
   reply_reserve_max_tokens: 1500
+  # Пороги карточек панели решений во вкладке «Состояние». ПРЕДВАРИТЕЛЬНЫЕ: подобраны по A/B,
+  # а не по проду, правятся здесь без правки кода. Доли — целые проценты, цена — копейки за решение.
+  panel:
+    window_days: 7
+    min_sample: 20
+    # Расхождение судей по действию: в A/B было 8–22%.
+    disagree_warn_percent: 30
+    disagree_crit_percent: 45
+    # Доля решений, где звали арбитра (расхождение или молчание судьи): по A/B 8–21%.
+    arbiter_warn_percent: 35
+    arbiter_crit_percent: 50
+    # Резерв = основной арбитр не ответил.
+    reserve_warn_percent: 5
+    reserve_crit_percent: 20
+    # degraded = диалог держится без отправки, потому что не ответил ни один арбитр.
+    degraded_warn: 1
+    degraded_crit: 3
+    # Цена решения: в A/B около 3 копеек, максимум 5,5; граница владельца — 30–50 копеек.
+    cost_warn_kopecks: 6
+    cost_crit_kopecks: 12
+    # Коридор доли needs_manager: это не качество, а проверка, что флаг не залип.
+    needs_manager_low_percent: 20
+    needs_manager_high_percent: 90
+    # Цены каталога Cloud.ru, рубли за 1 млн токенов. Без цены модели карточка говорит «мало данных».
+    prices:
+      - model: Qwen/Qwen3-30B-A3B
+        rub_in: 16
+        rub_out: 65
+      - model: openai/gpt-oss-120b
+        rub_in: 16
+        rub_out: 61
+      - model: deepseek-ai/DeepSeek-V4-Flash
+        rub_in: 43
+        rub_out: 87
 
 llm:
   # Модель меняется здесь: правка строки и перераскатка. Ключ — только из окружения.

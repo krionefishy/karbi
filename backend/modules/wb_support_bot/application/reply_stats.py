@@ -4,9 +4,11 @@
 """
 
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from statistics import median
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from backend.modules.wb_support_bot.domain import (
@@ -16,6 +18,14 @@ from backend.modules.wb_support_bot.domain import (
     GUARD_STOPWORD,
     Gate,
     gate_decision,
+)
+from backend.modules.wb_support_bot.domain.decision import (
+    PATH_ARBITER,
+    PATH_DEGRADED,
+    PATH_GUARD,
+    PATH_RESERVE,
+    VOTE_JUDGE_A,
+    VOTE_JUDGE_B,
 )
 
 BUCKET_UNDETERMINED = "undetermined"
@@ -72,6 +82,16 @@ class SliceRow:
     tokens_in: int | None
     tokens_out: int | None
     error: str | None = None
+    # Поля панели решений (sb007): у среза, решённого одной моделью, их нет.
+    decision_path: str | None = None
+    decision_votes: dict[str, Any] | None = None
+    needs_manager: bool | None = None
+
+    @property
+    def votes(self) -> list[dict[str, Any]]:
+        """Голоса судей и арбитра из JSON; в degraded токены есть только здесь, в колонках их нет."""
+        raw = (self.decision_votes or {}).get("votes")
+        return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
     @property
     def bucket(self) -> str:
@@ -287,6 +307,86 @@ def health(rows: list[SliceRow], now: datetime) -> Health:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PanelStats:
+    """Срезы, решённые панелью: согласие судей, вызовы арбитра, резерв, цена и «нужен менеджер».
+
+    Считается по последнему состоянию среза: истории попыток в таблице нет, повтор перезаписывает
+    путь и голоса (ограничение sb007).
+    """
+
+    rows: int = 0
+    decided: int = 0
+    paths: tuple[tuple[str, int], ...] = ()
+    judged: int = 0
+    disagreed: int = 0
+    arbiter: int = 0
+    reserve: int = 0
+    degraded: int = 0
+    needs_manager_known: int = 0
+    needs_manager: int = 0
+    costed: int = 0
+    cost_rub: float = 0.0
+    unpriced_models: tuple[str, ...] = ()
+
+
+def _vote_cost(votes: list[dict[str, Any]], prices: Mapping[str, tuple[int, int]]) -> tuple[float, set[str]]:
+    """Стоимость решения в рублях и модели без цены: цена — рубли за 1 млн токенов входа и выхода."""
+    cost = 0.0
+    unpriced: set[str] = set()
+    for vote in votes:
+        model = str(vote.get("model") or "")
+        price = prices.get(model)
+        if price is None:
+            unpriced.add(model or "без имени")
+            continue
+        rub_in, rub_out = price
+        cost += (int(vote.get("tokens_in") or 0) * rub_in + int(vote.get("tokens_out") or 0) * rub_out) / 1_000_000
+    return cost, unpriced
+
+
+def panel_stats(rows: list[SliceRow], prices: Mapping[str, tuple[int, int]]) -> PanelStats:
+    """Метрики панели по срезам окна; срезы без `decision_path` (одна модель) не учитываются."""
+    panel = [row for row in rows if row.decision_path is not None]
+    if not panel:
+        return PanelStats()
+    paths = Counter(str(row.decision_path) for row in panel)
+    decided = [row for row in panel if row.decision_path != PATH_GUARD]
+    judged = disagreed = 0
+    costed = 0
+    cost = 0.0
+    unpriced: set[str] = set()
+    for row in decided:
+        votes = row.votes
+        judges = [vote for vote in votes if vote.get("role") in (VOTE_JUDGE_A, VOTE_JUDGE_B)]
+        if len(judges) == 2:
+            judged += 1
+            disagreed += 1 if judges[0].get("action") != judges[1].get("action") else 0
+        if votes:
+            row_cost, row_unpriced = _vote_cost(votes, prices)
+            unpriced |= row_unpriced
+            if row_unpriced:
+                continue
+            costed += 1
+            cost += row_cost
+    known = [row for row in decided if row.needs_manager is not None]
+    return PanelStats(
+        rows=len(panel),
+        decided=len(decided),
+        paths=tuple(sorted(paths.items(), key=lambda item: (-item[1], item[0]))),
+        judged=judged,
+        disagreed=disagreed,
+        arbiter=sum(paths.get(path, 0) for path in (PATH_ARBITER, PATH_RESERVE, PATH_DEGRADED)),
+        reserve=paths.get(PATH_RESERVE, 0),
+        degraded=paths.get(PATH_DEGRADED, 0),
+        needs_manager_known=len(known),
+        needs_manager=sum(1 for row in known if row.needs_manager),
+        costed=costed,
+        cost_rub=cost,
+        unpriced_models=tuple(sorted(unpriced)),
+    )
+
+
 def open_escalations(rows: list[SliceRow], dialogs: dict[tuple[str, datetime], tuple[str, bool]]) -> list[SliceRow]:
     """Последний срез диалога — угроза, просьба прекратить или стоп-слово, а менеджер ещё не ответил.
 
@@ -342,9 +442,11 @@ __all__ = [
     "Health",
     "LateSends",
     "late_dialogs",
+    "PanelStats",
     "ReplySummary",
     "SendRow",
     "SliceRow",
     "build_summary",
     "open_escalations",
+    "panel_stats",
 ]

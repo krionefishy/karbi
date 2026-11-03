@@ -5,7 +5,8 @@
 """
 
 import uuid
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -19,6 +20,7 @@ from backend.modules.wb_support_bot.application.reply_stats import (
     health,
     late_dialogs,
     open_escalations,
+    panel_stats,
 )
 from backend.modules.wb_support_bot.domain.health import (
     Check,
@@ -35,6 +37,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
 )
 from backend.shared.kafka_streams.topics import SupportBotTopics
 from backend.shared.outbox.repository import OutboxRepository
+from backend.shared.settings.config import PanelMonitorConfig
 
 MSK = ZoneInfo("Europe/Moscow")
 HISTORY_DAYS = 7
@@ -73,7 +76,36 @@ def _slice_row(row: ReplyVerdictModel) -> SliceRow:
         tokens_in=row.tokens_in,
         tokens_out=row.tokens_out,
         error=row.error,
+        decision_path=row.decision_path,
+        decision_votes=row.decision_votes,
+        needs_manager=row.needs_manager,
     )
+
+
+def monitor_limits(panel: PanelMonitorConfig, base: Thresholds = Thresholds()) -> Thresholds:
+    """Пороги проверок с панельной частью из настройки: проценты и копейки приходят целыми."""
+    return replace(
+        base,
+        panel_window_days=panel.window_days,
+        panel_min_sample=panel.min_sample,
+        panel_disagree_warn=panel.disagree_warn_percent / 100,
+        panel_disagree_crit=panel.disagree_crit_percent / 100,
+        panel_arbiter_warn=panel.arbiter_warn_percent / 100,
+        panel_arbiter_crit=panel.arbiter_crit_percent / 100,
+        panel_reserve_warn=panel.reserve_warn_percent / 100,
+        panel_reserve_crit=panel.reserve_crit_percent / 100,
+        panel_degraded_warn=panel.degraded_warn,
+        panel_degraded_crit=panel.degraded_crit,
+        panel_cost_warn=panel.cost_warn_kopecks / 100,
+        panel_cost_crit=panel.cost_crit_kopecks / 100,
+        panel_needs_manager_low=panel.needs_manager_low_percent / 100,
+        panel_needs_manager_high=panel.needs_manager_high_percent / 100,
+    )
+
+
+def monitor_prices(panel: PanelMonitorConfig) -> dict[str, tuple[int, int]]:
+    """Цены моделей для карточки «Цена решения»: рубли за 1 млн токенов входа и выхода."""
+    return {price.model: (price.rub_in, price.rub_out) for price in panel.prices}
 
 
 def history_days(events: list[MonitorEventModel], now: datetime) -> list[MonitorDay]:
@@ -107,6 +139,8 @@ class BotMonitor:
         daily_cap: int,
         reply_gate_mode: str,
         reply_prompt_version: str,
+        reply_engine: str = "single",
+        prices: Mapping[str, tuple[int, int]] | None = None,
         limits: Thresholds = Thresholds(),
     ) -> None:
         self.session = session
@@ -115,6 +149,8 @@ class BotMonitor:
         self.daily_cap = daily_cap
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
+        self.reply_engine = reply_engine
+        self.prices = dict(prices or {})
         self.limits = limits
 
     async def snapshot(
@@ -161,6 +197,9 @@ class BotMonitor:
         ]
         continues = continue_stats(rows)
         asked_health = health(day_rows, now)
+        panel = panel_stats(
+            [row for row in rows if row.requested_at >= now - timedelta(days=limits.panel_window_days)], self.prices
+        )
         outbox = OutboxRepository(self.session)
         return Snapshot(
             now=now,
@@ -196,6 +235,20 @@ class BotMonitor:
             continue_dialogs=continues.dialogs,
             escalated_after_continue=continues.escalated_after,
             max_continues=continues.max_per_dialog,
+            reply_engine=self.reply_engine,
+            panel_rows=panel.rows,
+            panel_decided=panel.decided,
+            panel_paths=panel.paths,
+            panel_judged=panel.judged,
+            panel_disagreed=panel.disagreed,
+            panel_arbiter=panel.arbiter,
+            panel_reserve=panel.reserve,
+            panel_degraded=panel.degraded,
+            panel_needs_known=panel.needs_manager_known,
+            panel_needs_manager=panel.needs_manager,
+            panel_costed=panel.costed,
+            panel_cost_rub=panel.cost_rub,
+            panel_unpriced_models=panel.unpriced_models,
         )
 
     async def record(self, seller_id: uuid.UUID, now: datetime) -> Severity:
