@@ -53,6 +53,9 @@ from backend.shared.outbox.repository import OutboxRepository
 
 UNKNOWN_RESOLVE_AFTER = timedelta(minutes=45)
 RETRY_DELAY = timedelta(minutes=30)
+SLOW_RETRY_DELAY = timedelta(hours=6)
+SLOW_RETRY_AFTER = 2
+GIVE_UP_AFTER = 5
 VERDICT_RECHECK = timedelta(minutes=10)
 
 
@@ -283,7 +286,7 @@ class SupportBotProcessor:
             model.next_send_at = None
         elif projection.state is not DialogState.IN_CAMPAIGN:
             model.next_send_at = None
-        elif model.next_send_at is None:
+        elif model.next_send_at is None and not model.excluded:
             model.next_send_at = first_send_at(now, window=self.policy.window, pace=self.policy.pace, rng=self.rng)
         if gate.released and projection.state is DialogState.IN_CAMPAIGN and not projection.end_campaign:
             # Покупатель ответил, рассылка продолжается: следующее напоминание через обычный шаг, а не сразу.
@@ -527,6 +530,7 @@ class SupportBotProcessor:
                 continue
             text_model = self._pick_template(templates, await self._last_template(dialog))
             sends = await self.repository.dialog_sends(_key(dialog))
+            failures = _fail_streak(sends) + 1
             seq = (max((send.seq for send in sends), default=0)) + 1
             send = SendModel(
                 seller_id=seller_id,
@@ -547,7 +551,7 @@ class SupportBotProcessor:
             if not sign:
                 send.status = SEND_FAILED
                 send.error = "ни лента, ни список чатов не отдали подпись чата"
-                dialog.next_send_at = now + RETRY_DELAY
+                self._hold_after_failure(dialog, failures, now)
                 report.failed += 1
                 await self.repository.session.commit()
                 continue
@@ -557,7 +561,7 @@ class SupportBotProcessor:
             except WBPermanentError as error:
                 send.status = SEND_FAILED
                 send.error = str(error)
-                dialog.next_send_at = now + RETRY_DELAY
+                self._hold_after_failure(dialog, failures, now)
                 report.failed += 1
                 if "доступа" in str(error) or "недействителен" in str(error):
                     await self.repository.set_paused_reason(seller_id, str(error))
@@ -576,6 +580,22 @@ class SupportBotProcessor:
                 report.sent += 1
             await self.repository.session.commit()
             await self.sleep(self.policy.min_gap.total_seconds())
+
+    @staticmethod
+    def _hold_after_failure(dialog: DialogModel, failures: int, now: datetime) -> None:
+        """Отступ по числу неудач подряд: короткий повтор, затем редкий, затем остановка диалога.
+
+        WB умеет сутками отвечать отказом по одному чату, принимая остальные, а повтор раз
+        в полчаса чаще обычного шага рассылки: без отступа один залипший диалог даёт десятки
+        неудачных отправок и в одиночку красит мониторинг. После GIVE_UP_AFTER отказов подряд
+        диалог выводим из рассылки и помечаем для менеджера — вернуть его может только человек.
+        """
+        if failures >= GIVE_UP_AFTER:
+            dialog.next_send_at = None
+            dialog.excluded = True
+            dialog.attention = True
+            return
+        dialog.next_send_at = now + (SLOW_RETRY_DELAY if failures > SLOW_RETRY_AFTER else RETRY_DELAY)
 
     async def _chat_list_signs(self, seller_id: uuid.UUID) -> dict[str, str]:
         try:
@@ -597,6 +617,16 @@ class SupportBotProcessor:
         """Случайный вариант, но не тот же, что в прошлый раз (если есть из чего выбирать)."""
         pool = [item for item in templates if item.id != last_id] or templates
         return self.rng.choice(pool)
+
+
+def _fail_streak(sends: list[SendModel]) -> int:
+    """Сколько последних отправок по диалогу подряд закончились неудачей."""
+    streak = 0
+    for send in reversed(sends):
+        if send.status != SEND_FAILED:
+            break
+        streak += 1
+    return streak
 
 
 def _key(dialog: DialogModel) -> DialogKey:

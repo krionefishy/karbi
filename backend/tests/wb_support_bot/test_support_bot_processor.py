@@ -20,6 +20,7 @@ from backend.modules.wb_core.infrastructure.postgres import MirrorRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
 from backend.modules.wb_support_bot.application import BotPolicy, SupportBotProcessor
+from backend.modules.wb_support_bot.application.processing import RETRY_DELAY, SLOW_RETRY_DELAY
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     MODE_LIVE,
     MODE_STOPPED,
@@ -627,3 +628,57 @@ async def test_a_stuck_request_is_asked_again_but_only_a_few_times(database: Dat
     (row,) = await verdicts(database, seller)
     assert row.attempts == 3
     assert len(await classify_events(database, seller)) == 3
+
+
+REJECTED = "WB Buyers Chat API: good card: check rid error"
+
+
+async def test_a_dialog_wb_keeps_rejecting_is_retried_rarely_and_then_taken_out_of_the_mailing(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    sender = FakeSender()
+    sender.error = WBPermanentError(REJECTED)
+    moments = [
+        NOW,
+        NOW + timedelta(minutes=30),
+        NOW + timedelta(hours=1),
+        NOW + timedelta(hours=7),
+        NOW + timedelta(days=1),
+    ]
+
+    gaps = []
+    for moment in moments:
+        await feed(database, seller, BASE_FEED, read_at=moment)
+        await run(database, seller, sender, now=moment)
+        state = await dialog(database, seller)
+        gaps.append(None if state.next_send_at is None else state.next_send_at - moment)
+
+    assert gaps == [RETRY_DELAY, RETRY_DELAY, SLOW_RETRY_DELAY, SLOW_RETRY_DELAY, None]
+    stopped = await dialog(database, seller)
+    assert stopped.excluded and stopped.attention and stopped.sent_count == 0
+    assert [row.status for row in await sends(database, seller)] == [SEND_FAILED] * 5
+
+
+async def test_a_rejection_after_a_delivered_message_waits_the_short_time_again(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    sender = FakeSender()
+    sender.error = WBPermanentError(REJECTED)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    await run(database, seller, sender, now=NOW)
+
+    sender.error = None
+    second = NOW + timedelta(minutes=30)
+    await feed(database, seller, BASE_FEED, read_at=second)
+    await run(database, seller, sender, now=second)
+
+    sender.error = WBPermanentError(REJECTED)
+    third = second + timedelta(hours=2)
+    await feed(database, seller, BASE_FEED, read_at=third)
+    await run(database, seller, sender, now=third)
+
+    state = await dialog(database, seller)
+    assert state.next_send_at == third + RETRY_DELAY and not state.excluded
+    assert [row.status for row in await sends(database, seller)] == [SEND_FAILED, SEND_SENT, SEND_FAILED]
