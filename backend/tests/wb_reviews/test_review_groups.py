@@ -7,8 +7,8 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.application import ReviewMirror
-from backend.modules.wb_core.domain import Article, ReviewFact
+from backend.modules.wb_core.application import ReviewMirror, StockMirror
+from backend.modules.wb_core.domain import Article, ReviewFact, StockFact
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_reviews.application import GroupActionError, ProductNotFoundError, ReviewSyncService
 from backend.modules.wb_reviews.application.groups import GroupCandidate, Placement, resolve_groups
@@ -17,14 +17,14 @@ from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncReposit
 
 T0 = datetime(2026, 11, 4, 10, 0, tzinfo=UTC)
 
-# Склейка 900: основной 101 (22 фото) и приклеенные болванки 102, 103 без фото.
-# 201 — неприклеенная болванка со своим imtID, 301 — другой товар.
+# 101, 102, 103 — одно название: товар и две болванки. 102 с отзывами, но без остатка.
+# 201 и 301 — другие товары со своими названиями.
 CANDIDATES = [
-    GroupCandidate("101", 900, 22, 50),
-    GroupCandidate("102", 900, 0, 70),
-    GroupCandidate("103", 900, 1, 3),
-    GroupCandidate("201", 777, 0, 10),
-    GroupCandidate("301", None, 12, 5),
+    GroupCandidate("101", 900, 22, 50, "Шуруповерт для дома", stock=40),
+    GroupCandidate("102", 900, 0, 70, "шуруповёрт  для дома", stock=0),
+    GroupCandidate("103", 555, 1, 3, "Шуруповерт для дома!", stock=2),
+    GroupCandidate("201", 900, 0, 10, "Компрессор"),
+    GroupCandidate("301", None, 12, 5, "Пылесос"),
 ]
 
 
@@ -32,100 +32,46 @@ def override(article: str, kind: str, main: str | None = None, *, minutes: int =
     return GroupOverride(article, kind, main, T0 + timedelta(minutes=minutes))
 
 
-def test_dummies_of_a_wb_card_gather_around_its_real_product() -> None:
+def test_cards_with_one_name_form_a_group_led_by_the_largest_stock() -> None:
     placements = resolve_groups(CANDIDATES, {})
 
     assert placements["101"] == Placement("g:101", "main", False)
     assert placements["102"] == Placement("g:101", "member", False)
-    assert placements["103"] == Placement("g:101", "member", False)
-    assert placements["201"] == Placement(None, None, False)
+    assert placements["103"] == Placement("g:101", "member", False), "другая склейка, но то же название"
+    assert placements["201"] == Placement(None, None, False), "та же склейка, но другое название"
     assert placements["301"] == Placement(None, None, False)
 
 
-def candidate(
-    article: str,
-    imt: int | None,
-    photos: int | None,
-    vendor: str,
-    *,
-    reviews: int = 0,
-    subject: str = "Шуруповерты",
-    name: str = "",
-) -> GroupCandidate:
-    return GroupCandidate(article, imt, photos, reviews, vendor_code=vendor, subject=subject, name=name)
-
-
-def test_a_second_real_product_in_the_same_wb_card_keeps_its_own_row() -> None:
-    """Склейка шуруповёрта у Саниева: «с ударом» (22 фото) и «с аккумуляторами» (14 фото) — разные товары."""
+def test_several_real_products_under_one_name_collapse_into_one_row() -> None:
+    """Саниев: «с ударом», «дрель» и «фирменный зелёный» продаются под одним названием."""
+    name = "Шуруповерт аккумуляторный мощный ударный"
     placements = resolve_groups(
         [
-            candidate("1", 900, 22, "Шуруповерт аккумуляторный с ударом", reviews=3700),
-            candidate("2", 900, 14, "шуруповёрт с аккумуляторами", reviews=400),
-            candidate("3", 900, 0, "шуруповёрт7"),
-            candidate("4", 900, 1, "шуруповёрт с аккумуляторами фото"),
+            GroupCandidate("1", 900, 22, 3790, name, stock=120),
+            GroupCandidate("2", 901, 14, 998, name, stock=300),
+            GroupCandidate("3", 902, 12, 40, name, stock=0),
+            GroupCandidate("4", None, 1, 0, name),
         ],
         {},
     )
 
-    assert placements["1"].role == placements["2"].role == "main"
-    assert placements["1"].group_id != placements["2"].group_id
-    assert placements["3"].group_id == placements["1"].group_id
-    assert placements["4"].group_id == placements["2"].group_id
+    assert {placement.group_id for placement in placements.values()} == {"g:2"}
+    assert placements["2"].role == "main"
 
 
-def test_unglued_dummies_find_their_product_by_vendor_code_and_name() -> None:
+def test_without_stock_the_main_is_the_card_with_more_reviews() -> None:
     placements = resolve_groups(
-        [
-            candidate("10", 1, 15, "Болгарка УШМ", subject="Шлифовальные машины"),
-            candidate("11", 2, 14, "Болгарка электрическая", subject="Шлифовальные машины"),
-            candidate("12", 1, 0, "Болгарка4", subject="Шлифовальные машины"),
-            candidate("13", None, 1, "Болгарка УШМ фото", subject="Шлифовальные машины"),
-            candidate("14", None, 1, "Болгарка электрическая УШМ", subject="Шлифовальные машины"),
-            candidate("15", None, 0, "Болгарка 9", subject="Шлифовальные машины"),
-            candidate(
-                "20",
-                3,
-                12,
-                "Компрессор автомобильный",
-                subject="Компрессоры",
-                name="Автомобильный насос компрессор беспроводной с насадками",
-            ),
-            candidate(
-                "21", 4, 16, "Компрессор new", subject="Компрессоры", name="Автомобильный насос компрессор с насадками"
-            ),
-            candidate(
-                "22",
-                5,
-                0,
-                "Компрессоры автомобильные3",
-                subject="Компрессоры",
-                name="Автомобильный насос компрессор беспроводной",
-            ),
-            candidate("30", 6, 18, "Перфоратор электрический", subject="Перфораторы"),
-            candidate("31", 7, 0, "сани16", subject="Перфораторы", name="перфоратор"),
-            candidate("40", 8, 14, "Пылесос беспроводной 2", subject="Пылесосы"),
-            candidate("41", 9, 14, "Моющий", subject="Пылесосы"),
-            candidate("42", 10, 0, "сани6", subject="Пылесосы", name="пылесос"),
-        ],
+        [GroupCandidate("1", None, 0, 5, "Пила"), GroupCandidate("2", None, 0, 9, "пила")],
         {},
     )
 
-    def group_of(article: str) -> str | None:
-        return placements[article].group_id
-
-    assert group_of("13") == group_of("10"), "«… фото» к своему товару"
-    assert group_of("14") == group_of("11"), "артикул уточняет артикул товара"
-    assert group_of("15") == group_of("10"), "соседи по артикулу приклеены к «Болгарка УШМ»"
-    assert group_of("22") == group_of("20"), "название — начало названия ровно одного товара"
-    assert group_of("31") == group_of("30"), "единственный товар предмета"
-    assert placements["42"] == Placement(None, None, False), "два товара в предмете и общее название — не угадываем"
-    assert placements["41"].group_id is None
+    assert placements["2"].role == "main"
 
 
-def test_a_card_with_unknown_photos_is_never_hidden_as_a_dummy() -> None:
-    placements = resolve_groups([candidate("1", 5, 22, "Товар"), candidate("2", 5, None, "Товар 2")], {})
+def test_a_card_without_a_name_stands_alone() -> None:
+    placements = resolve_groups([GroupCandidate("1", None, 0, 5, ""), GroupCandidate("2", None, 0, 9, " ")], {})
 
-    assert placements["2"] == Placement(None, None, False)
+    assert placements["1"] == placements["2"] == Placement(None, None, False)
 
 
 def test_a_pinned_main_wins_over_the_automatic_choice() -> None:
@@ -169,7 +115,7 @@ class Sellers:
         self.articles = [
             Article(uuid.uuid4(), seller_id, "101", "Шуруповерт", "Шуруповерт", imt_id=900, photo_count=22),
             Article(uuid.uuid4(), seller_id, "102", "шуруповёрт1", "Шуруповерт", imt_id=900, photo_count=0),
-            Article(uuid.uuid4(), seller_id, "201", "Компрессор3", "Компрессор", imt_id=777, photo_count=0),
+            Article(uuid.uuid4(), seller_id, "201", "Компрессор3", "Компрессор", imt_id=900, photo_count=0),
             Article(uuid.uuid4(), seller_id, "301", "Пылесос", "Пылесос", imt_id=None, photo_count=10),
         ]
 
@@ -215,6 +161,14 @@ class Session:
         self.commits += 1
 
 
+class Stocks:
+    def __init__(self, stocks: dict[str, int]) -> None:
+        self.stocks = stocks
+
+    async def stock(self, seller_id: uuid.UUID, *, fresh_since: datetime) -> dict[str, StockFact]:
+        return {article: StockFact(article, quantity, quantity, 1) for article, quantity in self.stocks.items()}
+
+
 class Ratings:
     def __init__(self, ratings: dict[str, Decimal]) -> None:
         self.ratings = ratings
@@ -226,12 +180,15 @@ class Ratings:
         }
 
 
-def service(seller_id: uuid.UUID, reviews: Reviews, ratings: dict[str, Decimal]) -> ReviewSyncService:
+def service(
+    seller_id: uuid.UUID, reviews: Reviews, ratings: dict[str, Decimal], stocks: dict[str, int] | None = None
+) -> ReviewSyncService:
     return ReviewSyncService(
         cast(AsyncSession, Session()),
         cast(SellerRepository, Sellers(seller_id)),
         cast(ReviewSyncRepository, reviews),
         cast(ReviewMirror, Ratings(ratings)),
+        cast(StockMirror, Stocks(stocks or {})),
     )
 
 
@@ -257,6 +214,15 @@ async def test_history_carries_ratings_groups_and_group_totals() -> None:
         {"date": "2026-11-04", "ratings": {1: 1, 2: 0, 3: 0, 4: 1, 5: 16}},
     ]
     assert products["102"].group_snapshots == []
+
+
+async def test_the_main_follows_the_stock_from_the_mirror() -> None:
+    seller_id = uuid.uuid4()
+
+    history = await service(seller_id, Reviews(seller_id), {}, {"101": 3, "102": 50}).history(seller_id, 90)
+    roles = {product.article: product.group_role for product in history.products}
+
+    assert roles == {"101": "member", "102": "main", "201": None, "301": None}
 
 
 async def test_a_card_without_any_rating_or_reviews_has_none() -> None:

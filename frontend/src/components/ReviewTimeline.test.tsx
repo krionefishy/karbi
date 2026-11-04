@@ -200,7 +200,7 @@ describe("ReviewTimeline", () => {
       fireEvent.click(screen.getByRole("button", { name: "Показать болванки" }));
 
       expect(screen.getByTitle("Рейтинг WB")).toHaveTextContent("4,9");
-      expect(screen.getByTitle(/Рейтинг склейки/)).toHaveTextContent("4,9");
+      expect(screen.getByTitle(/Рейтинг основного товара группы/)).toHaveTextContent("4,9");
     });
 
     it("marks a rating we computed ourselves", () => {

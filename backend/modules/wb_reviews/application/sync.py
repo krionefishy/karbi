@@ -6,7 +6,7 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.application import ReviewMirror, SellerNotFoundError
+from backend.modules.wb_core.application import ReviewMirror, SellerNotFoundError, StockMirror
 from backend.modules.wb_core.domain import Article
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_reviews.application.groups import (
@@ -36,6 +36,7 @@ RatingSource = Literal["wb", "group", "reviews"]
 RATING_WB: RatingSource = "wb"
 RATING_GROUP: RatingSource = "group"
 RATING_REVIEWS: RatingSource = "reviews"
+STOCK_FRESHNESS = timedelta(days=3)
 
 
 class ProductNotFoundError(Exception):
@@ -118,11 +119,13 @@ class ReviewSyncService:
         sellers: SellerRepository,
         reviews: ReviewSyncRepository,
         review_mirror: ReviewMirror | None = None,
+        stock_mirror: StockMirror | None = None,
     ) -> None:
         self.session = session
         self.sellers = sellers
         self.reviews = reviews
         self.review_mirror = review_mirror or ReviewMirror(session)
+        self.stock_mirror = stock_mirror or StockMirror(session)
 
     async def request(self, trigger: str, snapshot_date: date) -> ReviewSyncRun:
         await self.reviews.lock_run_creation()
@@ -206,7 +209,8 @@ class ReviewSyncService:
             by_article.setdefault(count.article, {})[count.date.isoformat()] = list(count.ratings)
         card_totals = self._totals(articles, by_article, lambda article: card_key(article.article, article.imt_id))
         placements = resolve_groups(
-            self._candidates(articles, by_article), await self.reviews.group_overrides(seller_id)
+            self._candidates(articles, by_article, await self._stocks(seller_id)),
+            await self.reviews.group_overrides(seller_id),
         )
         group_totals = self._totals(
             articles, by_article, lambda article: placements[article.article].group_id or f"nm:{article.article}"
@@ -250,7 +254,7 @@ class ReviewSyncService:
         """Ручная правка группы болванок.
 
         `pin_main` снимает закрепление с прежнего основного той же группы, но
-        его ручную привязку сохраняет; `reset` возвращает товар к склейке WB.
+        его ручную привязку сохраняет; `reset` возвращает товар в группу по названию.
         """
         if await self.sellers.get(seller_id) is None:
             raise SellerNotFoundError
@@ -279,7 +283,7 @@ class ReviewSyncService:
             by_article: dict[str, dict[str, list[int]]] = {}
             for count in await self.reviews.history(seller_id, 7):
                 by_article.setdefault(count.article, {})[count.date.isoformat()] = list(count.ratings)
-            keys = group_keys(self._candidates(articles, by_article), overrides)
+            keys = group_keys(self._candidates(articles, by_article, await self._stocks(seller_id)), overrides)
             for other, override in overrides.items():
                 if other != article and override.kind == GROUP_MAIN and keys.get(other) == keys[article]:
                     await self._unpin(seller_id, override, now=now)
@@ -295,8 +299,15 @@ class ReviewSyncService:
                 seller_id, override.article, GROUP_MEMBER, override.main_article, now=now
             )
 
+    async def _stocks(self, seller_id: uuid.UUID) -> dict[str, int]:
+        """Остаток FBO + FBS по карточке; без свежего сбора основной выбирается по отзывам."""
+        facts = await self.stock_mirror.stock(seller_id, fresh_since=datetime.now(UTC) - STOCK_FRESHNESS) or {}
+        return {article: fact.fbo_quantity + fact.fbs_quantity for article, fact in facts.items()}
+
     @staticmethod
-    def _candidates(articles: list[Article], by_article: dict[str, dict[str, list[int]]]) -> list[GroupCandidate]:
+    def _candidates(
+        articles: list[Article], by_article: dict[str, dict[str, list[int]]], stocks: dict[str, int]
+    ) -> list[GroupCandidate]:
         def latest_total(article: str) -> int:
             days = by_article.get(article)
             return sum(days[max(days)]) if days else 0
@@ -307,9 +318,8 @@ class ReviewSyncService:
                 article.imt_id,
                 article.photo_count,
                 latest_total(article.article),
-                vendor_code=article.vendor_code,
-                subject=article.subject_name,
                 name=article.name,
+                stock=stocks.get(article.article, 0),
             )
             for article in articles
         ]

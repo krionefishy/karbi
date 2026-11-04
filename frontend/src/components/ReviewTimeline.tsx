@@ -124,7 +124,7 @@ const ratingFormatter = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 
 
 const ratingTitles = {
   wb: "Рейтинг WB",
-  group: "Рейтинг склейки: WB считает его общим с основным товаром",
+  group: "Рейтинг основного товара группы",
   reviews: "WB не отдал рейтинг, это средняя по нашим счётчикам отзывов",
 } as const;
 
@@ -249,7 +249,7 @@ function GroupMenu({ product, group, onAction }: GroupMenuProps) {
   if (grouped && isMain && !product.group_manual) items.push({ action: "pin_main", label: "Закрепить как основной" });
   items.push({ action: "attach", label: "Привязать к основному товару…" });
   if (grouped && !isMain) items.push({ action: "detach", label: "Вывести из группы" });
-  if (product.group_manual) items.push({ action: "reset", label: "Вернуть как в склейке WB" });
+  if (product.group_manual) items.push({ action: "reset", label: "Вернуть в группу по названию" });
   return (
     <div className="row-menu" role="menu" onClick={(event) => event.stopPropagation()}>
       <span className="row-menu-caption">WB {product.article}</span>

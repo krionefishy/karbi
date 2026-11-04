@@ -35,7 +35,7 @@ export interface ProductReviewHistory {
   group_snapshots: DailyReviewSnapshot[];
 }
 
-/** wb — рейтинг самой карточки из аналитики WB; group — рейтинг основного товара склейки;
+/** wb — рейтинг самой карточки из аналитики WB; group — рейтинг основного товара группы;
  *  reviews — наш расчёт по счётчикам отзывов, когда WB рейтинг не отдал. */
 export type RatingSource = "wb" | "group" | "reviews";
 

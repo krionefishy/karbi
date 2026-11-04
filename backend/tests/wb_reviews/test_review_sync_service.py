@@ -5,7 +5,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_core.application import ReviewMirror
+from backend.modules.wb_core.application import ReviewMirror, StockMirror
 from backend.modules.wb_core.domain import Article, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
@@ -131,6 +131,11 @@ class NoRatings:
         return None
 
 
+class NoStocks:
+    async def stock(self, seller_id: uuid.UUID, *, fresh_since: datetime) -> None:
+        return None
+
+
 async def test_history_reports_both_the_article_and_the_whole_card() -> None:
     seller_id = uuid.uuid4()
     sellers = HistorySellers(seller_id)
@@ -139,6 +144,7 @@ async def test_history_reports_both_the_article_and_the_whole_card() -> None:
         cast(SellerRepository, sellers),
         cast(ReviewSyncRepository, HistoryReviews(seller_id)),
         cast(ReviewMirror, NoRatings()),
+        cast(StockMirror, NoStocks()),
     )
 
     history = await service.history(seller_id, 90)
