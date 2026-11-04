@@ -32,27 +32,107 @@ def override(article: str, kind: str, main: str | None = None, *, minutes: int =
     return GroupOverride(article, kind, main, T0 + timedelta(minutes=minutes))
 
 
-def test_auto_groups_follow_wb_cards_and_pick_the_richest_card_as_main() -> None:
+def test_dummies_of_a_wb_card_gather_around_its_real_product() -> None:
     placements = resolve_groups(CANDIDATES, {})
 
-    assert placements["101"] == Placement("imt:900", "main", False)
-    assert placements["102"] == Placement("imt:900", "member", False)
-    assert placements["103"] == Placement("imt:900", "member", False)
+    assert placements["101"] == Placement("g:101", "main", False)
+    assert placements["102"] == Placement("g:101", "member", False)
+    assert placements["103"] == Placement("g:101", "member", False)
     assert placements["201"] == Placement(None, None, False)
     assert placements["301"] == Placement(None, None, False)
 
 
-def test_auto_main_breaks_photo_ties_by_reviews_then_by_the_older_article() -> None:
-    tied = [GroupCandidate("11", 5, 3, 1), GroupCandidate("12", 5, 3, 9), GroupCandidate("10", 5, 3, 9)]
+def candidate(
+    article: str,
+    imt: int | None,
+    photos: int | None,
+    vendor: str,
+    *,
+    reviews: int = 0,
+    subject: str = "Шуруповерты",
+    name: str = "",
+) -> GroupCandidate:
+    return GroupCandidate(article, imt, photos, reviews, vendor_code=vendor, subject=subject, name=name)
 
-    assert resolve_groups(tied, {})["10"].role == "main"
+
+def test_a_second_real_product_in_the_same_wb_card_keeps_its_own_row() -> None:
+    """Склейка шуруповёрта у Саниева: «с ударом» (22 фото) и «с аккумуляторами» (14 фото) — разные товары."""
+    placements = resolve_groups(
+        [
+            candidate("1", 900, 22, "Шуруповерт аккумуляторный с ударом", reviews=3700),
+            candidate("2", 900, 14, "шуруповёрт с аккумуляторами", reviews=400),
+            candidate("3", 900, 0, "шуруповёрт7"),
+            candidate("4", 900, 1, "шуруповёрт с аккумуляторами фото"),
+        ],
+        {},
+    )
+
+    assert placements["1"].role == placements["2"].role == "main"
+    assert placements["1"].group_id != placements["2"].group_id
+    assert placements["3"].group_id == placements["1"].group_id
+    assert placements["4"].group_id == placements["2"].group_id
+
+
+def test_unglued_dummies_find_their_product_by_vendor_code_and_name() -> None:
+    placements = resolve_groups(
+        [
+            candidate("10", 1, 15, "Болгарка УШМ", subject="Шлифовальные машины"),
+            candidate("11", 2, 14, "Болгарка электрическая", subject="Шлифовальные машины"),
+            candidate("12", 1, 0, "Болгарка4", subject="Шлифовальные машины"),
+            candidate("13", None, 1, "Болгарка УШМ фото", subject="Шлифовальные машины"),
+            candidate("14", None, 1, "Болгарка электрическая УШМ", subject="Шлифовальные машины"),
+            candidate("15", None, 0, "Болгарка 9", subject="Шлифовальные машины"),
+            candidate(
+                "20",
+                3,
+                12,
+                "Компрессор автомобильный",
+                subject="Компрессоры",
+                name="Автомобильный насос компрессор беспроводной с насадками",
+            ),
+            candidate(
+                "21", 4, 16, "Компрессор new", subject="Компрессоры", name="Автомобильный насос компрессор с насадками"
+            ),
+            candidate(
+                "22",
+                5,
+                0,
+                "Компрессоры автомобильные3",
+                subject="Компрессоры",
+                name="Автомобильный насос компрессор беспроводной",
+            ),
+            candidate("30", 6, 18, "Перфоратор электрический", subject="Перфораторы"),
+            candidate("31", 7, 0, "сани16", subject="Перфораторы", name="перфоратор"),
+            candidate("40", 8, 14, "Пылесос беспроводной 2", subject="Пылесосы"),
+            candidate("41", 9, 14, "Моющий", subject="Пылесосы"),
+            candidate("42", 10, 0, "сани6", subject="Пылесосы", name="пылесос"),
+        ],
+        {},
+    )
+
+    def group_of(article: str) -> str | None:
+        return placements[article].group_id
+
+    assert group_of("13") == group_of("10"), "«… фото» к своему товару"
+    assert group_of("14") == group_of("11"), "артикул уточняет артикул товара"
+    assert group_of("15") == group_of("10"), "соседи по артикулу приклеены к «Болгарка УШМ»"
+    assert group_of("22") == group_of("20"), "название — начало названия ровно одного товара"
+    assert group_of("31") == group_of("30"), "единственный товар предмета"
+    assert placements["42"] == Placement(None, None, False), "два товара в предмете и общее название — не угадываем"
+    assert placements["41"].group_id is None
+
+
+def test_a_card_with_unknown_photos_is_never_hidden_as_a_dummy() -> None:
+    placements = resolve_groups([candidate("1", 5, 22, "Товар"), candidate("2", 5, None, "Товар 2")], {})
+
+    assert placements["2"] == Placement(None, None, False)
 
 
 def test_a_pinned_main_wins_over_the_automatic_choice() -> None:
     placements = resolve_groups(CANDIDATES, {"102": override("102", "main")})
 
-    assert placements["102"] == Placement("imt:900", "main", True)
-    assert placements["101"] == Placement("imt:900", "member", False)
+    assert placements["102"] == Placement("g:101", "main", True)
+    assert placements["101"] == Placement("g:101", "member", False)
 
 
 def test_the_latest_pin_wins_when_two_mains_end_up_in_one_group() -> None:
@@ -64,7 +144,7 @@ def test_the_latest_pin_wins_when_two_mains_end_up_in_one_group() -> None:
 def test_an_unglued_dummy_can_be_attached_to_the_main() -> None:
     placements = resolve_groups(CANDIDATES, {"201": override("201", "member", "101")})
 
-    assert placements["201"] == Placement("imt:900", "member", True)
+    assert placements["201"] == Placement("g:101", "member", True)
     assert placements["101"].role == "main"
 
 
@@ -80,7 +160,7 @@ def test_a_detached_card_stands_alone() -> None:
     placements = resolve_groups(CANDIDATES, {"103": override("103", "solo")})
 
     assert placements["103"] == Placement(None, None, True)
-    assert placements["102"].group_id == "imt:900"
+    assert placements["102"].group_id == "g:101"
 
 
 class Sellers:
@@ -169,7 +249,7 @@ async def test_history_carries_ratings_groups_and_group_totals() -> None:
     assert (products["301"].rating, products["301"].rating_source) == (4.0, "reviews")
     assert (products["101"].group_role, products["101"].group_manual) == ("main", False)
     assert (products["201"].group_role, products["201"].group_manual) == ("member", True)
-    assert products["101"].group_id == products["201"].group_id == "imt:900"
+    assert products["101"].group_id == products["201"].group_id == "g:101"
     assert products["301"].group_id is None and products["301"].group_role is None
     assert products["101"].photo_count == 22
     assert products["101"].group_snapshots == [
@@ -241,4 +321,4 @@ def test_a_chain_of_attachments_ends_in_one_group() -> None:
 
     placements = resolve_groups(CANDIDATES, overrides)
 
-    assert placements["301"].group_id == placements["201"].group_id == placements["101"].group_id == "imt:900"
+    assert placements["301"].group_id == placements["201"].group_id == placements["101"].group_id == "g:101"

@@ -276,7 +276,10 @@ class ReviewSyncService:
                 raise ProductNotFoundError
             await self.reviews.save_group_override(seller_id, article, GROUP_MEMBER, main_article, now=now)
         else:
-            keys = group_keys(self._candidates(articles, {}), overrides)
+            by_article: dict[str, dict[str, list[int]]] = {}
+            for count in await self.reviews.history(seller_id, 7):
+                by_article.setdefault(count.article, {})[count.date.isoformat()] = list(count.ratings)
+            keys = group_keys(self._candidates(articles, by_article), overrides)
             for other, override in overrides.items():
                 if other != article and override.kind == GROUP_MAIN and keys.get(other) == keys[article]:
                     await self._unpin(seller_id, override, now=now)
@@ -299,7 +302,15 @@ class ReviewSyncService:
             return sum(days[max(days)]) if days else 0
 
         return [
-            GroupCandidate(article.article, article.imt_id, article.photo_count, latest_total(article.article))
+            GroupCandidate(
+                article.article,
+                article.imt_id,
+                article.photo_count,
+                latest_total(article.article),
+                vendor_code=article.vendor_code,
+                subject=article.subject_name,
+                name=article.name,
+            )
             for article in articles
         ]
 

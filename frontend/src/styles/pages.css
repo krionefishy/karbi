@@ -57,7 +57,7 @@
 .history-slider input { width: 100%; height: 2px; }
 .five-star-key { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; color: var(--warning); background: var(--warning-soft); border-radius: var(--radius-sm); font-size: 12px; white-space: nowrap; }
 .timeline-table { overflow: clip; }
-.timeline-grid { display: grid; grid-template-columns: minmax(240px, 2fr) repeat(7, minmax(78px, 1fr)); }
+.timeline-grid { display: grid; grid-template-columns: minmax(300px, 2.4fr) repeat(7, minmax(78px, 1fr)); }
 .timeline-head { position: sticky; z-index: 15; top: calc(var(--topbar) + 68px); isolation: isolate; background: var(--surface-sunken); border-bottom: 1px solid var(--line); }
 .timeline-head > div { display: flex; min-height: 48px; align-items: center; justify-content: center; flex-direction: column; background: var(--surface-sunken); border-left: 1px solid var(--line); color: var(--ink-muted); font-size: 12px; line-height: 16px; font-weight: 500; }
 .timeline-head > .today-cell { background: var(--accent-soft) !important; color: var(--accent); }
@@ -65,7 +65,7 @@
 .timeline-head b { margin-top: 2px; color: var(--ink); font-size: 12px; }
 .product-head { padding: 0 var(--space-4); }
 .product-block + .product-block { border-top: 1px solid var(--line); }
-.product-row { min-height: 64px; }
+.product-row { min-height: 96px; }
 .product-identity { position: relative; display: flex; min-width: 0; align-items: center; gap: 10px; padding: 10px var(--space-3) 10px var(--space-4); border-right: 1px solid var(--line); }
 .product-identity-ids { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .product-identity-text { display: flex; min-width: 0; flex: 1; justify-content: center; flex-direction: column; gap: 3px; }
@@ -82,7 +82,11 @@
 .product-identity a, .wb-article-link { color: var(--link); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
 .product-identity a:hover, .wb-article-link:hover { text-decoration-color: currentColor; }
 /* Рейтинг и группы «основной товар + болванки» */
-.product-identity-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.product-identity .product-identity-name { display: -webkit-box; overflow: hidden; font-size: 13px; line-height: 17px; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.product-identity .product-identity-ids { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.product-identity .product-identity-codes { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.product-identity .product-tags { flex-wrap: wrap; row-gap: 4px; }
+.product-identity-actions { display: flex; flex: none; align-self: stretch; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
 .product-identity .rating-badge { display: inline-flex; flex: none; align-items: center; gap: 3px; height: 20px; padding: 0 6px; color: var(--warning); background: var(--warning-soft); border-radius: var(--radius-full); font-family: var(--font-mono); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .product-identity .rating-badge-low { color: var(--negative); background: var(--negative-soft); }
 .product-identity .rating-badge-group { padding: 0 2px; color: var(--ink-muted); background: transparent; font-weight: 500; }
@@ -99,7 +103,7 @@
 .group-toggle:focus-visible, .row-menu-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .product-group + .product-group { border-top: 1px solid var(--line); }
 .product-group .product-block + .product-block { border-top: 1px solid var(--line); }
-.product-row-member { min-height: 54px; background: var(--surface-sunken); }
+.product-row-member { min-height: 80px; background: var(--surface-sunken); }
 .product-row-member .day-cell { background: var(--surface-sunken); }
 .product-row-member .day-cell:hover { background: var(--surface-hover); }
 .product-identity-member { padding-left: 46px; }
@@ -420,7 +424,7 @@
 
 @media (max-width: 1180px) {
   .page-container, .reviews-content { padding: var(--space-5); }
-  .timeline-grid { grid-template-columns: minmax(210px, 1.8fr) repeat(7, minmax(72px, 1fr)); }
+  .timeline-grid { grid-template-columns: minmax(280px, 2fr) repeat(7, minmax(72px, 1fr)); }
 }
 
 /* Возвраты WB */

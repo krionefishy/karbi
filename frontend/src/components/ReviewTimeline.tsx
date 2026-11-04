@@ -174,16 +174,16 @@ function ProductIdentity({ product, group, delta, open, onToggle, expanded, onEx
         </button>
       )}
       <div className="product-identity-text">
-        <span className="product-identity-title">
-          <strong title={product.name}>{product.name}</strong>
-          <RatingBadge product={product} />
-        </span>
+        <strong className="product-identity-name" title={product.name}>{product.name}</strong>
         <span className="product-identity-ids">
-          WB{" "}
-          <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
-            {product.article}
-          </a>
-          {product.vendor_code && <> · {product.vendor_code}</>}
+          <RatingBadge product={product} />
+          <span className="product-identity-codes">
+            WB{" "}
+            <a href={`https://www.wildberries.ru/catalog/${product.article}/detail.aspx`} target="_blank" rel="noreferrer">
+              {product.article}
+            </a>
+            {product.vendor_code && <> · {product.vendor_code}</>}
+          </span>
         </span>
         <span className="product-tags">
           {grouped && isMain ? (
@@ -200,34 +200,36 @@ function ProductIdentity({ product, group, delta, open, onToggle, expanded, onEx
           {member && product.photo_count === 0 && <span className="group-tag group-tag-dummy">без фото</span>}
           {member && product.group_manual && <span className="group-tag-note">привязана вручную</span>}
           {!grouped && product.imt_id !== null && <span className="product-card-id">карточка {product.imt_id}</span>}
+          {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
         </span>
       </div>
-      {delta !== null && delta !== 0 && <MovementBadge delta={delta} />}
-      <button
-        type="button"
-        className={`chart-toggle${open ? " chart-toggle-open" : ""}`}
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-label={`Карточка и динамика за ${CHART_DAYS} дней: ${product.name}`}
-        title={`Карточка товара и динамика за ${CHART_DAYS} дней`}
-      >
-        <BarChart2 size={15} />
-      </button>
-      {onMenu && (
+      <div className="product-identity-actions">
         <button
           type="button"
-          className={`row-menu-toggle${menuOpen ? " row-menu-toggle-open" : ""}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onMenu();
-          }}
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          aria-label={`Группа товара ${product.article}`}
+          className={`chart-toggle${open ? " chart-toggle-open" : ""}`}
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-label={`Карточка и динамика за ${CHART_DAYS} дней: ${product.name}`}
+          title={`Карточка товара и динамика за ${CHART_DAYS} дней`}
         >
-          <MoreHorizontal size={15} />
+          <BarChart2 size={15} />
         </button>
-      )}
+        {onMenu && (
+          <button
+            type="button"
+            className={`row-menu-toggle${menuOpen ? " row-menu-toggle-open" : ""}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onMenu();
+            }}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={`Группа товара ${product.article}`}
+          >
+            <MoreHorizontal size={15} />
+          </button>
+        )}
+      </div>
       {menuOpen && menu}
     </div>
   );
