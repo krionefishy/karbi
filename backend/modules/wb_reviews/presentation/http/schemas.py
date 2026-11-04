@@ -1,4 +1,5 @@
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -48,6 +49,18 @@ class ProductHistoryResponse(BaseModel):
     state: str
     snapshots: list[SnapshotResponse]
     card_snapshots: list[SnapshotResponse]
+    photo_count: int | None
+    rating: float | None
+    rating_source: Literal["wb", "group", "reviews"] | None
+    group_id: str | None
+    group_role: Literal["main", "member"] | None
+    group_manual: bool
+    group_snapshots: list[SnapshotResponse]
+
+
+class GroupChangeRequest(BaseModel):
+    action: Literal["pin_main", "attach", "detach", "reset"]
+    main_article: str | None = None
 
 
 class ReviewHistoryResponse(BaseModel):

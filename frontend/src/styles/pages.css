@@ -81,6 +81,46 @@
 .product-card-id { overflow: hidden; color: var(--ink-muted); text-overflow: ellipsis; white-space: nowrap; }
 .product-identity a, .wb-article-link { color: var(--link); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 2px; }
 .product-identity a:hover, .wb-article-link:hover { text-decoration-color: currentColor; }
+/* Рейтинг и группы «основной товар + болванки» */
+.product-identity-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.product-identity .rating-badge { display: inline-flex; flex: none; align-items: center; gap: 3px; height: 20px; padding: 0 6px; color: var(--warning); background: var(--warning-soft); border-radius: var(--radius-full); font-family: var(--font-mono); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.product-identity .rating-badge-low { color: var(--negative); background: var(--negative-soft); }
+.product-identity .rating-badge-group { padding: 0 2px; color: var(--ink-muted); background: transparent; font-weight: 500; }
+.product-identity .rating-badge-reviews { color: var(--ink-muted); background: transparent; border: 1px dashed var(--line-strong); font-weight: 500; }
+.product-identity .group-tag { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; color: var(--ink-secondary); border: 1px solid var(--line); border-radius: var(--radius-xs); font-size: 11px; white-space: nowrap; }
+.product-identity .group-tag-main { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.product-identity .group-tag-dummy { color: var(--ink-muted); border-style: dashed; border-color: var(--line-strong); }
+.product-identity .group-tag-note { font-size: 11px; white-space: nowrap; }
+.group-toggle, .row-menu-toggle { display: inline-flex; width: 24px; height: 24px; flex: none; align-items: center; justify-content: center; color: var(--ink); background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-xs); cursor: pointer; }
+.group-toggle svg { transition: transform .15s ease; }
+.group-toggle-open svg { transform: rotate(90deg); }
+.row-menu-toggle { color: var(--ink-muted); border-color: transparent; background: transparent; }
+.group-toggle:hover, .row-menu-toggle:hover, .row-menu-toggle-open { color: var(--ink); background: var(--surface-hover); border-color: var(--line); }
+.group-toggle:focus-visible, .row-menu-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.product-group + .product-group { border-top: 1px solid var(--line); }
+.product-group .product-block + .product-block { border-top: 1px solid var(--line); }
+.product-row-member { min-height: 54px; background: var(--surface-sunken); }
+.product-row-member .day-cell { background: var(--surface-sunken); }
+.product-row-member .day-cell:hover { background: var(--surface-hover); }
+.product-identity-member { padding-left: 46px; }
+.product-identity-member::before { content: ""; position: absolute; top: 0; bottom: 0; left: 27px; border-left: 1px dashed var(--line-strong); }
+.product-identity-member::after { content: ""; position: absolute; top: 50%; left: 27px; width: 12px; border-top: 1px dashed var(--line-strong); }
+.product-block-member:last-child .product-identity-member::before { bottom: 50%; }
+.product-identity-member strong { font-weight: 500; color: var(--ink-secondary); }
+.group-sum { color: var(--accent); }
+.row-menu { position: absolute; z-index: 15; top: calc(100% - 6px); right: 8px; display: grid; min-width: 250px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-md); }
+.row-menu button { padding: 8px 10px; color: var(--ink); background: transparent; border: 0; border-radius: var(--radius-sm); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.row-menu button:hover, .row-menu button:focus-visible { background: var(--surface-hover); outline: none; }
+.product-identity .row-menu-caption { padding: 4px 10px 2px; font-size: 11px; }
+.groups-toggle { height: var(--control-sm); padding: 0 10px; white-space: nowrap; }
+.attach-dialog { width: min(560px, 100%); }
+.attach-choices { display: grid; gap: 6px; max-height: 300px; overflow-y: auto; }
+.attach-choice { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.attach-choice-selected { background: var(--accent-soft); border-color: var(--accent); }
+.attach-choice > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.attach-choice strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.attach-choice small { color: var(--ink-muted); font-family: var(--font-mono); font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .group-toggle svg { transition: none; } }
 .day-cell { position: relative; display: flex; min-width: 0; align-items: center; justify-content: center; flex-direction: column; gap: 4px; padding: 8px 4px; background: var(--surface); border: 0; border-left: 1px solid var(--line); cursor: pointer; }
 .day-cell:hover { background: var(--surface-hover); }
 .day-empty { color: var(--ink-muted); cursor: default; font-size: 11px; text-align: center; }

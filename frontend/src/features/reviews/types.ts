@@ -26,7 +26,22 @@ export interface ProductReviewHistory {
   state: ArticleState;
   snapshots: DailyReviewSnapshot[];
   card_snapshots: DailyReviewSnapshot[];
+  photo_count: number | null;
+  rating: number | null;
+  rating_source: RatingSource | null;
+  group_id: string | null;
+  group_role: GroupRole | null;
+  group_manual: boolean;
+  group_snapshots: DailyReviewSnapshot[];
 }
+
+/** wb — рейтинг самой карточки из аналитики WB; group — рейтинг основного товара склейки;
+ *  reviews — наш расчёт по счётчикам отзывов, когда WB рейтинг не отдал. */
+export type RatingSource = "wb" | "group" | "reviews";
+
+export type GroupRole = "main" | "member";
+
+export type GroupAction = "pin_main" | "attach" | "detach" | "reset";
 
 export interface SellerReviewHistory {
   seller_id: string;

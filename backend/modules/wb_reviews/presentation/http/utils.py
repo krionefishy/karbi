@@ -53,6 +53,13 @@ def product_response(product: ProductHistory) -> ProductHistoryResponse:
         state=product.state,
         snapshots=[SnapshotResponse(**snapshot) for snapshot in product.snapshots],
         card_snapshots=[SnapshotResponse(**snapshot) for snapshot in product.card_snapshots],
+        photo_count=product.photo_count,
+        rating=product.rating,
+        rating_source=product.rating_source,
+        group_id=product.group_id,
+        group_role=product.group_role,
+        group_manual=product.group_manual,
+        group_snapshots=[SnapshotResponse(**snapshot) for snapshot in product.group_snapshots],
     )
 
 

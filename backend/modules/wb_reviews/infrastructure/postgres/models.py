@@ -111,3 +111,25 @@ class ReviewSyncJobModel(WBReviewsBase):
         Index("ix_wb_reviews_sync_run_sellers_due", "status", "next_attempt_at"),
         Index("ix_wb_reviews_sync_run_sellers_lease", "status", "lease_expires_at"),
     )
+
+
+class ProductGroupOverrideModel(WBReviewsBase):
+    """Ручные правки групп болванок: закреплённый основной, привязка, вывод из группы."""
+
+    __tablename__ = "product_group_overrides"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    main_article: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        CheckConstraint("kind IN ('main', 'member', 'solo')", name="ck_wb_reviews_group_overrides_kind"),
+        CheckConstraint(
+            "(kind = 'member' AND main_article IS NOT NULL) OR (kind = 'solo' AND main_article IS NULL) "
+            "OR kind = 'main'",
+            name="ck_wb_reviews_group_overrides_target",
+        ),
+        CheckConstraint("main_article IS NULL OR main_article <> article", name="ck_wb_reviews_group_overrides_self"),
+    )

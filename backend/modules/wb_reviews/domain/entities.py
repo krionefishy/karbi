@@ -39,3 +39,23 @@ class ReviewSyncRun:
     started_at: datetime | None
     finished_at: datetime | None
     jobs: tuple[ReviewSyncJob, ...] = ()
+
+
+GROUP_MAIN = "main"
+GROUP_MEMBER = "member"
+GROUP_SOLO = "solo"
+
+
+@dataclass(frozen=True, slots=True)
+class GroupOverride:
+    """Ручная правка группы болванок поверх склеек WB.
+
+    `member` — артикул привязан к `main_article`; `main` — закреплён основным
+    (с `main_article`, если до закрепления был привязан вручную: привязка
+    сохраняется); `solo` — выведен из группы.
+    """
+
+    article: str
+    kind: str
+    main_article: str | None
+    updated_at: datetime

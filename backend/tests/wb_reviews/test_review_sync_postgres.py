@@ -1,11 +1,13 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
 from backend.app.factory import Application
-from backend.modules.wb_core.infrastructure.postgres import SellerRepository
-from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel, SellerModel
+from backend.modules.wb_core.domain import MIRROR_REVIEWS, ReviewFact
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
+from backend.modules.wb_core.infrastructure.postgres.models import ArticleModel, OutboxEventModel, SellerModel
 from backend.modules.wb_reviews.application import ReviewSyncService
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_reviews.infrastructure.postgres.models import (
@@ -104,3 +106,66 @@ async def test_review_sync_http_endpoints_use_application_dependencies() -> None
             await session.execute(delete(ReviewSyncJobModel))
             await session.execute(delete(ReviewSyncRunModel))
             await session.commit()
+
+
+async def test_group_changes_and_ratings_go_through_http() -> None:
+    settings = load_settings("backend/shared/settings/config.test.yaml")
+    application = Application(settings)
+    app = application.get_app()
+    today = datetime.now(UTC).date()
+
+    async with app.router.lifespan_context(app):
+        seller = SellerModel(name="Review groups seller", catalog_sync_status="success")
+        async with application.database.session() as session:
+            session.add(seller)
+            await session.flush()
+            session.add_all(
+                [
+                    ArticleModel(seller_id=seller.id, article="101", name="Шуруповерт", imt_id=900, photo_count=22),
+                    ArticleModel(seller_id=seller.id, article="102", name="Шуруповерт", imt_id=900, photo_count=0),
+                    ArticleModel(seller_id=seller.id, article="201", name="Компрессор", imt_id=777, photo_count=0),
+                ]
+            )
+            await ReviewSyncRepository(session).upsert_daily_counts(
+                seller.id, today, {"101": (0, 0, 0, 1, 9), "102": (0, 0, 0, 0, 2), "201": (1, 0, 0, 0, 1)}
+            )
+            await MirrorRepository(session).replace_reviews(
+                seller.id,
+                [ReviewFact("101", (0, 0, 0, 1, 9), None, None, wb_rating=Decimal("4.90"))],
+                now=datetime.now(UTC),
+            )
+            await MirrorRepository(session).record_attempt(seller.id, MIRROR_REVIEWS, now=datetime.now(UTC))
+            await MirrorRepository(session).mark_collected(seller.id, MIRROR_REVIEWS, now=datetime.now(UTC))
+            await session.commit()
+
+        try:
+            token = await operator_token(application)
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as client:
+                base = f"/api/v1/wb/reviews/sellers/{seller.id}"
+
+                async def change(article: str, body: dict) -> int:
+                    return (await client.put(f"{base}/products/{article}/group", json=body)).status_code
+
+                attached = await change("201", {"action": "attach", "main_article": "101"})
+                no_target = await change("201", {"action": "attach"})
+                to_self = await change("201", {"action": "attach", "main_article": "201"})
+                missing = await change("999", {"action": "detach"})
+                bad_action = await change("201", {"action": "explode"})
+                history = await client.get(f"{base}/history")
+
+            assert (attached, no_target, to_self, missing, bad_action) == (204, 400, 400, 404, 422)
+            products = {product["article"]: product for product in history.json()["products"]}
+            assert (products["101"]["group_role"], products["101"]["rating"]) == ("main", 4.9)
+            assert (products["201"]["group_role"], products["201"]["group_manual"]) == ("member", True)
+            assert (products["201"]["rating"], products["201"]["rating_source"]) == (4.9, "group")
+            assert products["101"]["group_snapshots"][-1]["ratings"] == {"1": 1, "2": 0, "3": 0, "4": 1, "5": 12}
+            assert products["102"]["photo_count"] == 0
+        finally:
+            async with application.database.session() as session:
+                await ReviewSyncRepository(session).purge_seller(seller.id)
+                await session.execute(delete(SellerModel).where(SellerModel.id == seller.id))
+                await session.commit()

@@ -96,6 +96,8 @@ class ReviewFact:
 
     `latest` — до пяти самых свежих отзывов по дате, новые первыми. `None` — свежие не
     запоминали (сбор до появления поля), пустой кортеж — отзывов у карточки нет.
+    `wb_rating` — рейтинг, который WB показывает на витрине (воронка продаж); `None` —
+    WB карточку не вернул (болванка без показов) или рейтинг ещё не собирали.
     """
 
     article: str
@@ -103,6 +105,7 @@ class ReviewFact:
     with_photo: int | None
     with_video: int | None
     latest: tuple[LatestRating, ...] | None = None
+    wb_rating: Decimal | None = None
 
     @property
     def total(self) -> int:

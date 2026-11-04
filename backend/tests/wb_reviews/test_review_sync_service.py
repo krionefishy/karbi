@@ -5,6 +5,7 @@ from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.wb_core.application import ReviewMirror
 from backend.modules.wb_core.domain import Article, Seller
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
@@ -121,6 +122,14 @@ class HistoryReviews:
     async def history(self, seller_id: uuid.UUID, days: int) -> list[DailyRatings]:
         return self.rows
 
+    async def group_overrides(self, seller_id: uuid.UUID) -> dict:
+        return {}
+
+
+class NoRatings:
+    async def totals(self, seller_id: uuid.UUID) -> None:
+        return None
+
 
 async def test_history_reports_both_the_article_and_the_whole_card() -> None:
     seller_id = uuid.uuid4()
@@ -129,6 +138,7 @@ async def test_history_reports_both_the_article_and_the_whole_card() -> None:
         cast(AsyncSession, FakeSession()),
         cast(SellerRepository, sellers),
         cast(ReviewSyncRepository, HistoryReviews(seller_id)),
+        cast(ReviewMirror, NoRatings()),
     )
 
     history = await service.history(seller_id, 90)

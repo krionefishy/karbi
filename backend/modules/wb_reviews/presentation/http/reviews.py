@@ -8,8 +8,18 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from backend.app.http.principals import CurrentPrincipal
 from backend.modules.wb_core.application import SellerNotFoundError
-from backend.modules.wb_reviews.application import XLSX_MEDIA_TYPE, ReviewReportService, ReviewSyncService
-from backend.modules.wb_reviews.presentation.http.schemas import ReviewHistoryResponse, SyncRunResponse
+from backend.modules.wb_reviews.application import (
+    XLSX_MEDIA_TYPE,
+    GroupActionError,
+    ProductNotFoundError,
+    ReviewReportService,
+    ReviewSyncService,
+)
+from backend.modules.wb_reviews.presentation.http.schemas import (
+    GroupChangeRequest,
+    ReviewHistoryResponse,
+    SyncRunResponse,
+)
 from backend.modules.wb_reviews.presentation.http.utils import history_response, run_response
 
 router = APIRouter(prefix="/wb/reviews", tags=["wb-reviews"])
@@ -43,6 +53,26 @@ async def seller_history(
     except SellerNotFoundError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не найден") from error
     return history_response(history)
+
+
+@router.put("/sellers/{seller_id}/products/{article}/group", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def change_product_group(
+    seller_id: uuid.UUID,
+    article: str,
+    payload: GroupChangeRequest,
+    _: CurrentPrincipal,
+    service: FromDishka[ReviewSyncService],
+) -> Response:
+    try:
+        await service.change_group(seller_id, article, payload.action, payload.main_article)
+    except SellerNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Селлер не найден") from error
+    except ProductNotFoundError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Товар не найден у селлера") from error
+    except GroupActionError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 MAX_REPORT_DAYS = 366

@@ -222,6 +222,7 @@ class ReviewFactModel(WBCoreBase):
     count_with_photo: Mapped[int | None] = mapped_column(Integer, nullable=True)
     count_with_video: Mapped[int | None] = mapped_column(Integer, nullable=True)
     latest_ratings: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    wb_rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

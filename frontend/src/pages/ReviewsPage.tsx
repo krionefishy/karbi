@@ -14,6 +14,7 @@ import {
   downloadReviewReport,
   getLatestReviewSync,
   getSellerReviewHistory,
+  setProductGroup,
   startReviewSync,
 } from "../features/reviews/api";
 import {
@@ -26,7 +27,9 @@ import {
   updateSeller,
 } from "../features/sellers/api";
 import { applyFilters, collectSubjects, hasActiveFilters } from "../features/reviews/filters";
-import { latestCollectedDate, sortByMovement } from "../features/reviews/movement";
+import { buildGroups, filterGroups, sortGroupsByMovement } from "../features/reviews/groups";
+import { latestCollectedDate } from "../features/reviews/movement";
+import type { GroupAction } from "../features/reviews/types";
 import type { ArticleFilters as Filters } from "../features/reviews/filters";
 import type { ArticleState, Seller, SellerInput } from "../features/sellers/types";
 
@@ -134,10 +137,12 @@ export function ReviewsPage() {
     [products, articles],
   );
   const latestDate = useMemo(() => latestCollectedDate(products), [products]);
-  const visibleProducts = useMemo(
-    () => sortByMovement(applyFilters(products, filters), latestDate),
-    [products, filters, latestDate],
-  );
+  const groups = useMemo(() => buildGroups(products), [products]);
+  const visibleGroups = useMemo(() => {
+    const selection = filterGroups(groups, filters);
+    return { groups: sortGroupsByMovement(selection.groups, latestDate), revealed: selection.revealed };
+  }, [groups, filters, latestDate]);
+  const shownProducts = visibleGroups.groups.reduce((count, group) => count + 1 + group.members.length, 0);
   const visibleArticles = useMemo(() => applyFilters(articles, filters), [articles, filters]);
   const filtersActive = hasActiveFilters(filters);
   const processedSellers = reviewSync
@@ -184,6 +189,13 @@ export function ReviewsPage() {
     },
   });
   const retryMutation = useMutation({ mutationFn: retrySellerSync, onSuccess: refresh });
+  const groupMutation = useMutation({
+    mutationFn: ({ article, action, mainArticle }: { article: string; action: GroupAction; mainArticle?: string }) =>
+      setProductGroup(sellerId, article, action, mainArticle ?? null),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["wb-review-history", sellerId] });
+    },
+  });
   const reviewSyncMutation = useMutation({
     mutationFn: startReviewSync,
     onSuccess: async () => {
@@ -334,12 +346,27 @@ export function ReviewsPage() {
               <ArticleFilters
                 filters={filters}
                 subjects={subjects}
-                shown={visibleProducts.length}
+                shown={shownProducts}
                 total={products.length}
                 onChange={setFilters}
               />
-              {visibleProducts.length ? (
-                <ReviewTimeline products={visibleProducts} latestDate={latestDate} />
+              {visibleGroups.groups.length ? (
+                <ReviewTimeline
+                  groups={visibleGroups.groups}
+                  revealed={visibleGroups.revealed}
+                  attachTargets={groups.map((group) => group.main)}
+                  latestDate={latestDate}
+                  onGroupAction={(article, action, mainArticle) =>
+                    groupMutation.mutate({ article, action, mainArticle })
+                  }
+                  groupError={
+                    groupMutation.isError
+                      ? groupMutation.error instanceof ApiError
+                        ? groupMutation.error.message
+                        : "Не удалось изменить группу"
+                      : undefined
+                  }
+                />
               ) : (
                 <NothingFound onReset={() => setFilters({ query: "", subjects: [] })} />
               )}

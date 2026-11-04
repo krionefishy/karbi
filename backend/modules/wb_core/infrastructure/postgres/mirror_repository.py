@@ -263,6 +263,7 @@ class MirrorRepository:
                     "count_with_photo": fact.with_photo,
                     "count_with_video": fact.with_video,
                     "latest_ratings": _encode_latest(fact.latest),
+                    "wb_rating": fact.wb_rating,
                     "collected_at": now,
                 }
                 for fact in facts
@@ -284,6 +285,7 @@ class MirrorRepository:
                 with_photo=row.count_with_photo,
                 with_video=row.count_with_video,
                 latest=_decode_latest(row.latest_ratings),
+                wb_rating=row.wb_rating,
             )
             for row in rows
         }

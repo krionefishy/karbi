@@ -6,9 +6,10 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.modules.wb_reviews.domain import DailyRatings, ReviewSyncRun
+from backend.modules.wb_reviews.domain import DailyRatings, GroupOverride, ReviewSyncRun
 from backend.modules.wb_reviews.infrastructure.postgres.models import (
     DailyReviewCountModel,
+    ProductGroupOverrideModel,
     ReviewSyncJobModel,
     ReviewSyncRunModel,
     TrackedSellerModel,
@@ -46,6 +47,35 @@ class ReviewSyncRepository:
         renders a job whose seller is gone as «Удалённый селлер»."""
         await self.untrack(seller_id)
         await self.session.execute(delete(DailyReviewCountModel).where(DailyReviewCountModel.seller_id == seller_id))
+        await self.session.execute(
+            delete(ProductGroupOverrideModel).where(ProductGroupOverrideModel.seller_id == seller_id)
+        )
+
+    async def group_overrides(self, seller_id: uuid.UUID) -> dict[str, GroupOverride]:
+        rows = await self.session.scalars(
+            select(ProductGroupOverrideModel).where(ProductGroupOverrideModel.seller_id == seller_id)
+        )
+        return {row.article: GroupOverride(row.article, row.kind, row.main_article, row.updated_at) for row in rows}
+
+    async def save_group_override(
+        self, seller_id: uuid.UUID, article: str, kind: str, main_article: str | None, *, now: datetime
+    ) -> None:
+        statement = insert(ProductGroupOverrideModel).values(
+            seller_id=seller_id, article=article, kind=kind, main_article=main_article, updated_at=now
+        )
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "article"],
+                set_={"kind": kind, "main_article": main_article, "updated_at": now},
+            )
+        )
+
+    async def delete_group_override(self, seller_id: uuid.UUID, article: str) -> None:
+        await self.session.execute(
+            delete(ProductGroupOverrideModel).where(
+                ProductGroupOverrideModel.seller_id == seller_id, ProductGroupOverrideModel.article == article
+            )
+        )
 
     async def lock_run_creation(self) -> None:
         """Serialize sync-run creation across API and scheduler processes."""

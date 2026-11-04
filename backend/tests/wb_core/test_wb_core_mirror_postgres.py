@@ -1,7 +1,8 @@
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -66,12 +67,18 @@ def fbo(article: str, quantity: int, to_client: int = 0) -> FBOStockRow:
 
 
 class FakeAnalytics(WBAnalyticsClient):
-    def __init__(self, rows: list[FBOStockRow]) -> None:
+    def __init__(self, rows: list[FBOStockRow], ratings: dict[str, Decimal] | Exception | None = None) -> None:
         super().__init__(make_gateway())
         self.rows = rows
+        self.ratings = ratings if ratings is not None else {}
 
     async def stocks(self, seller_id: str) -> list[FBOStockRow]:
         return list(self.rows)
+
+    async def feedback_ratings(self, seller_id: str, date_from: date, date_to: date) -> dict[str, Decimal]:
+        if isinstance(self.ratings, Exception):
+            raise self.ratings
+        return dict(self.ratings)
 
 
 def order(
@@ -350,6 +357,22 @@ async def test_reviews_are_mirrored_for_every_known_card(database: Database, sel
     )
     assert totals[VACUUM].latest == ()
     assert totals["3003"].latest is None
+
+
+async def test_wb_ratings_are_mirrored_and_survive_a_failed_funnel(database: Database, seller: uuid.UUID) -> None:
+    moment = datetime(2026, 9, 13, 4, 0, tzinfo=UTC)
+
+    await mirror(database, analytics=FakeAnalytics([], {FAN: Decimal("4.90")})).collect_reviews(seller, now=moment)
+    await mirror(database, analytics=FakeAnalytics([], WBTemporaryError("429"))).collect_reviews(
+        seller, now=moment + timedelta(days=1)
+    )
+
+    async with database.session() as session:
+        totals = await ReviewMirror(session).totals(seller)
+    assert totals is not None
+    assert totals[FAN].wb_rating == Decimal("4.90")
+    assert totals[VACUUM].wb_rating is None
+    assert totals[FAN].total == 10
 
 
 async def test_catalog_sync_updates_the_registry_status(database: Database, seller: uuid.UUID) -> None:

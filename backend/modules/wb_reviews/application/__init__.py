@@ -10,8 +10,11 @@ from backend.modules.wb_reviews.application.report import (
     ReviewReportService,
 )
 from backend.modules.wb_reviews.application.sync import (
+    GROUP_ACTIONS,
+    GroupActionError,
     MaintenanceReport,
     ProductHistory,
+    ProductNotFoundError,
     ReviewHistory,
     ReviewSyncService,
     SyncOverview,
@@ -20,6 +23,9 @@ from backend.modules.wb_reviews.application.sync import (
 __all__ = [
     "AUTOMATION_ID",
     "DESCRIPTION",
+    "GROUP_ACTIONS",
+    "GroupActionError",
+    "ProductNotFoundError",
     "TITLE",
     "XLSX_MEDIA_TYPE",
     "MaintenanceReport",

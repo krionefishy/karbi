@@ -2,6 +2,8 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from backend.modules.wb_core.domain import WarehouseRemain
@@ -12,6 +14,8 @@ from backend.modules.wb_core.infrastructure.wb.json_client import WBJsonClient
 ANALYTICS_BUCKET = "analytics"
 PAGE_LIMIT = 250_000
 MAX_PAGES = 100
+FUNNEL_PATH = "/api/analytics/v3/sales-funnel/products"
+FUNNEL_PAGE_LIMIT = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +72,63 @@ class WBAnalyticsClient(WBJsonClient):
                 return collected
             offset += len(items)
         raise WBPermanentError(f"{self.api_name}: отчёт по остаткам не закончился за {MAX_PAGES} страниц")
+
+    async def feedback_ratings(self, seller_id: str, date_from: date, date_to: date) -> dict[str, Decimal]:
+        """Рейтинг по отзывам, который WB показывает на витрине, по каждому nmID воронки продаж.
+
+        Воронка отдаёт только карточки с активностью за период: болванки без
+        показов в ответ не попадают, и их отсутствие не значит «рейтинга нет».
+        Ноль WB ставит карточке без отзывов — такой рейтинг не сохраняем.
+        """
+        ratings: dict[str, Decimal] = {}
+        offset = 0
+        for _ in range(MAX_PAGES):
+            payload = await self.request(
+                "POST",
+                FUNNEL_PATH,
+                seller_id,
+                json={
+                    "selectedPeriod": {"start": date_from.isoformat(), "end": date_to.isoformat()},
+                    "limit": FUNNEL_PAGE_LIMIT,
+                    "offset": offset,
+                },
+            )
+            products = self._funnel_products(payload)
+            for item in products:
+                product = item.get("product")
+                if not isinstance(product, dict):
+                    continue
+                article = product.get("nmId")
+                rating = self._rating(product.get("feedbackRating"))
+                if isinstance(article, int) and rating is not None:
+                    ratings[str(article)] = rating
+            if len(products) < FUNNEL_PAGE_LIMIT:
+                return ratings
+            offset += len(products)
+        raise WBPermanentError(f"{self.api_name}: воронка продаж не закончилась за {MAX_PAGES} страниц")
+
+    def _funnel_products(self, payload: Any) -> list[dict]:
+        if payload is None:
+            return []
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            raise WBPermanentError(f"{self.api_name}: в ответе воронки нет объекта data")
+        products = data.get("products")
+        if products is None:
+            return []
+        if not isinstance(products, list):
+            raise WBPermanentError(f"{self.api_name}: data.products не список")
+        return [item for item in products if isinstance(item, dict)]
+
+    @staticmethod
+    def _rating(value: Any) -> Decimal | None:
+        if isinstance(value, bool) or not isinstance(value, int | float | str):
+            return None
+        try:
+            rating = Decimal(str(value)).quantize(Decimal("0.01"))
+        except InvalidOperation:
+            return None
+        return rating if Decimal("0") < rating <= Decimal("5") else None
 
     def _items(self, payload: Any) -> list[dict]:
         if payload is None:

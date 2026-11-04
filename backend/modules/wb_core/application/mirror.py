@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from backend.modules.wb_core.domain import (
@@ -55,6 +56,7 @@ LIVE_ORDERS_MONTHS = 3
 ORDERS_OVERLAP = timedelta(days=3)
 WB_TIMEZONE = ZoneInfo("Europe/Moscow")
 MAX_ADVERT_WINDOW = 31
+RATING_WINDOW_DAYS = 30
 SALES_REPORT_CHECKED_SUMS = (
     "retail_amount_sum",
     "for_pay_sum",
@@ -367,9 +369,14 @@ class MirrorService:
         except (WBPermanentError, WBTemporaryError) as error:
             await self._fail(seller_id, MIRROR_REVIEWS, str(error))
             raise
+        wb_ratings = await self._wb_ratings(seller_id, stamp)
         async with self.database.session() as session:
             await self._ensure_alive(session, seller_id)
             sellers = SellerRepository(session)
+            mirror = MirrorRepository(session)
+            if wb_ratings is None:
+                previous = await mirror.reviews(seller_id)
+                wb_ratings = {article: fact.wb_rating for article, fact in previous.items() if fact.wb_rating}
             known = {article.article for article in await sellers.list_articles(seller_id)}
             unknown = self._unknown_cards(aggregation, known)
             await sellers.ensure_feedback_articles(seller_id, unknown)
@@ -381,16 +388,32 @@ class MirrorService:
                     with_photo=aggregation.media.get(article, NO_MEDIA)[0],
                     with_video=aggregation.media.get(article, NO_MEDIA)[1],
                     latest=self._latest_ratings(aggregation, article),
+                    wb_rating=wb_ratings.get(article),
                 )
                 for article in sorted(articles)
             ]
-            mirror = MirrorRepository(session)
             await mirror.replace_reviews(seller_id, facts, now=stamp)
             await mirror.mark_collected(seller_id, MIRROR_REVIEWS, now=stamp)
             await session.commit()
         outcome = ReviewsOutcome(len(facts), aggregation.feedback_count)
         self.logger.info("reviews_collected", extra={"seller_id": str(seller_id), **asdict(outcome)})
         return outcome
+
+    async def _wb_ratings(self, seller_id: uuid.UUID, stamp: datetime) -> dict[str, Decimal] | None:
+        """Рейтинги витрины за последние 30 дней; `None` — не получилось, остаются прежние.
+
+        Рейтинг — добавка к счётчикам: его сбой не должен стоить суточного снимка отзывов.
+        """
+        today = stamp.astimezone(WB_TIMEZONE).date()
+        try:
+            return await self.analytics.feedback_ratings(
+                str(seller_id), today - timedelta(days=RATING_WINDOW_DAYS - 1), today
+            )
+        except Exception as error:
+            self.logger.warning(
+                "wb_ratings_collection_failed", extra={"seller_id": str(seller_id), "error": str(error)}
+            )
+            return None
 
     async def collect_orders(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> OrdersOutcome:
         """Живые задания с перекрытием и архив по месяцам, которых ещё нет.
