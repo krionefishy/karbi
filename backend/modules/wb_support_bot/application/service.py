@@ -1,5 +1,4 @@
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -269,7 +268,6 @@ class SupportBotService(ReplyStatsMixin):
         reply_prompt_version: str = "r3",
         reply_engine: str = "single",
         daily_cap: int = 2500,
-        panel_prices: Mapping[str, tuple[int, int]] | None = None,
         limits: Thresholds = Thresholds(),
     ) -> None:
         self.classifier_mode = classifier_mode
@@ -278,7 +276,6 @@ class SupportBotService(ReplyStatsMixin):
         self.reply_prompt_version = reply_prompt_version
         self.reply_engine = reply_engine
         self.daily_cap = daily_cap
-        self.panel_prices = dict(panel_prices or {})
         self.limits = limits
         self.session = session
         self.sellers = sellers
@@ -339,7 +336,6 @@ class SupportBotService(ReplyStatsMixin):
             reply_gate_mode=self.reply_gate_mode,
             reply_prompt_version=self.reply_prompt_version,
             reply_engine=self.reply_engine,
-            prices=self.panel_prices,
             limits=self.limits,
         )
 

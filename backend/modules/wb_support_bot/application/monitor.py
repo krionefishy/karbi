@@ -5,7 +5,6 @@
 """
 
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -96,16 +95,7 @@ def monitor_limits(panel: PanelMonitorConfig, base: Thresholds = Thresholds()) -
         panel_reserve_crit=panel.reserve_crit_percent / 100,
         panel_degraded_warn=panel.degraded_warn,
         panel_degraded_crit=panel.degraded_crit,
-        panel_cost_warn=panel.cost_warn_kopecks / 100,
-        panel_cost_crit=panel.cost_crit_kopecks / 100,
-        panel_needs_manager_low=panel.needs_manager_low_percent / 100,
-        panel_needs_manager_high=panel.needs_manager_high_percent / 100,
     )
-
-
-def monitor_prices(panel: PanelMonitorConfig) -> dict[str, tuple[int, int]]:
-    """Цены моделей для карточки «Цена решения»: рубли за 1 млн токенов входа и выхода."""
-    return {price.model: (price.rub_in, price.rub_out) for price in panel.prices}
 
 
 def history_days(events: list[MonitorEventModel], now: datetime) -> list[MonitorDay]:
@@ -140,7 +130,6 @@ class BotMonitor:
         reply_gate_mode: str,
         reply_prompt_version: str,
         reply_engine: str = "single",
-        prices: Mapping[str, tuple[int, int]] | None = None,
         limits: Thresholds = Thresholds(),
     ) -> None:
         self.session = session
@@ -150,7 +139,6 @@ class BotMonitor:
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
         self.reply_engine = reply_engine
-        self.prices = dict(prices or {})
         self.limits = limits
 
     async def snapshot(
@@ -197,9 +185,7 @@ class BotMonitor:
         ]
         continues = continue_stats(rows)
         asked_health = health(day_rows, now)
-        panel = panel_stats(
-            [row for row in rows if row.requested_at >= now - timedelta(days=limits.panel_window_days)], self.prices
-        )
+        panel = panel_stats([row for row in rows if row.requested_at >= now - timedelta(days=limits.panel_window_days)])
         outbox = OutboxRepository(self.session)
         return Snapshot(
             now=now,
@@ -244,11 +230,6 @@ class BotMonitor:
             panel_arbiter=panel.arbiter,
             panel_reserve=panel.reserve,
             panel_degraded=panel.degraded,
-            panel_needs_known=panel.needs_manager_known,
-            panel_needs_manager=panel.needs_manager,
-            panel_costed=panel.costed,
-            panel_cost_rub=panel.cost_rub,
-            panel_unpriced_models=panel.unpriced_models,
         )
 
     async def record(self, seller_id: uuid.UUID, now: datetime) -> Severity:

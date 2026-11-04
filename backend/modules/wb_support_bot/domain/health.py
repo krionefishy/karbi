@@ -57,10 +57,6 @@ class Thresholds:
     panel_reserve_crit: float = 0.20
     panel_degraded_warn: int = 1
     panel_degraded_crit: int = 3
-    panel_cost_warn: float = 0.06
-    panel_cost_crit: float = 0.12
-    panel_needs_manager_low: float = 0.20
-    panel_needs_manager_high: float = 0.90
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,11 +103,6 @@ class Snapshot:
     panel_arbiter: int = 0
     panel_reserve: int = 0
     panel_degraded: int = 0
-    panel_needs_known: int = 0
-    panel_needs_manager: int = 0
-    panel_costed: int = 0
-    panel_cost_rub: float = 0.0
-    panel_unpriced_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,10 +143,6 @@ def _age_minutes(now: datetime, moment: datetime) -> int:
 
 def _limit(share: float) -> str:
     return f"{share * 100:.0f}%"
-
-
-def _rub(value: float, digits: int = 3) -> str:
-    return f"{value:.{digits}f} ₽".replace(".", ",")
 
 
 PATH_LABEL = {
@@ -252,26 +239,6 @@ def panel_checks(s: Snapshot, limits: Thresholds) -> list[Check]:
             "Резерв значит, что основной арбитр не ответил; «без решения» — диалог держится без отправки. "
             "Проверьте доступ к Cloud.ru и журнал консьюмера ответов.",
         ),
-        _panel_cost(s, limits, window),
-        Check(
-            "panel_needs_manager",
-            GROUP_PANEL,
-            "Флаг «нужен менеджер» различает диалоги",
-            Severity.NODATA
-            if s.panel_needs_known < limits.panel_min_sample
-            else Severity.WARN
-            if not (
-                limits.panel_needs_manager_low
-                <= s.panel_needs_manager / s.panel_needs_known
-                <= limits.panel_needs_manager_high
-            )
-            else Severity.OK,
-            f"{_percent(s.panel_needs_manager, s.panel_needs_known)} "
-            f"({s.panel_needs_manager} из {s.panel_needs_known} решений {window})",
-            f"коридор {_limit(limits.panel_needs_manager_low)}–{_limit(limits.panel_needs_manager_high)}: "
-            f"это не качество, а проверка, что флаг не залип",
-            "Доля у края коридора: флаг ставится почти всегда или почти никогда. Проверьте промпт и разбор ответа.",
-        ),
         Check(
             "panel_paths",
             GROUP_PANEL,
@@ -287,41 +254,6 @@ def panel_checks(s: Snapshot, limits: Thresholds) -> list[Check]:
         ),
     ]
     return checks
-
-
-def _panel_cost(s: Snapshot, limits: Thresholds, window: str) -> Check:
-    """Цена решения: средняя по токенам голосов и ценам моделей из настройки."""
-    threshold = (
-        f"до {_rub(limits.panel_cost_warn, 2)} — норма, от {_rub(limits.panel_cost_crit, 2)} — проблема "
-        f"(в A/B было около 0,03 ₽, максимум 0,055 ₽)"
-    )
-    hint = "Цена считается по токенам судей и арбитра и ценам моделей из настройки support_bot.panel.prices."
-    if s.panel_unpriced_models:
-        return Check(
-            "panel_cost",
-            GROUP_PANEL,
-            "Цена решения",
-            Severity.NODATA,
-            "нет цены для моделей: " + ", ".join(s.panel_unpriced_models),
-            threshold,
-            "Добавьте цену модели (рубли за 1 млн токенов) в support_bot.panel.prices, иначе цену считать не из чего.",
-        )
-    if s.panel_costed < limits.panel_min_sample:
-        return Check("panel_cost", GROUP_PANEL, "Цена решения", Severity.NODATA, None, threshold, hint)
-    average = s.panel_cost_rub / s.panel_costed
-    return Check(
-        "panel_cost",
-        GROUP_PANEL,
-        "Цена решения",
-        Severity.CRIT
-        if average >= limits.panel_cost_crit
-        else Severity.WARN
-        if average >= limits.panel_cost_warn
-        else Severity.OK,
-        f"в среднем {_rub(average)} за решение, всего {_rub(s.panel_cost_rub, 2)} {window} ({s.panel_costed} решений)",
-        threshold,
-        hint,
-    )
 
 
 def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Check]:
