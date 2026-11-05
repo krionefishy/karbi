@@ -1,0 +1,157 @@
+/* Адаптив. Подключается последним: только уточняет десктопную вёрстку на узких экранах.
+   До 1024px сайдбар сворачивается до иконок, до 768px становится выезжающим меню.
+   Широкие таблицы прокручиваются внутри своего контейнера; в карточки до 1024px
+   превращаются только реестры селлеров и сотрудников. */
+
+.shell-menu-button, .shell-menu-close, .shell-backdrop { display: none; }
+
+@media (max-width: 1023px) {
+  body { min-width: 0; }
+  .shell, .shell-collapsed { grid-template-columns: 64px minmax(0, 1fr); }
+  .shell-brand { justify-content: center; padding: 0; }
+  .shell-brand .wordmark, .shell-collapse { display: none; }
+  .shell-brand::before { content: "MA"; font-weight: 700; letter-spacing: -0.02em; }
+  .shell-links a span, .shell-link span, .shell-user-text { display: none; }
+  .shell-links a, .shell-link { justify-content: center; padding: 0; }
+  .shell-user { justify-content: center; padding: 0; flex-direction: column; }
+
+  /* Реестры селлеров и сотрудников — карточки: подпись поля берётся из data-label. */
+  .registry-table:has(> .registry-row, > .staff-row) { overflow: visible; background: transparent; border: 0; box-shadow: none; }
+  .registry-head, .staff-head { display: none; }
+  .registry-row, .staff-row {
+    min-width: 0; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-3); padding: var(--space-4); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--radius-md);
+  }
+  .registry-row:last-child, .staff-row:last-child { border-bottom: 1px solid var(--line); }
+  .registry-row > *, .staff-row > * { padding: 0; }
+  .registry-row > [data-label]::before, .staff-row > [data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 2px;
+    color: var(--ink-muted); font-size: 12px; font-weight: 400;
+  }
+  .registry-row > .catalog-state, .registry-row > .egress-state { display: block; white-space: normal; }
+  .registry-row > .registry-name, .staff-row > .registry-name, .registry-automations { grid-column: 1 / -1; }
+  .registry-row > .registry-name strong, .staff-row > .registry-name strong { font-size: 15px; line-height: 20px; }
+  .registry-row > .registry-row-actions, .staff-row > .registry-row-actions {
+    grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-end;
+    margin: var(--space-1) calc(-1 * var(--space-2)) calc(-1 * var(--space-2)); padding-top: var(--space-2); border-top: 1px solid var(--line);
+  }
+  .registry-row-actions button { width: 44px; height: 44px; }
+}
+
+@media (max-width: 767px) {
+  /* Меню: сайдбар уезжает за левый край и выезжает по кнопке в шапке. */
+  .shell, .shell-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .shell-nav {
+    position: fixed; z-index: 50; top: 0; bottom: 0; left: 0;
+    width: min(300px, calc(100vw - 56px)); height: 100dvh;
+    transform: translateX(-100%); transition: transform .2s ease; box-shadow: var(--shadow-lg);
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .shell-menu-open .shell-nav { transform: none; }
+  .shell-backdrop { display: block; position: fixed; z-index: 40; inset: 0; background: var(--overlay); }
+  .shell-brand { justify-content: space-between; padding: 0 0 0 10px; }
+  .shell-brand::before { content: none; }
+  .shell-brand .wordmark { display: block; }
+  .shell-menu-close { display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; color: var(--ink-muted); background: transparent; border: 0; border-radius: var(--radius-sm); cursor: pointer; }
+  .shell-links a span, .shell-link span, .shell-user-text { display: flex; }
+  .shell-links a span, .shell-link span { display: inline; }
+  .shell-links a, .shell-link { justify-content: flex-start; height: 44px; padding: 0 10px; font-size: 14px; }
+  .shell-user { justify-content: flex-start; padding: 0 0 0 4px; flex-direction: row; }
+
+  /* Шапка: кнопка меню, крошки ужимаются, инструменты справа. */
+  .shell-menu-button { display: inline-flex; flex: none; margin-left: -8px; }
+  .shell-top { gap: var(--space-2); padding: 0 var(--space-4); }
+  .breadcrumb { min-width: 0; overflow: hidden; }
+  .breadcrumb > a:not(:only-child), .breadcrumb > span[aria-hidden] { display: none; }
+  .breadcrumb > a:only-child { color: var(--ink); font-weight: 500; }
+  .breadcrumb-current { overflow: hidden; text-overflow: ellipsis; }
+  .shell-top-tools { min-width: 0; flex: none; }
+  .seller-switcher-trigger { max-width: 160px; }
+  .seller-switcher-trigger small { display: none; }
+  .seller-switcher-menu, .popover-menu { width: min(360px, calc(100vw - 32px)); }
+
+  /* Страница */
+  .page-container, .reviews-content { padding: var(--space-4); }
+  .automations-page, .sellers-page { padding-top: var(--space-4); padding-bottom: var(--space-8); }
+  .page-heading, .reviews-heading { align-items: stretch; gap: var(--space-3); }
+  .review-sync-actions { margin-left: 0; justify-content: flex-start; }
+  .automation-grid { grid-template-columns: minmax(0, 1fr); }
+  .automation-meta > div { grid-template-columns: 112px minmax(0, 1fr); }
+
+  /* Вход */
+  .login-page { padding: var(--space-6) var(--space-4); }
+  .login-panel { width: 100%; max-width: 400px; padding: var(--space-6) var(--space-5) var(--space-5); }
+
+  /* Диалоги на всю ширину с отступом; высокий диалог прокручивается внутри оверлея, а не обрезается. */
+  .modal-overlay { overflow-y: auto; padding: var(--space-4); overscroll-behavior: contain; }
+  .seller-dialog, .delete-dialog, .attach-dialog { width: 100%; max-width: 100%; margin: auto 0; padding: var(--space-5); }
+  .dialog-close { width: 40px; height: 40px; top: 8px; right: 8px; }
+  .dialog-actions { flex-wrap: wrap; }
+  .dialog-actions > button { flex: 1 1 auto; justify-content: center; }
+
+  /* Шапка с переключателем селлера: заголовок страницы и так есть в h1, место отдаём селлеру. */
+  .shell-top:has(.seller-switcher) .breadcrumb { display: none; }
+  .shell-top:has(.seller-switcher) .shell-top-tools { flex: 1; justify-content: flex-end; }
+  .shell-top .seller-switcher { min-width: 0; flex: 1; justify-content: flex-end; }
+  .shell-top .seller-switcher-pick { min-width: 0; flex: 1; }
+  .shell-top .seller-switcher-trigger { width: 100%; max-width: none; }
+  .shell-top .seller-switcher-trigger strong { flex: 1; text-align: left; }
+
+  /* Вкладки — одна строка, лишнее прокручивается пальцем, без переноса и выравнивания вправо. */
+  .mode-switch, .reviews-heading .mode-switch {
+    flex-wrap: nowrap; justify-content: flex-start; gap: var(--space-4); max-width: 100%;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+  }
+  .mode-switch::-webkit-scrollbar { display: none; }
+  .mode-switch button { height: var(--control-lg); }
+  .reviews-heading .mode-switch { flex: 1 1 100%; border-bottom: 1px solid var(--line); }
+
+  /* Кнопки в шапке страницы — одной строкой с переносом, а не столбиком. */
+  .heading-actions, .registry-actions { flex-wrap: wrap; }
+
+  /* Плашки с кнопкой внутри: текст сплошным абзацем, кнопка ниже на всю ширину. */
+  .checklist-notice:has(> button), .fbs-notice:has(> button) { display: block; }
+  .checklist-notice > button, .fbs-notice > button { display: flex; width: 100%; justify-content: center; margin: var(--space-3) 0 0 !important; }
+
+  /* Плитки показателей: простые — по две в ряд, с расшифровкой — по одной. */
+  .chats-summary { grid-template-columns: minmax(0, 1fr); }
+  .chats-summary:not(:has(dl)) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sc-kpi-blocks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sc-kpi-block { padding: var(--space-3) var(--space-4); }
+  .sc-kpi-block + .sc-kpi-block { border-left: 0; }
+  .sc-kpi-block:nth-child(even) { border-left: 1px solid var(--line); }
+  .sc-kpi-block:nth-child(n + 3) { border-top: 1px solid var(--line); }
+  .penalties-totals article { flex: 1 1 140px; min-width: 0; }
+
+  /* Тулбары с полями: поля тянутся по ширине и не выталкивают страницу вбок. */
+  .checklist-toolbar { flex-wrap: wrap; }
+  .checklist-toolbar input[type="search"], .checklist-toolbar input.docs-search { width: 100%; }
+  .checklist-toolbar .penalties-field { flex: 1 1 140px; min-width: 0; }
+  .penalties-field select, .penalties-field input { width: 100%; min-width: 0; }
+  .filter-search { min-width: 0; flex-basis: 100%; max-width: none; }
+  .card-toolbar .card-search { min-width: 0; flex: 1 1 100%; }
+
+  /* Строки настроек «название | поле | кнопка»: поле уходит на вторую строку. */
+  .stocks-warehouse-row, .podsort-seller-row, .fin-seller-row, .podsort-warehouses .stocks-warehouse-row {
+    grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--space-2); padding-top: var(--space-2); padding-bottom: var(--space-2);
+  }
+  .stocks-warehouse-row > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+  .stocks-warehouse-row select { width: 100%; }
+
+  /* Стикеры коробов: файл и текстовое поле по ширине карточки. */
+  .box-stickers-file { align-self: stretch; min-width: 0; }
+  .box-stickers-file input { max-width: 100%; }
+  .box-stickers-text { min-width: 0; }
+
+  /* Контроль скриншотов: загрузка и список друг под другом. */
+  .sc-columns { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+
+  /* Поля ввода: 16px, иначе iOS приближает страницу при фокусе. */
+  input, select, textarea { font-size: 16px; }
+}
+
+/* Подсказки горячих клавиш бессмысленны без клавиатуры. */
+@media (hover: none) and (pointer: coarse) {
+  .sca-hint { display: none; }
+}

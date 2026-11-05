@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   Bot,
   LogOut,
+  Menu,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -11,9 +12,10 @@ import {
   Sun,
   UserRound,
   Users,
+  X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import { adminEntryUrl, workspaceUrl } from "../features/admin/entry";
 import { logout } from "../features/auth/api";
@@ -44,6 +46,22 @@ export function Shell({ current, seller, actions, admin = false, children }: She
   const navigate = useNavigate();
   const { theme, toggle } = useTheme();
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  // На телефоне навигация — выезжающее меню; закрывается при переходе и по Escape.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
 
   useEffect(() => {
     try {
@@ -66,8 +84,8 @@ export function Shell({ current, seller, actions, admin = false, children }: She
   const rootPath = admin ? "/admin/users" : "/automations";
 
   return (
-    <div className={`shell ${collapsed ? "shell-collapsed" : ""}`}>
-      <aside className="shell-nav" aria-label="Навигация">
+    <div className={`shell ${collapsed ? "shell-collapsed" : ""} ${menuOpen ? "shell-menu-open" : ""}`}>
+      <aside className="shell-nav" id="shell-nav" aria-label="Навигация">
         <div className="shell-brand">
           <Link className="wordmark" to={rootPath}>
             {collapsed ? "MA" : "Marketplace Auto"}
@@ -78,6 +96,9 @@ export function Shell({ current, seller, actions, admin = false, children }: She
             aria-label={collapsed ? "Развернуть навигацию" : "Свернуть навигацию"}
           >
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+          <button className="shell-menu-close" onClick={() => setMenuOpen(false)} aria-label="Закрыть меню">
+            <X size={20} />
           </button>
         </div>
         {admin ? (
@@ -142,8 +163,18 @@ export function Shell({ current, seller, actions, admin = false, children }: She
           </div>
         </div>
       </aside>
+      {menuOpen && <div className="shell-backdrop" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
       <div className="shell-main">
         <header className="shell-top">
+          <button
+            className="ghost-button icon-button shell-menu-button"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Открыть меню"
+            aria-controls="shell-nav"
+            aria-expanded={menuOpen}
+          >
+            <Menu size={20} />
+          </button>
           <nav className="breadcrumb" aria-label="Хлебные крошки">
             <Link to={rootPath}>{rootLabel}</Link>
             {current && (

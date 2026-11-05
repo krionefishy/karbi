@@ -123,18 +123,18 @@ export function EmployeesPage() {
                     <strong>{employee.username}</strong>
                     {isSelf && <em>это вы</em>}
                   </div>
-                  <span>{employee.is_admin ? "Администратор" : "Сотрудник"}</span>
-                  <span className={employee.is_active ? "staff-active" : "staff-blocked"}>
+                  <span data-label="Роль">{employee.is_admin ? "Администратор" : "Сотрудник"}</span>
+                  <span data-label="Статус" className={employee.is_active ? "staff-active" : "staff-blocked"}>
                     {employee.is_active ? "Активен" : "Заблокирован"}
                   </span>
-                  <span className={employee.services.length ? undefined : "muted"}>
+                  <span data-label="Сервисы" className={employee.services.length ? undefined : "muted"}>
                     {employee.is_admin
                       ? "Все"
                       : employee.services.length
                         ? `${employee.services.length} из ${catalog.length || employee.services.length}`
                         : "Нет"}
                   </span>
-                  <span>
+                  <span data-label="Последний вход">
                     {employee.last_login_at ? dateFormatter.format(new Date(employee.last_login_at)) : "—"}
                   </span>
                   <span className="registry-row-actions">

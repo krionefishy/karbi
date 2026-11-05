@@ -256,17 +256,19 @@ export function SellersPage() {
                     <em className="registry-error">{seller.catalog_sync_error}</em>
                   )}
                 </div>
-                <span>{seller.product_count}</span>
-                <span className={`catalog-state catalog-state-${seller.catalog_sync_status}`}>
+                <span data-label="Товаров">{seller.product_count}</span>
+                <span data-label="Каталог" className={`catalog-state catalog-state-${seller.catalog_sync_status}`}>
                   {seller.archived_at ? "—" : syncStatusText[seller.catalog_sync_status]}
                 </span>
                 <span
+                  data-label="Ключ WB"
                   className={`egress-state egress-state-${seller.egress_status}`}
                   title={seller.egress_error ?? undefined}
                 >
                   {seller.archived_at ? "—" : (egressStatusText[seller.egress_status] ?? seller.egress_status)}
                 </span>
                 <span
+                  data-label="Ключ Ozon"
                   className={`egress-state egress-state-${isOzonMissing(seller) ? "absent" : seller.ozon_egress_status}`}
                   title={seller.ozon_egress_error ?? undefined}
                 >
@@ -277,6 +279,7 @@ export function SellersPage() {
                       : (egressStatusText[seller.ozon_egress_status] ?? seller.ozon_egress_status)}
                 </span>
                 <span
+                  data-label="Токен MPStats"
                   className={`egress-state egress-state-${isMPStatsMissing(seller) ? "absent" : seller.mpstats_egress_status}`}
                   title={seller.mpstats_egress_error ?? undefined}
                 >
@@ -289,7 +292,7 @@ export function SellersPage() {
                         : (egressStatusText[seller.mpstats_egress_status] ??
                           seller.mpstats_egress_status)}
                 </span>
-                <span className="registry-automations">
+                <span className="registry-automations" data-label="Автоматизации">
                   {shownAutomations(seller.automations).length === 0
                     ? "—"
                     : shownAutomations(seller.automations).map((id) => (
