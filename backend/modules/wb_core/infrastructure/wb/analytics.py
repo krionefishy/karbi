@@ -107,6 +107,42 @@ class WBAnalyticsClient(WBJsonClient):
             offset += len(products)
         raise WBPermanentError(f"{self.api_name}: воронка продаж не закончилась за {MAX_PAGES} страниц")
 
+    async def daily_orders(self, seller_id: str, day: date) -> dict[str, int]:
+        """Заказано, шт. за одни сутки по каждому nmID — та же цифра, что в отчётах кабинета.
+
+        Statistics `/supplier/orders` отдаёт заказов на 9–11% меньше (сверка
+        05.11.2026: 109 против 122 за сутки по одной карточке), а воронка с
+        отчётом кабинета сходится. Карточки без заказов WB не возвращает или
+        возвращает с нулём — в обоих случаях заказов не было.
+        """
+        orders: dict[str, int] = {}
+        offset = 0
+        for _ in range(MAX_PAGES):
+            payload = await self.request(
+                "POST",
+                FUNNEL_PATH,
+                seller_id,
+                json={
+                    "selectedPeriod": {"start": day.isoformat(), "end": day.isoformat()},
+                    "limit": FUNNEL_PAGE_LIMIT,
+                    "offset": offset,
+                },
+            )
+            products = self._funnel_products(payload)
+            for item in products:
+                product, statistic = item.get("product"), item.get("statistic")
+                if not isinstance(product, dict) or not isinstance(statistic, dict):
+                    continue
+                article = product.get("nmId")
+                selected = statistic.get("selected")
+                count = selected.get("orderCount") if isinstance(selected, dict) else None
+                if isinstance(article, int) and isinstance(count, int) and not isinstance(count, bool) and count > 0:
+                    orders[str(article)] = orders.get(str(article), 0) + count
+            if len(products) < FUNNEL_PAGE_LIMIT:
+                return orders
+            offset += len(products)
+        raise WBPermanentError(f"{self.api_name}: воронка продаж не закончилась за {MAX_PAGES} страниц")
+
     def _funnel_products(self, payload: Any) -> list[dict]:
         if payload is None:
             return []

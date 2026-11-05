@@ -149,7 +149,7 @@ class MirrorStateModel(WBCoreBase):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('catalog', 'stocks', 'reviews', 'orders', 'supplies', 'chats', 'remains', "
-            "'sales_reports', 'adverts', 'ozon_accruals', 'ozon_products', 'ozon_adverts')",
+            "'sales_reports', 'adverts', 'ozon_accruals', 'ozon_products', 'ozon_adverts', 'funnel')",
             name="ck_wb_core_mirror_state_kind",
         ),
     )
@@ -203,6 +203,34 @@ class WarehouseRemainModel(WBCoreBase):
     vendor_code: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FunnelDayModel(WBCoreBase):
+    """Сутки, за которые воронка продаж кабинета прочитана: без отметки нули по карточкам — «не знаем»."""
+
+    __tablename__ = "funnel_days"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FunnelOrderModel(WBCoreBase):
+    """Заказано, шт. по карточке за сутки (по Москве) из воронки продаж — как в отчётах кабинета.
+
+    Строки только с заказами: карточка без строки за отмеченные сутки — ноль.
+    """
+
+    __tablename__ = "funnel_orders"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("wb_core.sellers.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    article: Mapped[str] = mapped_column(String(255), primary_key=True)
+    order_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class ReviewFactModel(WBCoreBase):

@@ -62,6 +62,8 @@ from backend.modules.wb_core.infrastructure.postgres.models import (
     FbsOrderModel,
     FbsSupplyModel,
     FbsWarehouseStockModel,
+    FunnelDayModel,
+    FunnelOrderModel,
     MirrorStateModel,
     OzonAccrualCursorModel,
     OzonAccrualLineModel,
@@ -246,6 +248,59 @@ class MirrorRepository:
             )
             for row in rows
         ]
+
+    async def funnel_days(self, seller_id: uuid.UUID, since: date) -> dict[date, datetime]:
+        """Прочитанные сутки воронки с `since` и когда их читали."""
+        rows = await self.session.execute(
+            select(FunnelDayModel.day, FunnelDayModel.collected_at).where(
+                FunnelDayModel.seller_id == seller_id, FunnelDayModel.day >= since
+            )
+        )
+        return {row[0]: row[1] for row in rows.all()}
+
+    async def replace_funnel_day(
+        self, seller_id: uuid.UUID, day: date, orders: Mapping[str, int], *, now: datetime
+    ) -> None:
+        """Сутки воронки целиком: прежние строки этих суток уходят, сутки отмечаются прочитанными."""
+        await self.session.execute(
+            delete(FunnelOrderModel).where(FunnelOrderModel.seller_id == seller_id, FunnelOrderModel.day == day)
+        )
+        await self._insert(
+            FunnelOrderModel,
+            [
+                {"seller_id": seller_id, "day": day, "article": article, "order_count": count}
+                for article, count in sorted(orders.items())
+                if count > 0
+            ],
+        )
+        statement = insert(FunnelDayModel).values(seller_id=seller_id, day=day, collected_at=now)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "day"], set_={"collected_at": statement.excluded.collected_at}
+            )
+        )
+
+    async def funnel_orders(self, seller_id: uuid.UUID, since: date, until: date) -> tuple[set[date], dict[str, int]]:
+        """Прочитанные сутки окна и заказы по карточке, сложенные только по ним."""
+        days = await self.session.scalars(
+            select(FunnelDayModel.day).where(
+                FunnelDayModel.seller_id == seller_id, FunnelDayModel.day >= since, FunnelDayModel.day <= until
+            )
+        )
+        covered = set(days.all())
+        if not covered:
+            return covered, {}
+        rows = await self.session.execute(
+            select(FunnelOrderModel.article, func.sum(FunnelOrderModel.order_count))
+            .where(FunnelOrderModel.seller_id == seller_id, FunnelOrderModel.day.in_(covered))
+            .group_by(FunnelOrderModel.article)
+        )
+        return covered, {row[0]: int(row[1]) for row in rows.all()}
+
+    async def prune_funnel(self, before: date) -> int:
+        result = await self.session.execute(delete(FunnelOrderModel).where(FunnelOrderModel.day < before))
+        await self.session.execute(delete(FunnelDayModel).where(FunnelDayModel.day < before))
+        return int(getattr(result, "rowcount", 0) or 0)
 
     async def replace_reviews(self, seller_id: uuid.UUID, facts: Iterable[ReviewFact], *, now: datetime) -> None:
         await self.session.execute(delete(ReviewFactModel).where(ReviewFactModel.seller_id == seller_id))

@@ -59,6 +59,7 @@ class WBCoreWorkerApplication(WorkerApplication[WBCoreWorker]):
             ozon_overlap_days=self.settings.core_mirror.ozon_overlap_days,
             ozon_adverts_windows_per_run=self.settings.core_mirror.ozon_adverts_windows_per_run,
             ozon_adverts_overlap_days=self.settings.core_mirror.ozon_adverts_overlap_days,
+            funnel_days=self.settings.core_mirror.funnel_days,
             heartbeat=touch_heartbeat,
         )
         self.catalog_consumer = self._create_consumer()

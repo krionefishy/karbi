@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 from sqlalchemy import delete, update
 
 from backend.app.factory import Application
-from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_core.infrastructure.postgres.models import SellerModel
 from backend.modules.wb_core.infrastructure.wb import CatalogCard
 from backend.modules.wb_turnover.infrastructure.postgres import (
@@ -131,6 +131,14 @@ async def seed_stock(
             await session.execute(
                 update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(fbo_stocks_at=at)
             )
+        await session.commit()
+
+
+async def seed_funnel(application: Application, seller_id: uuid.UUID, by_day: dict[date, dict[str, int]]) -> None:
+    async with application.database.session() as session:
+        repository = MirrorRepository(session)
+        for day, orders in by_day.items():
+            await repository.replace_funnel_day(seller_id, day, orders, now=datetime.now(UTC))
         await session.commit()
 
 
@@ -511,3 +519,83 @@ async def test_a_file_without_the_columns_or_not_excel_is_refused(client: AsyncC
     book.save(buffer)
     refused = await upload(client, buffer.getvalue())
     assert refused.status_code == 422 and "нет столбцов" in refused.json()["detail"]
+
+
+async def test_orders_come_from_the_wb_funnel_where_statistics_lost_some(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    """Сверка 05.11.2026: Statistics 806 за неделю, отчёт кабинета и воронка — 884."""
+    day = yesterday()
+    window = [day - timedelta(days=offset) for offset in range(7)]
+    await seed_orders(application, seller, [sale(f"d{index}", DRILL, "1271611253", day) for index in range(9)])
+    await seed_funnel(application, seller, {each: {} for each in window} | {day: {"1271611253": 12}})
+    await add(client, seller, DRILL)
+
+    row = own((await client.get(API)).json())[DRILL]
+
+    assert row["orders"] == 12
+
+
+async def test_days_the_funnel_has_not_read_are_counted_from_statistics(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    day = yesterday()
+    earlier = day - timedelta(days=3)
+    await seed_orders(
+        application,
+        seller,
+        [sale("y1", DRILL, "1271611253", day), sale("e1", DRILL, "1271611253", earlier)],
+    )
+    await seed_funnel(application, seller, {day: {"1271611253": 4}})
+    await add(client, seller, DRILL)
+
+    row = own((await client.get(API)).json())[DRILL]
+
+    assert row["orders"] == 4 + 1
+
+
+async def test_card_orders_from_the_funnel_are_split_between_sizes(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    async with application.database.session() as session:
+        await SellerRepository(session).upsert_catalog(
+            seller,
+            active=[
+                CatalogCard(
+                    article="1270964388",
+                    vendor_code="Дождевики",
+                    name="Дождевики для обуви",
+                    subject_name="Дождевики",
+                    sizes=[
+                        {"chrt_id": 500, "tech_size": "M", "skus": ["2053485305847"]},
+                        {"chrt_id": 501, "tech_size": "L", "skus": ["2053486133913"]},
+                    ],
+                )
+            ],
+            archived=[],
+            archived_available=True,
+        )
+        await session.commit()
+    day = yesterday()
+    statistics = [sale(f"m{index}", "2053485305847", "1270964388", day) for index in range(6)]
+    statistics += [sale(f"l{index}", "2053486133913", "1270964388", day) for index in range(3)]
+    await seed_orders(application, seller, statistics)
+    await seed_funnel(application, seller, {day: {"1270964388": 10}})
+    await add(client, seller, "2053485305847", "2053486133913")
+
+    rows = own((await client.get(API)).json())
+
+    assert (rows["2053485305847"]["orders"], rows["2053486133913"]["orders"]) == (7, 3)
+
+
+async def test_a_day_the_funnel_read_without_the_card_means_no_orders(
+    application: Application, seller: uuid.UUID, client: AsyncClient
+) -> None:
+    day = yesterday()
+    await seed_orders(application, seller, [sale("s1", SAW, "1466514852", day)])
+    await seed_funnel(application, seller, {day: {"1271611253": 2}})
+    await add(client, seller, SAW)
+
+    row = own((await client.get(API)).json())[SAW]
+
+    assert (row["orders"], row["status"]) == (0, "no_sales")

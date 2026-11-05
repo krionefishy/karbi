@@ -44,3 +44,28 @@ def cover_tone(cover: BoardCover, *, red_days: int, yellow_days: int) -> str:
     if cover.days < yellow_days:
         return TONE_WARNING
     return TONE_CALM
+
+
+def split_article_orders(total: int, shares: dict[str, int]) -> dict[str, int]:
+    """Заказы карточки из воронки WB → по баркодам, в долях заказов из Statistics.
+
+    Воронка считает заказы верно, но только по карточке; Statistics знает баркод,
+    но теряет часть заказов. Доли берутся из Statistics, сумма — из воронки, и
+    после округления сходится с ней до штуки (метод наибольших остатков). Если
+    Statistics за окно по карточке молчит, делим поровну: заказы были, а честного
+    способа узнать размер нет.
+    """
+    if not shares:
+        return {}
+    keys = sorted(shares)
+    weights = {key: max(shares[key], 0) for key in keys}
+    whole = sum(weights.values())
+    if whole == 0:
+        weights = dict.fromkeys(keys, 1)
+        whole = len(keys)
+    exact = {key: total * weights[key] / whole for key in keys}
+    result = {key: math.floor(exact[key]) for key in keys}
+    left = total - sum(result.values())
+    for key in sorted(keys, key=lambda key: (-(exact[key] - result[key]), -weights[key], key))[:left]:
+        result[key] += 1
+    return result

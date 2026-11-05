@@ -303,6 +303,11 @@ class CoreMirrorConfig:
     chats_pages_per_run: int = 100
     chats_retention_days: int = 180
     remains_interval_minutes: int = 360
+    # Заказы по карточкам из воронки продаж: сколько прошедших суток держать прочитанными
+    # (не меньше окна таблицы оборачиваемости) и сколько хранить.
+    funnel_interval_minutes: int = 60
+    funnel_days: int = 14
+    funnel_retention_days: int = 60
     sales_reports_interval_minutes: int = 30
     sales_reports_per_run: int = 4
     sales_reports_history_from: str = "2026-01-01"
@@ -710,6 +715,9 @@ class Settings:
             "supplies_hour",
             "supplies_minute",
             "remains_interval_minutes",
+            "funnel_interval_minutes",
+            "funnel_days",
+            "funnel_retention_days",
             "sales_reports_interval_minutes",
             "sales_reports_per_run",
             "adverts_interval_minutes",
@@ -960,6 +968,10 @@ class Settings:
             raise ValueError("core_mirror.chats_* must be positive")
         if mirror.remains_interval_minutes < 1:
             raise ValueError("core_mirror.remains_interval_minutes must be positive")
+        if min(mirror.funnel_interval_minutes, mirror.funnel_days) < 1:
+            raise ValueError("core_mirror.funnel_* must be positive")
+        if mirror.funnel_retention_days < mirror.funnel_days:
+            raise ValueError("core_mirror.funnel_retention_days must cover core_mirror.funnel_days")
         if min(mirror.sales_reports_interval_minutes, mirror.sales_reports_per_run) < 1:
             raise ValueError("core_mirror.sales_reports_* must be positive")
         if min(mirror.adverts_interval_minutes, mirror.adverts_windows_per_run) < 1 or mirror.adverts_overlap_days < 0:
@@ -1125,6 +1137,8 @@ class Settings:
             raise ValueError("turnover.board_window_days must be positive and below order_retention_days")
         if self.turnover.orders_backfill_days <= self.turnover.board_window_days:
             raise ValueError("turnover.orders_backfill_days must exceed turnover.board_window_days")
+        if self.turnover.board_window_days > self.core_mirror.funnel_days:
+            raise ValueError("core_mirror.funnel_days must cover turnover.board_window_days")
         if not 0 < self.turnover.board_red_days < self.turnover.board_yellow_days:
             raise ValueError("turnover.board_red_days must be positive and below board_yellow_days")
         if self.turnover.region_history_days < 1:

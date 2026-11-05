@@ -10,6 +10,7 @@ from backend.modules.wb_turnover.domain import (
     TONE_WARNING,
     compute_board_cover,
     cover_tone,
+    split_article_orders,
 )
 
 
@@ -56,3 +57,23 @@ def test_the_tone_follows_the_thresholds(days: int, tone: str) -> None:
 def test_a_row_without_days_has_no_tone() -> None:
     cover = compute_board_cover(orders=0, stock=5, window_days=7)
     assert cover_tone(cover, red_days=10, yellow_days=20) == TONE_NEUTRAL
+
+
+def test_one_barcode_takes_all_orders_of_the_card() -> None:
+    assert split_article_orders(884, {"2055641975154": 806}) == {"2055641975154": 884}
+
+
+def test_sizes_share_the_card_orders_like_in_statistics_and_sum_up_exactly() -> None:
+    split = split_article_orders(10, {"m": 1, "l": 1, "xl": 1})
+
+    assert sum(split.values()) == 10
+    assert sorted(split.values()) == [3, 3, 4]
+    assert split_article_orders(110, {"m": 90, "l": 9, "xl": 0}) == {"m": 100, "l": 10, "xl": 0}
+
+
+def test_without_statistics_orders_the_card_orders_are_split_evenly() -> None:
+    assert split_article_orders(4, {"m": 0, "l": 0}) == {"m": 2, "l": 2}
+
+
+def test_a_card_without_orders_gives_zero_to_every_size() -> None:
+    assert split_article_orders(0, {"m": 5, "l": 2}) == {"m": 0, "l": 0}

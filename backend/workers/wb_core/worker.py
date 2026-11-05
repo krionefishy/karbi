@@ -9,6 +9,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_ADVERTS,
     MIRROR_CATALOG,
     MIRROR_CHATS,
+    MIRROR_FUNNEL,
     MIRROR_ORDERS,
     MIRROR_OZON_ACCRUALS,
     MIRROR_OZON_ADVERTS,
@@ -67,6 +68,7 @@ class WBCoreWorker(PollingWorker):
         await self.collect_due(MIRROR_SUPPLIES, now)
         await self.collect_due(MIRROR_CHATS, now)
         await self.collect_due(MIRROR_REMAINS, now)
+        await self.collect_due(MIRROR_FUNNEL, now)
         await self.collect_due(MIRROR_SALES_REPORTS, now)
         await self.collect_due(MIRROR_ADVERTS, now)
         await self.collect_due(MIRROR_OZON_ACCRUALS, now)
@@ -75,7 +77,7 @@ class WBCoreWorker(PollingWorker):
         await self.prune(now)
 
     async def prune(self, now: datetime) -> int:
-        """Задания и события чатов старше срока хранения — раз в сутки."""
+        """Задания, события чатов и сутки воронки старше срока хранения — раз в сутки."""
         today = now.astimezone(self.timezone).date()
         if self._pruned_on == today:
             return 0
@@ -83,11 +85,12 @@ class WBCoreWorker(PollingWorker):
             mirror = MirrorRepository(session)
             orders = await mirror.prune_orders(now - timedelta(days=self.config.orders_retention_days))
             chats = await mirror.prune_chat_events(now - timedelta(days=self.config.chats_retention_days))
+            funnel = await mirror.prune_funnel(today - timedelta(days=self.config.funnel_retention_days))
             await session.commit()
         self._pruned_on = today
-        if orders or chats:
-            self.logger.info("wb_core_mirror_pruned", orders=orders, chat_events=chats)
-        return orders + chats
+        if orders or chats or funnel:
+            self.logger.info("wb_core_mirror_pruned", orders=orders, chat_events=chats, funnel_orders=funnel)
+        return orders + chats + funnel
 
     def due_since(self, kind: str, now: datetime) -> datetime:
         """Момент последнего наступившего сбора этого вида.
@@ -101,6 +104,8 @@ class WBCoreWorker(PollingWorker):
             return now - timedelta(minutes=self.config.chats_interval_minutes)
         if kind == MIRROR_REMAINS:
             return now - timedelta(minutes=self.config.remains_interval_minutes)
+        if kind == MIRROR_FUNNEL:
+            return now - timedelta(minutes=self.config.funnel_interval_minutes)
         if kind == MIRROR_SALES_REPORTS:
             return now - timedelta(minutes=self.config.sales_reports_interval_minutes)
         if kind == MIRROR_ADVERTS:
@@ -141,7 +146,14 @@ class WBCoreWorker(PollingWorker):
                 if status_of(seller) in EGRESS_SERVABLE
             ]
             mirror = MirrorRepository(session)
-            if kind not in (MIRROR_CATALOG, MIRROR_CHATS, MIRROR_SALES_REPORTS, MIRROR_ADVERTS, *OZON_KINDS):
+            if kind not in (
+                MIRROR_CATALOG,
+                MIRROR_CHATS,
+                MIRROR_SALES_REPORTS,
+                MIRROR_ADVERTS,
+                MIRROR_FUNNEL,
+                *OZON_KINDS,
+            ):
                 catalog = await mirror.states(MIRROR_CATALOG)
                 candidates = [
                     seller_id
@@ -168,6 +180,7 @@ class WBCoreWorker(PollingWorker):
             MIRROR_SUPPLIES: self.mirror.collect_supplies,
             MIRROR_CHATS: self.mirror.collect_chats,
             MIRROR_REMAINS: self.mirror.collect_remains,
+            MIRROR_FUNNEL: self.mirror.collect_funnel,
             MIRROR_SALES_REPORTS: self.mirror.collect_sales_reports,
             MIRROR_ADVERTS: self.mirror.collect_adverts,
             MIRROR_OZON_ACCRUALS: self.mirror.collect_ozon_accruals,

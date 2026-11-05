@@ -1,6 +1,6 @@
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -8,9 +8,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import SellerNotFoundError
-from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_core.domain import BarcodeCard
+from backend.modules.wb_core.infrastructure.postgres import MirrorRepository, SellerRepository
 from backend.modules.wb_turnover.application.board_import import BoardFileError, normalize, parse_list
-from backend.modules.wb_turnover.domain import compute_board_cover, cover_tone
+from backend.modules.wb_turnover.domain import compute_board_cover, cover_tone, split_article_orders
 from backend.modules.wb_turnover.infrastructure.postgres import TurnoverRepository
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -114,9 +115,11 @@ class ImportResult:
 class BoardService:
     """Таблица «хватит на N дней» по списку баркодов аналитика.
 
-    Всё считается при чтении, из уже собранного: заказы — из таблицы заказов
-    автоматизации, остаток «Склад WB РФ» — из зеркала `wb_core`, наличие FBS — из
-    слоя остатков по складам продавца. Окно и пороги можно менять, и таблица
+    Всё считается при чтении, из уже собранного: заказы карточки — из воронки
+    продаж в зеркале `wb_core` (с отчётом кабинета она сходится, Statistics
+    теряет около 10%), по баркодам они делятся в долях заказов Statistics;
+    остаток — из отчёта по остаткам, «Остатки ФБС» — из слоя остатков по
+    складам продавца. Окно и пороги можно менять, и таблица
     сразу считается по-новому.
     """
 
@@ -211,7 +214,7 @@ class BoardService:
             catalog = {article.article: article for article in await self.sellers.list_articles(seller.id)}
             cards = await self.sellers.list_barcode_cards(seller.id)
             from_orders = await self.turnover.barcode_articles(seller.id, barcodes)
-            orders = await self.turnover.orders_by_barcode(seller.id, window_from, window_to, barcodes)
+            orders = await self._orders(seller.id, window_from, window_to, barcodes, cards)
             sizes = await self.sellers.list_barcode_sizes(seller.id)
             fbo_by_size = await self.turnover.fbo_stocks(seller.id) if stock_at else {}
             fbs_by_article = await self.turnover.warehouse_stocks(seller.id) if fbs_at else {}
@@ -283,6 +286,46 @@ class BoardService:
             rows=rows,
             hidden=hidden,
         )
+
+    async def _orders(
+        self,
+        seller_id: uuid.UUID,
+        window_from: date,
+        window_to: date,
+        barcodes: Sequence[str],
+        cards: Mapping[str, BarcodeCard],
+    ) -> dict[str, int]:
+        """Заказано за окно по баркоду: воронка за прочитанные сутки, Statistics — за остальные.
+
+        Сутки, которые зеркало воронки ещё не прочитало (новый кабинет, сбой
+        сбора), считаются по Statistics, как раньше: лучше заниженная цифра,
+        чем ноль. Баркод без известной карточки целиком считается по Statistics.
+        """
+        covered, funnel = await MirrorRepository(self.session).funnel_orders(seller_id, window_from, window_to)
+        article_of = {barcode: card.article for barcode, card in cards.items()}
+        stat_covered: dict[str, int] = {}
+        stat_rest: dict[str, int] = {}
+        for barcode, article, day, count in await self.turnover.barcode_orders_by_day(
+            seller_id, window_from, window_to
+        ):
+            article_of.setdefault(barcode, article)
+            target = stat_covered if day in covered else stat_rest
+            target[barcode] = target.get(barcode, 0) + count
+        siblings: dict[str, set[str]] = {}
+        for barcode, article in article_of.items():
+            siblings.setdefault(article, set()).add(barcode)
+        split: dict[str, dict[str, int]] = {}
+        result: dict[str, int] = {}
+        for barcode in barcodes:
+            card_article = article_of.get(barcode, "")
+            if not covered or not card_article:
+                result[barcode] = stat_covered.get(barcode, 0) + stat_rest.get(barcode, 0)
+                continue
+            if card_article not in split:
+                shares = {sibling: stat_covered.get(sibling, 0) for sibling in siblings.get(card_article, {barcode})}
+                split[card_article] = split_article_orders(funnel.get(card_article, 0), shares)
+            result[barcode] = split[card_article].get(barcode, 0) + stat_rest.get(barcode, 0)
+        return result
 
     async def add_items(
         self,

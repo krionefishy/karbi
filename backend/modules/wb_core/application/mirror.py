@@ -12,6 +12,7 @@ from backend.modules.wb_core.domain import (
     MIRROR_ADVERTS,
     MIRROR_CATALOG,
     MIRROR_CHATS,
+    MIRROR_FUNNEL,
     MIRROR_ORDERS,
     MIRROR_OZON_ACCRUALS,
     MIRROR_OZON_ADVERTS,
@@ -106,6 +107,12 @@ class OrdersOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class FunnelOutcome:
+    days: int
+    articles: int
+
+
+@dataclass(frozen=True, slots=True)
 class SuppliesOutcome:
     supplies: int
     warehouses: int
@@ -197,6 +204,7 @@ class MirrorService:
         ozon_overlap_days: int = 3,
         ozon_adverts_windows_per_run: int = 2,
         ozon_adverts_overlap_days: int = 3,
+        funnel_days: int = 14,
         heartbeat: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
@@ -224,6 +232,7 @@ class MirrorService:
         self.ozon_performance = ozon_performance
         self.ozon_adverts_windows_per_run = ozon_adverts_windows_per_run
         self.ozon_adverts_overlap_days = ozon_adverts_overlap_days
+        self.funnel_days = funnel_days
         self._heartbeat = heartbeat or (lambda: None)
         self.logger = logging.getLogger("wb.core.mirror")
 
@@ -453,6 +462,56 @@ class MirrorService:
         outcome = OrdersOutcome(len(live), len(archived), len(months))
         self.logger.info("orders_collected", extra={"seller_id": seller_key, **asdict(outcome)})
         return outcome
+
+    async def collect_funnel(self, seller_id: uuid.UUID, *, now: datetime | None = None) -> FunnelOutcome:
+        """Заказано по карточкам за каждые прошедшие сутки окна — из воронки продаж.
+
+        Сутки перечитываются, пока их не прочитали хотя бы через сутки после
+        конца: WB дописывает заказы с опозданием. Устоявшиеся сутки больше не
+        запрашиваются, поэтому обычный прогон — один-два запроса на кабинет.
+        Каждые сутки пишутся сразу: сбой на середине не теряет прочитанное.
+        """
+        stamp = now or datetime.now(UTC)
+        seller_key = str(seller_id)
+        today = stamp.astimezone(WB_TIMEZONE).date()
+        first = today - timedelta(days=self.funnel_days)
+        async with self.database.session() as session:
+            await self._start(session, seller_id, MIRROR_FUNNEL, stamp)
+            await session.commit()
+            known = await MirrorRepository(session).funnel_days(seller_id, first)
+        pending = [
+            day
+            for offset in range(self.funnel_days)
+            if not self._funnel_settled(day := first + timedelta(days=offset), known.get(day))
+        ]
+        articles: set[str] = set()
+        for day in pending:
+            self._heartbeat()
+            try:
+                orders = await self.analytics.daily_orders(seller_key, day)
+            except (WBPermanentError, WBTemporaryError) as error:
+                await self._fail(seller_id, MIRROR_FUNNEL, str(error))
+                raise
+            async with self.database.session() as session:
+                await self._ensure_alive(session, seller_id)
+                await MirrorRepository(session).replace_funnel_day(seller_id, day, orders, now=stamp)
+                await session.commit()
+            articles.update(orders)
+        async with self.database.session() as session:
+            await self._ensure_alive(session, seller_id)
+            await MirrorRepository(session).mark_collected(seller_id, MIRROR_FUNNEL, now=stamp)
+            await session.commit()
+        outcome = FunnelOutcome(len(pending), len(articles))
+        self.logger.info("funnel_collected", extra={"seller_id": seller_key, **asdict(outcome)})
+        return outcome
+
+    @staticmethod
+    def _funnel_settled(day: date, collected_at: datetime | None) -> bool:
+        """Сутки прочитаны не раньше, чем через сутки после их конца по Москве."""
+        if collected_at is None:
+            return False
+        settled_from = datetime.combine(day + timedelta(days=2), datetime.min.time(), tzinfo=WB_TIMEZONE)
+        return collected_at >= settled_from
 
     def _archive_months(self, now: datetime) -> list[tuple[int, int]]:
         """Месяцы от глубины истории до границы живого списка, старшие первыми."""

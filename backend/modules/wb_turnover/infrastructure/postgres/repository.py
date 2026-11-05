@@ -464,23 +464,21 @@ class TurnoverRepository:
         )
         return result.first() is not None
 
-    async def orders_by_barcode(
-        self, seller_id: uuid.UUID, since: date, until: date, barcodes: Sequence[str]
-    ) -> dict[str, int]:
-        """Заказано, шт. — как в отчёте WB: все заказы баркода, отмены не вычитаются."""
-        if not barcodes:
-            return {}
+    async def barcode_orders_by_day(
+        self, seller_id: uuid.UUID, since: date, until: date
+    ) -> list[tuple[str, str, date, int]]:
+        """Заказы окна из Statistics по баркоду и суткам: (баркод, артикул, сутки, штук), отмены не вычитаются."""
         rows = await self.session.execute(
-            select(OrderModel.barcode, func.count())
+            select(OrderModel.barcode, OrderModel.article, OrderModel.order_date, func.count())
             .where(
                 OrderModel.seller_id == seller_id,
-                OrderModel.barcode.in_(barcodes),
+                OrderModel.barcode != "",
                 OrderModel.order_date >= since,
                 OrderModel.order_date <= until,
             )
-            .group_by(OrderModel.barcode)
+            .group_by(OrderModel.barcode, OrderModel.article, OrderModel.order_date)
         )
-        return {row[0]: int(row[1]) for row in rows.all()}
+        return [(row[0], row[1], row[2], int(row[3])) for row in rows.all()]
 
     async def barcode_articles(self, seller_id: uuid.UUID, barcodes: Sequence[str]) -> dict[str, str]:
         """Баркод → артикул WB по заказам: единственное место, где у нас они стоят рядом."""

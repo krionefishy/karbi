@@ -9,6 +9,7 @@ from backend.modules.wb_turnover.domain.board import (
     BoardCover,
     compute_board_cover,
     cover_tone,
+    split_article_orders,
 )
 from backend.modules.wb_turnover.domain.entities import (
     STATUS_INSUFFICIENT,
@@ -32,6 +33,7 @@ __all__ = [
     "BoardCover",
     "compute_board_cover",
     "cover_tone",
+    "split_article_orders",
     "STATUS_INSUFFICIENT",
     "STATUS_NO_SALES",
     "STATUS_NO_STOCK",
