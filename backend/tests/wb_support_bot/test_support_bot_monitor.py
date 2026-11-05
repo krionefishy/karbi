@@ -73,7 +73,7 @@ def healthy(**changes: object) -> Snapshot:
         panel_decided=100,
         panel_paths=(("agree", 84), ("arbiter", 15), ("guard", 4), ("reserve", 1)),
         panel_judged=100,
-        panel_disagreed=16,
+        panel_disagreed=8,
         panel_arbiter=15,
         panel_reserve=1,
         panel_degraded=0,
@@ -160,16 +160,26 @@ def test_with_the_reply_layer_off_the_safety_checks_have_no_data() -> None:
 
 
 def test_judges_disagreeing_too_often_is_a_warning_then_a_problem() -> None:
-    assert level(healthy(panel_judged=100, panel_disagreed=22), "panel_disagreement") is Severity.OK
-    assert level(healthy(panel_judged=100, panel_disagreed=30), "panel_disagreement") is Severity.WARN
-    assert level(healthy(panel_judged=100, panel_disagreed=45), "panel_disagreement") is Severity.CRIT
+    assert level(healthy(panel_judged=100, panel_disagreed=14), "panel_disagreement") is Severity.OK
+    assert level(healthy(panel_judged=100, panel_disagreed=15), "panel_disagreement") is Severity.WARN
+    assert level(healthy(panel_judged=100, panel_disagreed=25), "panel_disagreement") is Severity.CRIT
     assert level(healthy(panel_judged=19, panel_disagreed=19), "panel_disagreement") is Severity.NODATA
 
 
+def test_a_silent_judge_is_counted_by_the_arbiter_card_but_not_by_the_disagreement_one() -> None:
+    """Знаменатели карточек расходятся намеренно: решение с одним голосом судьи согласия не измеряет."""
+    snapshot = healthy(panel_rows=32, panel_decided=32, panel_judged=31, panel_disagreed=0, panel_arbiter=1)
+    cards = {check.id: check for check in evaluate(snapshot)}
+
+    assert "31 решений, где ответили оба судьи" in (cards["panel_disagreement"].value or "")
+    assert "1 из 32 решений" in (cards["panel_arbiter"].value or "")
+    assert "знаменатель у этой карточки больше" in cards["panel_arbiter"].hint
+
+
 def test_arbiter_calls_are_judged_as_a_share_of_decisions() -> None:
-    assert level(healthy(panel_decided=100, panel_arbiter=21), "panel_arbiter") is Severity.OK
-    assert level(healthy(panel_decided=100, panel_arbiter=35), "panel_arbiter") is Severity.WARN
-    assert level(healthy(panel_decided=100, panel_arbiter=50), "panel_arbiter") is Severity.CRIT
+    assert level(healthy(panel_decided=100, panel_arbiter=19), "panel_arbiter") is Severity.OK
+    assert level(healthy(panel_decided=100, panel_arbiter=20), "panel_arbiter") is Severity.WARN
+    assert level(healthy(panel_decided=100, panel_arbiter=30), "panel_arbiter") is Severity.CRIT
 
 
 def test_the_reserve_and_held_dialogs_share_one_card() -> None:

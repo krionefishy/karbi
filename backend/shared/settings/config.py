@@ -338,17 +338,17 @@ class LLMConfig:
 
 @dataclass(frozen=True, slots=True)
 class PanelMonitorConfig:
-    """Пороги панели решений во вкладке «Состояние». Предварительные: подобраны по A/B, не по проду.
+    """Пороги панели решений во вкладке «Состояние». Замер на проде 05.11.2026, окно 7 дней.
 
     Доли — целые проценты. Правятся конфигом без выкатки кода.
     """
 
     window_days: int = 7
     min_sample: int = 20
-    disagree_warn_percent: int = 30
-    disagree_crit_percent: int = 45
-    arbiter_warn_percent: int = 35
-    arbiter_crit_percent: int = 50
+    disagree_warn_percent: int = 15
+    disagree_crit_percent: int = 25
+    arbiter_warn_percent: int = 20
+    arbiter_crit_percent: int = 30
     reserve_warn_percent: int = 5
     reserve_crit_percent: int = 20
     degraded_warn: int = 1

@@ -46,13 +46,13 @@ class Thresholds:
     escalation_crit_count: int = 3
     escalated_after_continue_warn: float = 0.10
     continues_warn: int = 5
-    # Панель решений: пороги предварительные, подобраны по A/B (настройка support_bot.panel).
+    # Панель решений: пороги по замеру на проде 05.11.2026 (настройка support_bot.panel).
     panel_window_days: int = 7
     panel_min_sample: int = 20
-    panel_disagree_warn: float = 0.30
-    panel_disagree_crit: float = 0.45
-    panel_arbiter_warn: float = 0.35
-    panel_arbiter_crit: float = 0.50
+    panel_disagree_warn: float = 0.15
+    panel_disagree_crit: float = 0.25
+    panel_arbiter_warn: float = 0.20
+    panel_arbiter_crit: float = 0.30
     panel_reserve_warn: float = 0.05
     panel_reserve_crit: float = 0.20
     panel_degraded_warn: int = 1
@@ -194,10 +194,11 @@ def panel_checks(s: Snapshot, limits: Thresholds) -> list[Check]:
                 limits.panel_min_sample,
             ),
             f"расходятся {_percent(s.panel_disagreed, s.panel_judged)} "
-            f"({s.panel_disagreed} из {s.panel_judged} решений {window})",
+            f"({s.panel_disagreed} из {s.panel_judged} решений, где ответили оба судьи, {window})",
             f"до {_limit(limits.panel_disagree_warn)} — норма, от {_limit(limits.panel_disagree_crit)} — проблема "
-            f"(в A/B расхождение было 8–22%)",
-            "Судьи спорят чаще обычного: каждое расхождение зовёт арбитра и стоит денег. Проверьте промпт судей.",
+            f"(на проде 05.11 было 0%)",
+            "Судьи спорят чаще обычного: каждое расхождение зовёт арбитра и стоит денег. Проверьте промпт судей. "
+            "Решения, где один судья не ответил, сюда не попадают — они считаются в карточке арбитра.",
         ),
         Check(
             "panel_arbiter",
@@ -212,9 +213,10 @@ def panel_checks(s: Snapshot, limits: Thresholds) -> list[Check]:
             ),
             f"{_percent(s.panel_arbiter, s.panel_decided)} ({s.panel_arbiter} из {s.panel_decided} решений {window})",
             f"до {_limit(limits.panel_arbiter_warn)} — норма, от {_limit(limits.panel_arbiter_crit)} — проблема "
-            f"(по A/B ожидается 8–21%)",
+            f"(на проде 05.11 было 3%)",
             "Арбитра зовут и при расхождении судей, и когда судья не ответил: смотрите карточку расхождения "
-            "и отказы Cloud.ru.",
+            "и отказы Cloud.ru. Решения с молчащим судьёй считаются здесь, но не в карточке расхождения, "
+            "поэтому знаменатель у этой карточки больше.",
         ),
         Check(
             "panel_fallback",

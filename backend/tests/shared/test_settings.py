@@ -237,16 +237,16 @@ def test_panel_thresholds_come_from_yaml(monkeypatch: pytest.MonkeyPatch) -> Non
     load_settings.cache_clear()
 
     assert (panel.window_days, panel.min_sample) == (7, 20)
-    assert (panel.disagree_warn_percent, panel.disagree_crit_percent) == (30, 45)
+    assert (panel.disagree_warn_percent, panel.disagree_crit_percent) == (15, 25)
 
 
 def test_panel_thresholds_are_read_from_a_custom_yaml_section() -> None:
     raw = _raw_test_config()
-    raw["support_bot"] = {"panel": {"window_days": 14, "disagree_warn_percent": 40}}
+    raw["support_bot"] = {"panel": {"window_days": 14, "disagree_warn_percent": 20}}
 
     panel = Settings.from_dict(raw).support_bot.panel
 
-    assert (panel.window_days, panel.disagree_warn_percent, panel.disagree_crit_percent) == (14, 40, 45)
+    assert (panel.window_days, panel.disagree_warn_percent, panel.disagree_crit_percent) == (14, 20, 25)
 
 
 @pytest.mark.parametrize(
