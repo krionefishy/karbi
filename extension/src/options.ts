@@ -17,15 +17,22 @@ function render(settings: Settings): void {
   $("seller").textContent = paired ? settings.sellerName || "подключено" : "не подключено";
   $("last-run").textContent = stamp(settings.lastRunAt);
   const state = $("last-state");
-  state.className = settings.lastState === "ok" ? "ok" : settings.lastState === "needs_login" ? "warn" : "bad";
+  state.className =
+    settings.lastState === "ok"
+      ? "ok"
+      : settings.lastState === "needs_login" || settings.lastState === "disconnected"
+        ? "warn"
+        : "bad";
   state.textContent =
     settings.lastState === "ok"
       ? "код получен"
       : settings.lastState === "needs_login"
         ? "нужен вход на wildberries.ru под телефоном владельца"
-        : settings.lastState === "error"
-          ? `ошибка: ${settings.lastError ?? ""}`
-          : "—";
+        : settings.lastState === "disconnected"
+          ? settings.lastError ?? "отключено сервисом: подключите заново по коду из бота"
+          : settings.lastState === "error"
+            ? `ошибка: ${settings.lastError ?? ""}`
+            : "—";
   $("next-run").textContent = stamp(settings.nextRunAt);
   $("code-today").textContent = settings.hasCodeToday ? "у бота есть" : "ещё нет";
   $<HTMLButtonElement>("run").disabled = !paired;

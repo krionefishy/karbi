@@ -393,10 +393,9 @@ class ReturnsRepository:
         return install
 
     async def install_by_token_hash(self, token_hash: str) -> ExtensionInstallModel | None:
+        """Установка по токену, в том числе отозванная: отозванной сервис отвечает иначе, чем чужому токену."""
         return await self.session.scalar(
-            select(ExtensionInstallModel).where(
-                ExtensionInstallModel.token_hash == token_hash, ExtensionInstallModel.revoked_at.is_(None)
-            )
+            select(ExtensionInstallModel).where(ExtensionInstallModel.token_hash == token_hash)
         )
 
     async def install(self, seller_id: uuid.UUID, install_id: uuid.UUID) -> ExtensionInstallModel | None:

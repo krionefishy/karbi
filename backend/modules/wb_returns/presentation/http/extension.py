@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from backend.modules.wb_returns.application import (
     STATES,
+    ExtensionRevokedError,
     ExtensionService,
     ExtensionUnauthorizedError,
     PairingCodeInvalidError,
@@ -15,6 +16,10 @@ from backend.modules.wb_returns.application import (
 router = APIRouter(prefix="/wb/returns", tags=["wb-returns-extension"])
 
 BAD_TOKEN = "Токен расширения не подходит: подключите расширение заново по коду из бота"
+REVOKED_TOKEN = (
+    "Расширение в этом браузере отключено: кабинет подключён в другом браузере или установку удалили. "
+    "Подключите заново по коду из бота или удалите расширение"
+)
 
 
 class PairRequest(BaseModel):
@@ -62,6 +67,10 @@ async def _install(service: ExtensionService, authorization: str | None):  # noq
         supplied = authorization[7:].strip()
     try:
         return await service.authenticate(supplied)
+    except ExtensionRevokedError as error:
+        # 410, а не 401: установка была, но её больше нет. По этому коду расширение забывает токен,
+        # а nginx не пишет такие ответы в лог мониторинга (deploy/nginx/monitoring-log-format.conf).
+        raise HTTPException(status.HTTP_410_GONE, REVOKED_TOKEN) from error
     except ExtensionUnauthorizedError as error:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, BAD_TOKEN, headers={"WWW-Authenticate": "Bearer"}) from error
 

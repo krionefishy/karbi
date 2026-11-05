@@ -96,6 +96,9 @@ function isStale(stamp: string | null, maxAgeMs: number): boolean {
   return Number.isNaN(at) || at < Date.now() - maxAgeMs;
 }
 
+/** Сервис больше не принимает токен этой установки: 410 — её заменили или удалили, 401 — токен чужой. */
+class DisconnectedError extends Error {}
+
 async function api<T>(settings: Settings, path: string, body: unknown): Promise<T> {
   const response = await fetch(`${settings.backendUrl.replace(/\/$/, "")}/api/v1/wb/returns/extension${path}`, {
     method: "POST",
@@ -110,9 +113,24 @@ async function api<T>(settings: Settings, path: string, body: unknown): Promise<
     } catch {
       /* тело не JSON — оставляем статус */
     }
+    if (response.status === 401 || response.status === 410) {
+      await disconnect(settings.token, detail);
+      throw new DisconnectedError(detail);
+    }
     throw new Error(detail);
   }
   return (await response.json()) as T;
+}
+
+/**
+ * Забыть токен и остановить будильники. Без этого отозванная установка стучится
+ * в сервис каждые 10 минут, пока расширение не удалят руками.
+ */
+async function disconnect(token: string, reason: string): Promise<void> {
+  const current = await loadSettings();
+  if (current.token !== token) return; // за это время подключились заново — новый токен не трогаем
+  await Promise.all([HEARTBEAT_ALARM, COLLECT_ALARM, RETRY_ALARM, KEEPALIVE_ALARM].map((name) => chrome.alarms.clear(name)));
+  await saveSettings({ token: "", lastState: "disconnected", lastError: reason, hasCodeToday: false, nextRunAt: null });
 }
 
 async function pair(backendUrl: string, code: string): Promise<Settings> {
@@ -155,6 +173,7 @@ async function heartbeat(): Promise<void> {
     if (reply.refresh_code) await collect("task");
     else if (!reply.has_code_today && isStale(settings.lastRunAt, MISSING_CODE_RETRY_MS)) await collect("missing");
   } catch (error) {
+    if (error instanceof DisconnectedError) return;
     await saveSettings({ lastError: `heartbeat: ${error instanceof Error ? error.message : String(error)}` });
   }
 }
@@ -188,6 +207,7 @@ async function collect(reason: string): Promise<void> {
         }
       }
     } catch (caught) {
+      if (caught instanceof DisconnectedError) return;
       state = "error";
       error = `${reason}: ${caught instanceof Error ? caught.message : String(caught)}`;
     }

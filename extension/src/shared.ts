@@ -5,7 +5,7 @@ export interface Settings {
   sellerName: string;
   installId: string;
   lastRunAt: string | null;
-  lastState: "ok" | "needs_login" | "error" | null;
+  lastState: "ok" | "needs_login" | "error" | "disconnected" | null;
   lastError: string | null;
   lastCodeAt: string | null;
   hasCodeToday: boolean;

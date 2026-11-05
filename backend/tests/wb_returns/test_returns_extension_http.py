@@ -128,4 +128,6 @@ async def test_extension_pairs_reports_and_serves_qr_through_the_api(workspace) 
     )
     assert revoked.status_code == 204
     gone = await client.post(f"{API}/wb/returns/extension/heartbeat", json={"state": "ok"}, headers=as_extension)
-    assert gone.status_code == 401
+    assert gone.status_code == 410, gone.text
+    codes_gone = await client.post(f"{API}/wb/returns/extension/codes", json={"codes": []}, headers=as_extension)
+    assert codes_gone.status_code == 410

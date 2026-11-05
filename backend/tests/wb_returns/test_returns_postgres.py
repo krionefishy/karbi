@@ -451,10 +451,13 @@ async def test_extension_pairs_sends_codes_and_answers_the_waiting_chat(database
         async with database.session() as session:
             assert await extension(session).revoke(seller, paired.install_id, now=NOW)
         async with database.session() as session:
-            from backend.modules.wb_returns.application import ExtensionUnauthorizedError
+            from backend.modules.wb_returns.application import ExtensionRevokedError, ExtensionUnauthorizedError
 
-            with pytest.raises(ExtensionUnauthorizedError):
+            with pytest.raises(ExtensionRevokedError):
                 await extension(session).authenticate(paired.token, now=NOW)
+            with pytest.raises(ExtensionUnauthorizedError) as unknown:
+                await extension(session).authenticate("mar_unknown", now=NOW)
+            assert not isinstance(unknown.value, ExtensionRevokedError)
     finally:
         async with database.session() as session:
             aggregate = uuid.uuid5(uuid.NAMESPACE_URL, f"telegram-chat:{chat}")

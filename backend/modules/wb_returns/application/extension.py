@@ -36,7 +36,15 @@ class PairingCodeInvalidError(Exception):
 
 
 class ExtensionUnauthorizedError(Exception):
-    """Токена нет, он отозван или не наш."""
+    """Токена нет или он не наш."""
+
+
+class ExtensionRevokedError(ExtensionUnauthorizedError):
+    """Токен был наш, но установку отозвали: её заменила новая пара или её удалили на странице.
+
+    Расширение по этому ответу забывает токен и перестаёт стучаться, а мониторинг
+    не считает такой ответ ошибкой: брошенный браузер иначе шлёт 400+ отказов в сутки.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +189,8 @@ class ExtensionService:
         install = await self.returns.install_by_token_hash(hash_token(token))
         if install is None:
             raise ExtensionUnauthorizedError
+        if install.revoked_at is not None:
+            raise ExtensionRevokedError
         install.last_seen_at = now or datetime.now(UTC)
         return install
 
