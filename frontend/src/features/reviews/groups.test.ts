@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { buildGroups, collapsedSnapshots, filterGroups, pluralizeDummies, sortGroupsByMovement } from "./groups";
+import {
+  buildGroups,
+  collapsedSnapshots,
+  filterGroups,
+  pluralizeDummies,
+  sortGroupsByMovement,
+} from "./groups";
 import type { ProductReviewHistory } from "./types";
 
-function item(id: string, extra: Partial<ProductReviewHistory> = {}): ProductReviewHistory {
+function item(
+  id: string,
+  extra: Partial<ProductReviewHistory> = {},
+): ProductReviewHistory {
   return {
     id,
     article: id,
@@ -28,7 +37,10 @@ function item(id: string, extra: Partial<ProductReviewHistory> = {}): ProductRev
   };
 }
 
-const day = (date: string, five: number) => ({ date, ratings: { 1: 0, 2: 0, 3: 0, 4: 0, 5: five } });
+const day = (date: string, five: number) => ({
+  date,
+  ratings: { 1: 0, 2: 0, 3: 0, 4: 0, 5: five },
+});
 
 describe("buildGroups", () => {
   it("puts the main product first whatever order the members came in", () => {
@@ -37,7 +49,12 @@ describe("buildGroups", () => {
       item("a", { group_id: "g", group_role: "main" }),
       item("c"),
     ]);
-    expect(groups.map((group) => [group.main.id, group.members.map((member) => member.id)])).toEqual([
+    expect(
+      groups.map((group) => [
+        group.main.id,
+        group.members.map((member) => member.id),
+      ]),
+    ).toEqual([
       ["a", ["b"]],
       ["c", []],
     ]);
@@ -47,7 +64,12 @@ describe("buildGroups", () => {
 describe("collapsedSnapshots", () => {
   it("uses the group total for a group and the product itself otherwise", () => {
     const [group, single] = buildGroups([
-      item("a", { group_id: "g", group_role: "main", snapshots: [day("2026-11-04", 1)], group_snapshots: [day("2026-11-04", 9)] }),
+      item("a", {
+        group_id: "g",
+        group_role: "main",
+        snapshots: [day("2026-11-04", 1)],
+        group_snapshots: [day("2026-11-04", 9)],
+      }),
       item("b", { group_id: "g", group_role: "member" }),
       item("c", { snapshots: [day("2026-11-04", 3)] }),
     ]);
@@ -58,13 +80,24 @@ describe("collapsedSnapshots", () => {
 
 describe("filterGroups", () => {
   const groups = buildGroups([
-    item("main", { group_id: "g", group_role: "main", vendor_code: "Шуруповерт основной" }),
-    item("dummy", { group_id: "g", group_role: "member", vendor_code: "шуруповёрт7" }),
+    item("main", {
+      group_id: "g",
+      group_role: "main",
+      vendor_code: "Шуруповерт основной",
+    }),
+    item("dummy", {
+      group_id: "g",
+      group_role: "member",
+      vendor_code: "шуруповёрт7",
+    }),
     item("other", { vendor_code: "Болгарка" }),
   ]);
 
   it("keeps a group when only a dummy matches and opens it", () => {
-    const selection = filterGroups(groups, { query: "шуруповёрт7", subjects: [] });
+    const selection = filterGroups(groups, {
+      query: "шуруповёрт7",
+      subjects: [],
+    });
     expect(selection.groups.map((group) => group.id)).toEqual(["g"]);
     expect([...selection.revealed]).toEqual(["g"]);
   });
@@ -79,7 +112,9 @@ describe("filterGroups", () => {
 describe("sortGroupsByMovement", () => {
   it("ranks a group by the movement of its total", () => {
     const groups = buildGroups([
-      item("quiet", { snapshots: [day("2026-11-03", 5), day("2026-11-04", 6)] }),
+      item("quiet", {
+        snapshots: [day("2026-11-03", 5), day("2026-11-04", 6)],
+      }),
       item("main", {
         group_id: "g",
         group_role: "main",
@@ -88,7 +123,27 @@ describe("sortGroupsByMovement", () => {
       }),
       item("dummy", { group_id: "g", group_role: "member" }),
     ]);
-    expect(sortGroupsByMovement(groups, "2026-11-04").map((group) => group.main.id)).toEqual(["main", "quiet"]);
+    expect(
+      sortGroupsByMovement(groups, "2026-11-04").map((group) => group.main.id),
+    ).toEqual(["main", "quiet"]);
+  });
+
+  it("puts products with dummies above single products, however busy the single ones are", () => {
+    const groups = buildGroups([
+      item("busy", {
+        snapshots: [day("2026-11-03", 5), day("2026-11-04", 90)],
+      }),
+      item("calm", { snapshots: [day("2026-11-03", 5), day("2026-11-04", 6)] }),
+      item("main", {
+        group_id: "g",
+        group_role: "main",
+        snapshots: [day("2026-11-03", 5), day("2026-11-04", 5)],
+      }),
+      item("dummy", { group_id: "g", group_role: "member" }),
+    ]);
+    expect(
+      sortGroupsByMovement(groups, "2026-11-04").map((group) => group.main.id),
+    ).toEqual(["main", "busy", "calm"]);
   });
 });
 

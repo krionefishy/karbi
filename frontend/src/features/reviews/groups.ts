@@ -9,7 +9,9 @@ export interface ProductGroup {
   members: ProductReviewHistory[];
 }
 
-export function buildGroups(products: readonly ProductReviewHistory[]): ProductGroup[] {
+export function buildGroups(
+  products: readonly ProductReviewHistory[],
+): ProductGroup[] {
   const groups = new Map<string, ProductGroup>();
   const order: string[] = [];
   for (const product of products) {
@@ -19,7 +21,10 @@ export function buildGroups(products: readonly ProductReviewHistory[]): ProductG
       group = { id, main: product, members: [] };
       groups.set(id, group);
       order.push(id);
-    } else if (product.group_role === "main" && group.main.group_role !== "main") {
+    } else if (
+      product.group_role === "main" &&
+      group.main.group_role !== "main"
+    ) {
       group.members.push(group.main);
       group.main = product;
     } else {
@@ -36,7 +41,9 @@ export function isGroup(group: ProductGroup): boolean {
 /** Счётчики, которые видны в свёрнутой строке: сумма по группе или сам товар. */
 export function collapsedSnapshots(group: ProductGroup): DailyReviewSnapshot[] {
   if (!isGroup(group)) return group.main.snapshots;
-  return group.main.group_snapshots.length ? group.main.group_snapshots : group.main.snapshots;
+  return group.main.group_snapshots.length
+    ? group.main.group_snapshots
+    : group.main.snapshots;
 }
 
 export interface GroupSelection {
@@ -46,8 +53,12 @@ export interface GroupSelection {
 }
 
 /** Группа видна, если под фильтр попал основной товар или любая болванка. */
-export function filterGroups(groups: readonly ProductGroup[], filters: ArticleFilters): GroupSelection {
-  if (!hasActiveFilters(filters)) return { groups: [...groups], revealed: new Set() };
+export function filterGroups(
+  groups: readonly ProductGroup[],
+  filters: ArticleFilters,
+): GroupSelection {
+  if (!hasActiveFilters(filters))
+    return { groups: [...groups], revealed: new Set() };
   const revealed = new Set<string>();
   const visible = groups.filter((group) => {
     if (applyFilters([group.main], filters).length) return true;
@@ -58,10 +69,21 @@ export function filterGroups(groups: readonly ProductGroup[], filters: ArticleFi
   return { groups: visible, revealed };
 }
 
-export function sortGroupsByMovement(groups: readonly ProductGroup[], date: string | null): ProductGroup[] {
+/** Сначала товары с болванками, за ними одиночки; внутри — по движению отзывов за день. */
+export function sortGroupsByMovement(
+  groups: readonly ProductGroup[],
+  date: string | null,
+): ProductGroup[] {
   return groups
-    .map((group, index) => ({ group, index, delta: movementOn({ snapshots: collapsedSnapshots(group) }, date).delta }))
+    .map((group, index) => ({
+      group,
+      index,
+      delta: movementOn({ snapshots: collapsedSnapshots(group) }, date).delta,
+    }))
     .sort((left, right) => {
+      const grouped =
+        Number(isGroup(right.group)) - Number(isGroup(left.group));
+      if (grouped !== 0) return grouped;
       const moved = Math.abs(right.delta ?? 0) - Math.abs(left.delta ?? 0);
       return moved !== 0 ? moved : left.index - right.index;
     })
