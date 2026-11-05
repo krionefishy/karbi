@@ -254,7 +254,7 @@ class ReviewSyncService:
         """Ручная правка группы болванок.
 
         `pin_main` снимает закрепление с прежнего основного той же группы, но
-        его ручную привязку сохраняет; `reset` возвращает товар в группу по названию.
+        его ручную привязку сохраняет; `reset` возвращает товар в автоматическую группу.
         """
         if await self.sellers.get(seller_id) is None:
             raise SellerNotFoundError
@@ -299,14 +299,20 @@ class ReviewSyncService:
                 seller_id, override.article, GROUP_MEMBER, override.main_article, now=now
             )
 
-    async def _stocks(self, seller_id: uuid.UUID) -> dict[str, int]:
-        """Остаток FBO + FBS по карточке; без свежего сбора основной выбирается по отзывам."""
-        facts = await self.stock_mirror.stock(seller_id, fresh_since=datetime.now(UTC) - STOCK_FRESHNESS) or {}
-        return {article: fact.fbo_quantity + fact.fbs_quantity for article, fact in facts.items()}
+    async def _stocks(self, seller_id: uuid.UUID) -> dict[str, int] | None:
+        """Остаток FBO + FBS с товаром в пути; `None` — свежих остатков нет, основной угадывается по фото.
+
+        Отчёт WB перечисляет только карточки с остатком или товаром в пути:
+        карточки, которой в нём нет, — болванка с нулём.
+        """
+        facts = await self.stock_mirror.stock(seller_id, fresh_since=datetime.now(UTC) - STOCK_FRESHNESS)
+        if not facts:
+            return None
+        return {article: fact.fbo_quantity_full + fact.fbs_quantity for article, fact in facts.items()}
 
     @staticmethod
     def _candidates(
-        articles: list[Article], by_article: dict[str, dict[str, list[int]]], stocks: dict[str, int]
+        articles: list[Article], by_article: dict[str, dict[str, list[int]]], stocks: dict[str, int] | None
     ) -> list[GroupCandidate]:
         def latest_total(article: str) -> int:
             days = by_article.get(article)
@@ -319,7 +325,9 @@ class ReviewSyncService:
                 article.photo_count,
                 latest_total(article.article),
                 name=article.name,
-                stock=stocks.get(article.article, 0),
+                stock=None if stocks is None else stocks.get(article.article, 0),
+                vendor_code=article.vendor_code,
+                subject=article.subject_name,
             )
             for article in articles
         ]

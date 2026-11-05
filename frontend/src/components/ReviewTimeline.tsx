@@ -249,7 +249,7 @@ function GroupMenu({ product, group, onAction }: GroupMenuProps) {
   if (grouped && isMain && !product.group_manual) items.push({ action: "pin_main", label: "Закрепить как основной" });
   items.push({ action: "attach", label: "Привязать к основному товару…" });
   if (grouped && !isMain) items.push({ action: "detach", label: "Вывести из группы" });
-  if (product.group_manual) items.push({ action: "reset", label: "Вернуть в группу по названию" });
+  if (product.group_manual) items.push({ action: "reset", label: "Вернуть автоматическую группу" });
   return (
     <div className="row-menu" role="menu" onClick={(event) => event.stopPropagation()}>
       <span className="row-menu-caption">WB {product.article}</span>
