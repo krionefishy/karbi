@@ -654,6 +654,13 @@
 .sc-list-foot select { height: var(--control-sm); font-size: 13px; }
 .sc-more { height: var(--control-sm); margin-left: auto; font-size: 13px; }
 .sc-connections { display: flex; flex-direction: column; gap: var(--space-5); max-width: 880px; }
+.sc-help { padding: var(--space-3) var(--space-5); background: var(--surface-sunken); border: 1px solid var(--line); border-radius: var(--radius-md); font-size: 13px; line-height: 18px; color: var(--ink-secondary); }
+.sc-help summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.sc-help-body { max-width: 760px; padding-top: var(--space-3); }
+.sc-help-body h3 { margin: var(--space-4) 0 var(--space-2); font-size: 13px; line-height: 18px; color: var(--ink); }
+.sc-help-body p { margin: 0 0 var(--space-2); }
+.sc-help-body ol, .sc-help-body ul { margin: 0 0 var(--space-2); padding-left: 20px; }
+.sc-help-body li { margin-bottom: 4px; }
 .sc-connection h2 { margin: 0 0 var(--space-4); }
 .sc-connection > .muted { margin: 0; font-size: 13px; line-height: 18px; }
 .sc-connection-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-2); }
