@@ -1,8 +1,22 @@
 import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+
+import {
   dailySeries,
+  dailyTip,
   percent,
+  rateTip,
   replyLabel,
   sortedCategories,
+  tipText,
+  type DayTip,
+  type TipSwatch,
 } from "../features/supportBot/format";
 import type {
   DailyPoint,
@@ -140,6 +154,132 @@ export function CategoryDonut({
   return <Donut slices={slices} label={label} />;
 }
 
+const SWATCH_COLOR: Record<TipSwatch, string> = {
+  live: "var(--accent)",
+  control: "var(--line-strong)",
+  total: "var(--ink-secondary)",
+};
+
+/**
+ * Состояние подсказки по дню: наведение и фокус показывают её, нажатие закрепляет,
+ * повторное нажатие, Esc или касание вне дней убирают.
+ */
+function useDayTip() {
+  const [active, setActive] = useState<number | null>(null);
+  const [pinned, setPinned] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (pinned === null) return undefined;
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest?.("[data-tip-hit]")) return;
+      setPinned(null);
+      setActive(null);
+    };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [pinned]);
+
+  const toggle = (at: number) => {
+    if (pinned === at) {
+      setPinned(null);
+      setActive(null);
+    } else {
+      setPinned(at);
+      setActive(at);
+    }
+  };
+
+  const hit = (at: number, tip: DayTip) => {
+    const show = () => {
+      if (pinned === null) setActive(at);
+    };
+    const hide = () => {
+      if (pinned === null) setActive(null);
+    };
+    return {
+      "data-tip-hit": "",
+      tabIndex: 0,
+      role: "button" as const,
+      "aria-label": tipText(tip),
+      "aria-describedby": active === at ? "rp-tooltip" : undefined,
+      onMouseEnter: show,
+      onMouseLeave: hide,
+      onFocus: show,
+      onBlur: hide,
+      onClick: () => toggle(at),
+      onKeyDown: (event: KeyboardEvent) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          toggle(at);
+        } else if (event.key === "Escape") {
+          setPinned(null);
+          setActive(null);
+        }
+      },
+    };
+  };
+
+  return { active, hit };
+}
+
+/** Плавающая подсказка над графиком: держится внутри рамки и не перехватывает мышь. */
+function Tooltip({ tip, anchor }: { tip: DayTip; anchor: number }) {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    const wrap = parent.clientWidth;
+    const width = el.offsetWidth;
+    const at = anchor * wrap;
+    const gap = 12;
+    const left = at + gap + width <= wrap ? at + gap : at - gap - width;
+    el.style.left = `${Math.max(0, Math.min(left, wrap - width))}px`;
+  });
+  return (
+    <div ref={box} id="rp-tooltip" role="tooltip" className="rp-tip">
+      <strong>{tip.title}</strong>
+      <dl>
+        {tip.rows.map((row) => (
+          <div key={row.label}>
+            <dt>
+              {row.swatch && (
+                <i
+                  style={{ background: SWATCH_COLOR[row.swatch] }}
+                  aria-hidden="true"
+                />
+              )}
+              {row.label}
+            </dt>
+            <dd>
+              {row.value}
+              {row.hint && <small>{row.hint}</small>}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function ChartWrap({
+  tip,
+  anchor,
+  children,
+}: {
+  tip: DayTip | null;
+  anchor: number;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rp-chart-wrap">
+      {children}
+      {tip && <Tooltip tip={tip} anchor={anchor} />}
+    </div>
+  );
+}
+
 const W = 1000;
 const LEFT = 44;
 const RIGHT = 960;
@@ -159,6 +299,16 @@ function marker(dates: string[], liveSince: string | null): number | null {
   return at === -1 ? null : at;
 }
 
+const RATE_WINDOW_MS = 48 * 3600 * 1000;
+
+/** Первый день, у которого окно 48 ч ещё не закрыто; null, если время сборки неизвестно. */
+function matureBefore(generatedAt: string | undefined): string | null {
+  if (!generatedAt) return null;
+  return moscowDate(
+    new Date(new Date(generatedAt).getTime() - RATE_WINDOW_MS).toISOString(),
+  );
+}
+
 function labelEvery(count: number): number {
   return Math.max(1, Math.ceil(count / 12));
 }
@@ -166,9 +316,11 @@ function labelEvery(count: number): number {
 export function DailyBars({
   daily,
   liveSince,
+  generatedAt,
 }: {
   daily: DailyPoint[];
   liveSince: string | null;
+  generatedAt?: string;
 }) {
   const series = dailySeries(daily);
   const count = daily.length;
@@ -186,6 +338,14 @@ export function DailyBars({
   const cx = (at: number) => LEFT + slot * (at + 0.5);
   const every = labelEvery(count);
   const mark = marker(series.dates, liveSince);
+  const { active, hit } = useDayTip();
+  const matureUntil = matureBefore(generatedAt);
+  const tips = daily.map((day, at) =>
+    dailyTip(day, series.cumulative[at], {
+      mature: matureUntil === null || day.date < matureUntil,
+      marker: at === mark,
+    }),
+  );
   const line = series.cumulative
     .map(
       (value, at) =>
@@ -194,12 +354,25 @@ export function DailyBars({
     .join(" ");
 
   return (
+    <ChartWrap
+      tip={active === null ? null : tips[active]}
+      anchor={active === null ? 0 : cx(active) / W}
+    >
     <svg
       viewBox={`0 0 ${W} ${height}`}
       className="rp-chart"
-      role="img"
+      role="group"
       aria-label="Ответы покупателей по дням"
     >
+      {active !== null && (
+        <rect
+          x={cx(active) - slot / 2}
+          y={top - 6}
+          width={slot}
+          height={bottom - top + 6}
+          fill="var(--surface-hover)"
+        />
+      )}
       {[0, 0.5, 1].map((part) => (
         <g key={part}>
           <line
@@ -233,18 +406,14 @@ export function DailyBars({
               width={barWidth}
               height={bottom - y(control)}
               fill="var(--line-strong)"
-            >
-              <title>{`${shortDate(day.date)}: контроль ${control}, с напоминанием ${live}`}</title>
-            </rect>
+            />
             <rect
               x={cx(at) - barWidth / 2}
               y={y(control + live)}
               width={barWidth}
               height={y(control) - y(control + live)}
               fill="var(--accent)"
-            >
-              <title>{`${shortDate(day.date)}: контроль ${control}, с напоминанием ${live}`}</title>
-            </rect>
+            />
             {at % every === 0 && (
               <text
                 x={cx(at)}
@@ -282,11 +451,22 @@ export function DailyBars({
           </text>
         </g>
       )}
+      {daily.map((day, at) => (
+        <rect
+          key={day.date}
+          className="rp-hit"
+          x={cx(at) - slot / 2}
+          y={0}
+          width={slot}
+          height={height}
+          fill="transparent"
+          {...hit(at, tips[at])}
+        />
+      ))}
     </svg>
+    </ChartWrap>
   );
 }
-
-const RATE_WINDOW_MS = 48 * 3600 * 1000;
 
 export function RateLines({
   daily,
@@ -299,11 +479,11 @@ export function RateLines({
 }) {
   const base = dailySeries(daily);
   // Окно 48 ч у свежих дней ещё не закрыто: бэкенд не считает по ним ответы, и доля выглядела бы провалом до 0%.
-  const matureUntil = generatedAt
-    ? moscowDate(new Date(new Date(generatedAt).getTime() - RATE_WINDOW_MS).toISOString())
-    : null;
+  const matureUntil = matureBefore(generatedAt);
+  const isMature = (at: number) =>
+    matureUntil === null || base.dates[at] < matureUntil;
   const mask = (rates: (number | null)[]) =>
-    rates.map((rate, at) => (matureUntil !== null && base.dates[at] >= matureUntil ? null : rate));
+    rates.map((rate, at) => (isMature(at) ? rate : null));
   const series = {
     ...base,
     rate48Live: mask(base.rate48Live),
@@ -321,6 +501,10 @@ export function RateLines({
   const y = (value: number) => bottom - (value / max) * (bottom - top);
   const every = labelEvery(count);
   const mark = marker(series.dates, liveSince);
+  const { active, hit } = useDayTip();
+  const tips = daily.map((day, at) =>
+    rateTip(day, { mature: isMature(at), marker: at === mark }),
+  );
 
   const path = (rates: (number | null)[]) =>
     rates
@@ -342,20 +526,30 @@ export function RateLines({
           cx={cx(at)}
           cy={y(rate)}
           r="3"
-          style={{ fill: color }}
-        >
-          <title>{`${shortDate(series.dates[at])}: ${name} ${(rate * 100).toFixed(1)}%`}</title>
-        </circle>
+          style={{ fill: color }} />
       ),
     );
 
   return (
+    <ChartWrap
+      tip={active === null ? null : tips[active]}
+      anchor={active === null ? 0 : cx(active) / W}
+    >
     <svg
       viewBox={`0 0 ${W} 160`}
       className="rp-chart"
-      role="img"
+      role="group"
       aria-label="Доля ответивших за 48 часов по дню старта"
     >
+      {active !== null && (
+        <rect
+          x={cx(active) - slot / 2}
+          y={top - 6}
+          width={slot}
+          height={bottom - top + 6}
+          fill="var(--surface-hover)"
+        />
+      )}
       {[0, 0.5, 1].map((part) => (
         <g key={part}>
           <line
@@ -413,6 +607,19 @@ export function RateLines({
           strokeWidth="2"
         />
       )}
+      {daily.map((day, at) => (
+        <rect
+          key={day.date}
+          className="rp-hit"
+          x={cx(at) - slot / 2}
+          y={0}
+          width={slot}
+          height={160}
+          fill="transparent"
+          {...hit(at, tips[at])}
+        />
+      ))}
     </svg>
+    </ChartWrap>
   );
 }

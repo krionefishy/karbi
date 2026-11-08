@@ -913,3 +913,18 @@ button.sca-shot { cursor: zoom-in; }
   .bot-prod-head > .bot-switch { grid-column: 4; grid-row: 1; }
   .bot-prod-counts { grid-column: 3 / -1; grid-row: 2; }
 }
+
+/* Подсказки графиков «Ответы» */
+.rp-chart-wrap { position: relative; }
+.rp-hit { cursor: pointer; outline: none; }
+.rp-hit:focus-visible { stroke: var(--accent); stroke-width: 2; }
+.rp-tip { position: absolute; top: 6px; left: 0; z-index: 5; width: max-content; max-width: min(260px, 100%); box-sizing: border-box; padding: var(--space-2) var(--space-3); background: var(--surface); color: var(--ink); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); font-size: 12px; line-height: 1.35; pointer-events: none; }
+.rp-tip strong { display: block; margin-bottom: 4px; font-size: 12px; }
+.rp-tip dl { margin: 0; display: grid; gap: 3px; }
+.rp-tip dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 var(--space-3); }
+.rp-tip dd { text-align: right; margin-left: auto; }
+.rp-tip dt { display: flex; align-items: center; gap: 6px; color: var(--ink-secondary); }
+.rp-tip dt i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.rp-tip dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.rp-tip dd small { display: block; color: var(--ink-muted); font-size: 11px; }
+@media (max-width: 520px) { .rp-tip { font-size: 11px; padding: var(--space-1) var(--space-2); } }

@@ -590,7 +590,11 @@ export function SupportBotReplies({
                   </span>
                 )}
               </div>
-              <DailyBars daily={data.daily} liveSince={data.live_since} />
+              <DailyBars
+                daily={data.daily}
+                liveSince={data.live_since}
+                generatedAt={data.generated_at}
+              />
               <h4 className="rp-chart-title">
                 Доля ответивших за 48 ч по дню старта
               </h4>

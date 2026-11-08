@@ -7,7 +7,14 @@ import {
   armRates,
   cumulative,
   dailySeries,
+  dailyTip,
   dayBars,
+  formatCount,
+  formatPoints,
+  formatRatio,
+  formatShare,
+  rateTip,
+  tipText,
   formatMinutes,
   groupChecks,
   groupLabel,
@@ -225,5 +232,64 @@ describe("supportBot replies format", () => {
     expect(workerStale(null, now)).toBe(false);
     expect(workerStale("2026-10-29T11:45:00Z", now)).toBe(false);
     expect(workerStale("2026-10-29T11:20:00Z", now)).toBe(true);
+  });
+
+  describe("подсказки графиков", () => {
+    const point = {
+      date: "2026-11-08",
+      started_live: 20,
+      started_control: 10,
+      eligible48_live: 20,
+      eligible48_control: 10,
+      replied48_live: 12,
+      replied48_control: 4,
+      replies_live: 7,
+      replies_control: 3,
+    };
+
+    it("форматирует числа по-русски", () => {
+      expect(formatShare(0.6)).toBe("60,0%");
+      expect(formatShare(0.0375)).toBe("3,8%");
+      expect(formatShare(0)).toBe("0%");
+      expect(formatShare(1)).toBe("100%");
+      expect(formatCount(1234)).toBe(new Intl.NumberFormat("ru-RU").format(1234));
+      expect(formatRatio(12, 20)).toBe("12 из 20 · 60,0%");
+      expect(formatRatio(0, 0)).toBe("нет данных");
+      expect(formatPoints(0.2)).toBe("+20,0 п. п.");
+      expect(formatPoints(-0.025)).toBe("−2,5 п. п.");
+      expect(formatPoints(0)).toBe("0 п. п.");
+    });
+
+    it("подсказка по дням: числа, накопленный итог и доля 48 ч", () => {
+      const tip = dailyTip(point, 42, { mature: true, marker: true });
+      expect(tip.title).toContain("08.11");
+      expect(tip.title).toContain("режим 100%");
+      const text = tipText(tip);
+      expect(text).toContain("С напоминанием: 7");
+      expect(text).toContain("Контроль: 3");
+      expect(text).toContain("Накопленный итог: 42");
+      expect(text).toContain("12 из 20 · 60,0%");
+    });
+
+    it("подсказка по дням: пустой день и незакрытое окно", () => {
+      const empty = { ...point, started_live: 0, started_control: 0, eligible48_live: 0, eligible48_control: 0, replied48_live: 0, replied48_control: 0, replies_live: 0, replies_control: 0 };
+      expect(dailyTip(empty, 5, { mature: true, marker: false }).rows[0]).toEqual({ label: "За день", value: "нет данных" });
+      const fresh = tipText(dailyTip(point, 42, { mature: false, marker: false }));
+      expect(fresh).not.toContain("ответили за 48 ч");
+    });
+
+    it("подсказка доли 48 ч: интервал, разница, нет данных, незакрытое окно", () => {
+      const tip = rateTip(point, { mature: true, marker: false });
+      expect(tip.rows[0].value).toBe("12 из 20 · 60,0%");
+      expect(tip.rows[0].hint).toMatch(/^95%: \d+,\d–\d+,\d%$/);
+      expect(tip.rows[1].value).toBe("4 из 10 · 40,0%");
+      expect(tip.rows[2]).toEqual({ label: "Разница", value: "+20,0 п. п." });
+      const noControl = rateTip({ ...point, eligible48_control: 0, replied48_control: 0 }, { mature: true, marker: false });
+      expect(noControl.rows[1].value).toBe("нет данных");
+      expect(noControl.rows).toHaveLength(2);
+      const fresh = rateTip(point, { mature: false, marker: false });
+      expect(fresh.rows[0].value).toBe("окно 48 ч ещё не закрыто");
+      expect(fresh.rows).toHaveLength(2);
+    });
   });
 });

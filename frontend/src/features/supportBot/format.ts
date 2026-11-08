@@ -345,3 +345,118 @@ export function workerStale(workerCheckedAt: string | null, now: number = Date.n
   const at = Date.parse(workerCheckedAt);
   return Number.isFinite(at) && now - at > limitMinutes * 60000;
 }
+
+const countFormat = new Intl.NumberFormat("ru-RU");
+const shareFormat = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const dayFormat = new Intl.DateTimeFormat("ru-RU", { weekday: "short", day: "2-digit", month: "2-digit", timeZone: "UTC" });
+
+/** Целое по-русски: «1 234». */
+export const formatCount = (value: number): string => countFormat.format(value);
+
+/** Доля [0, 1] в процентах по-русски: «60,0%», «0%» и «100%» без знаков после запятой. */
+export function formatShare(fraction: number): string {
+  if (fraction <= 0) return "0%";
+  if (fraction >= 1) return "100%";
+  return `${shareFormat.format(fraction * 100)}%`;
+}
+
+/** Разница долей в п. п. со знаком: «+5,0 п. п.», «−2,5 п. п.», «0 п. п.». */
+export function formatPoints(diff: number): string {
+  const points = Math.round(diff * 1000) / 10;
+  if (points === 0) return "0 п. п.";
+  return `${points > 0 ? "+" : "−"}${shareFormat.format(Math.abs(points))} п. п.`;
+}
+
+/** «12 из 20 · 60,0%»; «нет данных», если знаменатель нулевой. */
+export function formatRatio(part: number, total: number): string {
+  if (total <= 0) return "нет данных";
+  return `${formatCount(part)} из ${formatCount(total)} · ${formatShare(part / total)}`;
+}
+
+export type TipSwatch = "live" | "control" | "total";
+
+export interface TipRow {
+  label: string;
+  value: string;
+  hint?: string;
+  swatch?: TipSwatch;
+}
+
+export interface DayTip {
+  title: string;
+  rows: TipRow[];
+}
+
+export interface TipOptions {
+  /** Окно 48 ч у дня закрыто, доле можно верить. */
+  mature: boolean;
+  /** С этого дня включён режим 100%. */
+  marker: boolean;
+}
+
+function dayTitle(date: string, marker: boolean): string {
+  const text = dayFormat.format(new Date(`${date}T00:00:00Z`));
+  return marker ? `${text} · режим 100%` : text;
+}
+
+function wilsonRange(successes: number, total: number): string {
+  const [low, high] = wilson(successes, total);
+  return `95%: ${shareFormat.format(low * 100)}–${shareFormat.format(high * 100)}%`;
+}
+
+/** Подсказка графика «Ответы по дням»; running — накопленный итог на конец дня. */
+export function dailyTip(point: DailyPoint, running: number, options: TipOptions): DayTip {
+  const title = dayTitle(point.date, options.marker);
+  const total = point.replies_live + point.replies_control;
+  const starts = point.eligible48_live + point.eligible48_control;
+  if (total === 0 && starts === 0 && point.started_live + point.started_control === 0) {
+    return {
+      title,
+      rows: [
+        { label: "За день", value: "нет данных" },
+        { label: "Накопленный итог", value: formatCount(running), swatch: "total" },
+      ],
+    };
+  }
+  const rows: TipRow[] = [
+    { label: "С напоминанием", value: formatCount(point.replies_live), swatch: "live" },
+    { label: "Контроль", value: formatCount(point.replies_control), swatch: "control" },
+    { label: "Всего за день", value: formatCount(total) },
+    { label: "Накопленный итог", value: formatCount(running), swatch: "total" },
+  ];
+  if (options.mature) {
+    const arm = (label: string, replied: number, eligible: number): TipRow => ({
+      label,
+      value: formatRatio(replied, eligible),
+    });
+    rows.push(
+      arm("Старты дня, с напоминанием: ответили за 48 ч", point.replied48_live, point.eligible48_live),
+      arm("Старты дня, контроль: ответили за 48 ч", point.replied48_control, point.eligible48_control),
+    );
+  }
+  return { title, rows };
+}
+
+/** Подсказка графика «Доля ответивших за 48 ч»; незакрытое окно не выдаём за ноль. */
+export function rateTip(point: DailyPoint, options: TipOptions): DayTip {
+  const arm = (label: string, swatch: TipSwatch, replied: number, eligible: number): TipRow => {
+    if (eligible <= 0) return { label, value: "нет данных", swatch };
+    if (!options.mature) return { label, value: "окно 48 ч ещё не закрыто", swatch };
+    return { label, value: formatRatio(replied, eligible), hint: wilsonRange(replied, eligible), swatch };
+  };
+  const rows = [
+    arm("С напоминанием", "live", point.replied48_live, point.eligible48_live),
+    arm("Контроль", "control", point.replied48_control, point.eligible48_control),
+  ];
+  if (options.mature && point.eligible48_live > 0 && point.eligible48_control > 0) {
+    const diff = point.replied48_live / point.eligible48_live - point.replied48_control / point.eligible48_control;
+    rows.push({ label: "Разница", value: formatPoints(diff) });
+  }
+  return { title: dayTitle(point.date, options.marker), rows };
+}
+
+/** Текст подсказки одной строкой для aria-label. */
+export function tipText(tip: DayTip): string {
+  const rows = tip.rows.map((row) => `${row.label}: ${row.value}${row.hint ? ` (${row.hint})` : ""}`);
+  return `${tip.title}. ${rows.join("; ")}`;
+}
