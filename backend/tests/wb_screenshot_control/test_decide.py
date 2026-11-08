@@ -758,3 +758,19 @@ def test_every_reason_carries_an_admin_detail_with_the_other_submission() -> Non
     detail = decision.reasons[0].detail
     assert detail["other_submission_id"] == str(uuid.UUID(int=1))
     assert "code" not in detail
+
+
+def test_mobile_single_photo_flag_goes_to_review_not_rejection() -> None:
+    decision = run(mobile(quality=QualityFlags(photo_of_screen=True)))
+    assert (decision.verdict, codes(decision)) == ("needs_review", ["photo_of_screen"])
+
+
+def test_mobile_photo_and_glare_together_are_rejected() -> None:
+    decision = run(mobile(quality=QualityFlags(photo_of_screen=True, moire_or_glare=True)))
+    assert decision.verdict == "rejected"
+
+
+def test_mobile_single_shared_message_is_not_a_duplicate() -> None:
+    other = (*HISTORY[:1], msg("совсем другое сообщение про возврат", 19, 5), msg("и еще одно новое сообщение", 19, 6))
+    decision = run(mobile(other), [make_candidate(1, mobile())])
+    assert decision.verdict != "duplicate", codes(decision)

@@ -300,7 +300,11 @@ def _compare_without_chat(
     pairs = matched_messages(client_messages(x.messages), client_messages(y.messages), text_threshold=t.text_dup)
     matched_len = sum(pair.text_len for pair in pairs)
     overlap = {"messages": len(pairs), "matched_len": matched_len}
-    if matched_len >= t.min_text_len and (len(pairs) >= 2 or any(pair.dated for pair in pairs) or confirmed):
+    mine, theirs = client_messages(x.messages), client_messages(y.messages)
+    smaller = min(len(mine), len(theirs))
+    # Одна общая реплика из многих — скрины одного чата с разных мест переписки, а не повтор.
+    covers = len(pairs) >= 2 or (smaller > 0 and len(pairs) * 2 >= smaller)
+    if matched_len >= t.min_text_len and covers and (len(pairs) >= 2 or any(pair.dated for pair in pairs) or confirmed):
         # Продолжение диалога меняет последнюю реплику, но набор пересекается — тот же кейс.
         return _hit(candidate, "messages_overlap", "duplicate", "messages", 1.0, **overlap)
 
@@ -368,7 +372,12 @@ def content_rejections(fields: ExtractedFields) -> list[Finding]:
         return [Finding("not_wb_screenshot", "rejected", {"layout": fields.layout})]
     if fields.layout == "unreadable":
         return [Finding("unreadable", "rejected", {"layout": fields.layout})]
-    if fields.quality.photo_of_screen or fields.quality.moire_or_glare:
+    photo, glare = fields.quality.photo_of_screen, fields.quality.moire_or_glare
+    if photo or glare:
+        # Телефонный скрин с клавиатурой и строкой состояния модель путает с фото: один флаг без второго
+        # признака на телефоне — повод для проверки, а не отказа.
+        if fields.layout == "mobile_app" and not (photo and glare):
+            return [Finding("photo_of_screen", "needs_review")]
         return [Finding("photo_of_screen", "rejected")]
     if keys_unread(fields):
         if fields.quality.cropped_missing_panel:

@@ -245,7 +245,8 @@ class Extractor:
             text = client.text
             moment = _pick(_message_datetime(client.date_text, client.time_text), _numbers(client))
             if twin is not None:
-                _put(agreement, "time", datetime_agreement(moment, _message_datetime(twin.date_text, twin.time_text)))
+                if moment is None or twin.time_text:
+                    _put(agreement, "time", datetime_agreement(moment, _message_datetime(twin.date_text, twin.time_text)))
                 _put(agreement, "text", text_agreement(client.text, twin.text))
             truncated = has_truncation_tail(text)
         else:
