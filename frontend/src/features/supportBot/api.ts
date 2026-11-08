@@ -2,12 +2,12 @@ import { apiRequest } from "../../api/http";
 import type {
   BotDialog,
   BotMode,
-  DialogFilter,
   DialogPage,
+  DialogScope,
   JournalFilter,
   MonitorResponse,
   EscalationItem,
-  ManualVerdict,
+  ProductList,
   ReplyDialog,
   ReplySummary,
   SendPage,
@@ -22,12 +22,16 @@ export const PAGE_SIZE = 50;
 
 export const getSupportBot = (sellerId: string) => apiRequest<SupportBot>(base(sellerId));
 
-export function getDialogs(sellerId: string, filter: DialogFilter) {
-  const params = new URLSearchParams({ page: String(filter.page), page_size: String(PAGE_SIZE) });
-  if (filter.state) params.set("state", filter.state);
-  if (filter.flag) params.set("flag", filter.flag);
-  return apiRequest<DialogPage>(`${base(sellerId)}/dialogs?${params.toString()}`);
+export const getProducts = (sellerId: string, scope: DialogScope) =>
+  apiRequest<ProductList>(`${base(sellerId)}/products?scope=${scope}`);
+
+export function getProductDialogs(sellerId: string, key: number, scope: DialogScope, page: number) {
+  const params = new URLSearchParams({ scope, page: String(page), page_size: String(PAGE_SIZE) });
+  return apiRequest<DialogPage>(`${base(sellerId)}/products/${key}/dialogs?${params.toString()}`);
 }
+
+export const setProductSwitch = (sellerId: string, key: number, enabled: boolean) =>
+  apiRequest<void>(`${base(sellerId)}/products/${key}/switch`, { method: "PUT", body: JSON.stringify({ enabled }) });
 
 export function getSends(sellerId: string, filter: JournalFilter) {
   const params = new URLSearchParams({ page: String(filter.page), page_size: String(PAGE_SIZE) });
@@ -66,14 +70,15 @@ export const setDialogFlags = (
     body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, ...flags }),
   });
 
-export const setManualVerdict = (
+/** `on`: true — писать, false — не писать, null — вернуть к решению модели. */
+export const setDialogSwitch = (
   sellerId: string,
   dialog: Pick<BotDialog, "chat_id" | "prompt_at">,
-  value: ManualVerdict | null,
+  on: boolean | null,
 ) =>
-  apiRequest<void>(`${base(sellerId)}/dialogs/manual-verdict`, {
+  apiRequest<void>(`${base(sellerId)}/dialogs/switch`, {
     method: "POST",
-    body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, value }),
+    body: JSON.stringify({ chat_id: dialog.chat_id, prompt_at: dialog.prompt_at, on }),
   });
 
 export const getReplySummary = (sellerId: string, days: number) =>

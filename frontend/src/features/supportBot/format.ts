@@ -8,12 +8,14 @@ import type {
   MonitorDay,
   MonitorGroup,
   MonitorIncident,
-  ManualVerdict,
+  Mailing,
+  MailingReason,
   ReplyBucket,
   ReplyCategoryCount,
   ReplyGateMode,
   SendStatus,
   Severity,
+  ProductGroup,
   SupportBot,
   Verdict,
 } from "./types";
@@ -70,24 +72,41 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
   unclear: "ИИ: неясно",
 };
 
-export const MANUAL_LABEL: Record<ManualVerdict, string> = {
-  allow: "вручную: писать",
-  deny: "вручную: не писать",
-};
-
-export function verdictNote(dialog: Pick<BotDialog, "verdict" | "verdict_reason" | "manual_verdict">): string | null {
-  if (dialog.manual_verdict) return MANUAL_LABEL[dialog.manual_verdict];
+export function verdictNote(dialog: Pick<BotDialog, "verdict" | "verdict_reason">): string | null {
   if (!dialog.verdict) return null;
   const label = VERDICT_LABEL[dialog.verdict];
   return dialog.verdict_reason ? `${label} (${dialog.verdict_reason})` : label;
 }
 
-export function needsDecision(
-  dialog: Pick<BotDialog, "state" | "verdict" | "manual_verdict">,
-  mode: SupportBot["classifier_mode"],
-): boolean {
-  if (mode === "off" || dialog.state !== "in_campaign") return false;
-  return dialog.manual_verdict !== null || dialog.verdict !== "open";
+const MAILING_LABEL: Record<MailingReason, string> = {
+  state: "рассылки нет",
+  no_contact: "просил не писать",
+  product_off: "выключен товаром",
+  excluded: "исключён",
+  reply_hold: "ждёт оценки ответа",
+  manual_on: "включён вручную",
+  manual_off: "выключен вручную",
+  verdict_open: "по решению модели",
+  verdict_closing: "по решению модели",
+  verdict_unclear: "по решению модели",
+  verdict_pending: "ждёт оценки модели",
+  model_off: "оценка модели выключена",
+};
+
+const untilFormatter = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+/** Подпись под тумблером диалога: откуда решение и, для ручного, до какого момента оно действует. */
+export function mailingNote(mailing: Mailing): string {
+  const label = MAILING_LABEL[mailing.reason];
+  if (mailing.source === "manual" && mailing.manual_until) {
+    return `${label} до ${untilFormatter.format(new Date(mailing.manual_until))}`;
+  }
+  return label;
+}
+
+/** Сколько диалогов товара показывать подписью: «пишем 3 из 12». */
+export function productCounts(group: Pick<ProductGroup, "enabled" | "writing" | "total">): string {
+  return group.enabled ? `пишем ${group.writing} из ${group.total}` : `выключен, диалогов ${group.total}`;
 }
 
 export const REPLY_LABEL: Record<ReplyBucket, string> = {

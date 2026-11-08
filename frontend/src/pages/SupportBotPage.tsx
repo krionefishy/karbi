@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ExternalLink, Pause, Play } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/http";
@@ -7,6 +7,7 @@ import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
 import { SupportBotMonitor } from "../components/SupportBotMonitor";
+import { SupportBotProducts } from "../components/SupportBotProducts";
 import { SupportBotReplies } from "../components/SupportBotReplies";
 import { SupportBotJournal } from "../components/SupportBotJournal";
 import { SupportBotTemplates } from "../components/SupportBotTemplates";
@@ -14,36 +15,15 @@ import { Shell } from "../components/Shell";
 import {
   addTemplate,
   deleteTemplate,
-  getDialogs,
   getSends,
   getSupportBot,
-  PAGE_SIZE,
-  setDialogFlags,
-  setManualVerdict,
   setMode,
   setPaused,
   setTemplateActive,
   updateTemplate,
 } from "../features/supportBot/api";
-import {
-  MODE_LABEL,
-  STATE_LABEL,
-  STATE_ORDER,
-  needsDecision,
-  replyLabel,
-  statusLine,
-  totalDialogs,
-  verdictNote,
-} from "../features/supportBot/format";
-import type {
-  BotDialog,
-  BotMode,
-  DialogFilter,
-  DialogFlag,
-  DialogState,
-  JournalFilter,
-  ManualVerdict,
-} from "../features/supportBot/types";
+import { MODE_LABEL, STATE_LABEL, STATE_ORDER, statusLine, totalDialogs } from "../features/supportBot/format";
+import type { BotMode, JournalFilter } from "../features/supportBot/types";
 import {
   attachSeller,
   detachSeller,
@@ -56,18 +36,6 @@ import type { Seller, SellerInput } from "../features/sellers/types";
 const AUTOMATION_ID = "wb-support-bot";
 const AUTOMATION_TITLE = "Бот поддержки в чатах";
 
-const momentFormatter = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
-const stamp = (value: string | null) => (value ? momentFormatter.format(new Date(value)) : "—");
-
-const FLAG_OPTIONS: { value: DialogFlag | ""; label: string }[] = [
-  { value: "", label: "Любые флаги" },
-  { value: "no_contact", label: "Просили не писать" },
-  { value: "attention", label: "Жалоба" },
-  { value: "excluded", label: "Исключены вручную" },
-];
-
-const TEMPLATE = ["170px", "200px", "150px", "150px", "100px", "minmax(260px, 1fr)"].join(" ");
-
 function message(error: unknown, fallback: string) {
   return error instanceof ApiError ? error.message : fallback;
 }
@@ -75,7 +43,6 @@ function message(error: unknown, fallback: string) {
 export function SupportBotPage() {
   const queryClient = useQueryClient();
   const [sellerId, setSellerId] = useState("");
-  const [filter, setFilter] = useState<DialogFilter>({ state: "", flag: "", page: 1 });
   const [journalFilter, setJournalFilter] = useState<JournalFilter>({ status: "", page: 1 });
   const [connecting, setConnecting] = useState(false);
   const [detaching, setDetaching] = useState<Seller | null>(null);
@@ -98,12 +65,6 @@ export function SupportBotPage() {
     queryFn: () => getSupportBot(sellerId),
     enabled: Boolean(sellerId),
   });
-  const dialogs = useQuery({
-    queryKey: ["support-bot-dialogs", sellerId, filter],
-    queryFn: () => getDialogs(sellerId, filter),
-    enabled: Boolean(sellerId),
-    placeholderData: (previous) => previous,
-  });
   const sends = useQuery({
     queryKey: ["support-bot-sends", sellerId, journalFilter],
     queryFn: () => getSends(sellerId, journalFilter),
@@ -121,7 +82,8 @@ export function SupportBotPage() {
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ["support-bot", sellerId] });
-    await queryClient.invalidateQueries({ queryKey: ["support-bot-dialogs", sellerId] });
+    await queryClient.invalidateQueries({ queryKey: ["support-bot-products", sellerId] });
+    await queryClient.invalidateQueries({ queryKey: ["support-bot-product-dialogs", sellerId] });
     await queryClient.invalidateQueries({ queryKey: ["support-bot-sends", sellerId] });
   };
   const refreshSellers = async () => {
@@ -189,24 +151,8 @@ export function SupportBotPage() {
     onSuccess: refresh,
     onError: failed("Не удалось удалить текст"),
   });
-  const flagMutation = useMutation({
-    mutationFn: (item: { dialog: BotDialog; flags: { excluded?: boolean; closed?: boolean } }) =>
-      setDialogFlags(sellerId, item.dialog, item.flags),
-    onSuccess: refresh,
-    onError: failed("Не удалось изменить диалог"),
-  });
-
-  const verdictMutation = useMutation({
-    mutationFn: (item: { dialog: BotDialog; value: ManualVerdict | null }) =>
-      setManualVerdict(sellerId, item.dialog, item.value),
-    onSuccess: refresh,
-    onError: failed("Не удалось сохранить решение"),
-  });
-
   const selected = sellers.find((seller) => seller.id === sellerId);
   const view = bot.data;
-  const page = dialogs.data;
-  const changeFilter = (patch: Partial<DialogFilter>) => setFilter({ ...filter, ...patch, page: 1 });
   const hasActiveText = (view?.templates ?? []).some((item) => item.active);
 
   return (
@@ -365,145 +311,8 @@ export function SupportBotPage() {
               onDelete={(id) => deleteMutation.mutate(id)}
             />
 
-            <h2 className="chats-section-title">Диалоги</h2>
-            <div className="checklist-toolbar penalties-toolbar">
-              <div className="mode-switch penalties-groups" role="tablist" aria-label="Состояния диалогов">
-                {([{ value: "", label: "Все" }, ...STATE_ORDER.map((value) => ({ value, label: STATE_LABEL[value] }))] as {
-                  value: DialogState | "";
-                  label: string;
-                }[]).map((option) => (
-                  <button
-                    key={option.value || "all"}
-                    type="button"
-                    role="tab"
-                    aria-selected={filter.state === option.value}
-                    className={filter.state === option.value ? "mode-active" : undefined}
-                    onClick={() => changeFilter({ state: option.value })}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <label className="penalties-field">
-                <select
-                  aria-label="Флаги диалога"
-                  value={filter.flag}
-                  onChange={(event) => changeFilter({ flag: event.target.value as DialogFlag | "" })}
-                >
-                  {FLAG_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <section
-              className="checklist-scroll stocks-scroll"
-              style={{ "--stocks-template": TEMPLATE } as React.CSSProperties}
-            >
-              <div className="stocks-head">
-                <span className="checklist-sticky">Диалог</span>
-                <span>Состояние</span>
-                <span>Покупатель писал</span>
-                <span>Мы писали</span>
-                <span>Сообщений</span>
-                <span>Действия</span>
-              </div>
-              {page?.dialogs.map((dialog) => (
-                <div className="stocks-row" key={`${dialog.chat_id}:${dialog.prompt_at}`}>
-                  <span className="checklist-sticky">
-                    {dialog.chat_url ? (
-                      <a className="wb-article-link" href={dialog.chat_url} target="_blank" rel="noreferrer">
-                        {stamp(dialog.prompt_at)} <ExternalLink size={12} />
-                      </a>
-                    ) : (
-                      <span title={dialog.chat_id}>{stamp(dialog.prompt_at)}</span>
-                    )}
-                    <em>{dialog.nm_id ?? "артикул не передан"}</em>
-                  </span>
-                  <span className="penalty-kind">
-                    <strong>{STATE_LABEL[dialog.state]}</strong>
-                    {dialog.no_contact && <em className="stocks-unknown">просил не писать</em>}
-                    {dialog.attention && <em className="stocks-unknown">жалоба</em>}
-                    {dialog.excluded && <em className="stocks-unknown">исключён</em>}
-                    {verdictNote(dialog) && (
-                      <em className={dialog.verdict === "open" ? undefined : "stocks-unknown"}>{verdictNote(dialog)}</em>
-                    )}
-                    {dialog.reply_hold && <em className="stocks-unknown">Ждёт оценки ответа</em>}
-                    {dialog.reply_category && <em>{replyLabel(dialog.reply_category)}</em>}
-                    {dialog.next_send_at && dialog.state === "in_campaign" && (
-                      <em>следующее: {stamp(dialog.next_send_at)}</em>
-                    )}
-                  </span>
-                  <span>{stamp(dialog.buyer_last_at)}</span>
-                  <span>{stamp(dialog.last_sent_at ?? dialog.our_last_at)}</span>
-                  <span>{dialog.sent_count}</span>
-                  <span>
-                    <button
-                      className="secondary-button"
-                      onClick={() => flagMutation.mutate({ dialog, flags: { excluded: !dialog.excluded } })}
-                    >
-                      {dialog.excluded ? "Вернуть в рассылку" : "Исключить"}
-                    </button>{" "}
-                    <button
-                      className="secondary-button"
-                      onClick={() => flagMutation.mutate({ dialog, flags: { closed: !dialog.closed } })}
-                    >
-                      {dialog.closed ? "Открыть" : "Закрыть"}
-                    </button>
-                    {view && needsDecision(dialog, view.classifier_mode) && (
-                      <>
-                        {" "}
-                        <button
-                          className="secondary-button"
-                          aria-pressed={dialog.manual_verdict === "allow"}
-                          onClick={() =>
-                            verdictMutation.mutate({ dialog, value: dialog.manual_verdict === "allow" ? null : "allow" })
-                          }
-                        >
-                          Писать
-                        </button>{" "}
-                        <button
-                          className="secondary-button"
-                          aria-pressed={dialog.manual_verdict === "deny"}
-                          onClick={() =>
-                            verdictMutation.mutate({ dialog, value: dialog.manual_verdict === "deny" ? null : "deny" })
-                          }
-                        >
-                          Не писать
-                        </button>
-                      </>
-                    )}
-                  </span>
-                </div>
-              ))}
-              {page && page.dialogs.length === 0 && <span className="fbs-row-empty">Под этот фильтр диалогов нет.</span>}
-            </section>
-            {page && page.total > PAGE_SIZE && (
-              <nav className="penalties-pager" aria-label="Страницы">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={filter.page <= 1}
-                  onClick={() => setFilter({ ...filter, page: filter.page - 1 })}
-                >
-                  <ChevronLeft size={15} /> Назад
-                </button>
-                <span>
-                  {(page.page - 1) * page.page_size + 1}–{Math.min(page.page * page.page_size, page.total)} из{" "}
-                  {page.total}
-                </span>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={page.page * page.page_size >= page.total}
-                  onClick={() => setFilter({ ...filter, page: filter.page + 1 })}
-                >
-                  Вперёд <ChevronRight size={15} />
-                </button>
-              </nav>
-            )}
+            <h2 className="chats-section-title">Диалоги по товарам</h2>
+            <SupportBotProducts sellerId={sellerId} onError={setActionError} />
 
             <h2 className="chats-section-title">Журнал отправок</h2>
             <SupportBotJournal page={sends.data} filter={journalFilter} onFilter={setJournalFilter} />

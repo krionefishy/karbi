@@ -7,7 +7,6 @@ export type DialogState =
   | "exhausted"
   | "closed";
 export type BotMode = "stopped" | "live";
-export type DialogFlag = "no_contact" | "attention" | "excluded";
 export type SendStatus =
   "planned" | "sending" | "sent" | "unknown" | "failed";
 
@@ -34,7 +33,56 @@ export interface SupportBot {
 
 export type ClassifierMode = "off" | "enforce";
 export type Verdict = "open" | "closing" | "unclear";
-export type ManualVerdict = "allow" | "deny";
+
+/** Откуда взялось решение «пишем ли по диалогу»: модель, человек, выключенный товар, исключение или остановка бота. */
+export type MailingSource = "model" | "manual" | "product" | "excluded" | "system";
+export type MailingReason =
+  | "state"
+  | "no_contact"
+  | "product_off"
+  | "excluded"
+  | "reply_hold"
+  | "manual_on"
+  | "manual_off"
+  | "verdict_open"
+  | "verdict_closing"
+  | "verdict_unclear"
+  | "verdict_pending"
+  | "model_off";
+
+export interface Mailing {
+  on: boolean;
+  source: MailingSource;
+  reason: MailingReason;
+  /** Тумблер нельзя переключить: товар выключен, рассылки нет или идёт оценка ответа. */
+  locked: boolean;
+  /** До какого момента ручная отметка сильнее решения модели. */
+  manual_until: string | null;
+}
+
+export type DialogScope = "campaign" | "all";
+
+export interface ProductGroup {
+  /** Ключ товара в запросах: артикул, а у диалогов без артикула 0. */
+  key: number;
+  nm_id: number | null;
+  name: string;
+  vendor_code: string;
+  photo_url: string;
+  /** Карточка снята с продажи или в корзине. */
+  removed: boolean;
+  enabled: boolean;
+  total: number;
+  /** По скольким диалогам бот пишет сейчас. */
+  writing: number;
+  waiting: number;
+}
+
+export interface ProductList {
+  products: ProductGroup[];
+  scope: DialogScope;
+  manual_hours: number;
+}
 
 export interface BotDialog {
   chat_id: string;
@@ -55,9 +103,9 @@ export interface BotDialog {
   chat_url: string | null;
   verdict: Verdict | null;
   verdict_reason: string | null;
-  manual_verdict: ManualVerdict | null;
   reply_hold: boolean;
   reply_category: ReplyCategory | null;
+  mailing: Mailing | null;
 }
 
 export interface DialogPage {
@@ -93,12 +141,6 @@ export interface SendPage {
 
 export interface JournalFilter {
   status: JournalStatus | "";
-  page: number;
-}
-
-export interface DialogFilter {
-  state: DialogState | "";
-  flag: DialogFlag | "";
   page: number;
 }
 

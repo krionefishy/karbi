@@ -16,7 +16,8 @@ import {
   severityTone,
   sortChecks,
   workerStale,
-  needsDecision,
+  mailingNote,
+  productCounts,
   percent,
   replyLabel,
   replyTone,
@@ -42,25 +43,29 @@ describe("supportBot format", () => {
     expect(totalDialogs({ counts: { in_campaign: 3, awaiting_us: 2 } })).toBe(5);
   });
 
-  it("решение менеджера важнее вердикта, а причина модели идёт в скобках", () => {
-    const none = { verdict: null, verdict_reason: null, manual_verdict: null };
+  it("вердикт модели подписывается, причина идёт в скобках", () => {
+    const none = { verdict: null, verdict_reason: null };
     expect(verdictNote(none)).toBeNull();
-    expect(verdictNote({ ...none, verdict: "closing", verdict_reason: "заявка одобрена" })).toBe(
+    expect(verdictNote({ verdict: "closing", verdict_reason: "заявка одобрена" })).toBe(
       "ИИ: диалог завершён (заявка одобрена)",
     );
-    expect(verdictNote({ ...none, verdict: "open" })).toBe("ИИ: ждёт ответа");
-    expect(verdictNote({ verdict: "closing", verdict_reason: "x", manual_verdict: "allow" })).toBe("вручную: писать");
+    expect(verdictNote({ verdict: "open", verdict_reason: null })).toBe("ИИ: ждёт ответа");
   });
 
-  it("отметка «писать / не писать» нужна, пока нейросеть не подтвердила, что покупателя ждут", () => {
-    const base = { state: "in_campaign" as const, verdict: "closing" as const, manual_verdict: null };
-    expect(needsDecision(base, "enforce")).toBe(true);
-    expect(needsDecision({ ...base, verdict: "unclear" }, "enforce")).toBe(true);
-    expect(needsDecision({ ...base, verdict: null }, "enforce")).toBe(true);
-    expect(needsDecision({ ...base, verdict: "open" }, "enforce")).toBe(false);
-    expect(needsDecision({ ...base, verdict: "open", manual_verdict: "deny" }, "enforce")).toBe(true);
-    expect(needsDecision(base, "off")).toBe(false);
-    expect(needsDecision({ ...base, state: "awaiting_buyer" }, "enforce")).toBe(false);
+  it("подпись под тумблером говорит, откуда решение, а у ручного называет срок", () => {
+    const base = { on: true, locked: false, manual_until: null };
+    expect(mailingNote({ ...base, source: "model", reason: "verdict_open" })).toBe("по решению модели");
+    expect(mailingNote({ ...base, on: false, source: "model", reason: "verdict_pending" })).toBe("ждёт оценки модели");
+    expect(mailingNote({ ...base, on: false, source: "product", reason: "product_off", locked: true })).toBe(
+      "выключен товаром",
+    );
+    const manual = mailingNote({ ...base, source: "manual", reason: "manual_on", manual_until: "2026-11-09T12:20:00+00:00" });
+    expect(manual).toMatch(/^включён вручную до 09\.11, /);
+  });
+
+  it("счётчик товара: у включённого сколько пишем, у выключенного сколько диалогов", () => {
+    expect(productCounts({ enabled: true, writing: 3, total: 12 })).toBe("пишем 3 из 12");
+    expect(productCounts({ enabled: false, writing: 0, total: 5 })).toBe("выключен, диалогов 5");
   });
 });
 
