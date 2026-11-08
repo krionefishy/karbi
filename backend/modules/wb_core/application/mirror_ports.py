@@ -20,6 +20,7 @@ from backend.modules.wb_core.domain import (
     AdvertCampaign,
     AdvertNmStat,
     AdvertSpend,
+    CatalogCard,
     ChatEvent,
     FbsOrder,
     FbsSupply,
@@ -182,7 +183,11 @@ class ChatMirrorState:
 
 
 class CatalogMirror:
-    """Какие карточки каталога уже сняты с продажи, по зеркалу каталога."""
+    """Какие карточки каталога уже сняты с продажи и как они называются, по зеркалу каталога."""
+
+    async def cards(self, seller_id: uuid.UUID, articles: Iterable[str]) -> dict[str, CatalogCard]:
+        """Карточки только из запрошенных артикулов; неизвестных (нет в каталоге) в ответе нет."""
+        return await self.mirror.article_cards(seller_id, articles)
 
     def __init__(self, session: AsyncSession) -> None:
         self.mirror = MirrorRepository(session)

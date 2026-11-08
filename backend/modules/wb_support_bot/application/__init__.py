@@ -21,8 +21,22 @@ from backend.modules.wb_support_bot.application.service import (
     SupportBotOverview,
     SupportBotService,
 )
+from backend.modules.wb_support_bot.application.switches import (
+    SCOPE_ALL,
+    SCOPE_CAMPAIGN,
+    ProductDialogs,
+    ProductGroup,
+    SwitchDialog,
+    SwitchError,
+)
 
 __all__ = [
+    "SCOPE_ALL",
+    "SCOPE_CAMPAIGN",
+    "ProductDialogs",
+    "ProductGroup",
+    "SwitchDialog",
+    "SwitchError",
     "AUTOMATION_ID",
     "DESCRIPTION",
     "TITLE",

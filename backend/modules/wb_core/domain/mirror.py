@@ -486,3 +486,14 @@ def is_review_prompt(sender: str, source: str, text: str | None) -> bool:
     if sender != CHAT_SENDER_SELLER or source != CHAT_SOURCE_PORTAL or not text:
         return False
     return text.lstrip().startswith(REVIEW_PROMPT_PREFIX)
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogCard:
+    """Как карточка выглядит в списках: название, артикул продавца, главное фото и состояние в каталоге."""
+
+    article: str
+    name: str
+    vendor_code: str
+    photo_url: str
+    state: str

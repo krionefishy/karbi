@@ -1,8 +1,9 @@
+import random
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, delete, func, select, tuple_, update
+from sqlalchemy import case, delete, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -10,6 +11,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     MODE_LIVE,
     MODE_STOPPED,
+    NO_ARTICLE_KEY,
     SEND_DRY_RUN,
     SEND_FAILED,
     SEND_SENT,
@@ -19,6 +21,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
     ModeChangeModel,
     MonitorEventModel,
     MonitorStateModel,
+    ProductSwitchModel,
     ReplyVerdictModel,
     SendModel,
     TemplateModel,
@@ -27,6 +30,8 @@ from backend.modules.wb_support_bot.infrastructure.postgres.models import (
 )
 
 JOURNAL_STATUSES = (SEND_SENT, SEND_UNKNOWN, SEND_FAILED)
+# За сколько после включения товара расходятся первые сообщения его диалогов.
+RESUME_SPREAD = timedelta(hours=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +67,7 @@ class SupportBotRepository:
             ModeChangeModel,
             MonitorStateModel,
             MonitorEventModel,
+            ProductSwitchModel,
             TemplateModel,
             TrackedSellerModel,
         ):
@@ -159,6 +165,7 @@ class SupportBotRepository:
                 ~DialogModel.closed,
                 ~DialogModel.no_contact,
                 ~DialogModel.reply_hold,
+                ~self._product_off(),
             )
             .order_by(DialogModel.next_send_at)
             .limit(limit)
@@ -509,17 +516,96 @@ class SupportBotRepository:
     def add_verdict(self, model: VerdictModel) -> None:
         self.session.add(model)
 
-    async def set_manual_verdict(self, key: DialogKey, value: str | None) -> bool:
-        """Ручная отметка менеджера для текущего хвоста диалога; `None` снимает её.
+    async def set_manual_verdict(self, key: DialogKey, value: str | None, *, until: datetime | None = None) -> bool:
+        """Ручное решение менеджера по диалогу; `None` снимает его.
 
-        Привязана к отпечатку хвоста: появится новое сообщение — отметка перестанет действовать.
+        Действует до `until` и пока хвост диалога тот же: написали ещё раз или срок вышел,
+        и тумблер снова следует за вердиктом модели.
         """
         dialog = await self.get_dialog(key)
         if dialog is None:
             return False
-        if value is not None and dialog.tail_fingerprint is None:
-            return False
         dialog.manual_verdict = value
         dialog.manual_fingerprint = dialog.tail_fingerprint if value is not None else None
+        dialog.manual_until = until if value is not None else None
         dialog.updated_at = func.now()
         return True
+
+    # --- тумблеры товаров -----------------------------------------------------
+
+    @staticmethod
+    def _product_off():
+        """Условие: у диалога товар выключен (диалоги без артикула идут под ключом 0)."""
+        return exists().where(
+            ProductSwitchModel.seller_id == DialogModel.seller_id,
+            ProductSwitchModel.nm_id == func.coalesce(DialogModel.nm_id, NO_ARTICLE_KEY),
+            ~ProductSwitchModel.enabled,
+        )
+
+    async def disabled_products(self, seller_id: uuid.UUID) -> set[int]:
+        rows = await self.session.scalars(
+            select(ProductSwitchModel.nm_id).where(
+                ProductSwitchModel.seller_id == seller_id, ~ProductSwitchModel.enabled
+            )
+        )
+        return set(rows)
+
+    async def set_product_enabled(
+        self,
+        seller_id: uuid.UUID,
+        nm_id: int,
+        enabled: bool,
+        *,
+        by: uuid.UUID | None = None,
+        now: datetime | None = None,
+        spread: timedelta = RESUME_SPREAD,
+    ) -> None:
+        """Включает или выключает товар.
+
+        При включении диалогам товара, где идёт рассылка, назначается новое время отправки в
+        пределах `spread` от сейчас: накопившиеся за паузу сообщения не уйдут одной пачкой.
+        """
+        statement = insert(ProductSwitchModel).values(seller_id=seller_id, nm_id=nm_id, enabled=enabled, updated_by=by)
+        await self.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["seller_id", "nm_id"],
+                set_={"enabled": enabled, "updated_by": by, "updated_at": func.now()},
+            )
+        )
+        if not enabled:
+            return
+        moment = now or datetime.now(UTC)
+        rows = await self.session.scalars(
+            select(DialogModel).where(
+                DialogModel.seller_id == seller_id,
+                func.coalesce(DialogModel.nm_id, NO_ARTICLE_KEY) == nm_id,
+                DialogModel.state == "in_campaign",
+            )
+        )
+        for dialog in rows:
+            dialog.next_send_at = moment + timedelta(seconds=random.uniform(60, spread.total_seconds()))
+
+    async def product_off_for_chat(self, seller_id: uuid.UUID, chat_id: str, prompt_at: datetime | None = None) -> bool:
+        """Выключен ли товар диалога; без `prompt_at` берётся самый свежий диалог чата."""
+        query = select(DialogModel.nm_id).where(DialogModel.seller_id == seller_id, DialogModel.chat_id == chat_id)
+        if prompt_at is not None:
+            query = query.where(DialogModel.prompt_at == prompt_at)
+        rows = (await self.session.execute(query.order_by(DialogModel.prompt_at.desc()).limit(1))).first()
+        if rows is None:
+            return False
+        key = rows[0] if rows[0] is not None else NO_ARTICLE_KEY
+        return key in await self.disabled_products(seller_id)
+
+    async def dialogs_for_switches(
+        self, seller_id: uuid.UUID, *, states: tuple[str, ...] | None, nm_key: int | None = None
+    ) -> list[DialogModel]:
+        """Диалоги кабинета для экрана тумблеров: нужные состояния, при `nm_key` — только одного товара."""
+        conditions: list[ColumnElement[bool]] = [DialogModel.seller_id == seller_id]
+        if states is not None:
+            conditions.append(DialogModel.state.in_(states))
+        if nm_key is not None:
+            conditions.append(func.coalesce(DialogModel.nm_id, NO_ARTICLE_KEY) == nm_key)
+        rows = await self.session.scalars(
+            select(DialogModel).where(*conditions).order_by(DialogModel.updated_at.desc(), DialogModel.chat_id)
+        )
+        return list(rows)

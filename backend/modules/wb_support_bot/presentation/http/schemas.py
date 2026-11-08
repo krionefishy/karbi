@@ -22,6 +22,16 @@ class SupportBotResponse(BaseModel):
     monitor_overall: str
 
 
+class MailingResponse(BaseModel):
+    """Решение «пишем ли по диалогу»: `source` и `reason` объясняют, откуда оно; `locked` — тумблер недоступен."""
+
+    on: bool
+    source: str
+    reason: str
+    locked: bool
+    manual_until: str | None = None
+
+
 class DialogResponse(BaseModel):
     chat_id: str
     prompt_at: str
@@ -41,9 +51,9 @@ class DialogResponse(BaseModel):
     chat_url: str | None
     verdict: str | None = None
     verdict_reason: str | None = None
-    manual_verdict: str | None = None
     reply_hold: bool = False
     reply_category: str | None = None
+    mailing: MailingResponse | None = None
 
 
 class DialogPageResponse(BaseModel):
@@ -98,10 +108,34 @@ class DialogActionRequest(BaseModel):
     closed: bool | None = None
 
 
-class ManualVerdictRequest(BaseModel):
+class DialogSwitchRequest(BaseModel):
     chat_id: str
     prompt_at: str
-    value: str | None = None
+    # true — писать, false — не писать, null — вернуть к решению модели.
+    on: bool | None = None
+
+
+class ProductSwitchRequest(BaseModel):
+    enabled: bool
+
+
+class ProductResponse(BaseModel):
+    key: int
+    nm_id: int | None
+    name: str
+    vendor_code: str
+    photo_url: str
+    removed: bool
+    enabled: bool
+    total: int
+    writing: int
+    waiting: int
+
+
+class ProductListResponse(BaseModel):
+    products: list[ProductResponse]
+    scope: str
+    manual_hours: int
 
 
 class ArmStatsResponse(BaseModel):

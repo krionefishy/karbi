@@ -13,10 +13,12 @@ from backend.modules.wb_support_bot.application import (
     NotEnrolledError,
     SendRow,
     SupportBotService,
+    SwitchDialog,
+    SwitchError,
 )
 from backend.modules.wb_support_bot.application.reply_stats import ArmStats
 from backend.modules.wb_support_bot.application.service import ReplyOverview, reply_action
-from backend.modules.wb_support_bot.domain import chat_url
+from backend.modules.wb_support_bot.domain import Mailing, chat_url
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     VERDICT_DONE,
     DialogModel,
@@ -33,18 +35,22 @@ from backend.modules.wb_support_bot.presentation.http.schemas import (
     DialogActionRequest,
     DialogPageResponse,
     DialogResponse,
+    DialogSwitchRequest,
     EffectResponse,
     EscalationListResponse,
     EscalationResponse,
     HealthResponse,
     LateSendsResponse,
-    ManualVerdictRequest,
+    MailingResponse,
     ModeRequest,
     MonitorCheckResponse,
     MonitorDayResponse,
     MonitorIncidentResponse,
     MonitorResponse,
     PauseRequest,
+    ProductListResponse,
+    ProductResponse,
+    ProductSwitchRequest,
     ReplyDialogResponse,
     ReplyMessageResponse,
     ReplySummaryResponse,
@@ -73,6 +79,18 @@ def _iso(moment: datetime | None) -> str | None:
     return moment.isoformat() if moment else None
 
 
+def _mailing_response(mailing: Mailing | None) -> MailingResponse | None:
+    if mailing is None:
+        return None
+    return MailingResponse(
+        on=mailing.on,
+        source=mailing.source,
+        reason=mailing.reason,
+        locked=mailing.locked,
+        manual_until=_iso(mailing.manual_until),
+    )
+
+
 def template_response(model: TemplateModel) -> TemplateResponse:
     return TemplateResponse(id=model.id, text=model.text, active=model.active)
 
@@ -82,10 +100,10 @@ def dialog_response(
     chat_url_template: str,
     verdicts: dict[tuple[str, str], VerdictModel] | None = None,
     replies: dict[str, ReplyVerdictModel] | None = None,
+    mailing: Mailing | None = None,
 ) -> DialogResponse:
     row = (verdicts or {}).get((model.chat_id, model.tail_fingerprint)) if model.tail_fingerprint else None
     done = row is not None and row.status == VERDICT_DONE
-    manual = model.manual_verdict if model.manual_fingerprint == model.tail_fingerprint else None
     reply = (replies or {}).get(model.chat_id)
     return DialogResponse(
         chat_id=model.chat_id,
@@ -106,9 +124,9 @@ def dialog_response(
         chat_url=chat_url(chat_url_template, model.chat_id),
         verdict=row.verdict if row is not None and done else None,
         verdict_reason=row.reason if row is not None and done else None,
-        manual_verdict=manual,
         reply_hold=model.reply_hold,
         reply_category=(reply.guard or reply.category) if reply is not None and reply.status == VERDICT_DONE else None,
+        mailing=_mailing_response(mailing),
     )
 
 
@@ -310,21 +328,92 @@ async def dialog_flags(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/sellers/{seller_id}/dialogs/manual-verdict", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/sellers/{seller_id}/dialogs/switch", status_code=status.HTTP_204_NO_CONTENT)
 @inject
-async def dialog_manual_verdict(
-    seller_id: uuid.UUID, payload: ManualVerdictRequest, _: CurrentPrincipal, service: FromDishka[SupportBotService]
+async def dialog_switch(
+    seller_id: uuid.UUID, payload: DialogSwitchRequest, _: CurrentPrincipal, service: FromDishka[SupportBotService]
 ) -> Response:
     try:
         prompt_at = datetime.fromisoformat(payload.prompt_at)
     except ValueError as error:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Неверная дата диалога") from error
     try:
-        await service.set_manual_verdict(seller_id, payload.chat_id, prompt_at, payload.value)
+        await service.set_dialog_switch(seller_id, payload.chat_id, prompt_at, payload.on)
     except (SellerNotFoundError, NotEnrolledError) as error:
         raise not_enrolled() from error
-    except BotRequestError as error:
-        raise bad_request(error) from error
+    except SwitchError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/sellers/{seller_id}/products", response_model=ProductListResponse)
+@inject
+async def products(
+    seller_id: uuid.UUID,
+    _: CurrentPrincipal,
+    service: FromDishka[SupportBotService],
+    scope: str = Query(default="campaign"),
+) -> ProductListResponse:
+    try:
+        groups = await service.products(seller_id, scope=scope)
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except SwitchError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    return ProductListResponse(
+        products=[ProductResponse(**asdict(group)) for group in groups],
+        scope=scope,
+        manual_hours=service.manual_switch_hours,
+    )
+
+
+@router.get("/sellers/{seller_id}/products/{key}/dialogs", response_model=DialogPageResponse)
+@inject
+async def product_dialogs(
+    seller_id: uuid.UUID,
+    key: int,
+    _: CurrentPrincipal,
+    service: FromDishka[SupportBotService],
+    settings: FromDishka[Settings],
+    scope: str = Query(default="campaign"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+) -> DialogPageResponse:
+    try:
+        result = await service.product_dialogs(seller_id, key, scope=scope, page=page, page_size=page_size)
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except SwitchError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
+    template = settings.support_bot.chat_url_template
+
+    def row(item: SwitchDialog) -> DialogResponse:
+        verdicts = {(item.model.chat_id, item.verdict.tail_fingerprint): item.verdict} if item.verdict else None
+        return dialog_response(item.model, template, verdicts, None, item.mailing)
+
+    return DialogPageResponse(
+        dialogs=[row(item) for item in result.dialogs],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+@router.put("/sellers/{seller_id}/products/{key}/switch", status_code=status.HTTP_204_NO_CONTENT)
+@inject
+async def product_switch(
+    seller_id: uuid.UUID,
+    key: int,
+    payload: ProductSwitchRequest,
+    principal: CurrentPrincipal,
+    service: FromDishka[SupportBotService],
+) -> Response:
+    try:
+        await service.set_product_enabled(seller_id, key, payload.enabled, by=principal.user_id)
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except SwitchError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

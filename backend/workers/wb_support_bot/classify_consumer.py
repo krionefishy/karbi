@@ -100,6 +100,12 @@ class ClassifyConsumer:
                 await session.commit()
                 return
             seller_id, tail_event_id = row.seller_id, row.tail_event_id
+            if await repository.product_off_for_chat(seller_id, row.chat_id):
+                # Товар выключили, пока запрос лежал в очереди: на оценку нейросети его не отдаём.
+                # Строка остаётся ожидающей, после включения товара бот поставит запрос заново.
+                sellers.mark_inbox(event_id, EVENT_TYPE)
+                await session.commit()
+                return
             event = await ChatMirror(session).event(seller_id, tail_event_id)
         text = (event.text or "") if event is not None else None
 

@@ -33,6 +33,7 @@ from backend.modules.wb_core.domain import (
     AdvertCampaign,
     AdvertNmStat,
     AdvertSpend,
+    CatalogCard,
     ChatEvent,
     FbsOrder,
     FbsSupply,
@@ -720,6 +721,25 @@ class MirrorRepository:
             )
         )
         return {str(article): str(state) for article, state in rows.all()}
+
+    async def article_cards(self, seller_id: uuid.UUID, articles: Iterable[str]) -> dict[str, CatalogCard]:
+        """Название, артикул продавца, фото и состояние запрошенных карточек каталога."""
+        wanted = {article for article in articles if article}
+        if not wanted:
+            return {}
+        rows = await self.session.execute(
+            select(
+                ArticleModel.article,
+                ArticleModel.name,
+                ArticleModel.vendor_code,
+                ArticleModel.photo_url,
+                ArticleModel.state,
+            ).where(ArticleModel.seller_id == seller_id, ArticleModel.article.in_(wanted))
+        )
+        return {
+            str(article): CatalogCard(str(article), str(name), str(vendor), str(photo), str(state))
+            for article, name, vendor, photo, state in rows.all()
+        }
 
     async def active_article_count(self, seller_id: uuid.UUID) -> int:
         return int(

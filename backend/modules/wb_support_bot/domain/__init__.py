@@ -25,6 +25,29 @@ from backend.modules.wb_support_bot.domain.reply import (
 )
 from backend.modules.wb_support_bot.domain.schedule import MOSCOW, Pace, SendWindow, first_send_at, next_send_at
 from backend.modules.wb_support_bot.domain.stopwords import StopMatch, match
+from backend.modules.wb_support_bot.domain.switch import (
+    REASON_EXCLUDED,
+    REASON_MANUAL_OFF,
+    REASON_MANUAL_ON,
+    REASON_MODEL_OFF,
+    REASON_NO_CONTACT,
+    REASON_PRODUCT_OFF,
+    REASON_REPLY_HOLD,
+    REASON_STATE,
+    REASON_VERDICT_CLOSING,
+    REASON_VERDICT_OPEN,
+    REASON_VERDICT_PENDING,
+    REASON_VERDICT_UNCLEAR,
+    SOURCE_EXCLUDED,
+    SOURCE_MANUAL,
+    SOURCE_MODEL,
+    SOURCE_PRODUCT,
+    SOURCE_SYSTEM,
+    SWITCHABLE_STATES,
+    Mailing,
+    decide,
+    manual_valid,
+)
 from backend.modules.wb_support_bot.domain.verdict import (
     MANUAL_ALLOW,
     MANUAL_DENY,
@@ -43,6 +66,27 @@ from backend.modules.wb_support_bot.domain.verdict import (
 )
 
 __all__ = [
+    "REASON_EXCLUDED",
+    "REASON_MANUAL_OFF",
+    "REASON_MANUAL_ON",
+    "REASON_MODEL_OFF",
+    "REASON_NO_CONTACT",
+    "REASON_PRODUCT_OFF",
+    "REASON_REPLY_HOLD",
+    "REASON_STATE",
+    "REASON_VERDICT_CLOSING",
+    "REASON_VERDICT_OPEN",
+    "REASON_VERDICT_PENDING",
+    "REASON_VERDICT_UNCLEAR",
+    "SOURCE_EXCLUDED",
+    "SOURCE_MANUAL",
+    "SOURCE_MODEL",
+    "SOURCE_PRODUCT",
+    "SOURCE_SYSTEM",
+    "SWITCHABLE_STATES",
+    "Mailing",
+    "decide",
+    "manual_valid",
     "CATEGORY_FLAGS",
     "CONTINUE_CATEGORIES",
     "ESCALATION_CATEGORIES",

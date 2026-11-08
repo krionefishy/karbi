@@ -120,6 +120,11 @@ class ReplyConsumer:
                 return
             seller_id, chat_id = row.seller_id, row.chat_id
             first_at, last_at, prompt_at = row.first_event_at, row.last_event_at, row.prompt_at
+            if await repository.product_off_for_chat(seller_id, chat_id, prompt_at):
+                # Товар выключили, пока запрос лежал в очереди: на оценку нейросети его не отдаём.
+                sellers.mark_inbox(event_id, EVENT_TYPE)
+                await session.commit()
+                return
             events = await ChatMirror(session).chat_events(
                 seller_id, chat_id, since=min(first_at - CONTEXT_LOOKBACK, prompt_at), until=last_at
             )

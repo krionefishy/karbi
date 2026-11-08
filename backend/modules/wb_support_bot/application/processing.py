@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT, CHAT_SENDER_SELLER, ChatEvent
 from backend.modules.wb_core.infrastructure.wb.client import WBPermanentError, WBTemporaryError
+from backend.modules.wb_support_bot.application.mailing import mailing_for
 from backend.modules.wb_support_bot.application.ports import ChatSender
 from backend.modules.wb_support_bot.domain import (
     CATEGORY_FLAGS,
@@ -17,13 +18,14 @@ from backend.modules.wb_support_bot.domain import (
     CampaignRules,
     DialogState,
     Gate,
+    Mailing,
     Pace,
     SendWindow,
     SentMessage,
     first_send_at,
     gate_decision,
     is_wb_notice,
-    may_send,
+    manual_valid,
     next_send_at,
     project_dialog,
     reply_slice,
@@ -34,6 +36,7 @@ from backend.modules.wb_support_bot.domain import (
 )
 from backend.modules.wb_support_bot.infrastructure.postgres import (
     MODE_LIVE,
+    NO_ARTICLE_KEY,
     SEND_FAILED,
     SEND_SENDING,
     SEND_SENT,
@@ -151,6 +154,11 @@ class SupportBotProcessor:
         self.catalog = catalog
         self.rng = rng or random.Random()
         self.sleep = sleep
+        # Ключи выключенных товаров кабинета на время прохода; у диалогов без артикула ключ 0.
+        self._disabled: set[int] = set()
+
+    def _product_off(self, nm_id: int | None) -> bool:
+        return (nm_id if nm_id is not None else NO_ARTICLE_KEY) in self._disabled
 
     async def process_seller(self, seller_id: uuid.UUID, *, now: datetime) -> SellerReport:
         report = SellerReport()
@@ -167,6 +175,7 @@ class SupportBotProcessor:
         events = await self.chats.review_dialog_events(seller_id, since=since, until=now + timedelta(days=1))
         segments = split_dialogs(events)
 
+        self._disabled = await self.repository.disabled_products(seller_id)
         stored = await self.repository.dialogs_by_keys(seller_id, since)
         journal = await self.repository.sends_by_dialog(seller_id, since)
         removed: set[str] = set()
@@ -263,9 +272,17 @@ class SupportBotProcessor:
         tail = tail_message(segment.events, record, ignore_notices=enforce)
         model.tail_event_id = tail.event_id if tail else None
         model.tail_fingerprint = tail_fingerprint(tail) if tail else None
-        if model.manual_verdict is not None and model.manual_fingerprint != model.tail_fingerprint:
+        if model.manual_verdict is not None and not manual_valid(
+            model.manual_verdict,
+            manual_fingerprint=model.manual_fingerprint,
+            manual_until=model.manual_until,
+            tail_fingerprint=model.tail_fingerprint,
+            now=now,
+        ):
+            # Написали ещё раз или срок вышел: решение человека снято, тумблер снова следует за моделью.
             model.manual_verdict = None
             model.manual_fingerprint = None
+            model.manual_until = None
         model.nm_id = segment.nm_id
         model.buyer_first_at = projection.buyer_first_at
         model.buyer_last_at = projection.buyer_last_at
@@ -331,6 +348,10 @@ class SupportBotProcessor:
         key = (segment.chat_id, fingerprint)
         row = rows.get(key)
         policy = self.policy
+        off = self._product_off(model.nm_id)
+        if row is None and off:
+            # Товар выключен: срез на оценку нейросети не отправляем, диалог держится до включения товара.
+            return _ReplyGate(pending=True)
         if row is None:
             guard = slice_guard(events)
             row = ReplyVerdictModel(
@@ -357,6 +378,7 @@ class SupportBotProcessor:
                 self._request_reply(outbox, row, seller_id, report)
         elif (
             row.status != VERDICT_DONE
+            and not off
             and row.attempts < policy.reply_max_attempts
             and (now - row.requested_at >= policy.reply_retry)
         ):
@@ -428,6 +450,8 @@ class SupportBotProcessor:
                 continue
             if model.excluded or model.closed or model.no_contact:
                 continue
+            if self._product_off(model.nm_id):
+                continue
             row = existing.get((model.chat_id, model.tail_fingerprint))
             if row is None:
                 row = VerdictModel(
@@ -460,12 +484,16 @@ class SupportBotProcessor:
             )
             report.verdicts_requested += 1
 
-    def _cleared(self, dialog: DialogModel, verdicts: dict[tuple[str, str], VerdictModel]) -> bool:
-        """Можно ли писать по диалогу с учётом вердикта нейросети и ручной отметки менеджера."""
-        manual = dialog.manual_verdict if dialog.manual_fingerprint == dialog.tail_fingerprint else None
+    def _mailing(self, dialog: DialogModel, verdicts: dict[tuple[str, str], VerdictModel], now: datetime) -> Mailing:
+        """Итоговое решение по диалогу: вердикт нейросети, ручная отметка, тумблер товара и остановки бота."""
         row = verdicts.get((dialog.chat_id, dialog.tail_fingerprint)) if dialog.tail_fingerprint else None
-        verdict = row.verdict if row is not None and row.status == VERDICT_DONE else None
-        return may_send(self.policy.classifier_mode, verdict, manual)
+        return mailing_for(
+            dialog,
+            row,
+            mode=self.policy.classifier_mode,
+            product_enabled=not self._product_off(dialog.nm_id),
+            now=now,
+        )
 
     async def _reconcile(self, seller_id: uuid.UUID, segments: list[_Segment], now: datetime) -> None:
         unresolved = await self.repository.unresolved_sends(seller_id)
@@ -523,7 +551,7 @@ class SupportBotProcessor:
         if self.policy.classifier_mode == MODE_ENFORCE:
             verdicts = await self.repository.verdicts_by_tail(seller_id, self.policy.classifier_prompt_version)
         for dialog in due:
-            if not self._cleared(dialog, verdicts):
+            if not self._mailing(dialog, verdicts, now).on:
                 dialog.next_send_at = now + VERDICT_RECHECK
                 report.held += 1
                 await self.repository.session.commit()

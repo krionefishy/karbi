@@ -18,9 +18,8 @@ from backend.modules.wb_support_bot.application.reply_stats import (
 from backend.modules.wb_support_bot.application.reply_stats import (
     SendRow as StatSendRow,
 )
+from backend.modules.wb_support_bot.application.switches import SwitchesMixin
 from backend.modules.wb_support_bot.domain import (
-    MANUAL_ALLOW,
-    MANUAL_DENY,
     MODE_OFF,
     DialogState,
     Gate,
@@ -253,7 +252,7 @@ class ReplyStatsMixin:
         return ReplyDialogCard(tuple(messages), tuple(verdicts))
 
 
-class SupportBotService(ReplyStatsMixin):
+class SupportBotService(SwitchesMixin, ReplyStatsMixin):
     """Что бот показывает оператору и что оператор ему может поручить."""
 
     def __init__(
@@ -264,6 +263,7 @@ class SupportBotService(ReplyStatsMixin):
         *,
         classifier_mode: str = MODE_OFF,
         classifier_prompt_version: str = "v2",
+        manual_switch_hours: int = 24,
         reply_gate_mode: str = MODE_OFF,
         reply_prompt_version: str = "r3",
         reply_engine: str = "single",
@@ -272,6 +272,7 @@ class SupportBotService(ReplyStatsMixin):
     ) -> None:
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
+        self.manual_switch_hours = manual_switch_hours
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
         self.reply_engine = reply_engine
@@ -440,19 +441,4 @@ class SupportBotService(ReplyStatsMixin):
         key = DialogKey(seller_id, chat_id, prompt_at)
         if not await self.repository.set_dialog_flags(key, excluded=excluded, closed=closed):
             raise BotRequestError("Диалог не найден")
-        await self.session.commit()
-
-    async def set_manual_verdict(
-        self, seller_id: uuid.UUID, chat_id: str, prompt_at: datetime, value: str | None
-    ) -> None:
-        """Решение менеджера по диалогу: `allow` — писать, `deny` — не писать, `None` — снять отметку.
-
-        Действует только для текущего хвоста диалога: напишут снова — решение нужно принять заново.
-        """
-        await self._tracked(seller_id)
-        if value not in (None, MANUAL_ALLOW, MANUAL_DENY):
-            raise BotRequestError(f"Неизвестное решение: {value}")
-        key = DialogKey(seller_id, chat_id, prompt_at)
-        if not await self.repository.set_manual_verdict(key, value):
-            raise BotRequestError("Диалог не найден или в нём ещё нет сообщения специалиста")
         await self.session.commit()

@@ -85,6 +85,8 @@ class DialogModel(WBSupportBotBase):
     tail_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
     manual_verdict: Mapped[str | None] = mapped_column(String(8), nullable=True)
     manual_fingerprint: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Решение менеджера сильнее вердикта модели до этого момента; потом оно снимается, и тумблер следует за моделью.
+    manual_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reply_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     reply_cleared_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reply_first_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -193,6 +195,25 @@ class ReplyVerdictModel(WBSupportBotBase):
     )
 
 
+# Диалоги, у которых WB не передал артикул, собраны в одну группу с этим ключом.
+NO_ARTICLE_KEY = 0
+
+
+class ProductSwitchModel(WBSupportBotBase):
+    """Тумблер товара: выключенный товар не получает сообщений, и его диалоги не уходят на оценку нейросети.
+
+    Строка есть только у тех, кого трогали; нет строки — товар включён. Ключ 0 — диалоги без артикула.
+    """
+
+    __tablename__ = "product_switches"
+
+    seller_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    nm_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+
 class ModeChangeModel(WBSupportBotBase):
     """История режимов кабинета: по ней на графике ответов ставится метка перехода на 100%."""
 
@@ -270,6 +291,8 @@ class SendModel(WBSupportBotBase):
 
 
 __all__ = [
+    "NO_ARTICLE_KEY",
+    "ProductSwitchModel",
     "MODE_STOPPED",
     "MODE_LIVE",
     "SEND_DRY_RUN",

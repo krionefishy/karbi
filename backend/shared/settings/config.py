@@ -384,6 +384,8 @@ class SupportBotConfig:
     classifier_prompt_version: str = "v2"
     classifier_retry_minutes: int = 15
     classifier_max_attempts: int = 3
+    # Сколько часов ручное переключение диалога сильнее вердикта модели, потом тумблер снова следует за моделью.
+    manual_switch_hours: int = 24
     reply_gate_mode: str = "off"
     reply_prompt_version: str = "r3"
     reply_retry_minutes: int = 15
@@ -1026,6 +1028,8 @@ class Settings:
             raise ValueError("support_bot.history_days must exceed campaign_days")
         if bot.classifier_mode not in ("off", "enforce"):
             raise ValueError("support_bot.classifier_mode must be off or enforce")
+        if bot.manual_switch_hours < 1:
+            raise ValueError("support_bot.manual_switch_hours must be positive")
         if min(bot.classifier_retry_minutes, bot.classifier_max_attempts) < 1:
             raise ValueError("support_bot.classifier_* limits must be positive")
         if bot.reply_gate_mode not in ("off", "enforce"):
