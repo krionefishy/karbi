@@ -457,16 +457,32 @@ class SupportBotRepository:
         return int(total or 0)
 
     async def verdicts_pending_stuck(self, seller_id: uuid.UUID, before: datetime) -> int:
-        total = await self.session.scalar(
-            select(func.count())
-            .select_from(VerdictModel)
-            .where(
-                VerdictModel.seller_id == seller_id,
-                VerdictModel.status != "done",
-                VerdictModel.requested_at < before,
+        """Вердикты без ответа дольше срока. Диалоги выключенных товаров не считаются: их не оценивают сознательно."""
+        stuck = (
+            (
+                await self.session.execute(
+                    select(VerdictModel.chat_id).where(
+                        VerdictModel.seller_id == seller_id,
+                        VerdictModel.status != "done",
+                        VerdictModel.requested_at < before,
+                    )
+                )
             )
+            .scalars()
+            .all()
         )
-        return int(total or 0)
+        disabled = await self.disabled_products(seller_id) if stuck else set()
+        if not disabled:
+            return len(stuck)
+        latest: dict[str, int] = {}
+        dialogs = await self.session.execute(
+            select(DialogModel.chat_id, DialogModel.nm_id)
+            .where(DialogModel.seller_id == seller_id, DialogModel.chat_id.in_(set(stuck)))
+            .order_by(DialogModel.prompt_at.desc())
+        )
+        for chat_id, nm_id in dialogs:
+            latest.setdefault(chat_id, nm_id if nm_id is not None else NO_ARTICLE_KEY)
+        return sum(1 for chat_id in stuck if latest.get(chat_id) not in disabled)
 
     async def monitor_state(self, seller_id: uuid.UUID) -> MonitorStateModel | None:
         return await self.session.get(MonitorStateModel, seller_id)

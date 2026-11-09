@@ -1,6 +1,6 @@
 # ruff: noqa: F811 — фикстуры `database` и `seller` общие с тестами процессора и подставляются по имени.
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -355,3 +355,22 @@ async def test_the_classify_consumer_still_works_for_an_enabled_product(database
     await deliver(consumer(database, llm), verdict_id, seller, uuid.uuid4())
 
     assert len(llm.calls) == 1 and (await stored(database, verdict_id)).verdict == "open"
+
+
+async def test_stuck_verdicts_of_a_disabled_product_do_not_turn_the_monitor_red(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    await run_with(database, seller, FakeSender(), "off")
+    await request(database, seller, tail_event_id="specialist-60")
+    later = datetime.now(UTC) + timedelta(hours=2)  # requested_at строки ставит база: настоящее «сейчас»
+
+    async def stuck() -> int:
+        async with database.session() as session:
+            return await SupportBotRepository(session).verdicts_pending_stuck(seller, later)
+
+    assert await stuck() == 1
+    await switch_product(database, seller, PRODUCT, False)
+    assert await stuck() == 0
+    await switch_product(database, seller, PRODUCT, True)
+    assert await stuck() == 1
