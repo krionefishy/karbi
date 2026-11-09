@@ -16,6 +16,7 @@ class DialogState(StrEnum):
     IN_CAMPAIGN = "in_campaign"
     PRODUCT_REMOVED = "product_removed"
     EXHAUSTED = "exhausted"
+    TOO_OLD = "too_old"
     CLOSED = "closed"
 
 
@@ -31,7 +32,6 @@ class SentMessage:
 class CampaignRules:
     silence: timedelta = timedelta(hours=4)
     duration: timedelta = timedelta(days=5)
-    max_campaigns: int = 1
     max_idle: timedelta | None = None
 
 
@@ -64,17 +64,22 @@ def project_dialog(
     now: datetime,
     rules: CampaignRules,
     campaign_started_at: datetime | None = None,
-    campaigns_count: int = 0,
     product_removed: bool = False,
     cleared_through: datetime | None = None,
     reply_pending: bool = False,
     ignore_notices: bool = False,
+    can_start: bool = True,
 ) -> Projection:
     """Состояние диалога по его событиям, журналу бота и сохранённому состоянию кампании.
 
     `events` — события одного диалога (одного чата, от автосообщения WB до
-    следующего), в любом порядке. `campaign_started_at` и `campaigns_count` —
-    то, что модуль сам записал о кампании по этому диалогу раньше.
+    следующего), в любом порядке. `campaign_started_at` — то, что модуль сам
+    записал о кампании по этому диалогу раньше. Число прошлых кампаний не ограничено:
+    после ответа покупателя, нашего ответа и новой тишины стартует следующая.
+
+    `can_start` — вызывающий код разрешает старт новой кампании (свежий вердикт «ждём
+    покупателя», товар включён, не выбран часовой лимит стартов). Без разрешения диалог
+    остаётся в ожидании и проверяется на следующем проходе.
 
     Слой ответов: `cleared_through` — время последнего сообщения покупателя, по которому
     уже решено «рассылку продолжаем» (такие сообщения кампанию не останавливают);
@@ -129,13 +134,18 @@ def project_dialog(
     if campaign_started_at is not None:
         if human_last is not None and human_last > campaign_started_at:
             return result(DialogState.AWAITING_BUYER, end=True)
-        if stale or now - campaign_started_at >= rules.duration:
+        if stale:
+            return result(DialogState.TOO_OLD)
+        if now - campaign_started_at >= rules.duration:
             return result(DialogState.EXHAUSTED)
         if product_removed:
             return result(DialogState.PRODUCT_REMOVED, end=True)
         return result(DialogState.IN_CAMPAIGN)
-    if idle >= rules.silence and not stale and campaigns_count < rules.max_campaigns:
+    if stale:
+        return result(DialogState.TOO_OLD)
+    if idle >= rules.silence:
         if product_removed:
             return result(DialogState.PRODUCT_REMOVED)
-        return result(DialogState.IN_CAMPAIGN, start=True)
+        if can_start:
+            return result(DialogState.IN_CAMPAIGN, start=True)
     return result(DialogState.AWAITING_BUYER)

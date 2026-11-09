@@ -264,6 +264,7 @@ class SupportBotService(SwitchesMixin, ReplyStatsMixin):
         classifier_mode: str = MODE_OFF,
         classifier_prompt_version: str = "v2",
         manual_switch_hours: int = 24,
+        history: timedelta = timedelta(days=12),
         reply_gate_mode: str = MODE_OFF,
         reply_prompt_version: str = "r3",
         reply_engine: str = "single",
@@ -273,6 +274,7 @@ class SupportBotService(SwitchesMixin, ReplyStatsMixin):
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
         self.manual_switch_hours = manual_switch_hours
+        self.history = history
         self.reply_gate_mode = reply_gate_mode
         self.reply_prompt_version = reply_prompt_version
         self.reply_engine = reply_engine

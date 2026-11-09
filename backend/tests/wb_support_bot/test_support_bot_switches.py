@@ -196,10 +196,10 @@ async def test_a_disabled_product_gets_no_messages_and_its_dialogs_are_not_sent_
     assert report.dialogs == 1 and report.sent == 0 and report.held == 0 and report.verdicts_requested == 0
     assert later.verdicts_requested == 0 and later.sent == 0
     assert await verdicts(database, seller) == [] and await sends(database, seller) == []
-    assert (await dialog(database, seller)).state == "in_campaign"
+    assert (await dialog(database, seller)).state == "awaiting_buyer", "кампанию по выключенному товару не стартуем"
 
 
-async def test_turning_the_product_back_on_asks_the_model_and_spreads_the_first_messages(
+async def test_turning_the_product_back_on_asks_the_model_and_then_starts_the_campaign(
     database: Database, seller: uuid.UUID
 ) -> None:
     await go_live(database, seller)
@@ -210,14 +210,10 @@ async def test_turning_the_product_back_on_asks_the_model_and_spreads_the_first_
 
     await switch_product(database, seller, PRODUCT, True, now=enabled_at)
 
-    scheduled = (await dialog(database, seller)).next_send_at
-    assert scheduled is not None
-    assert enabled_at + timedelta(seconds=60) <= scheduled <= enabled_at + timedelta(hours=1), (
-        "накопившиеся сообщения не должны уйти разом"
-    )
+    assert (await dialog(database, seller)).next_send_at is None
     sender = FakeSender()
     resumed = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
-    assert resumed.verdicts_requested == 1 and resumed.held == 0 and resumed.sent == 0
+    assert resumed.verdicts_requested == 1 and resumed.campaigns_started == 0 and resumed.sent == 0
     await set_verdict(database, seller, "open")
     later = NOW + timedelta(hours=3)
     await feed(database, seller, BASE_FEED, read_at=later)
@@ -310,7 +306,7 @@ async def test_an_expired_manual_choice_is_dropped_and_the_model_decides_again(
 
     report = await run_with(database, seller, sender, "enforce", now=run_at)
 
-    assert report.sent == 0 and report.held == 1 and sender.calls == []
+    assert report.sent == 0 and report.campaigns_started == 0 and sender.calls == []
     state = await dialog(database, seller)
     assert state.manual_verdict is None and state.manual_until is None
 
@@ -324,7 +320,7 @@ async def test_a_manual_deny_stops_a_dialog_the_model_would_write_to(database: D
 
     report = await run_with(database, seller, FakeSender(), "enforce", now=NOW + timedelta(minutes=11))
 
-    assert report.sent == 0 and report.held == 1
+    assert report.sent == 0 and report.campaigns_started == 0
 
 
 # ---- потребители: выключенный товар не уходит на оценку ----

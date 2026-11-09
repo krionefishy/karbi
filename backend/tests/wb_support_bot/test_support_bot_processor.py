@@ -512,17 +512,18 @@ async def test_mode_off_does_not_touch_the_model(database: Database, seller: uui
     assert await verdicts(database, seller) == [] and await classify_events(database, seller) == []
 
 
-async def test_enforce_holds_a_dialog_without_a_verdict(database: Database, seller: uuid.UUID) -> None:
+async def test_enforce_does_not_start_a_campaign_without_a_verdict(database: Database, seller: uuid.UUID) -> None:
     await go_live(database, seller)
     await feed(database, seller, BASE_FEED, read_at=NOW)
     sender = FakeSender()
 
     report = await run_with(database, seller, sender, "enforce")
 
-    assert report.held == 1 and report.sent == 0 and sender.calls == []
+    assert report.campaigns_started == 0 and report.sent == 0 and sender.calls == []
+    assert report.verdicts_requested == 1
     assert await sends(database, seller) == []
     state = await dialog(database, seller)
-    assert state.next_send_at == NOW + timedelta(minutes=10)
+    assert state.state == "awaiting_buyer" and state.campaign_started_at is None and state.next_send_at is None
 
 
 async def test_enforce_sends_once_the_model_says_the_buyer_is_awaited(database: Database, seller: uuid.UUID) -> None:
@@ -550,7 +551,8 @@ async def test_enforce_keeps_holding_when_the_dialog_is_closed_or_unclear(
 
     report = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
 
-    assert report.held == 1 and report.sent == 0 and sender.calls == []
+    assert report.campaigns_started == 0 and report.sent == 0 and sender.calls == []
+    assert (await dialog(database, seller)).state == "awaiting_buyer"
 
 
 async def test_a_failed_verdict_does_not_let_the_message_through(database: Database, seller: uuid.UUID) -> None:
@@ -562,7 +564,7 @@ async def test_a_failed_verdict_does_not_let_the_message_through(database: Datab
 
     report = await run_with(database, seller, sender, "enforce", now=NOW + timedelta(minutes=11))
 
-    assert report.held == 1 and sender.calls == []
+    assert report.campaigns_started == 0 and sender.calls == []
 
 
 async def test_a_manual_allow_overrides_a_closing_verdict_and_a_deny_overrides_open(
@@ -629,6 +631,12 @@ async def test_a_stuck_request_is_asked_again_but_only_a_few_times(database: Dat
     assert row.attempts == 3
     assert len(await classify_events(database, seller)) == 3
 
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + 3 * step + timedelta(minutes=30))
+    assert (await verdicts(database, seller))[0].attempts == 3
+    # После исчерпания попыток запрос не бросается, а повторяется раз в час.
+    await run_with(database, seller, FakeSender(), "enforce", now=NOW + 2 * step + timedelta(minutes=61))
+    assert (await verdicts(database, seller))[0].attempts == 4
+
 
 REJECTED = "WB Buyers Chat API: good card: check rid error"
 
@@ -682,3 +690,51 @@ async def test_a_rejection_after_a_delivered_message_waits_the_short_time_again(
     state = await dialog(database, seller)
     assert state.next_send_at == third + RETRY_DELAY and not state.excluded
     assert [row.status for row in await sends(database, seller)] == [SEND_FAILED, SEND_SENT, SEND_FAILED]
+
+
+async def test_the_next_campaign_starts_after_a_previous_one_with_no_limit_on_the_count(
+    database: Database, seller: uuid.UUID
+) -> None:
+    async with database.session() as session:
+        session.add(
+            DialogModel(
+                seller_id=seller,
+                chat_id=CHAT,
+                prompt_at=PROMPT_AT,
+                state="awaiting_buyer",
+                campaigns_count=3,
+                sent_count=20,
+            )
+        )
+        await session.commit()
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+
+    report = await run_with(database, seller, FakeSender(), "off")
+
+    state = await dialog(database, seller)
+    assert report.campaigns_started == 1 and state.state == "in_campaign" and state.campaigns_count == 4
+
+
+async def test_new_campaigns_start_no_faster_than_the_hourly_limit(database: Database, seller: uuid.UUID) -> None:
+    async with database.session() as session:
+        session.add(
+            DialogModel(
+                seller_id=seller,
+                chat_id="1:other",
+                prompt_at=PROMPT_AT,
+                state="in_campaign",
+                campaign_started_at=NOW - timedelta(minutes=10),
+                campaigns_count=1,
+                next_send_at=NOW + timedelta(hours=1),
+            )
+        )
+        await session.commit()
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+
+    held = await run_with(database, seller, FakeSender(), "off", max_new_campaigns_per_hour=1)
+    later = await run_with(
+        database, seller, FakeSender(), "off", now=NOW + timedelta(minutes=51), max_new_campaigns_per_hour=1
+    )
+
+    assert held.campaigns_started == 0, "в последний час уже стартовала одна кампания"
+    assert later.campaigns_started == 1

@@ -20,7 +20,7 @@ from backend.modules.wb_support_bot.domain import (
 )
 
 START = datetime(2026, 10, 10, 6, 0, tzinfo=UTC)
-RULES = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_campaigns=1)
+RULES = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5))
 
 
 def event(minutes: float, kind: str, text: str = "") -> ChatEvent:
@@ -104,7 +104,7 @@ def test_campaign_continues_with_bot_messages_in_feed():
         event(60, "specialist", "Опишите проблему"),
         event(301, "bot", "Добрый день! Как дела с товаром?"),
     ]
-    result = project(events, now_minutes=600, sent=sent, campaign_started_at=at(300), campaigns_count=1)
+    result = project(events, now_minutes=600, sent=sent, campaign_started_at=at(300))
     assert result.state is DialogState.IN_CAMPAIGN
     assert result.start_campaign is False
     assert result.human_last_at == at(60)
@@ -119,7 +119,7 @@ def test_buyer_reply_ends_campaign():
         event(400, "buyer", "ладно, расскажу"),
     ]
     sent = [SentMessage(at(300), "напоминание")]
-    result = project(events, now_minutes=500, sent=sent, campaign_started_at=at(300), campaigns_count=1)
+    result = project(events, now_minutes=500, sent=sent, campaign_started_at=at(300))
     assert result.state is DialogState.AWAITING_US
     assert result.end_campaign is True
 
@@ -134,7 +134,7 @@ def test_buyer_reply_ends_campaign_even_when_the_bot_wrote_after_it():
         event(417, "bot", "напоминание"),
     ]
     sent = [SentMessage(at(300), "напоминание"), SentMessage(at(417), "напоминание")]
-    result = project(events, now_minutes=500, sent=sent, campaign_started_at=at(300), campaigns_count=1)
+    result = project(events, now_minutes=500, sent=sent, campaign_started_at=at(300))
     assert result.state is DialogState.AWAITING_US
     assert result.end_campaign is True
 
@@ -148,7 +148,7 @@ def test_specialist_message_during_campaign_pauses_it():
         event(350, "specialist", "Позвоните нам"),
     ]
     sent = [SentMessage(at(300), "напоминание")]
-    result = project(events, now_minutes=360, sent=sent, campaign_started_at=at(300), campaigns_count=1)
+    result = project(events, now_minutes=360, sent=sent, campaign_started_at=at(300))
     assert result.state is DialogState.AWAITING_BUYER
     assert result.end_campaign is True
 
@@ -159,24 +159,48 @@ def test_campaign_exhausted_after_duration():
         events,
         now_minutes=300 + 5 * 24 * 60,
         campaign_started_at=at(300),
-        campaigns_count=1,
     )
     assert result.state is DialogState.EXHAUSTED
 
 
-def test_no_second_campaign_when_limit_reached():
-    events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "Опишите проблему")]
-    result = project(events, now_minutes=60 + 10 * 60, campaigns_count=1)
+def test_next_campaign_starts_after_reply_and_new_silence():
+    # Кампания шла, покупатель ответил, специалист ответил, снова тишина: новая кампания без лимита по счёту.
+    events = [
+        event(0, "prompt"),
+        event(30, "buyer", "."),
+        event(60, "specialist", "ответ"),
+        event(600, "bot", "напоминание"),
+        event(2000, "buyer", "что с возвратом"),
+        event(2100, "specialist", "возврат одобрен, ждите"),
+    ]
+    sent = [SentMessage(at(600), "напоминание")]
+    waiting = project(events, now_minutes=2100 + 3 * 60, sent=sent)
+    assert waiting.state is DialogState.AWAITING_BUYER
+    result = project(events, now_minutes=2100 + 5 * 60, sent=sent)
+    assert result.state is DialogState.IN_CAMPAIGN
+    assert result.start_campaign is True
+
+
+def test_campaign_does_not_start_without_permission():
+    events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "ответ")]
+    result = project(events, now_minutes=60 + 5 * 60, can_start=False)
     assert result.state is DialogState.AWAITING_BUYER
     assert result.start_campaign is False
 
 
-def test_second_campaign_allowed_when_limit_raised():
-    rules = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_campaigns=2)
+def test_too_old_dialog_is_not_started_and_marked():
+    rules = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_idle=timedelta(days=5))
     events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "ответ")]
-    result = project_dialog(events, [], now=at(60 + 5 * 60), rules=rules, campaigns_count=1)
-    assert result.state is DialogState.IN_CAMPAIGN
-    assert result.start_campaign is True
+    result = project_dialog(events, [], now=at(60 + 6 * 24 * 60), rules=rules)
+    assert result.state is DialogState.TOO_OLD
+    assert result.start_campaign is False
+
+
+def test_too_old_when_campaign_outlives_idle_limit():
+    rules = CampaignRules(silence=timedelta(hours=4), duration=timedelta(days=5), max_idle=timedelta(days=5))
+    events = [event(0, "prompt"), event(30, "buyer", "."), event(60, "specialist", "ответ")]
+    result = project_dialog(events, [], now=at(60 + 6 * 24 * 60), rules=rules, campaign_started_at=at(300))
+    assert result.state is DialogState.TOO_OLD
 
 
 def test_stopwords_no_contact_and_attention():
@@ -258,7 +282,7 @@ def test_a_campaign_does_not_start_for_a_conversation_that_ended_long_ago():
     stale = project_dialog(events, [], now=at(60 + 5 * 24 * 60), rules=rules)
 
     assert recent.state is DialogState.IN_CAMPAIGN and recent.start_campaign is True
-    assert stale.state is DialogState.AWAITING_BUYER and stale.start_campaign is False
+    assert stale.state is DialogState.TOO_OLD and stale.start_campaign is False
 
 
 PROMPT = START
@@ -274,7 +298,7 @@ def test_a_running_campaign_stops_when_the_conversation_gets_too_old():
     outside = project_dialog(events, bot, now=at(60 + 6 * 24 * 60), rules=rules, campaign_started_at=at(60 + 300))
 
     assert inside.state is DialogState.IN_CAMPAIGN
-    assert outside.state is DialogState.EXHAUSTED
+    assert outside.state is DialogState.TOO_OLD
 
 
 def test_a_removed_product_never_gets_a_campaign_and_ends_a_running_one():

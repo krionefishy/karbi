@@ -91,6 +91,7 @@ class SwitchesMixin:
     classifier_mode: str
     classifier_prompt_version: str
     manual_switch_hours: int
+    history: timedelta
 
     async def _tracked(self, seller_id: uuid.UUID):  # type: ignore[no-untyped-def]
         raise NotImplementedError
@@ -103,7 +104,9 @@ class SwitchesMixin:
         """Товары кабинета: сначала включённые (где пишем больше, выше), выключенные в самом конце."""
         await self._tracked(seller_id)
         moment = now or datetime.now(UTC)
-        dialogs = await self.repository.dialogs_for_switches(seller_id, states=_scope_states(scope))
+        dialogs = await self.repository.dialogs_for_switches(
+            seller_id, states=_scope_states(scope), since=moment - self.history
+        )
         disabled = await self.repository.disabled_products(seller_id)
         verdicts = await self.repository.verdicts_by_tail(seller_id, self.classifier_prompt_version)
         total: dict[int, int] = {}
@@ -143,7 +146,9 @@ class SwitchesMixin:
         if key < 0:
             raise SwitchError("Неверный ключ товара")
         moment = now or datetime.now(UTC)
-        dialogs = await self.repository.dialogs_for_switches(seller_id, states=_scope_states(scope), nm_key=key)
+        dialogs = await self.repository.dialogs_for_switches(
+            seller_id, states=_scope_states(scope), since=moment - self.history, nm_key=key
+        )
         enabled = key not in await self.repository.disabled_products(seller_id)
         verdicts = await self.repository.verdicts_by_tail(seller_id, self.classifier_prompt_version)
         rows: list[SwitchDialog] = []

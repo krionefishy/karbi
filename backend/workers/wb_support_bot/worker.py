@@ -33,7 +33,6 @@ def policy_from(settings: Settings) -> BotPolicy:
         rules=CampaignRules(
             silence=timedelta(hours=config.silence_hours),
             duration=timedelta(days=config.campaign_days),
-            max_campaigns=config.max_campaigns,
             max_idle=timedelta(days=config.max_idle_days),
         ),
         daily_cap=config.daily_cap_per_seller,
@@ -45,6 +44,7 @@ def policy_from(settings: Settings) -> BotPolicy:
         classifier_prompt_version=config.classifier_prompt_version,
         classifier_retry=timedelta(minutes=config.classifier_retry_minutes),
         classifier_max_attempts=config.classifier_max_attempts,
+        max_new_campaigns_per_hour=config.max_new_campaigns_per_hour,
         reply_gate_mode=config.reply_gate_mode,
         reply_prompt_version=config.reply_prompt_version,
         reply_retry=timedelta(minutes=config.reply_retry_minutes),

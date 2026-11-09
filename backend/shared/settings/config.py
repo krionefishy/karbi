@@ -374,7 +374,8 @@ class SupportBotConfig:
     jitter_max_minutes: int = 10
     silence_hours: int = 4
     campaign_days: int = 5
-    max_campaigns: int = 1
+    # Сколько новых кампаний можно стартовать за час: после ответа и тишины диалоги не должны уходить в рассылку разом.
+    max_new_campaigns_per_hour: int = 6
     daily_cap_per_seller: int = 2500
     min_gap_seconds: int = 3
     tick_minutes: int = 10
@@ -1015,7 +1016,7 @@ class Settings:
                 bot.interval_minutes,
                 bot.silence_hours,
                 bot.campaign_days,
-                bot.max_campaigns,
+                bot.max_new_campaigns_per_hour,
                 bot.daily_cap_per_seller,
                 bot.tick_minutes,
                 bot.batch_per_tick,

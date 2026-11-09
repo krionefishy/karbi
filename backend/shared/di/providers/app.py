@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from dishka import Provider, Scope, from_context, provide
@@ -469,6 +470,7 @@ class SessionProvider(Provider):
             classifier_mode=settings.support_bot.classifier_mode,
             classifier_prompt_version=settings.support_bot.classifier_prompt_version,
             manual_switch_hours=settings.support_bot.manual_switch_hours,
+            history=timedelta(days=settings.support_bot.history_days),
             reply_gate_mode=settings.support_bot.reply_gate_mode,
             reply_prompt_version=settings.support_bot.reply_prompt_version,
             reply_engine=settings.support_bot.reply_engine,

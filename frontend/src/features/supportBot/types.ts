@@ -5,6 +5,7 @@ export type DialogState =
   | "in_campaign"
   | "product_removed"
   | "exhausted"
+  | "too_old"
   | "closed";
 export type BotMode = "stopped" | "live";
 export type SendStatus =

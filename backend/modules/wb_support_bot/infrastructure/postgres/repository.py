@@ -146,6 +146,17 @@ class SupportBotRepository:
         )
         return int(getattr(result, "rowcount", 0) or 0)
 
+    async def campaigns_started_since(self, seller_id: uuid.UUID, since: datetime) -> int:
+        """Сколько кампаний сейчас идёт, стартовав не раньше `since`: основа часового лимита новых стартов."""
+        return int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(DialogModel)
+                .where(DialogModel.seller_id == seller_id, DialogModel.campaign_started_at >= since)
+            )
+            or 0
+        )
+
     async def get_dialog(self, key: DialogKey) -> DialogModel | None:
         return await self.session.get(DialogModel, (key.seller_id, key.chat_id, key.prompt_at))
 
@@ -613,10 +624,23 @@ class SupportBotRepository:
         return key in await self.disabled_products(seller_id)
 
     async def dialogs_for_switches(
-        self, seller_id: uuid.UUID, *, states: tuple[str, ...] | None, nm_key: int | None = None
+        self,
+        seller_id: uuid.UUID,
+        *,
+        states: tuple[str, ...] | None,
+        since: datetime,
+        nm_key: int | None = None,
     ) -> list[DialogModel]:
-        """Диалоги кабинета для экрана тумблеров: нужные состояния, при `nm_key` — только одного товара."""
-        conditions: list[ColumnElement[bool]] = [DialogModel.seller_id == seller_id]
+        """Диалоги кабинета для экрана тумблеров: нужные состояния, при `nm_key` — только одного товара.
+
+        Слишком старые диалоги не показываем: автосообщение старше окна разбора `since` (бот такие
+        не пересчитывает) или последний ответ специалиста старше `max_idle_days` (`too_old`).
+        """
+        conditions: list[ColumnElement[bool]] = [
+            DialogModel.seller_id == seller_id,
+            DialogModel.prompt_at >= since,
+            DialogModel.state != "too_old",
+        ]
         if states is not None:
             conditions.append(DialogModel.state.in_(states))
         if nm_key is not None:

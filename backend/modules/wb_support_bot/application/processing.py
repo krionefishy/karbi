@@ -13,8 +13,10 @@ from backend.modules.wb_support_bot.application.mailing import mailing_for
 from backend.modules.wb_support_bot.application.ports import ChatSender
 from backend.modules.wb_support_bot.domain import (
     CATEGORY_FLAGS,
+    MANUAL_ALLOW,
     MODE_ENFORCE,
     MODE_OFF,
+    VERDICT_OPEN,
     CampaignRules,
     DialogState,
     Gate,
@@ -60,6 +62,10 @@ SLOW_RETRY_DELAY = timedelta(hours=6)
 SLOW_RETRY_AFTER = 2
 GIVE_UP_AFTER = 5
 VERDICT_RECHECK = timedelta(minutes=10)
+# После `classifier_max_attempts` неудач вердикт запрашивается раз в час, а не бросается навсегда:
+# сбой модели не должен оставлять диалог без оценки до конца кампании.
+VERDICT_SLOW_RETRY = timedelta(hours=1)
+CAMPAIGN_START_WINDOW = timedelta(hours=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +82,7 @@ class BotPolicy:
     classifier_prompt_version: str = "v2"
     classifier_retry: timedelta = timedelta(minutes=15)
     classifier_max_attempts: int = 3
+    max_new_campaigns_per_hour: int = 6
     reply_gate_mode: str = MODE_OFF
     reply_prompt_version: str = "r3"
     reply_retry: timedelta = timedelta(minutes=15)
@@ -156,6 +163,9 @@ class SupportBotProcessor:
         self.sleep = sleep
         # Ключи выключенных товаров кабинета на время прохода; у диалогов без артикула ключ 0.
         self._disabled: set[int] = set()
+        # Вердикты по хвосту и остаток часового лимита стартов на время прохода по кабинету.
+        self._verdicts: dict[tuple[str, str], VerdictModel] = {}
+        self._start_budget = policy.max_new_campaigns_per_hour
 
     def _product_off(self, nm_id: int | None) -> bool:
         return (nm_id if nm_id is not None else NO_ARTICLE_KEY) in self._disabled
@@ -176,6 +186,13 @@ class SupportBotProcessor:
         segments = split_dialogs(events)
 
         self._disabled = await self.repository.disabled_products(seller_id)
+        self._verdicts = (
+            await self.repository.verdicts_by_tail(seller_id, self.policy.classifier_prompt_version)
+            if self.policy.classifier_mode == MODE_ENFORCE
+            else {}
+        )
+        started = await self.repository.campaigns_started_since(seller_id, now - CAMPAIGN_START_WINDOW)
+        self._start_budget = max(0, self.policy.max_new_campaigns_per_hour - started)
         stored = await self.repository.dialogs_by_keys(seller_id, since)
         journal = await self.repository.sends_by_dialog(seller_id, since)
         removed: set[str] = set()
@@ -257,18 +274,7 @@ class SupportBotProcessor:
                 excluded=False,
                 closed=False,
             )
-        projection = project_dialog(
-            segment.events,
-            record,
-            now=now,
-            rules=self.policy.rules,
-            campaign_started_at=model.campaign_started_at,
-            campaigns_count=model.campaigns_count,
-            product_removed=product_removed,
-            cleared_through=model.reply_cleared_through if enforce else None,
-            reply_pending=gate.pending,
-            ignore_notices=enforce,
-        )
+        model.nm_id = segment.nm_id
         tail = tail_message(segment.events, record, ignore_notices=enforce)
         model.tail_event_id = tail.event_id if tail else None
         model.tail_fingerprint = tail_fingerprint(tail) if tail else None
@@ -283,6 +289,18 @@ class SupportBotProcessor:
             model.manual_verdict = None
             model.manual_fingerprint = None
             model.manual_until = None
+        projection = project_dialog(
+            segment.events,
+            record,
+            now=now,
+            rules=self.policy.rules,
+            campaign_started_at=model.campaign_started_at,
+            product_removed=product_removed,
+            cleared_through=model.reply_cleared_through if enforce else None,
+            reply_pending=gate.pending,
+            ignore_notices=enforce,
+            can_start=self._can_start(model, now),
+        )
         model.nm_id = segment.nm_id
         model.buyer_first_at = projection.buyer_first_at
         model.buyer_last_at = projection.buyer_last_at
@@ -296,6 +314,7 @@ class SupportBotProcessor:
         if projection.start_campaign:
             model.campaign_started_at = now
             model.campaigns_count += 1
+            self._start_budget -= 1
             model.next_send_at = first_send_at(now, window=self.policy.window, pace=self.policy.pace, rng=self.rng)
             report.campaigns_started += 1
         elif projection.end_campaign:
@@ -312,6 +331,24 @@ class SupportBotProcessor:
         if created:
             await self.repository.add_dialog(model)
         return model
+
+    def _can_start(self, model: DialogModel, now: datetime) -> bool:
+        """Можно ли начать новую кампанию: товар включён, диалог не снят вручную, есть вердикт «ждём покупателя».
+
+        В режиме enforce вердикт по текущему хвосту обязателен: без него (не пришёл, closing,
+        unclear) диалог ждёт. Ручная отметка менеджера для того же хвоста сильнее вердикта.
+        Часовой лимит стартов защищает покупателей от рассылки разом после долгой паузы.
+        """
+        if self._start_budget <= 0 or self._product_off(model.nm_id):
+            return False
+        if model.closed or model.excluded or model.no_contact:
+            return False
+        if self.policy.classifier_mode != MODE_ENFORCE:
+            return True
+        if model.manual_verdict is not None:
+            return model.manual_verdict == MANUAL_ALLOW
+        row = self._verdicts.get((model.chat_id, model.tail_fingerprint)) if model.tail_fingerprint else None
+        return row is not None and row.status == VERDICT_DONE and row.verdict == VERDICT_OPEN
 
     def _reply_eligible(self, model: DialogModel, now: datetime) -> bool:
         """Слой ответов смотрит только диалоги, где рассылка действительно идёт."""
@@ -435,10 +472,11 @@ class SupportBotProcessor:
     async def _request_verdicts(
         self, seller_id: uuid.UUID, models: dict[tuple[str, datetime], DialogModel], now: datetime, report: SellerReport
     ) -> None:
-        """Ставит запрос вердикта по диалогам, где идёт рассылка, а хвост ещё не оценён.
+        """Ставит запрос вердикта по диалогам в кампании и по ждущим новой кампании, а хвост ещё не оценён.
 
         Модель не вызывается здесь: бот только кладёт запрос в outbox и не ждёт ответа.
-        Зависший или упавший запрос ставится заново, но не больше `classifier_max_attempts` раз.
+        Зависший или упавший запрос ставится заново: сначала через `classifier_retry`, после
+        `classifier_max_attempts` неудач — раз в час.
         """
         if self.policy.classifier_mode == MODE_OFF:
             return
@@ -446,7 +484,9 @@ class SupportBotProcessor:
         existing = await self.repository.verdicts_by_tail(seller_id, version)
         outbox = OutboxRepository(self.repository.session)
         for model in models.values():
-            if model.state != DialogState.IN_CAMPAIGN.value or not model.tail_fingerprint or not model.tail_event_id:
+            if model.state not in (DialogState.IN_CAMPAIGN.value, DialogState.AWAITING_BUYER.value):
+                continue
+            if not model.tail_fingerprint or not model.tail_event_id:
                 continue
             if model.excluded or model.closed or model.no_contact:
                 continue
@@ -466,10 +506,7 @@ class SupportBotProcessor:
                     requested_at=now,
                 )
                 self.repository.add_verdict(row)
-            elif row.status == VERDICT_DONE or (
-                row.attempts >= self.policy.classifier_max_attempts
-                or now - row.requested_at < self.policy.classifier_retry
-            ):
+            elif row.status == VERDICT_DONE or now - row.requested_at < self._verdict_wait(row):
                 continue
             else:
                 row.status = VERDICT_PENDING
@@ -483,6 +520,12 @@ class SupportBotProcessor:
                 payload={"verdict_id": str(row.id), "seller_id": str(seller_id)},
             )
             report.verdicts_requested += 1
+
+    def _verdict_wait(self, row: VerdictModel) -> timedelta:
+        """Пауза до нового запроса вердикта: короткая, пока попытки не исчерпаны, потом час."""
+        if row.attempts < self.policy.classifier_max_attempts:
+            return self.policy.classifier_retry
+        return VERDICT_SLOW_RETRY
 
     def _mailing(self, dialog: DialogModel, verdicts: dict[tuple[str, str], VerdictModel], now: datetime) -> Mailing:
         """Итоговое решение по диалогу: вердикт нейросети, ручная отметка, тумблер товара и остановки бота."""

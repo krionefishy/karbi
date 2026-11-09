@@ -19,7 +19,8 @@ from backend.tests.operators import operator_token
 
 API = "/api/v1/wb/support-bot"
 AUTOMATION = "/api/v1/automations/wb-support-bot/sellers"
-PROMPT = datetime(2026, 10, 12, 6, 0, tzinfo=UTC)
+# Автосообщение внутри окна разбора: старые диалоги страница тумблеров не показывает.
+PROMPT = (datetime.now(UTC) - timedelta(days=2)).replace(microsecond=0)
 A, B, C = 111, 222, 333
 
 
@@ -65,10 +66,10 @@ async def client(application: Application) -> AsyncIterator[AsyncClient]:
 def dialog(
     seller_id: uuid.UUID, chat: str, nm_id: int | None, state: str = "in_campaign", **extra: object
 ) -> DialogModel:
+    extra.setdefault("prompt_at", PROMPT)
     return DialogModel(
         seller_id=seller_id,
         chat_id=chat,
-        prompt_at=PROMPT,
         state=state,
         nm_id=nm_id,
         tail_event_id=f"e-{chat}",
@@ -109,6 +110,8 @@ async def data(application: Application, client: AsyncClient, seller: uuid.UUID)
                 dialog(seller, "1:a-closing", A),
                 dialog(seller, "1:a-wait", A, state="awaiting_buyer"),
                 dialog(seller, "1:a-done", A, state="exhausted"),
+                dialog(seller, "1:a-too-old", A, state="too_old"),
+                dialog(seller, "1:a-outside", A, state="awaiting_buyer", prompt_at=PROMPT - timedelta(days=30)),
                 dialog(seller, "1:b-open", B),
                 dialog(seller, "1:c-open", C),
                 dialog(seller, "1:n-open", None),
@@ -179,6 +182,14 @@ async def test_every_dialog_shows_what_the_model_decided_and_why(client: AsyncCl
     assert "1:a-done" not in shown and "1:a-done" in await rows(client, data, A, "all")
     done = (await rows(client, data, A, "all"))["1:a-done"]["mailing"]
     assert (done["on"], done["reason"], done["locked"]) == (False, "state", True)
+
+
+async def test_too_old_dialogs_are_not_shown_in_any_scope(client: AsyncClient, data: uuid.UUID) -> None:
+    for scope in ("campaign", "all"):
+        shown = await rows(client, data, A, scope)
+        assert "1:a-too-old" not in shown and "1:a-outside" not in shown
+    everything = {group["key"]: group for group in await groups(client, data, "all")}
+    assert everything[A]["total"] == 4, "старые не попадают и в счётчики товара"
 
 
 async def test_a_disabled_product_locks_all_its_dialogs(client: AsyncClient, data: uuid.UUID) -> None:
