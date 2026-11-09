@@ -386,7 +386,11 @@ def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Chec
         Severity.CRIT if s.verdicts_pending_stuck else Severity.OK,
         f"ждут дольше 30 минут: {s.verdicts_pending_stuck}",
         "0",
-        "Проверьте консьюмер вердиктов, ключ и доступ к Cloud.ru.",
+        (
+            "Вердикт по последнему сообщению менеджера не получен дольше 30 минут (ошибка или очередь). "
+            "Смотрите ошибку в логах воркера: статус 404 значит, что Cloud.ru снял модель из llm.model; "
+            "иначе проверьте консьюмер, ключ и доступ к Cloud.ru."
+        ),
     )
 
     gate_on = s.reply_gate_mode != "off"
@@ -443,7 +447,11 @@ def evaluate(snapshot: Snapshot, limits: Thresholds = Thresholds()) -> list[Chec
                 Severity.WARN if s.median_decision_minutes > limits.decision_median_warn else Severity.OK,
                 f"медиана {s.median_decision_minutes} мин",
                 "медиана до 45 минут (зеркало 30 + такт 10)",
-                "Решения запаздывают: проверьте свежесть зеркала и нагрузку на консьюмер.",
+                (
+                    "Время от последнего сообщения покупателя до решения, по срезам за сутки, вместе с ожиданием "
+                    "зеркала; сам вызов модели занимает секунды. Решения запаздывают: проверьте свежесть зеркала "
+                    "и нагрузку на консьюмер."
+                ),
             )
     add(
         "token_budget",

@@ -130,6 +130,8 @@ class LLMClient:
             "max_tokens": max_tokens or self.config.max_tokens,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
+        if body["model"] == self.config.model and isinstance(self.config, LLMConfig):
+            body["chat_template_kwargs"] = {"enable_thinking": self.config.enable_thinking}
         if extra_body:
             body.update(extra_body)
         started = time.monotonic()

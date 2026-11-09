@@ -150,7 +150,7 @@ support_bot:
   # single | panel: кто решает по ответу. single — одна модель из `llm`; panel — слой принятия решения:
   # два судьи, при расхождении арбитр, затем резервный арбитр. Смена движка требует новой reply_prompt_version.
   reply_engine: ${SUPPORT_BOT_REPLY_ENGINE:-single}
-  reply_judge_a_model: Qwen/Qwen3-30B-A3B
+  reply_judge_a_model: Qwen/Qwen3.6-35B-A3B
   reply_judge_a_max_tokens: 150
   reply_judge_b_model: openai/gpt-oss-120b
   reply_judge_b_max_tokens: 400
@@ -182,7 +182,10 @@ support_bot:
 llm:
   # Модель меняется здесь: правка строки и перераскатка. Ключ — только из окружения.
   base_url: ${LLM_BASE_URL:-https://foundation-models.api.cloud.ru/v1}
-  model: ${LLM_MODEL:-Qwen/Qwen3-30B-A3B}
+  model: ${LLM_MODEL:-Qwen/Qwen3.6-35B-A3B}
+  # Qwen3.6 без этого рассуждает и на 150 токенах отдаёт пустой ответ. Замер 08.11.2026 на 40 хвостах:
+  # с выключенными рассуждениями 38 из 40 вердиктов совпали с прежней Qwen3-30B-A3B, медиана вызова 0,5 с.
+  enable_thinking: ${LLM_ENABLE_THINKING:-false}
   api_key: ${FOUNDATION_MODELS_API_KEY:-}
   timeout_seconds: 60
   max_tokens: 150

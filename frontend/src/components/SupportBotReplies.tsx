@@ -190,13 +190,17 @@ function Tiles({ summary }: { summary: ReplySummary }) {
           <dd>{health.failed}</dd>
           <dt>Не понятно</dt>
           <dd>{health.unclear}</dd>
-          <dt>Медиана решения</dt>
+          <dt title="От последнего сообщения покупателя до готового решения, по срезам за период. Включает ожидание зеркала чатов и такт воркера; сам вызов модели занимает секунды.">
+            Медиана решения
+          </dt>
           <dd>{formatMinutes(health.median_decision_minutes)}</dd>
           <dt>Токены вход / выход</dt>
           <dd>
             {health.tokens_in} / {health.tokens_out}
           </dd>
-          <dt>Вызовов</dt>
+          <dt title="Срезы, у которых записана модель. Число выше — все срезы, отправленные на оценку.">
+            Вызовов
+          </dt>
           <dd>{health.calls}</dd>
         </dl>
         {health.stuck > 0 && <p className="rp-flag">Есть зависшие оценки</p>}

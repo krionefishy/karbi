@@ -53,7 +53,7 @@ def test_the_default_model_is_the_one_chosen_for_the_bot(monkeypatch: pytest.Mon
     settings = load_settings("backend/shared/settings/config.docker.yaml")
     load_settings.cache_clear()
 
-    assert settings.llm.model == "Qwen/Qwen3-30B-A3B"
+    assert settings.llm.model == "Qwen/Qwen3.6-35B-A3B" and settings.llm.enable_thinking is False
     assert settings.support_bot.classifier_mode == "enforce"
 
 

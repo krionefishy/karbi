@@ -43,6 +43,18 @@ async def test_the_request_carries_the_model_key_and_both_messages() -> None:
 
 
 @respx.mock
+async def test_thinking_is_switched_off_only_for_the_config_model() -> None:
+    route = respx.post(URL).mock(return_value=answer("да"))
+    client = LLMClient(config())
+
+    await client.complete("s", "u")
+    assert json.loads(route.calls.last.request.read())["chat_template_kwargs"] == {"enable_thinking": False}
+
+    await client.complete("s", "u", model="other-model")
+    assert "chat_template_kwargs" not in json.loads(route.calls.last.request.read())
+
+
+@respx.mock
 async def test_the_model_is_taken_from_the_config_not_from_the_code() -> None:
     route = respx.post(URL).mock(return_value=answer("да", model="model-b"))
 

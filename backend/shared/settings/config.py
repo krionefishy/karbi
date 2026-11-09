@@ -334,7 +334,9 @@ class LLMConfig:
     """
 
     base_url: str = "https://foundation-models.api.cloud.ru/v1"
-    model: str = "Qwen/Qwen3-30B-A3B"
+    model: str = "Qwen/Qwen3.6-35B-A3B"
+    # Qwen3.6 рассуждает по умолчанию, и при `max_tokens` 150 ответ пустой: у основной модели рассуждения выключены.
+    enable_thinking: bool = False
     api_key: str = field(default="", repr=False)
     timeout_seconds: int = 60
     max_tokens: int = 150
@@ -391,7 +393,7 @@ class SupportBotConfig:
     reply_retry_minutes: int = 15
     reply_max_attempts: int = 10
     reply_engine: str = "single"
-    reply_judge_a_model: str = "Qwen/Qwen3-30B-A3B"
+    reply_judge_a_model: str = "Qwen/Qwen3.6-35B-A3B"
     reply_judge_a_max_tokens: int = 150
     reply_judge_b_model: str = "openai/gpt-oss-120b"
     reply_judge_b_max_tokens: int = 400
@@ -770,6 +772,8 @@ class Settings:
                 llm[key] = int(llm[key])
         if "temperature" in llm:
             llm["temperature"] = float(llm["temperature"])
+        if "enable_thinking" in llm:
+            llm["enable_thinking"] = _as_bool(llm["enable_thinking"])
         fbs_penalties = dict(data.get("fbs_penalties", {}))
         for key in (
             "poll_hours",
