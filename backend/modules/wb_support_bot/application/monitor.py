@@ -12,12 +12,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import ChatMirror
+from backend.modules.wb_support_bot.application.manager_replies import manager_replies_for
 from backend.modules.wb_support_bot.application.reply_stats import (
     SendRow,
     SliceRow,
     continue_stats,
     health,
     late_dialogs,
+    late_keys,
     open_escalations,
     panel_stats,
 )
@@ -177,7 +179,11 @@ class BotMonitor:
             SendRow(chat, prompt, moment)
             for chat, prompt, moment in await repository.sent_rows(seller_id, now - timedelta(days=7))
         ]
-        stop_dialogs, late = late_dialogs(week, sends_week, limits.late_tolerance)
+        # Сообщение после стопа, перед которым писал менеджер, — новая кампания, а не нарушение: читаем ленту
+        # только по диалогам-кандидатам.
+        candidates = late_keys(week, sends_week, limits.late_tolerance)
+        managers = await manager_replies_for(self.chats, repository, seller_id, candidates, now)
+        stop_dialogs, late = late_dialogs(week, sends_week, limits.late_tolerance, managers)
         overdue = [
             row
             for row in open_escalations(rows, {key: (model.state, model.closed) for key, model in states.items()})

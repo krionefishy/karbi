@@ -248,21 +248,27 @@ def last_reply_is_from_manager(context: list[tuple[str, str]]) -> bool:
     return False
 
 
+def is_manager_message(event: ChatEvent, reminders: set[str]) -> bool:
+    """Сообщение написал человек от продавца: напоминания бота, автоответы и служебные сообщения WB не в счёт."""
+    text = (event.text or "").strip()
+    return (
+        event.sender == CHAT_SENDER_SELLER
+        and not event.review_prompt
+        and bool(text)
+        and text not in reminders
+        and not text.lower().startswith(AUTOREPLY_PREFIX)
+        and not is_wb_notice(event)
+    )
+
+
 def manager_replied_before(events: list[ChatEvent], first_at: datetime, reminders: set[str]) -> bool:
-    """Отвечал ли в диалоге человек-менеджер до среза: напоминания бота, автоответы и служебные сообщения не в счёт."""
-    for event in events:
-        text = (event.text or "").strip()
-        if (
-            event.sender == CHAT_SENDER_SELLER
-            and event.added_at < first_at
-            and not event.review_prompt
-            and text
-            and text not in reminders
-            and not text.lower().startswith(AUTOREPLY_PREFIX)
-            and not is_wb_notice(event)
-        ):
-            return True
-    return False
+    """Отвечал ли в диалоге человек-менеджер до среза."""
+    return any(event.added_at < first_at and is_manager_message(event, reminders) for event in events)
+
+
+def manager_message_times(events: list[ChatEvent], reminders: set[str]) -> list[datetime]:
+    """Когда в диалоге писал человек-менеджер."""
+    return [event.added_at for event in events if is_manager_message(event, reminders)]
 
 
 def apply_vote_rules(vote: Vote, context: list[tuple[str, str]]) -> Vote:

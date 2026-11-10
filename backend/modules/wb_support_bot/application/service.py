@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.modules.wb_core.application import ChatMirror, SellerNotFoundError
 from backend.modules.wb_core.domain import CHAT_SENDER_CLIENT
 from backend.modules.wb_core.infrastructure.postgres import SellerRepository
+from backend.modules.wb_support_bot.application.manager_replies import manager_replies_for
 from backend.modules.wb_support_bot.application.monitor import BotMonitor, MonitorView
 from backend.modules.wb_support_bot.application.reply_stats import (
     EffectRow,
     ReplySummary,
     SliceRow,
     build_summary,
+    late_keys,
     open_escalations,
 )
 from backend.modules.wb_support_bot.application.reply_stats import (
@@ -187,6 +189,11 @@ class ReplyStatsMixin:
         keys = {(row.chat_id, row.prompt_at) for row in slices}
         states = await self.repository.dialog_states(seller_id, keys)
         live_since = await self.repository.live_since(seller_id)
+        stats = [_slice_row(row) for row in slices]
+        sends = [StatSendRow(*row) for row in await self.repository.sent_rows(seller_id, since)]
+        managers = await manager_replies_for(
+            self.chats, self.repository, seller_id, late_keys(stats, sends, timedelta(0)), moment
+        )
         summary = build_summary(
             days=days,
             now=moment,
@@ -194,10 +201,11 @@ class ReplyStatsMixin:
                 EffectRow(chat, prompt, first, live, reply)
                 for chat, prompt, first, live, reply in await self.repository.effect_rows(seller_id, since)
             ],
-            slices=[_slice_row(row) for row in slices],
-            sends=[StatSendRow(*row) for row in await self.repository.sent_rows(seller_id, since)],
+            slices=stats,
+            sends=sends,
             dialogs={key: (model.state, model.closed) for key, model in states.items()},
             live_since=live_since,
+            manager_replies=managers,
         )
         return ReplyOverview(summary, moment, live_since, self.reply_gate_mode)
 

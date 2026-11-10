@@ -4,6 +4,7 @@
 """
 
 from collections import Counter, defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from statistics import median
@@ -231,18 +232,36 @@ def _by_dialog(rows: list[SliceRow]) -> dict[tuple[str, datetime], list[SliceRow
     return grouped
 
 
-def late_sends(rows: list[SliceRow], sends: list[SendRow]) -> LateSends:
-    """Сообщения бота, ушедшие после ответа, по которому рассылка должна была остановиться."""
+# Когда в диалоге писал человек-менеджер: по ключу диалога (чат, автосообщение WB).
+ManagerReplies = Mapping[tuple[str, datetime], Sequence[datetime]]
+
+
+def _stops(rows: list[SliceRow]) -> dict[tuple[str, datetime], list[SliceRow]]:
     stops: dict[tuple[str, datetime], list[SliceRow]] = defaultdict(list)
     for row in rows:
         if row.gate is Gate.STOP:
             stops[(row.chat_id, row.prompt_at)].append(row)
+    return stops
+
+
+def _answered_by_manager(stop: SliceRow, send: SendRow, manager_replies: ManagerReplies | None) -> bool:
+    """Между ответом покупателя и сообщением бота писал человек: это новая кампания, а не нарушение стопа."""
+    return any(
+        stop.last_event_at < moment < send.sent_at
+        for moment in (manager_replies or {}).get((send.chat_id, send.prompt_at), ())
+    )
+
+
+def late_sends(rows: list[SliceRow], sends: list[SendRow], manager_replies: ManagerReplies | None = None) -> LateSends:
+    """Сообщения бота, ушедшие после ответа, по которому рассылка должна была остановиться."""
+    stops = _stops(rows)
     lags: list[float] = []
     for send in sends:
         replies = [
             row.first_event_at
             for row in stops.get((send.chat_id, send.prompt_at), [])
             if row.first_event_at < send.sent_at <= row.first_event_at + LATE_WINDOW
+            and not _answered_by_manager(row, send, manager_replies)
         ]
         if replies:
             lags.append((send.sent_at - max(replies)).total_seconds() / 60)
@@ -254,19 +273,34 @@ def late_sends(rows: list[SliceRow], sends: list[SendRow]) -> LateSends:
     )
 
 
-def late_dialogs(rows: list[SliceRow], sends: list[SendRow], tolerance: timedelta) -> tuple[int, int]:
-    """Остановленные диалоги и те из них, где бот написал позже допуска (задержка зеркала) после ответа."""
-    stops: dict[tuple[str, datetime], list[SliceRow]] = defaultdict(list)
-    for row in rows:
-        if row.gate is Gate.STOP:
-            stops[(row.chat_id, row.prompt_at)].append(row)
+def late_keys(
+    rows: list[SliceRow],
+    sends: list[SendRow],
+    tolerance: timedelta,
+    manager_replies: ManagerReplies | None = None,
+) -> set[tuple[str, datetime]]:
+    """Диалоги, где бот написал позже допуска после ответа-стопа (и без ответа менеджера между ними)."""
+    stops = _stops(rows)
     late: set[tuple[str, datetime]] = set()
     for send in sends:
         key = (send.chat_id, send.prompt_at)
         for row in stops.get(key, []):
-            if row.first_event_at + tolerance < send.sent_at <= row.first_event_at + LATE_WINDOW:
+            if (
+                row.first_event_at + tolerance < send.sent_at <= row.first_event_at + LATE_WINDOW
+                and not _answered_by_manager(row, send, manager_replies)
+            ):
                 late.add(key)
-    return len(stops), len(late)
+    return late
+
+
+def late_dialogs(
+    rows: list[SliceRow],
+    sends: list[SendRow],
+    tolerance: timedelta,
+    manager_replies: ManagerReplies | None = None,
+) -> tuple[int, int]:
+    """Остановленные диалоги и те из них, где бот написал позже допуска (задержка зеркала) после ответа."""
+    return len(_stops(rows)), len(late_keys(rows, sends, tolerance, manager_replies))
 
 
 def continue_stats(rows: list[SliceRow]) -> ContinueStats:
@@ -374,6 +408,7 @@ def build_summary(
     sends: list[SendRow],
     dialogs: dict[tuple[str, datetime], tuple[str, bool]],
     live_since: datetime | None,
+    manager_replies: ManagerReplies | None = None,
 ) -> ReplySummary:
     since = now - timedelta(days=days)
     summary = ReplySummary(
@@ -390,7 +425,7 @@ def build_summary(
     summary.actions = {gate.value: gates.get(gate.value, 0) for gate in (Gate.CONTINUE, Gate.STOP, Gate.WAIT)}
     summary.daily = daily_points(effect, now, since)
     summary.escalations_open = len(open_escalations(slices, dialogs))
-    summary.late_sends = late_sends(slices, sends)
+    summary.late_sends = late_sends(slices, sends, manager_replies)
     summary.continues = continue_stats(slices)
     summary.health = health(slices, now)
     return summary
@@ -405,6 +440,8 @@ __all__ = [
     "Health",
     "LateSends",
     "late_dialogs",
+    "late_keys",
+    "ManagerReplies",
     "PanelStats",
     "ReplySummary",
     "SendRow",

@@ -13,6 +13,8 @@ from backend.modules.wb_support_bot.application.reply_stats import (
     continue_stats,
     daily_points,
     health,
+    late_dialogs,
+    late_keys,
     late_sends,
     open_escalations,
     panel_stats,
@@ -111,6 +113,25 @@ def test_a_send_after_a_stop_reply_is_late_and_after_a_continue_reply_is_not() -
     result = late_sends([stop, keep], sends)
 
     assert (result.count, result.total_sends, result.median_lag_minutes, result.max_lag_minutes) == (1, 3, 12, 12)
+
+
+def test_a_send_after_a_manager_reply_is_a_new_campaign_not_a_late_send() -> None:
+    stop = piece("a", 0, "waiting_seller")
+    sent_at = stop.first_event_at + timedelta(hours=6)
+    sends = [SendRow("a", PROMPT, sent_at)]
+    answered = {("a", PROMPT): [stop.first_event_at + timedelta(hours=1)]}
+    before_stop = {("a", PROMPT): [stop.first_event_at - timedelta(hours=1)]}
+    after_send = {("a", PROMPT): [sent_at + timedelta(minutes=5)]}
+    tolerance = timedelta(minutes=35)
+
+    assert late_dialogs([stop], sends, tolerance) == (1, 1)
+    assert late_dialogs([stop], sends, tolerance, answered) == (1, 0)
+    assert late_dialogs([stop], sends, tolerance, before_stop) == (1, 1)
+    assert late_dialogs([stop], sends, tolerance, after_send) == (1, 1)
+    assert late_keys([stop], sends, tolerance) == {("a", PROMPT)}
+    assert late_keys([stop], sends, tolerance, answered) == set()
+    assert late_sends([stop], sends, answered).count == 0
+    assert late_sends([stop], sends).count == 1
 
 
 def test_continues_are_counted_per_dialog_with_what_came_after() -> None:

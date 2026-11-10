@@ -24,6 +24,7 @@ from backend.modules.wb_support_bot.domain.decision import (
     RULE_NOISE_AFTER_MANAGER,
     Vote,
     last_reply_is_from_manager,
+    manager_message_times,
     manager_replied_before,
     parse_arbiter_choice,
     parse_panel_verdict,
@@ -454,6 +455,18 @@ def test_only_a_live_seller_message_counts_as_a_manager_reply() -> None:
     assert manager_replied_before([event(0, "prompt", "Отзыв"), auto, bot, notice, buyer], first_at, reminders) is False
     assert manager_replied_before([auto, bot, buyer, human], first_at, reminders) is True
     assert manager_replied_before([auto, later], first_at, reminders) is False
+
+
+def test_manager_message_times_skip_bot_auto_reply_and_notices() -> None:
+    reminders = {"Напоминание бота"}
+    auto = event(1, "specialist", "Сообщение выше автоматическое и ответа не требует.")
+    bot = event(2, "bot", "Напоминание бота")
+    buyer = event(4, "buyer", "не работает")
+    human = event(5, "specialist", "Опишите проблему подробнее")
+    later = event(60 * 72, "specialist", "Ответ позже")
+
+    assert manager_message_times([auto, bot, buyer], reminders) == []
+    assert manager_message_times([auto, bot, buyer, human, later], reminders) == [human.added_at, later.added_at]
 
 
 async def test_the_note_about_the_manager_reaches_the_judges_and_the_arbiter() -> None:
