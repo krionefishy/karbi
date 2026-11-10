@@ -191,6 +191,42 @@ async def test_live_sends_once_and_waits_for_the_next_slot(database: Database, s
     assert [row.status for row in await sends(database, seller)] == [SEND_SENT]
 
 
+async def set_cursor(database: Database, seller_id: uuid.UUID, *, last_event_at: datetime, read_to_end_at: datetime):
+    async with database.session() as session:
+        await MirrorRepository(session).save_chat_cursor(
+            seller_id, int(last_event_at.timestamp() * 1000), tail_reached_at=read_to_end_at
+        )
+        await session.commit()
+
+
+async def test_a_quiet_cabinet_is_fresh_while_the_feed_is_read_to_the_end(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    # Последнее событие ленты три часа назад, но ленту дочитали только что: кабинет тихий, зеркало свежее.
+    await set_cursor(database, seller, last_event_at=NOW - timedelta(hours=3), read_to_end_at=NOW)
+    sender = FakeSender()
+
+    report = await run(database, seller, sender)
+
+    assert report.skipped is None and report.sent == 1
+
+
+async def test_the_mirror_is_stale_when_the_feed_was_not_read_to_the_end_for_long(
+    database: Database, seller: uuid.UUID
+) -> None:
+    await go_live(database, seller)
+    await feed(database, seller, BASE_FEED, read_at=NOW)
+    await set_cursor(database, seller, last_event_at=NOW, read_to_end_at=NOW - timedelta(hours=3))
+    sender = FakeSender()
+
+    report = await run(database, seller, sender)
+
+    assert report.skipped == "зеркало чатов устарело, ничего не отправляем"
+    assert sender.calls == []
+
+
 async def test_nothing_goes_to_a_buyer_who_never_answered(database: Database, seller: uuid.UUID) -> None:
     await go_live(database, seller)
     await feed(database, seller, BASE_FEED[:2], read_at=NOW)

@@ -180,7 +180,8 @@ class SupportBotProcessor:
         if mirror is None or mirror.read_through is None:
             report.skipped = "лента чатов ещё не читалась"
             return report
-        fresh = now - mirror.read_through <= self.policy.mirror_stale
+        # Свежесть — когда ленту дочитали до конца, а не время последнего события: у тихого кабинета событий нет часами.
+        fresh = now - (mirror.synced_through or mirror.read_through) <= self.policy.mirror_stale
         since = now - self.policy.history
         events = await self.chats.review_dialog_events(seller_id, since=since, until=now + timedelta(days=1))
         segments = split_dialogs(events)
