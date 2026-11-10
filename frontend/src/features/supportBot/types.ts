@@ -30,7 +30,20 @@ export interface SupportBot {
   classifier_mode: ClassifierMode;
   reply_gate_mode: ReplyGateMode;
   monitor_overall: Severity;
+  pace: Pace;
+  pace_default: Pace;
+  pace_custom: boolean;
 }
+
+/** Шаг рассылки кабинета в минутах: интервал и случайная добавка к нему. */
+export interface Pace {
+  interval_minutes: number;
+  jitter_min_minutes: number;
+  jitter_max_minutes: number;
+}
+
+/** Что уходит на сервер: `null` возвращает общее значение. */
+export type PaceInput = { [K in keyof Pace]: number | null };
 
 export type ClassifierMode = "off" | "enforce";
 export type Verdict = "open" | "closing" | "unclear";

@@ -6,6 +6,7 @@ import { ApiError } from "../api/http";
 import { ConnectSellerDialog } from "../components/ConnectSellerDialog";
 import { ConfirmDialog } from "../components/SellerDialog";
 import { SellerSwitcher } from "../components/SellerSwitcher";
+import { SupportBotPace } from "../components/SupportBotPace";
 import { SupportBotMonitor } from "../components/SupportBotMonitor";
 import { SupportBotProducts } from "../components/SupportBotProducts";
 import { SupportBotReplies } from "../components/SupportBotReplies";
@@ -17,13 +18,14 @@ import {
   deleteTemplate,
   getSends,
   getSupportBot,
+  savePace,
   setMode,
   setPaused,
   setTemplateActive,
   updateTemplate,
 } from "../features/supportBot/api";
 import { MODE_LABEL, STATE_LABEL, STATE_ORDER, statusLine, totalDialogs } from "../features/supportBot/format";
-import type { BotMode, JournalFilter } from "../features/supportBot/types";
+import type { BotMode, JournalFilter, PaceInput } from "../features/supportBot/types";
 import {
   attachSeller,
   detachSeller,
@@ -50,6 +52,8 @@ export function SupportBotPage() {
   const [tab, setTab] = useState<"dialogs" | "replies" | "monitor">("dialogs");
   const [formError, setFormError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [paceError, setPaceError] = useState("");
+  const [paceSaved, setPaceSaved] = useState<number | null>(null);
 
   const { data: sellers = [], isLoading } = useQuery({
     queryKey: ["automation-sellers", AUTOMATION_ID],
@@ -77,6 +81,8 @@ export function SupportBotPage() {
   }, [sellerId, sellers]);
   useEffect(() => {
     setActionError("");
+    setPaceError("");
+    setPaceSaved(null);
     setJournalFilter({ status: "", page: 1 });
   }, [sellerId]);
 
@@ -119,6 +125,18 @@ export function SupportBotPage() {
       await refresh();
     },
     onError: failed("Не удалось сменить режим"),
+  });
+  const paceMutation = useMutation({
+    mutationFn: (pace: PaceInput) => savePace(sellerId, pace),
+    onSuccess: async (result) => {
+      setPaceError("");
+      setPaceSaved(result.rescheduled);
+      await refresh();
+    },
+    onError: (error: unknown) => {
+      setPaceSaved(null);
+      setPaceError(message(error, "Не удалось сохранить интервал"));
+    },
   });
   const pauseMutation = useMutation({
     mutationFn: (paused: boolean) => setPaused(paused),
@@ -243,6 +261,17 @@ export function SupportBotPage() {
                 )}
               </div>
             )}
+
+            <SupportBotPace
+              key={`${view.seller_id}-${view.pace.interval_minutes}-${view.pace.jitter_min_minutes}-${view.pace.jitter_max_minutes}`}
+              pace={view.pace}
+              defaults={view.pace_default}
+              custom={view.pace_custom}
+              busy={paceMutation.isPending}
+              error={paceError}
+              rescheduled={paceSaved}
+              onSave={(pace) => paceMutation.mutate(pace)}
+            />
 
             <div className="chats-summary" aria-label="Диалоги по состояниям">
               {STATE_ORDER.map((state) => (

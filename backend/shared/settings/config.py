@@ -379,6 +379,8 @@ class SupportBotConfig:
     daily_cap_per_seller: int = 2500
     min_gap_seconds: int = 3
     tick_minutes: int = 10
+    # Лёгкий цикл только отправки: готовые к отправке диалоги уходят не позже чем через эту паузу.
+    send_tick_seconds: int = 60
     batch_per_tick: int = 40
     history_days: int = 12
     mirror_stale_minutes: int = 90
@@ -1027,6 +1029,8 @@ class Settings:
             or bot.min_gap_seconds < 0
         ):
             raise ValueError("support_bot.* limits must be positive")
+        if bot.send_tick_seconds < 10:
+            raise ValueError("support_bot.send_tick_seconds must be at least 10")
         if bot.max_idle_days < 1:
             raise ValueError("support_bot.max_idle_days must be positive")
         if bot.history_days <= bot.campaign_days:

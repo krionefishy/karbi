@@ -23,7 +23,18 @@ from backend.modules.wb_support_bot.domain.reply import (
     slice_fingerprint,
     slice_guard,
 )
-from backend.modules.wb_support_bot.domain.schedule import MOSCOW, Pace, SendWindow, first_send_at, next_send_at
+from backend.modules.wb_support_bot.domain.schedule import (
+    INTERVAL_MAX_MINUTES,
+    INTERVAL_MIN_MINUTES,
+    JITTER_CAP_MINUTES,
+    MOSCOW,
+    Pace,
+    SendWindow,
+    first_send_at,
+    next_send_at,
+    pace_with,
+    validate_pace,
+)
 from backend.modules.wb_support_bot.domain.stopwords import StopMatch, match
 from backend.modules.wb_support_bot.domain.switch import (
     REASON_EXCLUDED,
@@ -126,7 +137,12 @@ __all__ = [
     "SentMessage",
     "StopMatch",
     "chat_url",
+    "INTERVAL_MAX_MINUTES",
+    "INTERVAL_MIN_MINUTES",
+    "JITTER_CAP_MINUTES",
     "first_send_at",
+    "pace_with",
+    "validate_pace",
     "match",
     "next_send_at",
     "project_dialog",

@@ -928,3 +928,20 @@ button.sca-shot { cursor: zoom-in; }
 .rp-tip dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .rp-tip dd small { display: block; color: var(--ink-muted); font-size: 11px; }
 @media (max-width: 520px) { .rp-tip { font-size: 11px; padding: var(--space-1) var(--space-2); } }
+
+.bot-pace { margin-bottom: var(--space-6); padding: var(--space-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.bot-pace-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.bot-pace-head .chats-section-title { margin: 0; }
+.bot-pace-badge { padding: 2px var(--space-2); color: var(--ink-secondary); background: var(--surface-sunken); border-radius: var(--radius-sm); font-size: 12px; line-height: 16px; }
+.bot-pace-lead { margin: var(--space-2) 0 var(--space-3); }
+.bot-pace-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-bottom: var(--space-3); }
+.bot-pace-field { display: block; min-width: 0; }
+.bot-pace-field input { width: 100%; }
+.bot-pace-default { color: var(--ink-disabled); }
+.bot-pace-saved { color: var(--positive, var(--ink-secondary)); }
+.bot-pace-actions { margin-top: var(--space-3); flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .bot-pace-fields { grid-template-columns: 1fr; }
+  .bot-pace-actions { width: 100%; }
+  .bot-pace-actions button { flex: 1 1 100%; }
+}

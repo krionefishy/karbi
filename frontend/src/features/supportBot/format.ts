@@ -13,6 +13,7 @@ import type {
   ReplyBucket,
   ReplyCategoryCount,
   ReplyGateMode,
+  Pace,
   SendStatus,
   Severity,
   ProductGroup,
@@ -461,4 +462,34 @@ export function rateTip(point: DailyPoint, options: TipOptions): DayTip {
 export function tipText(tip: DayTip): string {
   const rows = tip.rows.map((row) => `${row.label}: ${row.value}${row.hint ? ` (${row.hint})` : ""}`);
   return `${tip.title}. ${rows.join("; ")}`;
+}
+
+export const PACE_LIMITS = { intervalMin: 10, intervalMax: 1440, jitterCap: 240 } as const;
+
+/** Интервал для подписи: «2 ч», «1 ч 30 мин», «45 мин». */
+export function formatInterval(minutes: number): string {
+  if (minutes < 60) return `${minutes} мин`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
+}
+
+/** Живой пример шага: «например, через 2 ч 1–3 мин». */
+export function paceExample(pace: Pace): string {
+  const { jitter_min_minutes: low, jitter_max_minutes: high } = pace;
+  const jitter = low === high ? `${low} мин` : `${low}–${high} мин`;
+  return `например, через ${formatInterval(pace.interval_minutes)} ${jitter}`;
+}
+
+/** Те же границы, что на сервере: ошибку видно до отправки. */
+export function paceError(pace: Pace): string | null {
+  const { interval_minutes: interval, jitter_min_minutes: low, jitter_max_minutes: high } = pace;
+  if (![interval, low, high].every(Number.isInteger)) return "Введите целые числа минут";
+  if (interval < PACE_LIMITS.intervalMin || interval > PACE_LIMITS.intervalMax) {
+    return `Интервал должен быть от ${PACE_LIMITS.intervalMin} до ${PACE_LIMITS.intervalMax} минут`;
+  }
+  if (low < 0) return "Добавка «от» не может быть отрицательной";
+  if (high < low) return "Добавка «до» не может быть меньше добавки «от»";
+  if (high > PACE_LIMITS.jitterCap) return `Добавка «до» не может быть больше ${PACE_LIMITS.jitterCap} минут`;
+  return null;
 }

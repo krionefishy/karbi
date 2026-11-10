@@ -28,6 +28,10 @@ class TrackedSellerModel(WBSupportBotBase):
     enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     mode: Mapped[str] = mapped_column(String(16), nullable=False, server_default=MODE_STOPPED)
     paused_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Шаг рассылки кабинета в минутах; NULL — общее значение из настроек.
+    interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    jitter_min_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    jitter_max_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ControlModel(WBSupportBotBase):

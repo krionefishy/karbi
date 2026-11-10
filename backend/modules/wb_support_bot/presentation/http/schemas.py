@@ -7,6 +7,24 @@ class TemplateResponse(BaseModel):
     active: bool
 
 
+class PaceResponse(BaseModel):
+    interval_minutes: int
+    jitter_min_minutes: int
+    jitter_max_minutes: int
+
+
+class PaceRequest(BaseModel):
+    """Шаг кабинета; `null` в поле возвращает общее значение из настроек."""
+
+    interval_minutes: int | None = None
+    jitter_min_minutes: int | None = None
+    jitter_max_minutes: int | None = None
+
+
+class PaceSavedResponse(BaseModel):
+    rescheduled: int
+
+
 class SupportBotResponse(BaseModel):
     seller_id: str
     seller_name: str
@@ -20,6 +38,9 @@ class SupportBotResponse(BaseModel):
     classifier_mode: str
     reply_gate_mode: str
     monitor_overall: str
+    pace: PaceResponse
+    pace_default: PaceResponse
+    pace_custom: bool
 
 
 class MailingResponse(BaseModel):

@@ -81,6 +81,41 @@ class SupportBotRepository:
             .values(mode=mode, paused_reason=None)
         )
 
+    async def set_pace(
+        self, seller_id: uuid.UUID, interval: int | None, jitter_min: int | None, jitter_max: int | None
+    ) -> None:
+        await self.session.execute(
+            update(TrackedSellerModel)
+            .where(TrackedSellerModel.seller_id == seller_id)
+            .values(interval_minutes=interval, jitter_min_minutes=jitter_min, jitter_max_minutes=jitter_max)
+        )
+
+    async def live_seller_ids(self) -> set[uuid.UUID]:
+        """Кабинеты, где рассылка включена и не снята ошибкой доступа."""
+        return set(
+            await self.session.scalars(
+                select(TrackedSellerModel.seller_id).where(
+                    TrackedSellerModel.mode == MODE_LIVE, TrackedSellerModel.paused_reason.is_(None)
+                )
+            )
+        )
+
+    async def scheduled_dialogs(self, seller_id: uuid.UUID) -> list[DialogModel]:
+        """Диалоги в рассылке, по которым уже была отправка и назначена следующая: их расписание зависит от шага."""
+        rows = await self.session.scalars(
+            select(DialogModel)
+            .where(
+                DialogModel.seller_id == seller_id,
+                DialogModel.state == "in_campaign",
+                DialogModel.last_sent_at.is_not(None),
+                DialogModel.next_send_at.is_not(None),
+                ~DialogModel.excluded,
+                ~DialogModel.closed,
+            )
+            .with_for_update()
+        )
+        return list(rows)
+
     async def set_paused_reason(self, seller_id: uuid.UUID, reason: str | None) -> None:
         await self.session.execute(
             update(TrackedSellerModel).where(TrackedSellerModel.seller_id == seller_id).values(paused_reason=reason)

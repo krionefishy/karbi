@@ -3,7 +3,7 @@ import random
 import uuid
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from backend.modules.wb_core.application import CatalogMirror, ChatMirror
@@ -29,6 +29,7 @@ from backend.modules.wb_support_bot.domain import (
     is_wb_notice,
     manual_valid,
     next_send_at,
+    pace_with,
     project_dialog,
     reply_slice,
     slice_fingerprint,
@@ -51,6 +52,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     SendModel,
     SupportBotRepository,
     TemplateModel,
+    TrackedSellerModel,
     VerdictModel,
 )
 from backend.shared.kafka_streams.topics import SupportBotTopics
@@ -102,6 +104,8 @@ class SellerReport:
     replies_requested: int = 0
     replies_held: int = 0
     skipped: str | None = None
+    # Курсор ленты чатов, по которому разобраны диалоги: лёгкая отправка вправе писать, пока он не сдвинулся.
+    projected_through: datetime | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -158,6 +162,7 @@ class SupportBotProcessor:
         self.chats = chats
         self.sender = sender
         self.policy = policy
+        self._base_policy = policy
         self.catalog = catalog
         self.rng = rng or random.Random()
         self.sleep = sleep
@@ -170,12 +175,20 @@ class SupportBotProcessor:
     def _product_off(self, nm_id: int | None) -> bool:
         return (nm_id if nm_id is not None else NO_ARTICLE_KEY) in self._disabled
 
+    def _adopt_pace(self, tracked: TrackedSellerModel) -> None:
+        """Шаг кабинета поверх общего: что в кабинете не задано, берётся из настроек."""
+        pace = pace_with(
+            self._base_policy.pace, tracked.interval_minutes, tracked.jitter_min_minutes, tracked.jitter_max_minutes
+        )
+        self.policy = replace(self._base_policy, pace=pace)
+
     async def process_seller(self, seller_id: uuid.UUID, *, now: datetime) -> SellerReport:
         report = SellerReport()
         tracked = await self.repository.tracked(seller_id)
         if tracked is None:
             report.skipped = "кабинет не подключён"
             return report
+        self._adopt_pace(tracked)
         mirror = await self.chats.state(seller_id)
         if mirror is None or mirror.read_through is None:
             report.skipped = "лента чатов ещё не читалась"
@@ -228,6 +241,7 @@ class SupportBotProcessor:
         await self.repository.retire_out_of_window(seller_id, since)
         await self._request_verdicts(seller_id, models, now, report)
         await self.repository.session.commit()
+        report.projected_through = mirror.read_through
 
         await self._reconcile(seller_id, segments, now)
         if tracked.paused_reason:
@@ -245,7 +259,45 @@ class SupportBotProcessor:
         if tracked.mode != MODE_LIVE:
             report.skipped = "рассылка кабинета не включена"
             return report
-        await self._send_due(seller_id, segments, now, report)
+        await self._send_due(seller_id, now, report)
+        return report
+
+    async def send_due_only(
+        self, seller_id: uuid.UUID, *, now: datetime, projected_through: datetime | None
+    ) -> SellerReport:
+        """Лёгкая отправка: только то, что уже пора, по расписанию последнего полного прохода.
+
+        Диалоги не разбираются заново, поэтому писать можно лишь пока лента чатов не сдвинулась
+        с момента полного прохода (`projected_through`): иначе в ней может быть ответ покупателя,
+        которого проекция ещё не видела. Тогда ждём ближайшего полного прохода.
+        """
+        report = SellerReport()
+        tracked = await self.repository.tracked(seller_id)
+        if tracked is None:
+            report.skipped = "кабинет не подключён"
+            return report
+        self._adopt_pace(tracked)
+        if tracked.mode != MODE_LIVE or tracked.paused_reason:
+            report.skipped = "рассылка кабинета не включена"
+            return report
+        if await self.repository.is_paused():
+            report.skipped = "рассылка остановлена общим выключателем"
+            return report
+        if not self.policy.window.contains(now):
+            report.skipped = "вне окна рассылки"
+            return report
+        mirror = await self.chats.state(seller_id)
+        if mirror is None or mirror.read_through is None:
+            report.skipped = "лента чатов ещё не читалась"
+            return report
+        if now - (mirror.synced_through or mirror.read_through) > self.policy.mirror_stale:
+            report.skipped = "зеркало чатов устарело, ничего не отправляем"
+            return report
+        if projected_through is None or mirror.read_through != projected_through:
+            report.skipped = "в ленте есть события, которых полный проход ещё не разобрал"
+            return report
+        self._disabled = await self.repository.disabled_products(seller_id)
+        await self._send_due(seller_id, now, report)
         return report
 
     async def _project(
@@ -567,9 +619,7 @@ class SupportBotProcessor:
                 send.error = "в ленте чата сообщения нет: считаем, что не ушло"
         await self.repository.session.commit()
 
-    async def _send_due(
-        self, seller_id: uuid.UUID, segments: list[_Segment], now: datetime, report: SellerReport
-    ) -> None:
+    async def _send_due(self, seller_id: uuid.UUID, now: datetime, report: SellerReport) -> None:
         local_midnight = now.astimezone(self.policy.window.timezone).replace(hour=0, minute=0, second=0, microsecond=0)
         spent = await self.repository.sent_today(seller_id, local_midnight.astimezone(UTC))
         room = self.policy.daily_cap - spent
@@ -586,11 +636,6 @@ class SupportBotProcessor:
             report.skipped = "у кабинета нет активных текстов"
             return
         fallback: dict[str, str] | None = None
-        signs: dict[str, str] = {}
-        for segment in segments:
-            for event in segment.events:
-                if event.reply_sign:
-                    signs[segment.chat_id] = event.reply_sign
         verdicts: dict[tuple[str, str], VerdictModel] = {}
         if self.policy.classifier_mode == MODE_ENFORCE:
             verdicts = await self.repository.verdicts_by_tail(seller_id, self.policy.classifier_prompt_version)
@@ -615,7 +660,7 @@ class SupportBotProcessor:
                 planned_at=now,
             )
             await self.repository.add_send(send)
-            sign = signs.get(dialog.chat_id) or await self.chats.reply_sign(seller_id, dialog.chat_id)
+            sign = await self.chats.reply_sign(seller_id, dialog.chat_id)
             if not sign:
                 if fallback is None:
                     fallback = await self._chat_list_signs(seller_id)

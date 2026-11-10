@@ -47,6 +47,9 @@ from backend.modules.wb_support_bot.presentation.http.schemas import (
     MonitorDayResponse,
     MonitorIncidentResponse,
     MonitorResponse,
+    PaceRequest,
+    PaceResponse,
+    PaceSavedResponse,
     PauseRequest,
     ProductListResponse,
     ProductResponse,
@@ -169,6 +172,9 @@ async def seller_view(
         classifier_mode=view.classifier_mode,
         reply_gate_mode=view.reply_gate_mode,
         monitor_overall=view.monitor_overall,
+        pace=PaceResponse(**asdict(view.pace)),
+        pace_default=PaceResponse(**asdict(view.pace_default)),
+        pace_custom=view.pace_custom,
     )
 
 
@@ -238,6 +244,22 @@ async def set_mode(
     except BotRequestError as error:
         raise bad_request(error) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/sellers/{seller_id}/pace", response_model=PaceSavedResponse)
+@inject
+async def set_pace(
+    seller_id: uuid.UUID, payload: PaceRequest, _: CurrentPrincipal, service: FromDishka[SupportBotService]
+) -> PaceSavedResponse:
+    try:
+        rescheduled = await service.set_pace(
+            seller_id, payload.interval_minutes, payload.jitter_min_minutes, payload.jitter_max_minutes
+        )
+    except (SellerNotFoundError, NotEnrolledError) as error:
+        raise not_enrolled() from error
+    except BotRequestError as error:
+        raise bad_request(error) from error
+    return PaceSavedResponse(rescheduled=rescheduled)
 
 
 @router.put("/control", status_code=status.HTTP_204_NO_CONTENT)

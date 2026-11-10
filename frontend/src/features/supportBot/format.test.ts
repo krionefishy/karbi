@@ -16,6 +16,9 @@ import {
   rateTip,
   tipText,
   formatMinutes,
+  formatInterval,
+  paceError,
+  paceExample,
   groupChecks,
   groupLabel,
   incidentDuration,
@@ -291,5 +294,27 @@ describe("supportBot replies format", () => {
       expect(fresh.rows[0].value).toBe("окно 48 ч ещё не закрыто");
       expect(fresh.rows).toHaveLength(2);
     });
+  });
+});
+
+describe("pace", () => {
+  const pace = { interval_minutes: 120, jitter_min_minutes: 1, jitter_max_minutes: 3 };
+
+  it("writes the interval and the example", () => {
+    expect(formatInterval(45)).toBe("45 мин");
+    expect(formatInterval(90)).toBe("1 ч 30 мин");
+    expect(formatInterval(120)).toBe("2 ч");
+    expect(paceExample(pace)).toBe("например, через 2 ч 1–3 мин");
+    expect(paceExample({ ...pace, jitter_max_minutes: 1 })).toBe("например, через 2 ч 1 мин");
+  });
+
+  it("checks the same limits as the server", () => {
+    expect(paceError(pace)).toBeNull();
+    expect(paceError({ ...pace, interval_minutes: 9 })).toContain("от 10 до 1440");
+    expect(paceError({ ...pace, interval_minutes: 1441 })).toContain("от 10 до 1440");
+    expect(paceError({ ...pace, jitter_min_minutes: -1 })).toContain("отрицательной");
+    expect(paceError({ ...pace, jitter_max_minutes: 0 })).toContain("меньше");
+    expect(paceError({ ...pace, jitter_max_minutes: 241 })).toContain("больше 240");
+    expect(paceError({ ...pace, interval_minutes: Number.NaN })).toContain("целые");
   });
 });

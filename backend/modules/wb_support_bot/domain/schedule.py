@@ -36,6 +36,32 @@ class Pace:
         return self.interval + timedelta(seconds=rng.uniform(low, high))
 
 
+INTERVAL_MIN_MINUTES = 10
+INTERVAL_MAX_MINUTES = 1440
+JITTER_CAP_MINUTES = 240
+
+
+def validate_pace(interval: int, jitter_min: int, jitter_max: int) -> None:
+    """Проверка шага кабинета в минутах; `ValueError` с текстом для оператора."""
+    if not INTERVAL_MIN_MINUTES <= interval <= INTERVAL_MAX_MINUTES:
+        raise ValueError(f"Интервал должен быть от {INTERVAL_MIN_MINUTES} до {INTERVAL_MAX_MINUTES} минут")
+    if jitter_min < 0:
+        raise ValueError("Добавка «от» не может быть отрицательной")
+    if jitter_max < jitter_min:
+        raise ValueError("Добавка «до» не может быть меньше добавки «от»")
+    if jitter_max > JITTER_CAP_MINUTES:
+        raise ValueError(f"Добавка «до» не может быть больше {JITTER_CAP_MINUTES} минут")
+
+
+def pace_with(default: Pace, interval: int | None, jitter_min: int | None, jitter_max: int | None) -> Pace:
+    """Шаг кабинета: своё значение, где оно задано, иначе общее."""
+    return Pace(
+        interval=default.interval if interval is None else timedelta(minutes=interval),
+        jitter_min=default.jitter_min if jitter_min is None else timedelta(minutes=jitter_min),
+        jitter_max=default.jitter_max if jitter_max is None else timedelta(minutes=jitter_max),
+    )
+
+
 def next_send_at(
     last_sent_at: datetime,
     *,

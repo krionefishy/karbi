@@ -156,3 +156,36 @@ async def test_the_journal_is_filtered_counted_and_linked(
     assert everything["sends"][0]["chat_url"].endswith("chatId=aaaa-bbbb")
     assert failed["total"] == 1 and failed["sends"][0]["error"] == "нет подписи"
     assert (await client.get(f"{API}/sellers/{seller}/sends", params={"status": "nope"})).status_code == 422
+
+
+async def test_pace_is_read_saved_validated_and_reset(client: AsyncClient, seller: uuid.UUID) -> None:
+    await client.post(AUTOMATION, json={"seller_id": str(seller)})
+    view = (await client.get(f"{API}/sellers/{seller}")).json()
+    default = {"interval_minutes": 60, "jitter_min_minutes": 1, "jitter_max_minutes": 10}
+    assert view["pace"] == default and view["pace_default"] == default and view["pace_custom"] is False
+
+    saved = await client.put(
+        f"{API}/sellers/{seller}/pace",
+        json={"interval_minutes": 120, "jitter_min_minutes": 1, "jitter_max_minutes": 3},
+    )
+    assert saved.status_code == 200 and saved.json() == {"rescheduled": 0}
+    view = (await client.get(f"{API}/sellers/{seller}")).json()
+    assert view["pace"] == {"interval_minutes": 120, "jitter_min_minutes": 1, "jitter_max_minutes": 3}
+    assert view["pace_default"] == default and view["pace_custom"] is True
+
+    bad = await client.put(
+        f"{API}/sellers/{seller}/pace",
+        json={"interval_minutes": 5, "jitter_min_minutes": 1, "jitter_max_minutes": 3},
+    )
+    assert bad.status_code == 422 and "от 10 до 1440" in bad.json()["detail"]
+    assert (await client.get(f"{API}/sellers/{seller}")).json()["pace"]["interval_minutes"] == 120
+
+    reset = await client.put(f"{API}/sellers/{seller}/pace", json={})
+    assert reset.status_code == 200
+    view = (await client.get(f"{API}/sellers/{seller}")).json()
+    assert view["pace"] == default and view["pace_custom"] is False
+
+
+async def test_pace_of_an_unknown_cabinet_is_refused(client: AsyncClient, seller: uuid.UUID) -> None:
+    response = await client.put(f"{API}/sellers/{seller}/pace", json={"interval_minutes": 90})
+    assert response.status_code == 404

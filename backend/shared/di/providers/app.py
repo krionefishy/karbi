@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import time, timedelta
 from zoneinfo import ZoneInfo
 
 from dishka import Provider, Scope, from_context, provide
@@ -71,6 +71,7 @@ from backend.modules.wb_reviews.application import ReviewReportService, ReviewsE
 from backend.modules.wb_reviews.infrastructure.postgres import ReviewSyncRepository
 from backend.modules.wb_support_bot.application import SupportBotEnrollment, SupportBotService
 from backend.modules.wb_support_bot.application.monitor import monitor_limits
+from backend.modules.wb_support_bot.domain import Pace, SendWindow
 from backend.modules.wb_support_bot.infrastructure.postgres import SupportBotRepository
 from backend.modules.wb_turnover.application import (
     BoardService,
@@ -476,6 +477,18 @@ class SessionProvider(Provider):
             reply_engine=settings.support_bot.reply_engine,
             daily_cap=settings.support_bot.daily_cap_per_seller,
             limits=monitor_limits(settings.support_bot.panel),
+            pace=Pace(
+                interval=timedelta(minutes=settings.support_bot.interval_minutes),
+                jitter_min=timedelta(minutes=settings.support_bot.jitter_min_minutes),
+                jitter_max=timedelta(minutes=settings.support_bot.jitter_max_minutes),
+            ),
+            window=SendWindow(
+                start=time(settings.support_bot.window_start_hour),
+                end=time.max
+                if settings.support_bot.window_end_hour >= 24
+                else time(settings.support_bot.window_end_hour),
+                timezone=ZoneInfo(settings.support_bot.timezone),
+            ),
         )
 
     @provide(scope=Scope.REQUEST)

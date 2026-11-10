@@ -12,6 +12,8 @@ import type {
   ReplySummary,
   SendPage,
   SupportBot,
+  Pace,
+  PaceInput,
   Template,
 } from "./types";
 
@@ -41,6 +43,9 @@ export function getSends(sellerId: string, filter: JournalFilter) {
 
 export const setMode = (sellerId: string, mode: BotMode) =>
   apiRequest<void>(`${base(sellerId)}/mode`, { method: "PUT", body: JSON.stringify({ mode }) });
+
+export const savePace = (sellerId: string, pace: PaceInput) =>
+  apiRequest<{ rescheduled: number }>(`${base(sellerId)}/pace`, { method: "PUT", body: JSON.stringify(pace) });
 
 export const setPaused = (paused: boolean) =>
   apiRequest<void>(`${root}/control`, { method: "PUT", body: JSON.stringify({ paused }) });

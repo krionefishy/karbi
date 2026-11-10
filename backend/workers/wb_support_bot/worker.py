@@ -1,8 +1,11 @@
+import asyncio
 import random
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.modules.wb_core.application import CatalogMirror, ChatMirror
 from backend.modules.wb_core.domain import EGRESS_SERVABLE
@@ -53,11 +56,16 @@ def policy_from(settings: Settings) -> BotPolicy:
 
 
 class SupportBotWorker(PollingWorker):
-    """Раз в `tick_minutes` проходит по подключённым кабинетам.
+    """Раз в `tick_minutes` проходит по подключённым кабинетам; раз в `send_tick_seconds` только отправляет.
 
     Один проход по кабинету — разбор диалогов из зеркала и отправка того, что
     пора. Ошибка одного кабинета не останавливает остальные; отправку по
     кабинету с ошибкой доступа бот снимает сам и пишет причину в карточку.
+
+    Лёгкий цикл отправки не разбирает диалоги: он берёт то, что полный проход уже назначил
+    на этот момент, чтобы узкий шаг (например 2 часа и 1–3 минуты) не расплывался на длину
+    полного прохода. Писать он вправе, пока лента чатов не сдвинулась с последнего полного
+    прохода; на один кабинет полный и лёгкий цикл не заходят одновременно.
     """
 
     tick_failed_event = "support_bot_tick_failed"
@@ -79,6 +87,85 @@ class SupportBotWorker(PollingWorker):
         self.policy = policy_from(settings)
         self._now = now or (lambda: datetime.now(UTC))
         self._last_tick: datetime | None = None
+        # Курсор ленты чатов на момент последнего полного разбора кабинета и замок «кабинет сейчас в работе».
+        self._projected: dict[uuid.UUID, datetime] = {}
+        self._locks: dict[uuid.UUID, asyncio.Lock] = {}
+
+    def _lock(self, seller_id: uuid.UUID) -> asyncio.Lock:
+        return self._locks.setdefault(seller_id, asyncio.Lock())
+
+    async def run(self) -> None:
+        sender = asyncio.create_task(self._send_loop(), name="support-bot-send")
+        try:
+            await super().run()
+        finally:
+            sender.cancel()
+            await asyncio.gather(sender, return_exceptions=True)
+
+    async def _send_loop(self) -> None:
+        pause = float(self.settings.support_bot.send_tick_seconds)
+        while not self._stop.is_set():
+            touch_heartbeat()
+            try:
+                await self.send_tick()
+            except Exception:
+                self.logger.exception("support_bot_send_tick_failed")
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=pause)
+            except TimeoutError:
+                continue
+
+    async def send_tick(self) -> int:
+        """Один лёгкий проход: отправить готовое по кабинетам в режиме live. Возвращает число отправленных."""
+        now = self._now()
+        if not self.policy.window.contains(now):
+            return 0
+        async with self.database.session() as session:
+            live = await SupportBotRepository(session).live_seller_ids()
+            servable = {
+                seller.id
+                for seller in await SellerRepository(session).list_sellers()
+                if seller.egress_status in EGRESS_SERVABLE
+            }
+        sent = 0
+        for seller_id in sorted(live & servable, key=str):
+            if self._stop.is_set():
+                break
+            lock = self._lock(seller_id)
+            if lock.locked():
+                continue
+            touch_heartbeat()
+            async with lock:
+                try:
+                    async with self.database.session() as session:
+                        processor = self._processor(session)
+                        report = await processor.send_due_only(
+                            seller_id, now=self._now(), projected_through=self._projected.get(seller_id)
+                        )
+                except Exception:
+                    self.logger.exception("support_bot_send_failed", seller_id=str(seller_id))
+                    continue
+            sent += report.sent
+            if report.sent or report.failed or report.held:
+                self.logger.info(
+                    "support_bot_seller_sent",
+                    seller_id=str(seller_id),
+                    sent=report.sent,
+                    failed=report.failed,
+                    held=report.held,
+                    skipped=report.skipped,
+                )
+        return sent
+
+    def _processor(self, session: AsyncSession) -> SupportBotProcessor:
+        return SupportBotProcessor(
+            SupportBotRepository(session),
+            ChatMirror(session),
+            self.sender,
+            self.policy,
+            catalog=CatalogMirror(session),
+            rng=random.Random(),
+        )
 
     def _due(self, now: datetime) -> bool:
         gap = timedelta(minutes=self.settings.support_bot.tick_minutes)
@@ -102,19 +189,13 @@ class SupportBotWorker(PollingWorker):
                 break
             touch_heartbeat()
             try:
-                async with self.database.session() as session:
-                    processor = SupportBotProcessor(
-                        SupportBotRepository(session),
-                        ChatMirror(session),
-                        self.sender,
-                        self.policy,
-                        catalog=CatalogMirror(session),
-                        rng=random.Random(),
-                    )
-                    report = await processor.process_seller(seller_id, now=now)
+                async with self._lock(seller_id), self.database.session() as session:
+                    report = await self._processor(session).process_seller(seller_id, now=now)
             except Exception:
                 self.logger.exception("support_bot_seller_failed", seller_id=str(seller_id))
                 continue
+            if report.projected_through is not None:
+                self._projected[seller_id] = report.projected_through
             handled += 1
             await self._record_monitor(seller_id, now)
             self.logger.info(

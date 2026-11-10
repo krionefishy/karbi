@@ -1,3 +1,4 @@
+import random
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -25,7 +26,12 @@ from backend.modules.wb_support_bot.domain import (
     MODE_OFF,
     DialogState,
     Gate,
+    Pace,
+    SendWindow,
     is_wb_notice,
+    next_send_at,
+    pace_with,
+    validate_pace,
 )
 from backend.modules.wb_support_bot.domain.health import Thresholds
 from backend.modules.wb_support_bot.infrastructure.postgres import (
@@ -38,6 +44,7 @@ from backend.modules.wb_support_bot.infrastructure.postgres import (
     SendModel,
     SupportBotRepository,
     TemplateModel,
+    TrackedSellerModel,
     VerdictModel,
 )
 
@@ -70,6 +77,23 @@ class SupportBotOverview:
 
 
 @dataclass(frozen=True, slots=True)
+class PaceView:
+    """Шаг рассылки в минутах: интервал и случайная добавка к нему."""
+
+    interval_minutes: int
+    jitter_min_minutes: int
+    jitter_max_minutes: int
+
+
+def pace_view(pace: Pace) -> PaceView:
+    return PaceView(
+        interval_minutes=round(pace.interval.total_seconds() / 60),
+        jitter_min_minutes=round(pace.jitter_min.total_seconds() / 60),
+        jitter_max_minutes=round(pace.jitter_max.total_seconds() / 60),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class SellerBotView:
     seller_id: uuid.UUID
     seller_name: str
@@ -83,6 +107,13 @@ class SellerBotView:
     classifier_mode: str
     reply_gate_mode: str
     monitor_overall: str
+    pace: PaceView
+    pace_default: PaceView
+    pace_custom: bool
+
+
+# Расписание идущих диалогов при смене шага разводится в пределах этого срока, чтобы не уйти пачкой.
+RESCHEDULE_SPREAD = timedelta(minutes=10)
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +309,11 @@ class SupportBotService(SwitchesMixin, ReplyStatsMixin):
         reply_engine: str = "single",
         daily_cap: int = 2500,
         limits: Thresholds = Thresholds(),
+        pace: Pace = Pace(),
+        window: SendWindow = SendWindow(),
     ) -> None:
+        self.default_pace = pace
+        self.window = window
         self.classifier_mode = classifier_mode
         self.classifier_prompt_version = classifier_prompt_version
         self.manual_switch_hours = manual_switch_hours
@@ -337,6 +372,17 @@ class SupportBotService(SwitchesMixin, ReplyStatsMixin):
             classifier_mode=self.classifier_mode,
             reply_gate_mode=self.reply_gate_mode,
             monitor_overall=(await self._monitor().overall(seller_id)).value,
+            pace=pace_view(self._pace_of(tracked)),
+            pace_default=pace_view(self.default_pace),
+            pace_custom=any(
+                value is not None
+                for value in (tracked.interval_minutes, tracked.jitter_min_minutes, tracked.jitter_max_minutes)
+            ),
+        )
+
+    def _pace_of(self, tracked: TrackedSellerModel) -> Pace:
+        return pace_with(
+            self.default_pace, tracked.interval_minutes, tracked.jitter_min_minutes, tracked.jitter_max_minutes
         )
 
     def _monitor(self) -> BotMonitor:
@@ -392,6 +438,50 @@ class SupportBotService(SwitchesMixin, ReplyStatsMixin):
             raise BotRequestError(f"Неизвестный режим: {mode}")
         await self.repository.set_mode(seller_id, mode)
         await self.session.commit()
+
+    async def set_pace(
+        self,
+        seller_id: uuid.UUID,
+        interval: int | None,
+        jitter_min: int | None,
+        jitter_max: int | None,
+        *,
+        now: datetime | None = None,
+        rng: random.Random | None = None,
+    ) -> int:
+        """Свой шаг кабинета (`None` — общее значение). Возвращает, у скольких диалогов пересчитано расписание.
+
+        Идущим диалогам следующая отправка пересчитывается от последней отправки по новому шагу,
+        но не раньше текущего момента; те, у кого срок уже вышел, разводятся на несколько минут.
+        Повторное сохранение прежних значений ничего не двигает.
+        """
+        _, tracked = await self._tracked(seller_id)
+        new = pace_with(self.default_pace, interval, jitter_min, jitter_max)
+        view = pace_view(new)
+        try:
+            validate_pace(view.interval_minutes, view.jitter_min_minutes, view.jitter_max_minutes)
+        except ValueError as error:
+            raise BotRequestError(str(error)) from error
+        if (tracked.interval_minutes, tracked.jitter_min_minutes, tracked.jitter_max_minutes) == (
+            interval,
+            jitter_min,
+            jitter_max,
+        ):
+            return 0
+        await self.repository.set_pace(seller_id, interval, jitter_min, jitter_max)
+        moment = now or datetime.now(UTC)
+        generator = rng or random.Random()
+        rescheduled = 0
+        for dialog in await self.repository.scheduled_dialogs(seller_id):
+            assert dialog.last_sent_at is not None
+            target = next_send_at(dialog.last_sent_at, window=self.window, pace=new, rng=generator)
+            if target <= moment:
+                target = moment + timedelta(seconds=generator.uniform(0, RESCHEDULE_SPREAD.total_seconds()))
+            if target != dialog.next_send_at:
+                dialog.next_send_at = target
+                rescheduled += 1
+        await self.session.commit()
+        return rescheduled
 
     async def set_paused(self, paused: bool) -> None:
         await self.repository.set_paused(paused)
