@@ -1,5 +1,6 @@
 import asyncio
 import random
+import re
 import ssl
 import time
 import uuid
@@ -107,7 +108,7 @@ class EgressGateway:
                 raise WBTemporaryError(f"{api_name}: {last_error}")
             status = int(payload.get("status", 0))
             if status in {401, 403}:
-                raise WBPermanentError(self._access_error(api_name, category))
+                raise WBPermanentError(self._access_error(api_name, category, status, payload.get("body")))
             if status == 404:
                 raise WBPermanentError(f"{api_name} не знает метод {path}")
             if status == 429 or status >= 500:
@@ -308,10 +309,27 @@ class EgressGateway:
         return self._client
 
     @staticmethod
-    def _access_error(api_name: str, category: str) -> str:
-        if category:
-            return f"{api_name}: ключ не имеет доступа к категории «{category}»"
-        return f"{api_name}: ключ недействителен или не имеет доступа"
+    def _access_error(api_name: str, category: str, status: int, body: Any) -> str:
+        # 401/403 alone cannot tell an expired key from missing permissions or
+        # a refusal for one particular request. Keep WB's diagnostic fields,
+        # including its request ID, without copying arbitrary response data.
+        context = f", категория «{category}»" if category else ""
+        message = f"{api_name}: отказ доступа (HTTP {status}{context})"
+        if isinstance(body, dict):
+            details = "; ".join(
+                f"{key}: {body[key]}"
+                for key in ("title", "code", "requestId", "origin", "detail")
+                if isinstance(body.get(key), (str, int)) and body[key] != ""
+            )
+        else:
+            details = body if isinstance(body, str) else ""
+        # WB may echo credentials in an error. Redact before truncating so a
+        # partial token cannot end up in the send journal or pause reason.
+        details = re.sub(r"\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b", "[redacted]", details)
+        details = re.sub(r"(?i)\b(?:Bearer|Basic)\s+\S+", "[redacted]", details)
+        details = re.sub(r"(?i)\b(?:authorization|api[_-]?key|token|replySign)\s*[:=]\s*\S+", "[redacted]", details)
+        details = " ".join(details.split())[:1000]
+        return f"{message}: {details}" if details else message
 
     @staticmethod
     def _detail(response: httpx.Response) -> str:

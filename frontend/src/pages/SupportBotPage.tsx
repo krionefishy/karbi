@@ -247,7 +247,7 @@ export function SupportBotPage() {
             {(view.mode !== "live" || view.globally_paused || view.paused_reason) && (
               <div className="checklist-notice" role="status">
                 <strong>{MODE_LABEL[view.mode]}.</strong> {statusLine(view)}{" "}
-                {view.mode !== "live" && (
+                {(view.mode !== "live" || view.paused_reason) && (
                   <button
                     type="button"
                     className="primary-button"
@@ -256,7 +256,7 @@ export function SupportBotPage() {
                     title={!hasActiveText ? "Сначала добавьте активный текст" : undefined}
                     onClick={() => setPendingMode("live")}
                   >
-                    Включить рассылку
+                    {view.paused_reason ? "Возобновить рассылку" : "Включить рассылку"}
                   </button>
                 )}
               </div>
@@ -374,9 +374,9 @@ export function SupportBotPage() {
       )}
       {pendingMode && (
         <ConfirmDialog
-          title="Включить отправку по всем диалогам?"
-          description="Бот начнёт писать покупателям всех диалогов этого кабинета по расписанию: окно 9:00–22:00 по Москве, около 12 сообщений в сутки на диалог. Остановить рассылку можно в любой момент."
-          confirmLabel="Включить"
+          title={view?.paused_reason ? "Возобновить отправку по кабинету?" : "Включить отправку по всем диалогам?"}
+          description="Бот будет отправлять напоминания по подходящим диалогам этого кабинета с настроенным интервалом в окне 9:00–22:00 по Москве. Общая пауза, если она включена, сохранится."
+          confirmLabel={view?.paused_reason ? "Возобновить" : "Включить"}
           pendingLabel="Включаем…"
           pending={modeMutation.isPending}
           onClose={() => setPendingMode(null)}

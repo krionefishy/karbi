@@ -43,20 +43,12 @@ class WBChatSender(WBJsonClient):
             raise WBPermanentError(f"{self.api_name}: пустой текст сообщения")
         if len(text) > MAX_MESSAGE_LENGTH:
             raise WBPermanentError(f"{self.api_name}: текст длиннее {MAX_MESSAGE_LENGTH} символов")
-        try:
-            payload: Any = await self.request(
-                "POST",
-                MESSAGE_PATH,
-                seller_id,
-                form={"replySign": reply_sign, "message": text},
-                attempts=1,
-            )
-        except WBPermanentError as error:
-            if "доступа" not in str(error):
-                raise
-            raise WBPermanentError(
-                f"{self.api_name}: у ключа нет права записи или доступа к категории «{self.category}»: "
-                "для отправки нужен токен с уровнем «Чтение и запись»"
-            ) from error
+        payload: Any = await self.request(
+            "POST",
+            MESSAGE_PATH,
+            seller_id,
+            form={"replySign": reply_sign, "message": text},
+            attempts=1,
+        )
         if isinstance(payload, dict) and payload.get("errors"):
             raise WBPermanentError(f"{self.api_name}: {payload['errors']}")
