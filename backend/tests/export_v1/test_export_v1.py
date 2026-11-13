@@ -12,7 +12,9 @@ from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.factory import Application
-from backend.infrastructure.export_v1.repository import ExportRepository
+from backend.infrastructure.export_v1.repository import ExportRepository, ExportRow
+from backend.infrastructure.observability import ExportObservability
+from backend.modules.export_v1.observability import record_export_page
 from backend.modules.wb_card_checklist.infrastructure.postgres.models import CardFactsModel, PriceFactsModel
 from backend.modules.wb_core.infrastructure.postgres.models import (
     AdvertCampaignModel,
@@ -258,6 +260,7 @@ async def test_auth_network_errors_and_request_errors_use_the_stable_envelope(st
     )
     disabled = await stand.client.get("/export/v1/datasets", headers=HEADERS)
     stand.app.state.settings = configured
+    metrics = await stand.client.get("/export/v1/observability/metrics", headers=HEADERS)
 
     assert missing.status_code == 401 and missing.json()["error"]["code"] == "unauthorized"
     assert wrong_ip.status_code == 403 and wrong_ip.json()["error"]["code"] == "unauthorized"
@@ -265,6 +268,10 @@ async def test_auth_network_errors_and_request_errors_use_the_stable_envelope(st
     assert bad_limit.status_code == 400 and bad_limit.json()["error"]["code"] == "bad_request"
     assert bad_cursor.status_code == 400 and bad_cursor.json()["error"]["code"] == "bad_cursor"
     assert disabled.status_code == 503 and disabled.json()["error"]["code"] == "auth_not_configured"
+    assert (
+        'marketplace_auto_export_v1_http_requests_total{channel="wb",dataset="orders",'
+        'status_class="4xx",status_code="400"} 2.0'
+    ) in metrics.text
 
 
 async def test_every_dataset_matches_the_export_v1_contract(stand: Stand) -> None:
@@ -344,3 +351,47 @@ async def test_database_failures_use_the_stable_service_unavailable_error(
 
     assert response.status_code == 503
     assert response.json() == {"error": {"code": "db_unavailable", "message": "export database is unavailable"}}
+
+
+async def test_observability_endpoint_uses_export_guard_and_records_real_page_boundary(stand: Stand) -> None:
+    page = await stand.client.get("/export/v1/products?limit=1", headers=HEADERS)
+    denied = await stand.client.get("/export/v1/observability/metrics")
+    metrics = await stand.client.get("/export/v1/observability/metrics", headers=HEADERS)
+    status = await stand.client.get("/export/v1/observability/status", headers=HEADERS)
+
+    assert page.status_code == 200
+    assert denied.status_code == 401
+    assert metrics.status_code == 200
+    assert status.status_code == 503  # Closed until the bridge preflight is clean.
+    assert 'marketplace_auto_export_v1_rows_total{channel="wb",dataset="products"' in metrics.text
+    assert f'seller="{SELLER_ID}",stage="sent"' in metrics.text
+    assert "marketplace_auto_export_v1_bytes_total" in metrics.text
+    assert "marketplace_auto_export_v1_pages_total" in metrics.text
+    assert "marketplace_auto_export_v1_http_requests_total" in metrics.text
+    assert page.json()["next_cursor"] not in metrics.text
+    assert "seller_tax_rates" not in metrics.text
+
+
+def test_mixed_seller_page_is_split_into_per_seller_metrics() -> None:
+    other_seller = uuid.UUID("a1e048f7-bf93-4e91-9f5a-c2b844fed0c4")
+    rows = [
+        ExportRow(STAMP, "1", {"seller_id": str(SELLER_ID), "channel": "wb", "value": "first"}),
+        ExportRow(STAMP, "2", {"seller_id": str(SELLER_ID), "channel": "wb", "value": "second"}),
+        ExportRow(STAMP, "3", {"seller_id": str(other_seller), "channel": "wb", "value": "third"}),
+    ]
+    metrics = ExportObservability()
+
+    record_export_page(
+        metrics,
+        dataset="products",
+        rows=rows,
+        next_cursor="opaque-cursor",
+        latency_seconds=0.1,
+        transfer_id=uuid.UUID("e8183773-347b-45ac-82a0-0900bd05b78d"),
+    )
+
+    snapshot = {item["seller_id"]: item for item in metrics.snapshot()}
+    assert snapshot[str(SELLER_ID)]["rows"] == {"sent": 2, "accepted": 0, "written": 0}
+    assert snapshot[str(other_seller)]["rows"] == {"sent": 1, "accepted": 0, "written": 0}
+    assert snapshot[str(SELLER_ID)]["pages"] == {"sent": 1, "accepted": 0, "written": 0}
+    assert "opaque-cursor" not in metrics.render_prometheus().decode()

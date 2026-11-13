@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from backend.app.api.router import root_router, router
 from backend.app.http.setup import setup_http_middleware
 from backend.infrastructure.logging import configure_logging
+from backend.infrastructure.observability import ExportObservability
 from backend.modules.platform.application import TokenService
 from backend.modules.wb_screenshot_control.infrastructure.wiring import (
     log_startup_state as log_screenshot_control_state,
@@ -36,6 +37,7 @@ class Application:
         self.app.state.database = self.database
         self.app.state.redis = self.redis
         self.app.state.settings = self.settings
+        self.app.state.export_observability = ExportObservability()
         self.container = make_async_container(
             *ALL_PROVIDERS,
             context={
