@@ -173,6 +173,25 @@ class ExportRepository:
         rows = await self._execute(statement, updated_at, pk, mapper, cursor, limit + 1)
         return rows[:limit], len(rows) > limit
 
+    async def volume_counts(self) -> dict[str, int]:
+        """Count the rows the exporter would expose, without serializing payloads."""
+        counts: dict[str, int] = {}
+        for dataset in DATASETS:
+            if dataset == "stocks":
+                count = 0
+                for statement, _updated, _pk_value, _mapper in self._stock_queries():
+                    count += int(
+                        await self.session.scalar(select(func.count()).select_from(statement.order_by(None).subquery()))
+                        or 0
+                    )
+                counts[dataset] = count
+                continue
+            statement, _updated, _pk_value, _mapper = self._query(dataset)
+            counts[dataset] = int(
+                await self.session.scalar(select(func.count()).select_from(statement.order_by(None).subquery())) or 0
+            )
+        return counts
+
     async def _execute(
         self,
         statement: Select,

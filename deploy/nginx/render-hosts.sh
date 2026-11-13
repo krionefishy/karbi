@@ -48,7 +48,7 @@ fi
 for site in $SITES bootstrap; do
     template="$APP_DIR/deploy/nginx/host-$site.conf.template"
     test -f "$template" || { echo "no template for $site" >&2; exit 1; }
-    envsubst '${PUBLIC_DOMAIN} ${ADMIN_DOMAIN} ${MONITORING_DOMAIN} ${EXPORT_ALLOWED_IP}' < "$template" > "$AVAILABLE/$site"
+    envsubst '${PUBLIC_DOMAIN} ${ADMIN_DOMAIN} ${MONITORING_DOMAIN} ${EXPORT_ALLOWED_IP} ${EXPORT_REPORT_BRIDGE_IP} ${EXPORT_REPORT_WRITER_IP}' < "$template" > "$AVAILABLE/$site"
     chmod 644 "$AVAILABLE/$site"
 done
 

@@ -48,11 +48,20 @@ Raw cursors, business rows and tokens are never logged or used as labels.
 as data pages. Status stays 503 until the bridge production-volume preflight is
 real, mock-free and reconciled for all nine datasets.
 
+`POST /export/v1/observability/production-report` accepts two independently
+authenticated aggregate generations: `ma_bridge/accepted` from vm-bridge and
+`mp_sync/written` from vm-fin. Karbi computes `sent` directly from its exporter
+queries, persists both acknowledgements in PostgreSQL and opens the gate only
+when all three counts match for exactly the nine v1 datasets. Each source is
+bound to its own IP allow-list; both use a report credential that is separate
+from `EXPORT_TOKEN`. Reports survive restarts and expire after 24 hours. The
+schema has no business rows, seller names, credentials or tax fields.
+
 ## Rollout and rollback
 
 1. Take a PostgreSQL backup and preserve the previous Git revision.
-2. Add the two export-token slots and both vm-bridge allow-list variables to
-   the production environment without printing their values.
+2. Add export-token slots for data pages plus separate report-token slots and
+   vm-bridge/vm-fin report allow-lists without printing their values.
 3. Deploy normally. The three schema migrations build cursor indexes with
    `CREATE INDEX CONCURRENTLY`, so collectors remain writable.
 4. Render/reload host nginx, verify `/api/v1/health/ready`, verify that an

@@ -213,7 +213,9 @@ def test_production_consumer_gate_requires_clean_volume_for_all_nine_datasets() 
                 mock_sellers=0,
                 mock_rows=0,
                 sent_rows=100,
-                bridge_rows=100,
+                accepted_rows=100,
+                written_rows=100,
+                observed_at=NOW,
             )
         )
     assert metrics.production_gate_status(channel="wb", now=NOW).ok
@@ -232,14 +234,28 @@ def test_production_consumer_gate_blocks_mock_data_missing_datasets_and_bridge_g
             mock_sellers=1,
             mock_rows=20,
             sent_rows=100,
-            bridge_rows=90,
+            accepted_rows=90,
+            written_rows=80,
+            rejected_rows=1,
+            unmapped_sellers=1,
+            backlog_rows=10,
+            observed_at=NOW,
         )
     )
 
     status = metrics.production_gate_status(channel="wb", now=NOW)
     assert not status.ok
     codes = {issue.code for issue in status.issues if issue.dataset == "orders"}
-    assert codes == {"no_real_sellers", "mock_sellers", "mock_rows", "gap_sent_bridge"}
+    assert codes == {
+        "no_real_sellers",
+        "mock_sellers",
+        "mock_rows",
+        "gap_sent_accepted",
+        "gap_accepted_written",
+        "rejected_rows",
+        "unmapped_seller",
+        "backlog",
+    }
     assert sum(issue.code == "production_volume_missing" for issue in status.issues) == 8
 
 

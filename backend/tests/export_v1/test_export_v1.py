@@ -1,7 +1,8 @@
+import copy
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -12,8 +13,9 @@ from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.factory import Application
-from backend.infrastructure.export_v1.repository import ExportRepository, ExportRow
+from backend.infrastructure.export_v1.repository import DATASETS, ExportRepository, ExportRow
 from backend.infrastructure.observability import ExportObservability
+from backend.infrastructure.observability.repository import production_reports_table
 from backend.modules.export_v1.observability import record_export_page
 from backend.modules.wb_card_checklist.infrastructure.postgres.models import CardFactsModel, PriceFactsModel
 from backend.modules.wb_core.infrastructure.postgres.models import (
@@ -33,6 +35,8 @@ from backend.shared.settings import load_settings
 TOKEN = "test-export-token-0123456789abcdef"
 NEXT_TOKEN = "test-export-next-0123456789abcdef"
 HEADERS = {"Authorization": f"Bearer {TOKEN}"}
+REPORT_TOKEN = "test-report-token-0123456789abcdef"
+REPORT_HEADERS = {"Authorization": f"Bearer {REPORT_TOKEN}"}
 SELLER_ID = uuid.UUID("f03b4256-7bf1-47ad-bbd9-f93e9dd86d80")
 STAMP = datetime(2026, 11, 14, 8, 30, tzinfo=UTC)
 
@@ -52,6 +56,7 @@ async def stand() -> AsyncIterator[Stand]:
     app = application.get_app()
     async with app.router.lifespan_context(app):
         async with application.database.session() as session:
+            await session.execute(delete(production_reports_table))
             seller = SellerModel(
                 id=SELLER_ID,
                 name="ИП Экспорт",
@@ -205,6 +210,7 @@ async def stand() -> AsyncIterator[Stand]:
                 yield Stand(app, client, application)
             finally:
                 async with application.database.session() as session:
+                    await session.execute(delete(production_reports_table))
                     for model in (
                         OrderModel,
                         PriceFactsModel,
@@ -395,3 +401,133 @@ def test_mixed_seller_page_is_split_into_per_seller_metrics() -> None:
     assert snapshot[str(other_seller)]["rows"] == {"sent": 1, "accepted": 0, "written": 0}
     assert snapshot[str(SELLER_ID)]["pages"] == {"sent": 1, "accepted": 0, "written": 0}
     assert "opaque-cursor" not in metrics.render_prometheus().decode()
+
+
+async def production_report_payload(
+    stand: Stand,
+    *,
+    source: str,
+    observed_at: datetime | None = None,
+) -> dict[str, object]:
+    stamp = observed_at or datetime.now(UTC)
+    async with stand.application.database.session() as session:
+        counts = await ExportRepository(session).volume_counts()
+    stage = {"ma_bridge": "accepted", "mp_sync": "written"}[source]
+    return {
+        "contract": "export_v1_observability_v1",
+        "report_id": str(uuid.uuid4()),
+        "observed_at": stamp.isoformat(),
+        "channel": "wb",
+        "source": source,
+        "stage": stage,
+        "datasets": [
+            {
+                "dataset": dataset,
+                "rows": counts[dataset],
+                "real_sellers": 1 if source == "ma_bridge" else 0,
+                "mock_sellers": 0,
+                "mock_rows": 0,
+                "rejected_rows": 0,
+                "unmapped_sellers": 0,
+                "backlog_rows": 0,
+            }
+            for dataset in DATASETS
+        ],
+    }
+
+
+async def test_production_report_is_guarded_durable_and_restores_gate_after_restart(stand: Stand) -> None:
+    accepted_payload = await production_report_payload(stand, source="ma_bridge")
+    written_payload = await production_report_payload(stand, source="mp_sync")
+    denied = await stand.client.post("/export/v1/observability/production-report", json=accepted_payload)
+    wrong_credential = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=HEADERS,
+        json=accepted_payload,
+    )
+    accepted = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=accepted_payload,
+    )
+    written = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=written_payload,
+    )
+    replayed = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=written_payload,
+    )
+    changed = copy.deepcopy(written_payload)
+    changed["datasets"][0]["rows"] = 99  # type: ignore[index]
+    conflicting = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=changed,
+    )
+
+    assert denied.status_code == 401
+    assert wrong_credential.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json()["consumer_gate_open"] is False
+    assert written.status_code == 200
+    assert replayed.status_code == 200
+    assert conflicting.status_code == 409
+    assert written.json()["consumer_gate_open"] is True
+
+    # Simulate a fresh worker: status must rebuild the gate from PostgreSQL.
+    stand.app.state.export_observability = ExportObservability()
+    status = await stand.client.get("/export/v1/observability/status", headers=HEADERS)
+    metrics = await stand.client.get("/export/v1/observability/metrics", headers=HEADERS)
+
+    assert status.status_code == 200
+    assert status.json()["ok"] is True
+    assert (
+        'marketplace_auto_export_v1_production_stage_rows{channel="wb",dataset="orders",stage="written"}'
+        in metrics.text
+    )
+
+
+async def test_production_report_rejects_stale_and_non_contract_datasets(stand: Stand) -> None:
+    current = await production_report_payload(stand, source="ma_bridge")
+    accepted = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=current,
+    )
+    stale = await production_report_payload(
+        stand,
+        source="ma_bridge",
+        observed_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    rejected = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=stale,
+    )
+    invalid = await production_report_payload(stand, source="mp_sync")
+    invalid["datasets"][0]["dataset"] = "seller_tax_rates"  # type: ignore[index]
+    bad_contract = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=invalid,
+    )
+
+    assert accepted.status_code == 200
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "stale_production_report"
+    assert bad_contract.status_code == 422
+
+
+async def test_production_report_rejects_source_stage_spoofing(stand: Stand) -> None:
+    payload = await production_report_payload(stand, source="mp_sync")
+    payload["stage"] = "accepted"
+    response = await stand.client.post(
+        "/export/v1/observability/production-report",
+        headers=REPORT_HEADERS,
+        json=payload,
+    )
+
+    assert response.status_code == 422

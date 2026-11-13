@@ -9,6 +9,7 @@ from backend.app.api.router import root_router, router
 from backend.app.http.setup import setup_http_middleware
 from backend.infrastructure.logging import configure_logging
 from backend.infrastructure.observability import ExportObservability
+from backend.infrastructure.observability.repository import ProductionReportRepository
 from backend.modules.platform.application import TokenService
 from backend.modules.wb_screenshot_control.infrastructure.wiring import (
     log_startup_state as log_screenshot_control_state,
@@ -86,6 +87,9 @@ class Application:
             pool_size=self.settings.database.pool_size,
             max_overflow=self.settings.database.max_overflow,
         )
+        async with self.database.session() as session:
+            reports = await ProductionReportRepository(session).list("wb")
+        self.app.state.export_observability.replace_production_reports(reports)
         await self.redis.connect(self.settings.redis.url)
         if self.s3 is not None:
             await self.s3.verify_connection()
