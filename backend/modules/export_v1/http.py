@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.http.client_ip import resolve_client_ip
-from backend.modules.export_v1.repository import (
+from backend.infrastructure.export_v1.repository import (
     CONTRACT,
     DATASETS,
     SCHEMA_VERSION,

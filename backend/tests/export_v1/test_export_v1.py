@@ -12,7 +12,7 @@ from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app.factory import Application
-from backend.modules.export_v1.repository import ExportRepository
+from backend.infrastructure.export_v1.repository import ExportRepository
 from backend.modules.wb_card_checklist.infrastructure.postgres.models import CardFactsModel, PriceFactsModel
 from backend.modules.wb_core.infrastructure.postgres.models import (
     AdvertCampaignModel,
