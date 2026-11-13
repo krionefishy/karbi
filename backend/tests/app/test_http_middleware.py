@@ -123,9 +123,12 @@ async def test_rate_limit_middleware_sets_headers_and_rejects_excess_requests() 
 
     async with AsyncClient(transport=ASGITransport(app=rejected_app), base_url="http://test") as client:
         rejected_response = await client.get("/resource")
+        export_response = await client.get("/export/v1/orders")
 
     assert rejected_response.status_code == 429
     assert rejected_response.headers["Retry-After"] == "17"
+    assert export_response.status_code == 429
+    assert export_response.json() == {"error": {"code": "rate_limited", "message": "too many requests"}}
 
 
 async def test_rate_limit_middleware_answers_503_when_redis_is_not_connected() -> None:

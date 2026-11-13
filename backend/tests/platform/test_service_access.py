@@ -34,6 +34,7 @@ OPEN_ROUTER_TAGS = {
     "wb-screenshot-control-extension",  # расширение браузера со своим токеном
     "wb-screenshot-control-admin",  # CurrentAdmin
     "automations",  # каталог сам фильтруется по доступу, подключение селлеров проверяет id из пути
+    "export-v1",  # машинный bearer-токен и IP allow-list, не сессия сотрудника
 }
 ROUTER_FILE = Path("backend/app/api/router.py")
 
@@ -89,7 +90,9 @@ def test_only_the_explicit_list_of_routers_is_open() -> None:
 
 def test_routers_are_included_only_through_the_helpers() -> None:
     source = ROUTER_FILE.read_text()
-    assert source.count("router.include_router(") == 2, "include_service и include_open — единственные входы"
+    assert source.count("router.include_router(") == 3, (
+        "include_service, include_open и include_root_open — единственные входы"
+    )
 
 
 def test_every_catalog_service_has_a_router_and_every_router_a_known_service() -> None:

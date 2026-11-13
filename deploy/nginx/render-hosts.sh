@@ -23,7 +23,8 @@ set +a
 
 : "${PUBLIC_DOMAIN:?PUBLIC_DOMAIN must be set in .env}"
 : "${ADMIN_DOMAIN:?ADMIN_DOMAIN must be set in .env}"
-export PUBLIC_DOMAIN ADMIN_DOMAIN
+: "${EXPORT_ALLOWED_IP:?EXPORT_ALLOWED_IP must be set in .env}"
+export PUBLIC_DOMAIN ADMIN_DOMAIN EXPORT_ALLOWED_IP
 
 # Формат лога мониторинга нужен шаблонам public и admin всегда, даже пока сам
 # мониторинг не поставлен: без него nginx -t не пройдёт. Лог при этом пишется
@@ -47,7 +48,7 @@ fi
 for site in $SITES bootstrap; do
     template="$APP_DIR/deploy/nginx/host-$site.conf.template"
     test -f "$template" || { echo "no template for $site" >&2; exit 1; }
-    envsubst '${PUBLIC_DOMAIN} ${ADMIN_DOMAIN} ${MONITORING_DOMAIN}' < "$template" > "$AVAILABLE/$site"
+    envsubst '${PUBLIC_DOMAIN} ${ADMIN_DOMAIN} ${MONITORING_DOMAIN} ${EXPORT_ALLOWED_IP}' < "$template" > "$AVAILABLE/$site"
     chmod 644 "$AVAILABLE/$site"
 done
 

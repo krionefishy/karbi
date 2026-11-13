@@ -23,6 +23,10 @@ auth:
   audience: karbi-api
 rate_limit:
   enabled: false
+export:
+  token: test-export-token-0123456789abcdef
+  token_next: test-export-next-0123456789abcdef
+  allowed_ips: [127.0.0.1]
 worker:
   poll_interval_seconds: 1
   review_sync_hour: 0
