@@ -5,7 +5,7 @@ from dishka import make_async_container
 from dishka.integrations.fastapi import setup_dishka
 from fastapi import FastAPI
 
-from backend.app.api.router import router
+from backend.app.api.router import root_router, router
 from backend.app.http.setup import setup_http_middleware
 from backend.infrastructure.logging import configure_logging
 from backend.modules.platform.application import TokenService
@@ -35,6 +35,7 @@ class Application:
         self.app = FastAPI(title="Marketplace Auto API", version="0.1.0", lifespan=self.lifespan)
         self.app.state.database = self.database
         self.app.state.redis = self.redis
+        self.app.state.settings = self.settings
         self.container = make_async_container(
             *ALL_PROVIDERS,
             context={
@@ -64,6 +65,7 @@ class Application:
 
     def _setup_routes(self) -> None:
         self.app.include_router(router, prefix="/api/v1")
+        self.app.include_router(root_router)
 
     def _setup_middleware(self) -> None:
         setup_http_middleware(

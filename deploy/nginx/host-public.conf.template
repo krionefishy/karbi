@@ -57,6 +57,26 @@ server {
     location ^~ /api/v1/internal/ {
         return 403;
     }
+
+    # Read-only platform export: the bearer token is necessary but not enough;
+    # only vm-bridge may reach the application at all.
+    location ^~ /export/v1/ {
+        allow ${EXPORT_ALLOWED_IP};
+        deny all;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
     location ^~ /admin {
         return 301 https://${ADMIN_DOMAIN}$request_uri;
     }

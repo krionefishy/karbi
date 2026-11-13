@@ -1,3 +1,3 @@
-from backend.shared.settings.config import EgressConfig, RelayConfig, Settings, load_settings
+from backend.shared.settings.config import EgressConfig, ExportConfig, RelayConfig, Settings, load_settings
 
-__all__ = ["EgressConfig", "RelayConfig", "Settings", "load_settings"]
+__all__ = ["EgressConfig", "ExportConfig", "RelayConfig", "Settings", "load_settings"]

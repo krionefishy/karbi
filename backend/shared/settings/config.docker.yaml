@@ -42,6 +42,12 @@ rate_limit:
   enabled: true
   requests: ${RATE_LIMIT_REQUESTS:-120}
   window_seconds: ${RATE_LIMIT_WINDOW_SECONDS:-60}
+export:
+  # Separate machine credentials; both slots may coexist during rotation.
+  token: ${EXPORT_TOKEN:-}
+  token_next: ${EXPORT_TOKEN_NEXT:-}
+  # Comma-separated IPs/CIDRs. Production contains only vm-bridge.
+  allowed_ips: ${EXPORT_ALLOWED_IPS:-}
 worker:
   poll_interval_seconds: 30
   review_sync_hour: 0
