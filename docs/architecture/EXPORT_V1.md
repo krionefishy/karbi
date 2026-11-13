@@ -38,10 +38,15 @@ token in logs, issue text, client configuration, or command output.
 ## Observability hand-off (KRB-41)
 
 Each successful page emits `export_v1_page` with only `dataset`, `rows`,
-`bytes`, `has_more`, `duration_ms`, and `status`. Failures emit
-`export_v1_page_failed` with dataset/status and an exception traceback. These
-events are the Marketplace Auto end of the KRB-41 sent→accepted→written
-reconciliation; they contain no seller IDs, cursors, business rows, or tokens.
+`bytes`, `has_more`, `duration_ms`, `status`, and an opaque `transfer_id`.
+The same boundary records per-seller rows/bytes/pages and a cursor fingerprint
+through `ExportObservability`; mixed-seller pages are split after serialization.
+Failed active-dataset requests record bounded HTTP status/error-code metrics.
+Raw cursors, business rows and tokens are never logged or used as labels.
+
+`GET /export/v1/observability/metrics` and `/status` use the same IP/token guard
+as data pages. Status stays 503 until the bridge production-volume preflight is
+real, mock-free and reconciled for all nine datasets.
 
 ## Rollout and rollback
 

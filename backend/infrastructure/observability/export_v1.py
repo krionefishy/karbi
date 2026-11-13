@@ -176,6 +176,20 @@ class ExportObservability:
             buckets=_HISTOGRAM_BUCKETS,
             registry=self.registry,
         )
+        http_labels = ("dataset", "channel")
+        self._http_requests = Counter(
+            "marketplace_auto_export_v1_http_requests",
+            "Exporter HTTP requests, including failures without a seller context.",
+            (*http_labels, "status_class", "status_code"),
+            registry=self.registry,
+        )
+        self._http_latency = Histogram(
+            "marketplace_auto_export_v1_http_latency_seconds",
+            "Exporter HTTP request latency, including failed requests.",
+            http_labels,
+            buckets=_HISTOGRAM_BUCKETS,
+            registry=self.registry,
+        )
         self._retries = Counter(
             "marketplace_auto_export_v1_retries",
             "Retries before a transfer boundary completed.",
@@ -328,6 +342,45 @@ class ExportObservability:
             error_code=observation.error_code,
         )
         return transfer_id
+
+    def record_http_request(
+        self,
+        *,
+        dataset: str,
+        channel: str,
+        status_code: int,
+        latency_seconds: float,
+        transfer_id: uuid.UUID | str | None = None,
+        error_code: str | None = None,
+    ) -> str:
+        """Record one bounded exporter request even when no seller row was returned."""
+        dataset = _active_dataset(dataset)
+        channel = _member("channel", channel, EXPORT_CHANNELS)
+        if not 100 <= status_code <= 599:
+            raise ValueError("status_code must be between 100 and 599")
+        if not math.isfinite(latency_seconds) or latency_seconds < 0:
+            raise ValueError("latency_seconds must be finite and non-negative")
+        if error_code is not None and not _SAFE_CODE.fullmatch(error_code):
+            raise ValueError("error_code must be a bounded machine code, not an error message")
+        transfer = _transfer_id(transfer_id)
+        self._http_requests.labels(
+            dataset,
+            channel,
+            _status_class(status_code),
+            str(status_code),
+        ).inc()
+        self._http_latency.labels(dataset, channel).observe(latency_seconds)
+        log = self._logger.info if 200 <= status_code < 400 else self._logger.warning
+        log(
+            "export_v1_http_request_observed",
+            dataset=dataset,
+            channel=channel,
+            transfer_id=transfer,
+            status_code=status_code,
+            latency_seconds=latency_seconds,
+            error_code=error_code,
+        )
+        return transfer
 
     def record_unmapped_seller(
         self,

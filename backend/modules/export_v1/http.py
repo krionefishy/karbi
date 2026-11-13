@@ -4,6 +4,7 @@ import hmac
 import ipaddress
 import json
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -27,6 +28,8 @@ from backend.infrastructure.export_v1.repository import (
     encode_cursor,
     iso,
 )
+from backend.infrastructure.observability import ExportObservability, create_export_observability_router
+from backend.modules.export_v1.observability import record_export_page
 from backend.shared.settings import Settings
 
 router = APIRouter(prefix="/export/v1", tags=["export-v1"], include_in_schema=False)
@@ -64,6 +67,37 @@ async def guard(
 ExportGuard = Annotated[None | JSONResponse, Depends(guard)]
 
 
+def _observer(request: Request) -> ExportObservability:
+    return request.app.state.export_observability
+
+
+def _record_http_request(
+    request: Request,
+    *,
+    dataset: str,
+    status_code: int,
+    started: float,
+    transfer_id: uuid.UUID,
+    error_code: str | None = None,
+) -> None:
+    try:
+        _observer(request).record_http_request(
+            dataset=dataset,
+            channel="wb",
+            status_code=status_code,
+            latency_seconds=time.monotonic() - started,
+            transfer_id=transfer_id,
+            error_code=error_code,
+        )
+    except Exception:
+        log.exception(
+            "export_v1_observability_failed",
+            dataset=dataset,
+            status_code=status_code,
+            transfer_id=str(transfer_id),
+        )
+
+
 @router.get("/datasets")
 async def datasets(auth: ExportGuard) -> JSONResponse:
     if auth is not None:
@@ -90,17 +124,42 @@ async def dataset_page(
         return auth
     if dataset not in DATASETS:
         return error(404, "unknown_dataset", "dataset is not supported")
+    transfer_id = uuid.uuid4()
     raw_limit = request.query_params.get("limit", "1000")
     try:
         limit = int(raw_limit)
     except ValueError:
+        _record_http_request(
+            request,
+            dataset=dataset,
+            status_code=400,
+            started=started,
+            transfer_id=transfer_id,
+            error_code="bad_request",
+        )
         return error(400, "bad_request", "limit must be an integer between 1 and 5000")
     if not 1 <= limit <= 5000:
+        _record_http_request(
+            request,
+            dataset=dataset,
+            status_code=400,
+            started=started,
+            transfer_id=transfer_id,
+            error_code="bad_request",
+        )
         return error(400, "bad_request", "limit must be between 1 and 5000")
     raw_cursor = request.query_params.get("cursor")
     try:
         cursor = decode_cursor(dataset, raw_cursor, settings.auth.jwt_secret) if raw_cursor else None
     except BadCursor:
+        _record_http_request(
+            request,
+            dataset=dataset,
+            status_code=400,
+            started=started,
+            transfer_id=transfer_id,
+            error_code="bad_cursor",
+        )
         return error(400, "bad_cursor", "cursor is not valid for this dataset")
 
     try:
@@ -108,10 +167,36 @@ async def dataset_page(
         await session.execute(text("SET TRANSACTION READ ONLY"))
         rows, has_more = await ExportRepository(session).page(dataset, cursor, limit)
     except SQLAlchemyError:
-        log.exception("export_v1_page_failed", dataset=dataset, status="db_unavailable")
+        _record_http_request(
+            request,
+            dataset=dataset,
+            status_code=503,
+            started=started,
+            transfer_id=transfer_id,
+            error_code="db_unavailable",
+        )
+        log.exception(
+            "export_v1_page_failed",
+            dataset=dataset,
+            status="db_unavailable",
+            transfer_id=str(transfer_id),
+        )
         return error(503, "db_unavailable", "export database is unavailable")
     except Exception:
-        log.exception("export_v1_page_failed", dataset=dataset, status="error")
+        _record_http_request(
+            request,
+            dataset=dataset,
+            status_code=500,
+            started=started,
+            transfer_id=transfer_id,
+            error_code="internal_error",
+        )
+        log.exception(
+            "export_v1_page_failed",
+            dataset=dataset,
+            status="error",
+            transfer_id=str(transfer_id),
+        )
         return error(500, "internal_error", "export failed")
 
     next_cursor = raw_cursor
@@ -127,6 +212,23 @@ async def dataset_page(
         "as_of": iso(datetime.now(UTC)),
     }
     encoded_size = len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode())
+    duration_seconds = time.monotonic() - started
+    try:
+        record_export_page(
+            _observer(request),
+            dataset=dataset,
+            rows=rows,
+            next_cursor=next_cursor,
+            latency_seconds=duration_seconds,
+            transfer_id=transfer_id,
+        )
+    except Exception:
+        log.exception(
+            "export_v1_observability_failed",
+            dataset=dataset,
+            status_code=200,
+            transfer_id=str(transfer_id),
+        )
     log.info(
         "export_v1_page",
         dataset=dataset,
@@ -134,9 +236,13 @@ async def dataset_page(
         rows=len(rows),
         bytes=encoded_size,
         has_more=has_more,
-        duration_ms=round((time.monotonic() - started) * 1000),
+        duration_ms=round(duration_seconds * 1000),
+        transfer_id=str(transfer_id),
     )
     return JSONResponse(body)
+
+
+router.include_router(create_export_observability_router(_observer, authorize=guard))
 
 
 __all__ = ["error", "guard", "router"]

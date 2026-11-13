@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi import APIRouter, FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from prometheus_client import CONTENT_TYPE_LATEST
 
@@ -93,6 +94,30 @@ def test_429_and_5xx_have_distinct_bounded_status_classes() -> None:
     rendered = metrics.render_prometheus().decode()
     assert 'status_class="429",status_code="429"' in rendered
     assert 'status_class="5xx",status_code="503"' in rendered
+
+
+def test_exporter_http_metrics_cover_failures_without_a_seller_context() -> None:
+    metrics = ExportObservability()
+    metrics.record_http_request(
+        dataset="orders",
+        channel="wb",
+        status_code=429,
+        latency_seconds=0.5,
+        error_code="rate_limited",
+    )
+    metrics.record_http_request(
+        dataset="orders",
+        channel="wb",
+        status_code=503,
+        latency_seconds=1.5,
+        error_code="db_unavailable",
+    )
+
+    rendered = metrics.render_prometheus().decode()
+    assert 'marketplace_auto_export_v1_http_requests_total{channel="wb",dataset="orders"' in rendered
+    assert 'status_class="429",status_code="429"' in rendered
+    assert 'status_class="5xx",status_code="503"' in rendered
+    assert "marketplace_auto_export_v1_http_latency_seconds_bucket" in rendered
 
 
 def test_reconciliation_tracks_sent_accepted_written_without_payloads() -> None:
@@ -276,3 +301,26 @@ async def test_status_endpoint_stays_closed_until_production_preflight_is_comple
     assert response.status_code == 503
     assert response.json()["ok"] is False
     assert len(response.json()["production_gate_issues"]) == 9
+
+
+async def test_endpoint_factory_returns_a_guard_response_instead_of_ignoring_it() -> None:
+    metrics = ExportObservability()
+
+    async def authorize(authorization: str = Header(default="")) -> JSONResponse | None:
+        if authorization != "Bearer machine-test-token":
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+        return None
+
+    app = FastAPI()
+    parent = APIRouter(prefix="/export/v1")
+    parent.include_router(create_export_observability_router(metrics, authorize=authorize))
+    app.include_router(parent)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        denied = await client.get("/export/v1/observability/metrics")
+        allowed = await client.get(
+            "/export/v1/observability/metrics",
+            headers={"Authorization": "Bearer machine-test-token"},
+        )
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200

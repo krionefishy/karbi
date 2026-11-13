@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST
 
@@ -10,7 +10,7 @@ from backend.infrastructure.observability.export_v1 import ExportHealthThreshold
 
 
 def create_export_observability_router(
-    observer: ExportObservability,
+    observer: ExportObservability | Callable[[Request], ExportObservability],
     *,
     authorize: Callable[..., Any],
     thresholds: ExportHealthThresholds = ExportHealthThresholds(),
@@ -22,23 +22,27 @@ def create_export_observability_router(
     seller-level metrics before that policy exists.
     """
 
-    router = APIRouter(
-        prefix="/observability",
-        tags=["export-v1-observability"],
-        dependencies=[Depends(authorize)],
-    )
+    router = APIRouter(prefix="/observability", tags=["export-v1-observability"])
+
+    def resolve(request: Request) -> ExportObservability:
+        return observer(request) if callable(observer) else observer
 
     @router.get("/metrics", include_in_schema=False)
-    async def metrics() -> Response:
+    async def metrics(request: Request, auth: Any = Depends(authorize)) -> Response:
+        if isinstance(auth, Response):
+            return auth
         return Response(
-            content=observer.render_prometheus(),
+            content=resolve(request).render_prometheus(),
             headers={"Content-Type": CONTENT_TYPE_LATEST},
         )
 
     @router.get("/status", include_in_schema=False)
-    async def status() -> JSONResponse:
-        current = observer.status(thresholds)
-        gate = observer.production_gate_status()
+    async def status(request: Request, auth: Any = Depends(authorize)) -> Response:
+        if isinstance(auth, Response):
+            return auth
+        current_observer = resolve(request)
+        current = current_observer.status(thresholds)
+        gate = current_observer.production_gate_status()
         ok = current.ok and gate.ok
         return JSONResponse(
             status_code=200 if ok else 503,

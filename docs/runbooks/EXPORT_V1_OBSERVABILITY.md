@@ -3,9 +3,9 @@
 ## Граница изменений
 
 Этот слой наблюдает цепочку Marketplace Auto → ma-bridge → mp-sync, но не владеет
-контрактом выгрузки и авторизацией. Роутер метрик создаётся только с явной dependency
-машинной авторизации KRB-39; публично или через обычный пользовательский JWT его не
-подключать. До завершения KRB-39 production-проверка и запуск consumer запрещены.
+контрактом выгрузки и авторизацией. Роутер метрик подключён к тому же machine guard
+KRB-39; публично или через обычный пользовательский JWT он недоступен. До clean
+production-проверки bridge и открытия gate запуск consumer запрещён.
 
 Активны ровно девять наборов: `sellers`, `products`, `orders`, `sales_rows`, `prices`,
 `ad_campaigns`, `ad_stats_daily`, `stocks`, `ratings`. `seller_tax_rates` — legacy;
@@ -13,8 +13,8 @@
 
 ## Подключение к KRB-39
 
-Создать один `ExportObservability` на процесс. После сериализации страницы вызвать
-`observe(ExportBatchObservation(..., channel="wb", stage="sent"))`.
+`Application` создаёт один `ExportObservability` на процесс. После сериализации
+страницы adapter KRB-39 вызывает `record_export_page(..., stage="sent")`.
 ma-bridge и mp-sync публикуют те же имена метрик с тем же marketplace `channel`
 (`wb`/`ozon`) и стадиями `accepted`/`written`. Имя компонента берётся из scrape target,
 а не из label `channel`. Один UUID `transfer_id` передаётся между сервисами только в
@@ -28,12 +28,11 @@ UTF-8 байтов уже сериализованных `item` этого selle
 выданный `next_cursor` — observer сохранит только необратимый fingerprint. Пустую
 страницу учитывать в request/latency, но не создавать фиктивный seller label.
 
-Роутер подключается в export_v1 рядом с его machine-token dependency:
+Роутер подключён в export_v1 рядом с его machine-token dependency:
 
 ```python
-observer = ExportObservability()
 router.include_router(
-    create_export_observability_router(observer, authorize=require_export_machine_token)
+    create_export_observability_router(observer_from_app_state, authorize=guard)
 )
 ```
 
@@ -62,11 +61,12 @@ label: в warning пишется только fingerprint, в metric — dataset
 | rows rate | `sum by(dataset,seller,channel,stage)(rate(marketplace_auto_export_v1_rows_total[5m]))` |
 | bytes rate | `sum by(dataset,seller,channel,stage)(rate(marketplace_auto_export_v1_bytes_total[5m]))` |
 | pages rate | `sum by(dataset,seller,channel,stage)(rate(marketplace_auto_export_v1_pages_total[5m]))` |
-| p95 latency | `histogram_quantile(0.95, sum by(le,dataset,channel,stage)(rate(marketplace_auto_export_v1_latency_seconds_bucket[10m])))` |
+| p95 transfer latency | `histogram_quantile(0.95, sum by(le,dataset,channel,stage)(rate(marketplace_auto_export_v1_latency_seconds_bucket[10m])))` |
+| p95 exporter HTTP | `histogram_quantile(0.95, sum by(le,dataset,channel)(rate(marketplace_auto_export_v1_http_latency_seconds_bucket[10m])))` |
 | source lag | `max by(dataset,seller,channel)(marketplace_auto_export_v1_source_lag_seconds)` |
 | backlog | `max by(dataset,seller,channel)(marketplace_auto_export_v1_backlog_rows)` |
 | retries | `sum by(dataset,channel,reason)(increase(marketplace_auto_export_v1_retries_total[1h]))` |
-| 4xx/5xx/429 | `sum by(dataset,channel,status_class)(increase(marketplace_auto_export_v1_requests_total[1h]))` |
+| 4xx/5xx/429 | `sum by(dataset,channel,status_class)(increase(marketplace_auto_export_v1_http_requests_total[1h]))` |
 | rejected | `sum by(dataset,channel,stage,reason)(increase(marketplace_auto_export_v1_rejected_rows_total[1h]))` |
 | sent→accepted | `abs(sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="sent"}) - sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="accepted"}))` |
 | accepted→written | `abs(sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="accepted"}) - sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="written"}))` |
