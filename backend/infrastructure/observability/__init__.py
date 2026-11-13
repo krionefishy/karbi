@@ -6,6 +6,7 @@ from backend.infrastructure.observability.export_v1 import (
     ExportHealthThresholds,
     ExportObservability,
     ExportStatus,
+    ProductionStageReport,
     ProductionVolumeReport,
 )
 from backend.infrastructure.observability.http import create_export_observability_router
@@ -18,6 +19,7 @@ __all__ = [
     "ExportHealthThresholds",
     "ExportObservability",
     "ProductionVolumeReport",
+    "ProductionStageReport",
     "ExportStatus",
     "create_export_observability_router",
 ]

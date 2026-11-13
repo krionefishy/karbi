@@ -136,6 +136,10 @@ class ExportConfig:
     token: str = field(default="", repr=False)
     token_next: str = field(default="", repr=False)
     allowed_ips: tuple[str, ...] = ()
+    report_token: str = field(default="", repr=False)
+    report_token_next: str = field(default="", repr=False)
+    report_bridge_ips: tuple[str, ...] = ()
+    report_writer_ips: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -643,12 +647,13 @@ class Settings:
         rate_limit["requests"] = int(rate_limit.get("requests", 120))
         rate_limit["window_seconds"] = int(rate_limit.get("window_seconds", 60))
         export = dict(data.get("export", {}))
-        allowed_ips = export.get("allowed_ips", ())
-        if isinstance(allowed_ips, str):
-            allowed_ips = tuple(value.strip() for value in allowed_ips.split(",") if value.strip())
-        else:
-            allowed_ips = tuple(str(value).strip() for value in allowed_ips if str(value).strip())
-        export["allowed_ips"] = allowed_ips
+        for field_name in ("allowed_ips", "report_bridge_ips", "report_writer_ips"):
+            allowed_ips = export.get(field_name, ())
+            if isinstance(allowed_ips, str):
+                allowed_ips = tuple(value.strip() for value in allowed_ips.split(",") if value.strip())
+            else:
+                allowed_ips = tuple(str(value).strip() for value in allowed_ips if str(value).strip())
+            export[field_name] = allowed_ips
         worker = dict(data.get("worker", {}))
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
         worker["review_sync_hour"] = int(worker.get("review_sync_hour", 0))
@@ -911,10 +916,19 @@ class Settings:
     def validate_values(self) -> None:
         import ipaddress
 
-        for token in (self.export.token, self.export.token_next):
+        for token in (
+            self.export.token,
+            self.export.token_next,
+            self.export.report_token,
+            self.export.report_token_next,
+        ):
             if token and len(token) < 32:
                 raise ValueError("export tokens must contain at least 32 characters")
-        for network in self.export.allowed_ips:
+        for network in (
+            *self.export.allowed_ips,
+            *self.export.report_bridge_ips,
+            *self.export.report_writer_ips,
+        ):
             try:
                 ipaddress.ip_network(network, strict=False)
             except ValueError as error:
@@ -1336,6 +1350,11 @@ class Settings:
             invalid.append("s3 credentials and bucket")
         if (self.export.token or self.export.token_next) and not self.export.allowed_ips:
             invalid.append("export.allowed_ips")
+        if self.export.report_token or self.export.report_token_next:
+            if not self.export.report_bridge_ips:
+                invalid.append("export.report_bridge_ips")
+            if not self.export.report_writer_ips:
+                invalid.append("export.report_writer_ips")
         # Ключ HMAC скриншотов здесь не проверяется: без него выключается только сам модуль
         # (`_screenshot_control`), а api и остальные воркеры стартуют.
         if invalid:

@@ -48,6 +48,12 @@ export:
   token_next: ${EXPORT_TOKEN_NEXT:-}
   # Comma-separated IPs/CIDRs. Production contains only vm-bridge.
   allowed_ips: ${EXPORT_ALLOWED_IPS:-}
+  # Separate aggregate-only observability credential. It is never used to read
+  # export rows: vm-bridge may submit accepted, vm-fin may submit written.
+  report_token: ${EXPORT_REPORT_TOKEN:-}
+  report_token_next: ${EXPORT_REPORT_TOKEN_NEXT:-}
+  report_bridge_ips: ${EXPORT_REPORT_BRIDGE_IPS:-}
+  report_writer_ips: ${EXPORT_REPORT_WRITER_IPS:-}
 worker:
   poll_interval_seconds: 30
   review_sync_hour: 0

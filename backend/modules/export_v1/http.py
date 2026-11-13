@@ -29,7 +29,11 @@ from backend.infrastructure.export_v1.repository import (
     iso,
 )
 from backend.infrastructure.observability import ExportObservability, create_export_observability_router
-from backend.modules.export_v1.observability import record_export_page
+from backend.infrastructure.observability.repository import (
+    ProductionReportRepository,
+    StaleProductionReport,
+)
+from backend.modules.export_v1.observability import ProductionReportRequest, record_export_page
 from backend.shared.settings import Settings
 
 router = APIRouter(prefix="/export/v1", tags=["export-v1"], include_in_schema=False)
@@ -45,18 +49,36 @@ async def guard(
     authorization: Annotated[str | None, Header()] = None,
 ) -> None | JSONResponse:
     settings: Settings = request.app.state.settings
+    return _machine_guard(
+        request,
+        authorization,
+        settings.export.allowed_ips,
+        (settings.export.token, settings.export.token_next),
+        disabled_message="export is disabled",
+    )
+
+
+def _machine_guard(
+    request: Request,
+    authorization: str | None,
+    allowed_ips: tuple[str, ...],
+    configured_tokens: tuple[str, ...],
+    *,
+    disabled_message: str,
+) -> None | JSONResponse:
+    settings: Settings = request.app.state.settings
     client = resolve_client_ip(request, behind_trusted_proxy=settings.app.trust_proxy_headers)
     try:
         address = ipaddress.ip_address(client)
     except ValueError:
         return error(403, "unauthorized", "access denied")
-    networks = [ipaddress.ip_network(value, strict=False) for value in settings.export.allowed_ips]
+    networks = [ipaddress.ip_network(value, strict=False) for value in allowed_ips]
     if not networks or not any(address in network for network in networks):
         return error(403, "unauthorized", "access denied")
 
-    tokens = tuple(value for value in (settings.export.token, settings.export.token_next) if value)
+    tokens = tuple(value for value in configured_tokens if value)
     if not tokens:
-        return error(503, "auth_not_configured", "export is disabled")
+        return error(503, "auth_not_configured", disabled_message)
     scheme, _, candidate = (authorization or "").partition(" ")
     accepted = scheme.lower() == "bearer" and any(hmac.compare_digest(candidate.strip(), token) for token in tokens)
     if not accepted:
@@ -64,11 +86,28 @@ async def guard(
     return None
 
 
+def _report_guard(request: Request, source: str, authorization: str | None) -> None | JSONResponse:
+    settings: Settings = request.app.state.settings
+    allowed_ips = settings.export.report_bridge_ips if source == "ma_bridge" else settings.export.report_writer_ips
+    return _machine_guard(
+        request,
+        authorization,
+        allowed_ips,
+        (settings.export.report_token, settings.export.report_token_next),
+        disabled_message="production reporting is disabled",
+    )
+
+
 ExportGuard = Annotated[None | JSONResponse, Depends(guard)]
 
 
 def _observer(request: Request) -> ExportObservability:
     return request.app.state.export_observability
+
+
+async def _load_production_reports(request: Request):
+    async with request.app.state.database.session() as session:
+        return await ProductionReportRepository(session).list("wb")
 
 
 def _record_http_request(
@@ -242,7 +281,63 @@ async def dataset_page(
     return JSONResponse(body)
 
 
-router.include_router(create_export_observability_router(_observer, authorize=guard))
+@router.post("/observability/production-report")
+async def production_report(
+    body: ProductionReportRequest,
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> JSONResponse:
+    auth = _report_guard(request, body.source, authorization)
+    if auth is not None:
+        return auth
+    try:
+        async with request.app.state.database.transaction() as session:
+            sent_counts = await ExportRepository(session).volume_counts() if body.source == "ma_bridge" else None
+            reports = body.to_domain(sent_counts)
+            repository = ProductionReportRepository(session)
+            await repository.replace(reports)
+            combined = await repository.list(body.channel)
+    except StaleProductionReport:
+        return error(409, "stale_production_report", "a newer production report is already stored")
+    except SQLAlchemyError:
+        log.exception(
+            "export_v1_production_report_failed",
+            report_id=str(body.report_id),
+            status="db_unavailable",
+        )
+        return error(503, "db_unavailable", "production report store is unavailable")
+
+    observer = _observer(request)
+    observer.replace_production_reports(combined)
+    gate = observer.production_gate_status(channel=body.channel)
+    log.info(
+        "export_v1_production_report_stored",
+        report_id=str(body.report_id),
+        observed_at=body.observed_at.isoformat(),
+        channel=body.channel,
+        source=body.source,
+        stage=body.stage,
+        datasets=len(body.datasets),
+        consumer_gate_open=gate.ok,
+    )
+    return JSONResponse(
+        status_code=200,
+        content={
+            "ok": True,
+            "report_id": str(body.report_id),
+            "consumer_gate_open": gate.ok,
+            "production_gate_issues": [issue.code for issue in gate.issues],
+        },
+    )
+
+
+router.include_router(
+    create_export_observability_router(
+        _observer,
+        authorize=guard,
+        production_loader=_load_production_reports,
+    )
+)
 
 
 __all__ = ["error", "guard", "router"]

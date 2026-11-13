@@ -72,6 +72,8 @@ label: в warning пишется только fingerprint, в metric — dataset
 | accepted→written | `abs(sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="accepted"}) - sum by(dataset,seller,channel)(marketplace_auto_export_v1_rows_total{stage="written"}))` |
 | unmapped seller | `max by(dataset,channel)(marketplace_auto_export_v1_unmapped_sellers)` |
 | production gate | `min by(dataset,channel)(marketplace_auto_export_v1_production_consumer_gate_open)` |
+| durable stages | `max by(dataset,channel,stage)(marketplace_auto_export_v1_production_stage_rows)` |
+| report age | `max by(dataset,channel)(marketplace_auto_export_v1_production_report_age_seconds)` |
 
 Alert rules лежат в `deploy/monitoring/export-v1-rules.yaml`. Пороги начальные:
 остановка 15 минут, lag 30 минут, backlog 50 000 строк, любое устойчивое расхождение,
@@ -79,16 +81,24 @@ rejected или unmapped — инцидент. После первой неде�
 
 ## Обязательный preflight перед consumer
 
-Bridge сейчас содержит mock data, поэтому gate закрыт. До запуска consumer по каждому
-из девяти datasets выполнить read-only сверку и передать aggregate counts в
-   `report_production_volume` с marketplace channel `wb`/`ozon`:
+После каждого полного sync ma-bridge отправляет `source=ma_bridge, stage=accepted`,
+а mp-sync после commit своей БД отправляет `source=mp_sync, stage=written` в
+`POST /export/v1/observability/production-report`. Оба используют отдельный
+`EXPORT_REPORT_TOKEN`: export-token и bridge-token для этого не подходят.
+Приложение принимает accepted только с vm-bridge, written только с vm-fin и само
+считает sent по exporter queries. Каждый snapshot содержит ровно девять datasets
+и только aggregate counts; частичные, stale и содержащие `seller_tax_rates`
+отчёты отвергаются.
+
+До открытия consumer gate по каждому из девяти datasets проверить:
 
 1. `real_sellers > 0`; количество вывести отдельно по dataset.
 2. `mock_sellers == 0` и `mock_rows == 0`. Детектор mock определяется в ma-bridge по
    его seed/fixture manifest, а не по именам или эвристике бизнес-данных.
-3. `sent_rows == bridge_rows` на одном зафиксированном окне/cursor.
-4. `unmapped_sellers == 0`.
-5. `production_gate_status().ok == true` для всех девяти datasets.
+3. `sent_rows == accepted_rows == written_rows`; accepted подтверждён БД ma-bridge,
+   written — закоммиченными `sales.source_records` и `core.products` mp-sync.
+4. `rejected_rows == 0`, `unmapped_sellers == 0`, `backlog_rows == 0`.
+5. generation моложе 24 часов и `/export/v1/observability/status` отвечает 200.
 
 Если хотя бы один пункт не выполнен, consumer не запускать. Mock rows сначала удалить
 штатной процедурой ma-bridge с бэкапом; этот runbook не разрешает удаление данных.

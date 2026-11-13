@@ -58,6 +58,27 @@ server {
         return 403;
     }
 
+    # Aggregate-only acknowledgements have a separate credential. vm-bridge
+    # submits accepted, while vm-fin submits committed written counts.
+    location = /export/v1/observability/production-report {
+        allow ${EXPORT_REPORT_BRIDGE_IP};
+        allow ${EXPORT_REPORT_WRITER_IP};
+        deny all;
+
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        proxy_set_header X-Request-ID $request_id;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
     # Read-only platform export: the bearer token is necessary but not enough;
     # only vm-bridge may reach the application at all.
     location ^~ /export/v1/ {

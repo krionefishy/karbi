@@ -34,6 +34,7 @@ ACTIVE_EXPORT_DATASETS = frozenset(
 )
 EXPORT_CHANNELS = frozenset({"wb", "ozon"})
 EXPORT_STAGES = ("sent", "accepted", "written")
+PRODUCTION_REPORT_MAX_AGE_SECONDS = 24 * 60 * 60
 RETRY_REASONS = frozenset({"rate_limited", "server_error", "network", "other"})
 REJECTION_REASONS = frozenset({"validation", "unmapped_seller", "schema", "other"})
 
@@ -91,7 +92,7 @@ class ExportStatus:
 
 @dataclass(frozen=True, slots=True)
 class ProductionVolumeReport:
-    """Aggregate counts from a production preflight; never accepts row payloads."""
+    """Durable aggregate counts; never accepts row payloads or tax data."""
 
     dataset: str
     channel: str
@@ -99,7 +100,33 @@ class ProductionVolumeReport:
     mock_sellers: int
     mock_rows: int
     sent_rows: int
-    bridge_rows: int
+    accepted_rows: int
+    written_rows: int
+    rejected_rows: int = 0
+    unmapped_sellers: int = 0
+    backlog_rows: int = 0
+    observed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    report_id: uuid.UUID = field(default_factory=uuid.uuid4)
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionStageReport:
+    """One source-owned acknowledgement; stages are merged only inside Karbi."""
+
+    dataset: str
+    channel: str
+    source: str
+    stage: str
+    rows: int
+    real_sellers: int = 0
+    mock_sellers: int = 0
+    mock_rows: int = 0
+    rejected_rows: int = 0
+    unmapped_sellers: int = 0
+    backlog_rows: int = 0
+    sent_rows: int | None = None
+    observed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    report_id: uuid.UUID = field(default_factory=uuid.uuid4)
 
 
 @dataclass(slots=True)
@@ -139,7 +166,7 @@ class ExportObservability:
     ) -> None:
         self.registry = registry or CollectorRegistry(auto_describe=True)
         self._logger = logger or structlog.get_logger("export_v1.observability")
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._series: dict[tuple[str, str, str], _SeriesState] = {}
         self._unmapped: dict[tuple[str, str], int] = {}
         self._production: dict[tuple[str, str], ProductionVolumeReport] = {}
@@ -267,6 +294,42 @@ class ExportObservability:
         self._production_sent_bridge_gap = Gauge(
             "marketplace_auto_export_v1_production_sent_bridge_gap_rows",
             "Marketplace Auto sent rows minus bridge accepted rows during preflight.",
+            production_labels,
+            registry=self.registry,
+        )
+        self._production_accepted_written_gap = Gauge(
+            "marketplace_auto_export_v1_production_accepted_written_gap_rows",
+            "Bridge accepted rows minus mp-sync written rows during preflight.",
+            production_labels,
+            registry=self.registry,
+        )
+        self._production_stage_rows = Gauge(
+            "marketplace_auto_export_v1_production_stage_rows",
+            "Durable production row snapshot by transfer stage.",
+            (*production_labels, "stage"),
+            registry=self.registry,
+        )
+        self._production_rejected = Gauge(
+            "marketplace_auto_export_v1_production_rejected_rows",
+            "Rejected rows in the durable production snapshot.",
+            production_labels,
+            registry=self.registry,
+        )
+        self._production_unmapped = Gauge(
+            "marketplace_auto_export_v1_production_unmapped_sellers",
+            "Unmapped sellers in the durable production snapshot.",
+            production_labels,
+            registry=self.registry,
+        )
+        self._production_backlog = Gauge(
+            "marketplace_auto_export_v1_production_backlog_rows",
+            "Rows still waiting after mp-sync in the durable production snapshot.",
+            production_labels,
+            registry=self.registry,
+        )
+        self._production_report_age = Gauge(
+            "marketplace_auto_export_v1_production_report_age_seconds",
+            "Age of the durable production report generation.",
             production_labels,
             registry=self.registry,
         )
@@ -415,21 +478,39 @@ class ExportObservability:
     def report_production_volume(self, report: ProductionVolumeReport) -> bool:
         dataset = _active_dataset(report.dataset)
         channel = _member("channel", report.channel, EXPORT_CHANNELS)
-        for name in ("real_sellers", "mock_sellers", "mock_rows", "sent_rows", "bridge_rows"):
+        for name in (
+            "real_sellers",
+            "mock_sellers",
+            "mock_rows",
+            "sent_rows",
+            "accepted_rows",
+            "written_rows",
+            "rejected_rows",
+            "unmapped_sellers",
+            "backlog_rows",
+        ):
             _non_negative(name, getattr(report, name))
-        clean = (
-            report.real_sellers > 0
-            and report.mock_sellers == 0
-            and report.mock_rows == 0
-            and report.sent_rows == report.bridge_rows
-        )
+        observed_at = _aware_utc(report.observed_at, "observed_at")
+        report_age = max(0.0, (datetime.now(UTC) - observed_at).total_seconds())
+        clean = self._production_counts_clean(report) and report_age <= PRODUCTION_REPORT_MAX_AGE_SECONDS
         labels = (dataset, channel)
         with self._lock:
             self._production[labels] = report
             self._production_real_sellers.labels(*labels).set(report.real_sellers)
             self._production_mock_sellers.labels(*labels).set(report.mock_sellers)
             self._production_mock_rows.labels(*labels).set(report.mock_rows)
-            self._production_sent_bridge_gap.labels(*labels).set(report.sent_rows - report.bridge_rows)
+            self._production_sent_bridge_gap.labels(*labels).set(report.sent_rows - report.accepted_rows)
+            self._production_accepted_written_gap.labels(*labels).set(report.accepted_rows - report.written_rows)
+            for stage, rows in (
+                ("sent", report.sent_rows),
+                ("accepted", report.accepted_rows),
+                ("written", report.written_rows),
+            ):
+                self._production_stage_rows.labels(*labels, stage).set(rows)
+            self._production_rejected.labels(*labels).set(report.rejected_rows)
+            self._production_unmapped.labels(*labels).set(report.unmapped_sellers)
+            self._production_backlog.labels(*labels).set(report.backlog_rows)
+            self._production_report_age.labels(*labels).set(report_age)
             self._production_gate.labels(*labels).set(int(clean))
         self._logger.info(
             "export_v1_production_volume_checked",
@@ -439,16 +520,41 @@ class ExportObservability:
             mock_sellers=report.mock_sellers,
             mock_rows=report.mock_rows,
             sent_rows=report.sent_rows,
-            bridge_rows=report.bridge_rows,
+            accepted_rows=report.accepted_rows,
+            written_rows=report.written_rows,
+            rejected_rows=report.rejected_rows,
+            unmapped_sellers=report.unmapped_sellers,
+            backlog_rows=report.backlog_rows,
+            report_id=str(report.report_id),
+            observed_at=observed_at.isoformat(),
             consumer_gate_open=clean,
         )
         return clean
+
+    @staticmethod
+    def _production_counts_clean(report: ProductionVolumeReport) -> bool:
+        return (
+            report.real_sellers > 0
+            and report.mock_sellers == 0
+            and report.mock_rows == 0
+            and report.sent_rows == report.accepted_rows == report.written_rows
+            and report.rejected_rows == 0
+            and report.unmapped_sellers == 0
+            and report.backlog_rows == 0
+        )
+
+    def replace_production_reports(self, reports: list[ProductionVolumeReport]) -> None:
+        with self._lock:
+            self._production.clear()
+            for report in reports:
+                self.report_production_volume(report)
 
     def production_gate_status(
         self,
         *,
         channel: str = "wb",
         now: datetime | None = None,
+        max_age_seconds: float = PRODUCTION_REPORT_MAX_AGE_SECONDS,
     ) -> ExportStatus:
         """Require a clean report for every active dataset before a consumer starts."""
         channel = _member("channel", channel, EXPORT_CHANNELS)
@@ -467,9 +573,29 @@ class ExportObservability:
                 issues.append(ExportIssue("mock_sellers", dataset, None, channel, float(report.mock_sellers)))
             if report.mock_rows:
                 issues.append(ExportIssue("mock_rows", dataset, None, channel, float(report.mock_rows)))
-            gap = report.sent_rows - report.bridge_rows
-            if gap:
-                issues.append(ExportIssue("gap_sent_bridge", dataset, None, channel, float(gap)))
+            sent_accepted_gap = report.sent_rows - report.accepted_rows
+            if sent_accepted_gap:
+                issues.append(ExportIssue("gap_sent_accepted", dataset, None, channel, float(sent_accepted_gap)))
+            accepted_written_gap = report.accepted_rows - report.written_rows
+            if accepted_written_gap:
+                issues.append(
+                    ExportIssue(
+                        "gap_accepted_written",
+                        dataset,
+                        None,
+                        channel,
+                        float(accepted_written_gap),
+                    )
+                )
+            if report.rejected_rows:
+                issues.append(ExportIssue("rejected_rows", dataset, None, channel, float(report.rejected_rows)))
+            if report.unmapped_sellers:
+                issues.append(ExportIssue("unmapped_seller", dataset, None, channel, float(report.unmapped_sellers)))
+            if report.backlog_rows:
+                issues.append(ExportIssue("backlog", dataset, None, channel, float(report.backlog_rows)))
+            report_age = max(0.0, (checked_at - _aware_utc(report.observed_at, "observed_at")).total_seconds())
+            if report_age > max_age_seconds:
+                issues.append(ExportIssue("production_report_stale", dataset, None, channel, report_age))
         return ExportStatus(ok=not issues, checked_at=checked_at, issues=tuple(issues))
 
     def status(
@@ -545,6 +671,14 @@ class ExportObservability:
             ]
 
     def render_prometheus(self) -> bytes:
+        now = datetime.now(UTC)
+        with self._lock:
+            for labels, report in self._production.items():
+                age = max(0.0, (now - _aware_utc(report.observed_at, "observed_at")).total_seconds())
+                self._production_report_age.labels(*labels).set(age)
+                self._production_gate.labels(*labels).set(
+                    int(self._production_counts_clean(report) and age <= PRODUCTION_REPORT_MAX_AGE_SECONDS)
+                )
         return generate_latest(self.registry)
 
     def _set_series_gauges(self, key: tuple[str, str, str], stage: str, state: _SeriesState) -> None:
