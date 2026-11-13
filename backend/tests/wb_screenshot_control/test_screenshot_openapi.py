@@ -1,8 +1,9 @@
+from pathlib import Path
 from typing import Any, get_args
 
 from backend.app.factory import create_app
 from backend.app.http.principals import require_admin, require_authenticated
-from backend.commands.export_openapi import filter_by_tag
+from backend.commands.export_openapi import filter_by_tag, spec_sha256
 from backend.modules.wb_screenshot_control import domain
 from backend.modules.wb_screenshot_control.presentation.http import schemas
 from backend.modules.wb_screenshot_control.presentation.http.common import STATUS_BY_CODE
@@ -13,6 +14,8 @@ from backend.tests.wb_screenshot_control.routes import walk_routes
 SETTINGS = load_settings("backend/shared/settings/config.test.yaml")
 GUARDS = {require_authenticated, require_admin, require_extension}
 OPEN_BY_DESIGN = {("POST", "/api/v1/wb/screenshot-control/extension/pair")}
+GENERATED_SCHEMA = Path(__file__).resolve().parents[3] / "frontend/src/features/screenshotControl/schema.d.ts"
+FINGERPRINT_PREFIX = "// wb-screenshot-control OpenAPI SHA256: "
 
 
 def _calls(dependant: Any) -> set[Any]:
@@ -52,6 +55,14 @@ def test_the_filtered_spec_keeps_the_module_and_its_schemas_only() -> None:
     assert not any(name.startswith(("Return", "Seller")) for name in names)
     status = spec["components"]["schemas"]["SubmissionOut"]["properties"]["status"]
     assert set(status["enum"]) == set(get_args(schemas.Status))
+
+
+def test_frontend_generated_schema_is_fresh() -> None:
+    spec = filter_by_tag(create_app(SETTINGS).openapi(), "wb-screenshot-control")
+    first_line = GENERATED_SCHEMA.read_text(encoding="utf-8").splitlines()[0]
+    assert first_line == f"{FINGERPRINT_PREFIX}{spec_sha256(spec)}", (
+        "frontend schema.d.ts устарел; выполните `just screenshot-types`"
+    )
 
 
 def test_contract_vocabularies_match_the_domain() -> None:

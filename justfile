@@ -39,7 +39,11 @@ openapi *args:
 
 # Типы контракта «Контроля скриншотов ДБС» по схеме OpenAPI; schema.d.ts руками не правится.
 screenshot-types:
-    spec=$(mktemp) && CONFIG_PATH={{ test_config }} uv run python -m backend.commands.export_openapi --tag wb-screenshot-control --out "$spec" && cd frontend && npx openapi-typescript "$spec" -o src/features/screenshotControl/schema.d.ts && rm -f "$spec"
+    CONFIG_PATH={{ test_config }} uv run python -m backend.commands.generate_screenshot_types
+
+# Локальная побайтная проверка; в CI свежесть также ловит backend-тест по SHA256 схемы.
+screenshot-types-check:
+    CONFIG_PATH={{ test_config }} uv run python -m backend.commands.generate_screenshot_types --check
 
 # Напечатать конфиг внешнего мониторинга; на сервер он попадает сам при выкладке.
 monitoring-config:

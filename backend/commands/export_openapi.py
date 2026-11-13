@@ -5,6 +5,7 @@
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -61,12 +62,21 @@ def build_spec(tag: str | None = None) -> dict[str, Any]:
     return filter_by_tag(spec, tag) if tag else spec
 
 
+def serialize_spec(spec: dict[str, Any]) -> str:
+    """Стабильное представление, которое пишется в JSON и отпечатывается в сгенерированных типах."""
+    return json.dumps(spec, ensure_ascii=False, indent=2, sort_keys=False) + "\n"
+
+
+def spec_sha256(spec: dict[str, Any]) -> str:
+    return hashlib.sha256(serialize_spec(spec).encode()).hexdigest()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export the OpenAPI schema as JSON")
     parser.add_argument("--tag", default=None, help="keep only operations whose tag starts with this prefix")
     parser.add_argument("--out", default=None, help="file to write; stdout by default")
     args = parser.parse_args()
-    text = json.dumps(build_spec(args.tag), ensure_ascii=False, indent=2, sort_keys=False) + "\n"
+    text = serialize_spec(build_spec(args.tag))
     if args.out:
         Path(args.out).write_text(text, encoding="utf-8")
     else:
