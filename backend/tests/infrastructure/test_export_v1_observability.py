@@ -224,6 +224,42 @@ def test_production_consumer_gate_requires_clean_volume_for_all_nine_datasets() 
     assert "marketplace_auto_export_v1_production_consumer_gate_open" in rendered
 
 
+def test_production_consumer_gate_allows_retained_history_but_blocks_source_ahead() -> None:
+    metrics = ExportObservability()
+    for dataset in ACTIVE_EXPORT_DATASETS:
+        assert metrics.report_production_volume(
+            ProductionVolumeReport(
+                dataset=dataset,
+                channel="wb",
+                real_sellers=2,
+                mock_sellers=0,
+                mock_rows=0,
+                sent_rows=90,
+                accepted_rows=100,
+                written_rows=100,
+                observed_at=NOW,
+            )
+        )
+    assert metrics.production_gate_status(channel="wb", now=NOW).ok
+
+    metrics.report_production_volume(
+        ProductionVolumeReport(
+            dataset="orders",
+            channel="wb",
+            real_sellers=2,
+            mock_sellers=0,
+            mock_rows=0,
+            sent_rows=101,
+            accepted_rows=100,
+            written_rows=100,
+            observed_at=NOW,
+        )
+    )
+    status = metrics.production_gate_status(channel="wb", now=NOW)
+    assert not status.ok
+    assert [(issue.code, issue.value) for issue in status.issues] == [("gap_sent_accepted", 1.0)]
+
+
 def test_production_consumer_gate_blocks_mock_data_missing_datasets_and_bridge_gap() -> None:
     metrics = ExportObservability()
     assert not metrics.report_production_volume(

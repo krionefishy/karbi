@@ -95,8 +95,11 @@ rejected или unmapped — инцидент. После первой неде�
 1. `real_sellers > 0`; количество вывести отдельно по dataset.
 2. `mock_sellers == 0` и `mock_rows == 0`. Детектор mock определяется в ma-bridge по
    его seed/fixture manifest, а не по именам или эвристике бизнес-данных.
-3. `sent_rows == accepted_rows == written_rows`; accepted подтверждён БД ma-bridge,
+3. `sent_rows <= accepted_rows == written_rows`; accepted подтверждён БД ma-bridge,
    written — закоммиченными `sales.source_records` и `core.products` mp-sync.
+   Exporter считает текущий/скользящий source snapshot, а bridge и mp-sync сохраняют
+   ранее принятые daily/retention-записи, поэтому retained history может делать
+   accepted больше sent. Инцидентом является только `sent_rows > accepted_rows`.
 4. `rejected_rows == 0`, `unmapped_sellers == 0`, `backlog_rows == 0`.
 5. generation моложе 24 часов и `/export/v1/observability/status` отвечает 200.
 
@@ -108,7 +111,8 @@ rejected или unmapped — инцидент. После первой неде�
 1. Зафиксировать dataset/seller/channel, время и `transfer_id` из безопасного лога.
 2. При 429 остановить агрессивные повторы, проверить `Retry-After` и retry budget.
 3. При 5xx/сети cursor не продвигать; повторить ту же страницу идемпотентно.
-4. При `sent > accepted` смотреть rejected/unmapped и контракт schema_version.
+4. При `sent > accepted` смотреть rejected/unmapped и контракт schema_version;
+   `accepted > sent` допустим для сохранённой истории mutable/rolling datasets.
 5. При `accepted > written` смотреть backlog и транзакцию mp-sync; accepted нельзя
    считать written до commit.
 6. Raw payload, cursor и токены в тикет/чат не копировать. Для корреляции достаточно
