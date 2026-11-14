@@ -97,7 +97,10 @@ async def image_url(
     session: FromDishka[AsyncSession],
     kind: ImageKind = "thumb",
 ) -> ImageUrlOut:
-    """Presigned GET: оригинал как attachment, миниатюра inline. Очищенный или невыгруженный файл — available=false."""
+    """Presigned GET для inline-просмотра оригинала или миниатюры в админке.
+
+    Очищенный или невыгруженный файл — ``available=false``.
+    """
     try:
         answer = await admin_service(request, session, settings).image_url(submission_id, kind)
     except ServiceError as error:

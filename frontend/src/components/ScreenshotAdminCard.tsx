@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, ExternalLink, ImageOff, RotateCcw, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, ImageOff, Maximize2, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { ApiError } from "../api/http";
@@ -157,9 +157,16 @@ export function ScreenshotAdminCard({ item, panel, onPanel, onResolve, pending, 
     onExpired: () => void queryClient.invalidateQueries({ queryKey: [IMAGE_KEY, item.id, "thumb"] }),
   });
   const thumbSrc = shot.src;
-  const originalUrl = stableImageUrl(originalKey(item.id), original.data?.available ? original.data.url : null, {
-    expiresAt: original.data?.expires_at,
-  });
+  const originalShot = useStableImage(
+    originalKey(item.id),
+    original.data?.available ? original.data.url : null,
+    {
+      expiresAt: original.data?.expires_at,
+      onExpired: () => void queryClient.invalidateQueries({ queryKey: [IMAGE_KEY, item.id, "original"] }),
+    },
+  );
+  const originalSrc = originalShot.src;
+  const zoomSrc = originalSrc ?? thumbSrc;
 
   const fields = item.fields;
   const who = item.user.username || "удалённый сотрудник";
@@ -245,14 +252,14 @@ export function ScreenshotAdminCard({ item, panel, onPanel, onResolve, pending, 
         <span className="muted">
           {formatMoment(item.received_at)} · {item.channel === "extension" ? "расширение" : item.channel === "telegram" ? "Telegram" : "сайт"}
         </span>
-        {originalUrl ? (
-          <a className="secondary-button sca-small" href={originalUrl} target="_blank" rel="noopener noreferrer">
-            <ExternalLink size={14} aria-hidden="true" />
-            Открыть оригинал
-          </a>
+        {zoomSrc ? (
+          <button type="button" className="secondary-button sca-small" onClick={() => setZoomed(true)}>
+            <Maximize2 size={14} aria-hidden="true" />
+            Открыть фото
+          </button>
         ) : (
           <span className="sca-muted-small">
-            {original.isLoading ? "Готовим ссылку на оригинал…" : "Оригинал недоступен"}
+            {original.isLoading || thumb.isLoading ? "Готовим фото…" : "Фото недоступно"}
           </span>
         )}
       </div>
@@ -530,7 +537,12 @@ export function ScreenshotAdminCard({ item, panel, onPanel, onResolve, pending, 
           >
             <X size={18} />
           </button>
-          <img src={originalUrl ?? thumbSrc ?? undefined} alt={`Скриншот ${who} целиком`} onClick={(event) => event.stopPropagation()} />
+          <img
+            src={zoomSrc ?? undefined}
+            alt={`Скриншот ${who} целиком`}
+            onError={originalSrc ? originalShot.onError : shot.onError}
+            onClick={(event) => event.stopPropagation()}
+          />
         </div>
       )}
     </section>
