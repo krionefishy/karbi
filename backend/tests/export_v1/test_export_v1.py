@@ -336,6 +336,29 @@ async def test_cursor_pages_are_deterministic_idempotent_and_bound_to_the_datase
     assert wrong_dataset.status_code == 400 and wrong_dataset.json()["error"]["code"] == "bad_cursor"
 
 
+async def test_sales_rows_use_numeric_primary_key_order_for_the_indexed_cursor(stand: Stand) -> None:
+    async with stand.application.database.session() as session:
+        session.add_all(
+            [
+                SalesReportRowModel(
+                    seller_id=SELLER_ID,
+                    rrd_id=rrd_id,
+                    report_id=700_000 + rrd_id,
+                    nm_id=1001,
+                    collected_at=STAMP,
+                )
+                for rrd_id in (10, 2)
+            ]
+        )
+        await session.commit()
+
+    response = await stand.client.get("/export/v1/sales_rows?limit=5000", headers=HEADERS)
+
+    assert response.status_code == 200
+    seller_rows = [item["rrd_id"] for item in response.json()["items"] if item["seller_id"] == str(SELLER_ID)]
+    assert seller_rows == [2, 10, 900001]
+
+
 async def test_empty_page_keeps_the_incoming_cursor(stand: Stand) -> None:
     page = await stand.client.get("/export/v1/products?limit=5000", headers=HEADERS)
     cursor = page.json()["next_cursor"]

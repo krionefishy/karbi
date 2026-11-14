@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -170,6 +171,9 @@ class ExportRepository:
         if dataset == "stocks":
             return await self._stocks(cursor, limit)
         statement, updated_at, pk, mapper = self._query(dataset)
+        if dataset == "sales_rows":
+            rows = await self._execute_sales_rows(statement, updated_at, pk, mapper, cursor, limit + 1)
+            return rows[:limit], len(rows) > limit
         rows = await self._execute(statement, updated_at, pk, mapper, cursor, limit + 1)
         return rows[:limit], len(rows) > limit
 
@@ -212,6 +216,55 @@ class ExportRepository:
                 )
             )
         result = await self.session.execute(query.order_by(updated_at, pk).limit(limit))
+        output: list[ExportRow] = []
+        for row in result.all():
+            stamp = utc(row._export_updated)
+            item = mapper(row)
+            item.update(seller_id=str(item["seller_id"]), channel="wb", updated_at=iso(stamp))
+            output.append(ExportRow(stamp, str(row._export_pk), item))
+        return output
+
+    async def _execute_sales_rows(
+        self,
+        statement: Select,
+        updated_at: Any,
+        pk: Any,
+        mapper: Mapper,
+        cursor: Cursor | None,
+        limit: int,
+    ) -> list[ExportRow]:
+        """Use the deployed ``(collected_at, seller_id, rrd_id)`` index.
+
+        The public cursor keeps its existing JSON primary-key representation,
+        but comparing that representation as text defeats the index and makes
+        every page re-sort a large collection batch. Decode it only for the
+        keyset predicate and preserve the wire format returned to consumers.
+        """
+
+        seller_id = SalesReportRowModel.seller_id
+        rrd_id = SalesReportRowModel.rrd_id
+        export_updated = updated_at.label("_export_updated")
+        export_pk = pk.label("_export_pk")
+        query = statement.add_columns(export_updated, export_pk)
+        if cursor is not None:
+            try:
+                raw_key = json.loads(cursor.pk)
+                if not isinstance(raw_key, list) or len(raw_key) != 2 or isinstance(raw_key[1], bool):
+                    raise ValueError
+                cursor_seller = uuid.UUID(str(raw_key[0]))
+                cursor_rrd = int(raw_key[1])
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise BadCursor("cursor is not valid for sales_rows") from error
+            query = query.where(
+                or_(
+                    updated_at > cursor.updated_at,
+                    and_(
+                        updated_at == cursor.updated_at,
+                        or_(seller_id > cursor_seller, and_(seller_id == cursor_seller, rrd_id > cursor_rrd)),
+                    ),
+                )
+            )
+        result = await self.session.execute(query.order_by(updated_at, seller_id, rrd_id).limit(limit))
         output: list[ExportRow] = []
         for row in result.all():
             stamp = utc(row._export_updated)
