@@ -11,6 +11,7 @@ import {
   pipelineAlerts,
   STAGING_WARN_PERCENT,
   VLM_ERROR_WARN,
+  VLM_ERROR_MIN_SAMPLE,
 } from "../features/screenshotControl/admin";
 import { getPipeline } from "../features/screenshotControl/api";
 import { apiErrorText } from "../features/screenshotControl/errors";
@@ -81,7 +82,16 @@ export function ScreenshotAdminPipeline() {
           {data.oldest_processing_age_s === null ? "пусто" : formatAge(data.oldest_processing_age_s)}
         </Tile>
         <Tile label="p95 приём → вердикт">{formatAge(data.p95_s)}</Tile>
-        <Tile label="Ошибки VLM за час" tone={errors === null ? undefined : errors > VLM_ERROR_WARN ? "warning" : "positive"}>
+        <Tile
+          label={`Ошибки VLM за час · N=${data.extractions_1h}`}
+          tone={
+            errors === null || data.extractions_1h < VLM_ERROR_MIN_SAMPLE
+              ? undefined
+              : errors > VLM_ERROR_WARN
+                ? "warning"
+                : "positive"
+          }
+        >
           {errors === null ? "—" : formatShare(errors)}
         </Tile>
       </div>

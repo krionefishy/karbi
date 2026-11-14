@@ -499,11 +499,24 @@ export interface Pipeline {
   oldest_processing_age_s: number | null;
   p50_s: number | null;
   p95_s: number | null;
+  extractions_1h: number;
   vlm_error_rate_1h: number | null;
   extraction_failed_today: number;
   tokens_today: number;
+  retry_submissions_today: { one: number; two: number; three: number; four_plus: number };
+  auto_verdicts_today: Record<Verdict, number>;
+  review_queue: {
+    needs_review: number;
+    duplicates: number;
+    audit: number;
+    oldest_review_age_s: number | null;
+    oldest_duplicate_age_s: number | null;
+    oldest_audit_age_s: number | null;
+  };
+  outbox: { pending: number; retrying: number; oldest_pending_age_s: number | null };
   storage: {
     objects: Partial<Record<StorageState, number>>;
+    bytes_by_state: Partial<Record<StorageState, number>>;
     stored_bytes: number;
     oldest_staged_age_s: number | null;
     staging_used_percent: number | null;

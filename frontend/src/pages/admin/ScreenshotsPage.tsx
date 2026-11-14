@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { QUEUE_KEY, ScreenshotAdminQueue } from "../../components/ScreenshotAdminQueue";
 import { ScreenshotAdminManagers } from "../../components/ScreenshotAdminManagers";
+import { ScreenshotAdminMetrics } from "../../components/ScreenshotAdminMetrics";
 import { ScreenshotAdminPipeline } from "../../components/ScreenshotAdminPipeline";
 import { Shell } from "../../components/Shell";
 import type { QueueTab } from "../../features/screenshotControl/admin";
@@ -10,7 +11,7 @@ import { getQueue } from "../../features/screenshotControl/api";
 
 const TITLE = "Контроль скриншотов ДБС";
 
-type Tab = QueueTab | "managers" | "pipeline";
+type Tab = QueueTab | "managers" | "pipeline" | "metrics";
 
 const TABS: { key: Tab; label: string; count?: QueueTab }[] = [
   { key: "review", label: "Проверка", count: "review" },
@@ -18,6 +19,7 @@ const TABS: { key: Tab; label: string; count?: QueueTab }[] = [
   { key: "audit", label: "Аудит", count: "audit" },
   { key: "managers", label: "Менеджеры" },
   { key: "pipeline", label: "Конвейер" },
+  { key: "metrics", label: "Метрики" },
 ];
 
 const SUBTITLE: Record<Tab, string> = {
@@ -26,6 +28,7 @@ const SUBTITLE: Record<Tab, string> = {
   audit: "Случайные принятые скриншоты для перепроверки",
   managers: "Доли дублей, ревью и всплески по каждому менеджеру",
   pipeline: "Очередь распознавания, задержки, ошибки и хранилище",
+  metrics: "Качество автоматических решений, ретраи, каналы, ручная очередь и стоимость распознавания",
 };
 
 export function ScreenshotsPage() {
@@ -70,6 +73,8 @@ export function ScreenshotsPage() {
             <ScreenshotAdminManagers />
           ) : tab === "pipeline" ? (
             <ScreenshotAdminPipeline />
+          ) : tab === "metrics" ? (
+            <ScreenshotAdminMetrics />
           ) : (
             <ScreenshotAdminQueue key={tab} kind={tab} />
           )}

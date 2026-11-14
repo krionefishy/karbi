@@ -27,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.modules.wb_core.infrastructure.postgres.models import OutboxEventModel
 from backend.modules.wb_screenshot_control.infrastructure.postgres.models import (
     ExtensionInstallModel,
     ExtractionModel,
@@ -37,6 +38,7 @@ from backend.modules.wb_screenshot_control.infrastructure.postgres.models import
     TelegramLinkModel,
     VerdictEventModel,
 )
+from backend.shared.kafka_streams.topics import ScreenshotControlTopics, StorageTopics
 
 QUEUE_KINDS = ("review", "duplicates", "audit", "all")
 
@@ -83,6 +85,31 @@ class DayCounts:
     user_id: uuid.UUID
     day: date
     counts: Counts
+
+
+@dataclass(frozen=True, slots=True)
+class RetryBuckets:
+    one: int = 0
+    two: int = 0
+    three: int = 0
+    four_plus: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewQueueStats:
+    needs_review: int = 0
+    duplicates: int = 0
+    audit: int = 0
+    oldest_review_at: datetime | None = None
+    oldest_duplicate_at: datetime | None = None
+    oldest_audit_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutboxStats:
+    pending: int = 0
+    retrying: int = 0
+    oldest_at: datetime | None = None
 
 
 def _keys(values: Sequence[Any]) -> Any:
@@ -419,6 +446,80 @@ class ScreenshotQueries:
         ).one()
         return int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)
 
+    async def retry_buckets(self, since: datetime) -> RetryBuckets:
+        """Сабмишены с неудачными попытками распознавания; нулевой bucket намеренно исключён.
+
+        `attempts=0` смешивает успешный первый вызов, reuse готового extraction и exact-file fast path,
+        поэтому из текущей схемы честный denominator для retry rate восстановить нельзя.
+        """
+        row = (
+            await self.session.execute(
+                select(
+                    _count(SubmissionModel.attempts == 1),
+                    _count(SubmissionModel.attempts == 2),
+                    _count(SubmissionModel.attempts == 3),
+                    _count(SubmissionModel.attempts >= 4),
+                )
+                .select_from(SubmissionModel)
+                .where(SubmissionModel.received_at >= since)
+            )
+        ).one()
+        return RetryBuckets(*(int(value or 0) for value in row))
+
+    async def auto_verdict_counts(self, since: datetime) -> dict[str, int]:
+        rows = await self.session.execute(
+            select(SubmissionModel.auto_verdict, func.count())
+            .where(SubmissionModel.decided_at >= since, SubmissionModel.auto_verdict.is_not(None))
+            .group_by(SubmissionModel.auto_verdict)
+        )
+        return {verdict: int(count) for verdict, count in rows.all()}
+
+    async def review_queue_stats(self) -> ReviewQueueStats:
+        row = (
+            await self.session.execute(
+                select(
+                    _count(SubmissionModel.verdict == "needs_review"),
+                    _count(SubmissionModel.verdict == "duplicate"),
+                    _count(_AUDIT_OPEN),
+                    func.min(SubmissionModel.decided_at).filter(SubmissionModel.verdict == "needs_review"),
+                    func.min(SubmissionModel.decided_at).filter(SubmissionModel.verdict == "duplicate"),
+                    func.min(SubmissionModel.decided_at).filter(_AUDIT_OPEN),
+                ).select_from(SubmissionModel)
+            )
+        ).one()
+        return ReviewQueueStats(
+            needs_review=int(row[0] or 0),
+            duplicates=int(row[1] or 0),
+            audit=int(row[2] or 0),
+            oldest_review_at=row[3],
+            oldest_duplicate_at=row[4],
+            oldest_audit_at=row[5],
+        )
+
+    async def outbox_stats(self) -> OutboxStats:
+        topics = (
+            ScreenshotControlTopics.SUBMITTED,
+            ScreenshotControlTopics.EXTRACTED,
+            ScreenshotControlTopics.VERDICT_READY,
+            StorageTopics.WB_SCREENSHOT_CONTROL_UPLOAD,
+            StorageTopics.WB_SCREENSHOT_CONTROL_DELETE,
+        )
+        # Отложенные retry/deferral events с `next_attempt_at` в будущем — штатное расписание,
+        # а не backlog. В operational queue считаем только уже наступившие к публикации строки.
+        pending = and_(OutboxEventModel.published_at.is_(None), OutboxEventModel.next_attempt_at <= func.now())
+        row = (
+            await self.session.execute(
+                select(
+                    _count(pending),
+                    _count(and_(pending, OutboxEventModel.attempts > 0)),
+                    func.min(OutboxEventModel.created_at).filter(pending),
+                )
+                .select_from(OutboxEventModel)
+                .where(OutboxEventModel.topic.in_(topics))
+            )
+        ).one()
+        return OutboxStats(pending=int(row[0] or 0), retrying=int(row[1] or 0), oldest_at=row[2])
+
     async def channel_counts(self, since: datetime) -> dict[str, int]:
         rows = await self.session.execute(
             select(SubmissionModel.channel, func.count())
@@ -427,11 +528,15 @@ class ScreenshotQueries:
         )
         return {channel: int(count) for channel, count in rows.all()}
 
-    async def storage_stats(self) -> tuple[dict[str, int], int, datetime | None]:
+    async def storage_stats(self) -> tuple[dict[str, int], dict[str, int], int, datetime | None]:
         rows = await self.session.execute(
-            select(StorageObjectModel.state, func.count()).group_by(StorageObjectModel.state)
+            select(
+                StorageObjectModel.state, func.count(), func.coalesce(func.sum(StorageObjectModel.size_bytes), 0)
+            ).group_by(StorageObjectModel.state)
         )
-        states = {state: int(count) for state, count in rows.all()}
+        grouped = rows.all()
+        states = {state: int(count) for state, count, _bytes in grouped}
+        bytes_by_state = {state: int(bytes_) for state, _count, bytes_ in grouped}
         stored_bytes = await self.session.scalar(
             select(func.coalesce(func.sum(StorageObjectModel.size_bytes), 0)).where(
                 StorageObjectModel.state == "stored"
@@ -440,7 +545,7 @@ class ScreenshotQueries:
         oldest = await self.session.scalar(
             select(func.min(StorageObjectModel.updated_at)).where(StorageObjectModel.state.in_(("staged", "uploading")))
         )
-        return states, int(stored_bytes or 0), oldest
+        return states, bytes_by_state, int(stored_bytes or 0), oldest
 
 
 class ExtensionStore:

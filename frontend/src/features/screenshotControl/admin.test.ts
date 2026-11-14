@@ -218,10 +218,28 @@ const pipeline = (overrides: Partial<Pipeline> = {}): Pipeline => ({
   oldest_processing_age_s: 8,
   p50_s: 9,
   p95_s: 24,
+  extractions_1h: 12,
   vlm_error_rate_1h: 0,
   extraction_failed_today: 0,
   tokens_today: 412_000,
-  storage: { objects: { stored: 1240 }, stored_bytes: 1_600_000_000, oldest_staged_age_s: 3, staging_used_percent: 12 },
+  retry_submissions_today: { one: 0, two: 0, three: 0, four_plus: 0 },
+  auto_verdicts_today: { accepted: 30, duplicate: 2, needs_review: 1, rejected: 1 },
+  review_queue: {
+    needs_review: 1,
+    duplicates: 2,
+    audit: 0,
+    oldest_review_age_s: 60,
+    oldest_duplicate_age_s: 90,
+    oldest_audit_age_s: null,
+  },
+  outbox: { pending: 0, retrying: 0, oldest_pending_age_s: null },
+  storage: {
+    objects: { stored: 1240 },
+    bytes_by_state: { stored: 1_600_000_000 },
+    stored_bytes: 1_600_000_000,
+    oldest_staged_age_s: 3,
+    staging_used_percent: 12,
+  },
   channels_today: { extension: 30, telegram: 0, web: 4 },
   ...overrides,
 });
@@ -236,12 +254,21 @@ describe("конвейер", () => {
       pipeline({
         vlm_error_rate_1h: 0.25,
         oldest_processing_age_s: 660,
-        storage: { objects: {}, stored_bytes: 0, oldest_staged_age_s: 1000, staging_used_percent: 91.4 },
+        storage: { objects: {}, bytes_by_state: {}, stored_bytes: 0, oldest_staged_age_s: 1000, staging_used_percent: 91.4 },
       }),
     );
     expect(alerts.map((alert) => alert.key)).toEqual(["staging", "staged-age", "vlm", "queue"]);
     expect(alerts[0].title).toBe("Временное хранилище заполнено на 91%");
     expect(alerts[3].title).toBe("Скриншот ждёт вердикта 11 мин");
+  });
+
+  it("does not alert on a noisy VLM rate without a sample and reports a stuck outbox", () => {
+    expect(pipelineAlerts(pipeline({ extractions_1h: 2, vlm_error_rate_1h: 1 }))).toEqual([]);
+    expect(
+      pipelineAlerts(pipeline({ outbox: { pending: 3, retrying: 1, oldest_pending_age_s: 360 } })).map(
+        (alert) => alert.key,
+      ),
+    ).toEqual(["outbox"]);
   });
 
   it("formats ages and period ranges", () => {

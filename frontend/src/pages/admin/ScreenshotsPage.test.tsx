@@ -109,10 +109,28 @@ const pipeline: Pipeline = {
   oldest_processing_age_s: 8,
   p50_s: 9,
   p95_s: 24,
+  extractions_1h: 16,
   vlm_error_rate_1h: 0.31,
   extraction_failed_today: 1,
   tokens_today: 412000,
-  storage: { objects: { stored: 1240 }, stored_bytes: 1_700_000_000, oldest_staged_age_s: 4, staging_used_percent: 61 },
+  retry_submissions_today: { one: 2, two: 1, three: 0, four_plus: 0 },
+  auto_verdicts_today: { accepted: 27, duplicate: 3, needs_review: 3, rejected: 1 },
+  review_queue: {
+    needs_review: 3,
+    duplicates: 3,
+    audit: 1,
+    oldest_review_age_s: 120,
+    oldest_duplicate_age_s: 240,
+    oldest_audit_age_s: 60,
+  },
+  outbox: { pending: 0, retrying: 0, oldest_pending_age_s: null },
+  storage: {
+    objects: { stored: 1240 },
+    bytes_by_state: { stored: 1_700_000_000 },
+    stored_bytes: 1_700_000_000,
+    oldest_staged_age_s: 4,
+    staging_used_percent: 61,
+  },
   channels_today: { extension: 30, telegram: 0, web: 4 },
 };
 
@@ -392,7 +410,7 @@ describe("ScreenshotsPage", () => {
     expect(resolveCalls(request)[0].body).toEqual({ decision: "audit_ok", note: "" });
   });
 
-  it("shows manager signals and pipeline warnings on their tabs", async () => {
+  it("shows manager signals, pipeline warnings and metrics on separate tabs", async () => {
     const user = userEvent.setup();
     renderPage();
 
@@ -406,6 +424,12 @@ describe("ScreenshotsPage", () => {
     expect(await screen.findByText("Ошибки распознавания за час: 31%")).toBeInTheDocument();
     expect(screen.getByText("24 с")).toBeInTheDocument();
     expect(screen.getByText("Пробный")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Метрики" }));
+    expect(await screen.findByText("Автовердикты сегодня")).toBeInTheDocument();
+    expect(screen.getByText("Сабмишены с ретраями")).toBeInTheDocument();
+    expect(screen.getByText("Ручная очередь")).toBeInTheDocument();
+    expect(screen.getByText("DBS outbox")).toBeInTheDocument();
   });
 
   it("downloads the server CSV for the chosen period instead of building it in the browser", async () => {

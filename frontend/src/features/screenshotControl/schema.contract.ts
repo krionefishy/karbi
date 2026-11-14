@@ -74,11 +74,17 @@ export type _ResolveRequestNote = Expect<
   Same<NonNullable<T.ResolveRequest["note"]>, S["ResolveRequest"]["note"]>
 >;
 
-// В storage.objects фронт сужает ключи до StorageState, схема описывает их как любые строки.
+// В storage.objects/bytes_by_state фронт сужает ключи до StorageState, схема описывает их как любые строки.
 export type _Pipeline = Expect<Same<Omit<T.Pipeline, "storage">, Omit<S["PipelineOut"], "storage">>>;
 export type _PipelineStorage = Expect<
-  Same<Omit<T.Pipeline["storage"], "objects">, Omit<S["StorageStats"], "objects">>
+  Same<
+    Omit<T.Pipeline["storage"], "objects" | "bytes_by_state">,
+    Omit<S["StorageStats"], "objects" | "bytes_by_state">
+  >
 >;
 export type _PipelineStorageObjects = Expect<
   Same<T.Pipeline["storage"]["objects"], Partial<Record<StorageState, number>>>
+>;
+export type _PipelineStorageBytes = Expect<
+  Same<T.Pipeline["storage"]["bytes_by_state"], Partial<Record<StorageState, number>>>
 >;
