@@ -569,6 +569,7 @@ class PipelineStages(BaseModel):
 
 class StorageStats(BaseModel):
     objects: dict[StorageState, int]
+    bytes_by_state: dict[StorageState, int]
     stored_bytes: int
     oldest_staged_age_s: int | None
     staging_used_percent: float | None
@@ -580,6 +581,35 @@ class ChannelCounts(BaseModel):
     web: int
 
 
+class RetryBucketsOut(BaseModel):
+    one: int
+    two: int
+    three: int
+    four_plus: int
+
+
+class VerdictCountsOut(BaseModel):
+    accepted: int
+    duplicate: int
+    needs_review: int
+    rejected: int
+
+
+class ReviewQueueStatsOut(BaseModel):
+    needs_review: int
+    duplicates: int
+    audit: int
+    oldest_review_age_s: int | None
+    oldest_duplicate_age_s: int | None
+    oldest_audit_age_s: int | None
+
+
+class OutboxStatsOut(BaseModel):
+    pending: int
+    retrying: int
+    oldest_pending_age_s: int | None
+
+
 class PipelineOut(BaseModel):
     """Экран «Конвейер»: очередь, задержка «приём → вердикт», распознавание, хранилище."""
 
@@ -588,9 +618,14 @@ class PipelineOut(BaseModel):
     oldest_processing_age_s: int | None
     p50_s: float | None
     p95_s: float | None
+    extractions_1h: int
     vlm_error_rate_1h: float | None = Field(ge=0, le=1)
     extraction_failed_today: int
     tokens_today: int
+    retry_submissions_today: RetryBucketsOut
+    auto_verdicts_today: VerdictCountsOut
+    review_queue: ReviewQueueStatsOut
+    outbox: OutboxStatsOut
     storage: StorageStats
     channels_today: ChannelCounts
 

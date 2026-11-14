@@ -345,10 +345,12 @@ export function formatAge(seconds: number | null): string {
   return rest ? `${hours} ч ${rest} мин` : `${hours} ч`;
 }
 
-export const STAGING_WARN_PERCENT = 85;
+export const STAGING_WARN_PERCENT = 70;
 export const VLM_ERROR_WARN = 0.2;
+export const VLM_ERROR_MIN_SAMPLE = 5;
 export const OLDEST_PROCESSING_WARN_S = 600;
 export const OLDEST_STAGED_WARN_S = 900;
+export const OUTBOX_WARN_S = 300;
 
 export interface PipelineAlert {
   key: string;
@@ -375,7 +377,7 @@ export function pipelineAlerts(pipeline: Pipeline): PipelineAlert[] {
     });
   }
   const errors = pipeline.vlm_error_rate_1h;
-  if (errors !== null && errors > VLM_ERROR_WARN) {
+  if (errors !== null && pipeline.extractions_1h >= VLM_ERROR_MIN_SAMPLE && errors > VLM_ERROR_WARN) {
     alerts.push({
       key: "vlm",
       title: `Ошибки распознавания за час: ${formatShare(errors)}`,
@@ -388,6 +390,14 @@ export function pipelineAlerts(pipeline: Pipeline): PipelineAlert[] {
       key: "queue",
       title: `Скриншот ждёт вердикта ${formatAge(oldest)}`,
       text: "Очередь стоит дольше 10 минут: проверьте воркер и Kafka.",
+    });
+  }
+  const outboxAge = pipeline.outbox.oldest_pending_age_s;
+  if (outboxAge !== null && outboxAge > OUTBOX_WARN_S) {
+    alerts.push({
+      key: "outbox",
+      title: `Событие ждёт публикации ${formatAge(outboxAge)}`,
+      text: "DBS outbox не успевает публиковать события: проверьте publisher и Kafka.",
     });
   }
   return alerts;

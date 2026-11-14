@@ -316,11 +316,20 @@ async def test_pipeline_numbers(stand: Stand) -> None:
     first, second = await screens(stand, 2)
     await stand.decide(first, "accepted", fields=desktop_fields())
     await stand.store(first)
+    async with stand.database.session() as session:
+        retried = await session.get(SubmissionModel, uuid.UUID(first))
+        assert retried is not None
+        retried.attempts = 2
+        await session.commit()
 
     pipeline = PipelineOut.model_validate((await stand.client.get(f"{ADMIN}/pipeline", headers=admin)).json())
     assert pipeline.stages.processing == 1 and pipeline.oldest_processing_age_s is not None
-    assert pipeline.p50_s is not None and pipeline.vlm_error_rate_1h == 0.0
+    assert pipeline.p50_s is not None and (pipeline.extractions_1h, pipeline.vlm_error_rate_1h) == (1, 0.0)
     assert pipeline.tokens_today == 1200 and pipeline.channels_today.web == 2
+    assert pipeline.retry_submissions_today.model_dump() == {"one": 0, "two": 1, "three": 0, "four_plus": 0}
+    assert pipeline.auto_verdicts_today.accepted == 1
+    assert pipeline.review_queue.needs_review == 0 and pipeline.outbox.pending > 0
     assert pipeline.storage.objects["stored"] == 2 and pipeline.storage.objects["staged"] == 1
+    assert pipeline.storage.bytes_by_state["stored"] == pipeline.storage.stored_bytes
     assert pipeline.storage.stored_bytes > 0 and pipeline.storage.staging_used_percent is not None
     assert second

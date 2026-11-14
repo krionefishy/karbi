@@ -527,7 +527,11 @@ class AdminService:
         p50, p95 = await self.queries.decision_latency(now - timedelta(days=1))
         hour_total, hour_failed, _ = await self.queries.extraction_stats(now - timedelta(hours=1))
         _, failed_today, tokens_today = await self.queries.extraction_stats(midnight)
-        states, stored_bytes, oldest_staged = await self.queries.storage_stats()
+        retries = await self.queries.retry_buckets(midnight)
+        auto_verdicts = await self.queries.auto_verdict_counts(midnight)
+        review = await self.queries.review_queue_stats()
+        outbox = await self.queries.outbox_stats()
+        states, bytes_by_state, stored_bytes, oldest_staged = await self.queries.storage_stats()
         channels = await self.queries.channel_counts(midnight)
         return {
             "mode": self.config.mode,
@@ -535,11 +539,35 @@ class AdminService:
             "oldest_processing_age_s": _age(now, oldest),
             "p50_s": round(p50, 1) if p50 is not None else None,
             "p95_s": round(p95, 1) if p95 is not None else None,
+            "extractions_1h": hour_total,
             "vlm_error_rate_1h": round(hour_failed / hour_total, 4) if hour_total else None,
             "extraction_failed_today": failed_today,
             "tokens_today": tokens_today,
+            "retry_submissions_today": {
+                "one": retries.one,
+                "two": retries.two,
+                "three": retries.three,
+                "four_plus": retries.four_plus,
+            },
+            "auto_verdicts_today": {
+                name: auto_verdicts.get(name, 0) for name in ("accepted", "duplicate", "needs_review", "rejected")
+            },
+            "review_queue": {
+                "needs_review": review.needs_review,
+                "duplicates": review.duplicates,
+                "audit": review.audit,
+                "oldest_review_age_s": _age(now, review.oldest_review_at),
+                "oldest_duplicate_age_s": _age(now, review.oldest_duplicate_at),
+                "oldest_audit_age_s": _age(now, review.oldest_audit_at),
+            },
+            "outbox": {
+                "pending": outbox.pending,
+                "retrying": outbox.retrying,
+                "oldest_pending_age_s": _age(now, outbox.oldest_at),
+            },
             "storage": {
                 "objects": {state: states.get(state, 0) for state in STORAGE_STATES},
+                "bytes_by_state": {state: bytes_by_state.get(state, 0) for state in STORAGE_STATES},
                 "stored_bytes": stored_bytes,
                 # Без S3 файлы ждут выгрузки по замыслу, а не из-за сбоя: возраст очереди не показываем.
                 "oldest_staged_age_s": _age(now, oldest_staged) if self.images.blobs is not None else None,
