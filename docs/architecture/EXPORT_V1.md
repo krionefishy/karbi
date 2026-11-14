@@ -51,8 +51,11 @@ real, mock-free and reconciled for all nine datasets.
 `POST /export/v1/observability/production-report` accepts two independently
 authenticated aggregate generations: `ma_bridge/accepted` from vm-bridge and
 `mp_sync/written` from vm-fin. Karbi computes `sent` directly from its exporter
-queries, persists both acknowledgements in PostgreSQL and opens the gate only
-when all three counts match for exactly the nine v1 datasets. Each source is
+queries and persists both acknowledgements in PostgreSQL. The gate opens only
+when `sent <= accepted == written` for exactly the nine v1 datasets: exporter
+queries are current/rolling snapshots, while bridge and mp-sync retain accepted
+daily/history rows. Thus source ahead of bridge is loss, while retained history
+above the current source snapshot is expected. Each source is
 bound to its own IP allow-list; both use a report credential that is separate
 from `EXPORT_TOKEN`. Reports survive restarts and expire after 24 hours. The
 schema has no business rows, seller names, credentials or tax fields.

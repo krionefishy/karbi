@@ -73,10 +73,10 @@ groups:
         annotations:
           summary: "mock seller or mock rows detected in production volume"
       - alert: ExportV1ProductionReconciliationMismatch
-        expr: marketplace_auto_export_v1_production_sent_bridge_gap_rows != 0 or marketplace_auto_export_v1_production_accepted_written_gap_rows != 0
+        expr: marketplace_auto_export_v1_production_sent_bridge_gap_rows > 0 or marketplace_auto_export_v1_production_accepted_written_gap_rows != 0
         labels: {severity: critical}
         annotations:
-          summary: "durable production sent/accepted/written counts do not reconcile"
+          summary: "durable production source is ahead of bridge or accepted/written do not reconcile"
       - alert: ExportV1ProductionReportStale
         expr: marketplace_auto_export_v1_production_report_age_seconds > 86400
         labels: {severity: critical}

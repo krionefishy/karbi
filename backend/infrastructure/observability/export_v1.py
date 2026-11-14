@@ -537,7 +537,11 @@ class ExportObservability:
             report.real_sellers > 0
             and report.mock_sellers == 0
             and report.mock_rows == 0
-            and report.sent_rows == report.accepted_rows == report.written_rows
+            # Exporter queries are current/rolling snapshots, while bridge and
+            # mp-sync deliberately retain already accepted history. A bridge
+            # count above sent is therefore safe; the loss condition is the
+            # directional one where the source is ahead of the bridge.
+            and report.sent_rows <= report.accepted_rows == report.written_rows
             and report.rejected_rows == 0
             and report.unmapped_sellers == 0
             and report.backlog_rows == 0
@@ -574,7 +578,7 @@ class ExportObservability:
             if report.mock_rows:
                 issues.append(ExportIssue("mock_rows", dataset, None, channel, float(report.mock_rows)))
             sent_accepted_gap = report.sent_rows - report.accepted_rows
-            if sent_accepted_gap:
+            if sent_accepted_gap > 0:
                 issues.append(ExportIssue("gap_sent_accepted", dataset, None, channel, float(sent_accepted_gap)))
             accepted_written_gap = report.accepted_rows - report.written_rows
             if accepted_written_gap:
