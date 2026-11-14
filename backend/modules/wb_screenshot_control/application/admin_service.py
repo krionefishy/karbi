@@ -369,13 +369,13 @@ class AdminService:
         }
 
     async def image_url(self, submission_id: uuid.UUID, kind: str) -> dict[str, Any]:
-        """Оригинал — вложением со своим типом, миниатюра — inline."""
+        """Оригинал и миниатюра — inline для защищённого просмотра администратором."""
         submission = await self.queries.submission(submission_id)
         if submission is None:
             raise not_found()
         storage_kind = "orig" if kind == "original" else "thumb"
         stored = (await self.queries.objects([submission.file_id])).get((submission.file_id, storage_kind))
-        return self.images.answer(stored, attachment=storage_kind == "orig", now=self.now())
+        return self.images.answer(stored, attachment=False, now=self.now())
 
     # --- решения ---
 

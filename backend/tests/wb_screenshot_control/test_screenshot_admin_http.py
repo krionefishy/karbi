@@ -142,7 +142,7 @@ async def test_image_links_for_the_admin(stand: Stand) -> None:
     )
     assert original.json()["available"] is True and "/orig/" in original.json()["url"]
     assert stand.blobs is not None
-    assert (stand.blobs.signed[-1]["attachment"], stand.blobs.signed[-1]["content_type"]) == (True, "image/png")
+    assert (stand.blobs.signed[-1]["attachment"], stand.blobs.signed[-1]["content_type"]) == (False, "image/png")
     await stand.client.get(f"{ADMIN}/submissions/{submission}/image-url", headers=admin)
     assert (stand.blobs.signed[-1]["attachment"], stand.blobs.signed[-1]["content_type"]) == (False, "image/jpeg")
 

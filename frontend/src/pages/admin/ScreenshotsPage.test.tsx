@@ -230,6 +230,23 @@ describe("ScreenshotsPage", () => {
     expect(within(card()).getByText("0,78")).toBeInTheDocument();
   });
 
+  it("opens the full original from the suspicious screenshots queue", async () => {
+    const user = userEvent.setup();
+    renderPage({ duplicates: [anna] });
+
+    await user.click(await screen.findByRole("tab", { name: /Подозрения/ }));
+    await screen.findByRole("region", { name: "Скриншот Анна" });
+    await user.click(await within(card()).findByRole("button", { name: "Открыть фото" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Скриншот целиком" });
+    expect(within(dialog).getByRole("img", { name: "Скриншот Анна целиком" })).toHaveAttribute(
+      "src",
+      "https://s3.example/original.jpg",
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Скриншот целиком" })).not.toBeInTheDocument();
+  });
+
   it("invites rather than apologises when the queue is empty", async () => {
     renderPage();
     expect(await screen.findByText("Очередь пуста")).toBeInTheDocument();
