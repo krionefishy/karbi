@@ -73,9 +73,14 @@ class RateLimitMiddleware:
             return
 
         if not decision.allowed:
+            content = (
+                {"error": {"code": "rate_limited", "message": "too many requests"}}
+                if path.startswith("/export/v1/")
+                else {"detail": "Too many requests"}
+            )
             response = JSONResponse(
                 status_code=429,
-                content={"detail": "Too many requests"},
+                content=content,
                 headers={"Retry-After": str(decision.retry_after_seconds)},
             )
             await response(scope, receive, send)

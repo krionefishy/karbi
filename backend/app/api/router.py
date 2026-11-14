@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.automations import router as automations_router
 from backend.app.http.principals import require_service
+from backend.modules.export_v1 import router as export_v1_router
 from backend.modules.fin_reports.presentation.http import router as fin_reports_router
 from backend.modules.notifications.presentation.http import admin_bots_router
 from backend.modules.platform.presentation.http import admin_users_router
@@ -30,6 +31,7 @@ from backend.modules.wb_support_bot.presentation.http import router as wb_suppor
 from backend.modules.wb_turnover.presentation.http import router as wb_turnover_router
 
 router = APIRouter()
+root_router = APIRouter()
 
 
 SERVICE_ROUTERS: list[tuple[APIRouter, str]] = []
@@ -50,6 +52,12 @@ def include_open(open_router: APIRouter) -> None:
     """
     OPEN_ROUTERS.append(open_router)
     router.include_router(open_router)
+
+
+def include_root_open(open_router: APIRouter) -> None:
+    """Machine route with its own authentication and a contract outside /api/v1."""
+    OPEN_ROUTERS.append(open_router)
+    root_router.include_router(open_router)
 
 
 include_open(auth_router)
@@ -76,6 +84,7 @@ include_service(wb_screenshot_control_router, "wb-screenshot-control")
 include_open(wb_screenshot_control_extension_router)
 include_open(wb_screenshot_control_admin_router)
 include_open(automations_router)
+include_root_open(export_v1_router)
 
 
 @router.get("/health/live", include_in_schema=False)

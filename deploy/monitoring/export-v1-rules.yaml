@@ -1,0 +1,95 @@
+groups:
+  - name: marketplace-auto-export-v1
+    rules:
+      - alert: ExportV1Stopped
+        expr: time() - marketplace_auto_export_v1_last_success_unixtime_seconds > 900
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "export_v1 stopped for dataset/seller/channel"
+      - alert: ExportV1MetricsMissing
+        expr: absent(marketplace_auto_export_v1_rows_total)
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "export_v1 metrics are absent"
+      - alert: ExportV1SourceLagHigh
+        expr: marketplace_auto_export_v1_source_lag_seconds > 1800
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "export_v1 source lag is above 30 minutes"
+      - alert: ExportV1BacklogHigh
+        expr: marketplace_auto_export_v1_backlog_rows > 50000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "export_v1 backlog is above 50k rows"
+      - alert: ExportV1ReconciliationMismatch
+        expr: |
+          abs(
+            sum by(dataset, seller, channel) (marketplace_auto_export_v1_rows_total{stage="sent"})
+            -
+            sum by(dataset, seller, channel) (marketplace_auto_export_v1_rows_total{stage="accepted"})
+          ) > 0
+          or
+          abs(
+            sum by(dataset, seller, channel) (marketplace_auto_export_v1_rows_total{stage="accepted"})
+            -
+            sum by(dataset, seller, channel) (marketplace_auto_export_v1_rows_total{stage="written"})
+          ) > 0
+        for: 15m
+        labels: {severity: critical}
+        annotations:
+          summary: "export_v1 sent/accepted/written counters do not reconcile"
+      - alert: ExportV1RateLimited
+        expr: increase(marketplace_auto_export_v1_http_requests_total{status_class="429"}[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "export_v1 received HTTP 429"
+      - alert: ExportV1ClientErrors
+        expr: increase(marketplace_auto_export_v1_http_requests_total{status_class="4xx"}[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "export_v1 received HTTP 4xx"
+      - alert: ExportV1ServerErrors
+        expr: increase(marketplace_auto_export_v1_http_requests_total{status_class="5xx"}[10m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "export_v1 received HTTP 5xx"
+      - alert: ExportV1RejectedRows
+        expr: increase(marketplace_auto_export_v1_rejected_rows_total[10m]) > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "export_v1 rows were rejected"
+      - alert: ExportV1UnmappedSeller
+        expr: marketplace_auto_export_v1_unmapped_sellers > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "export_v1 has an unresolved seller UUID mapping"
+      - alert: ExportV1MockDataInProduction
+        expr: marketplace_auto_export_v1_production_mock_sellers > 0 or marketplace_auto_export_v1_production_mock_rows > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "mock seller or mock rows detected in production volume"
+      - alert: ExportV1ProductionReconciliationMismatch
+        expr: marketplace_auto_export_v1_production_sent_bridge_gap_rows > 0 or marketplace_auto_export_v1_production_accepted_written_gap_rows != 0
+        labels: {severity: critical}
+        annotations:
+          summary: "durable production source is ahead of bridge or accepted/written do not reconcile"
+      - alert: ExportV1ProductionReportStale
+        expr: marketplace_auto_export_v1_production_report_age_seconds > 86400
+        labels: {severity: critical}
+        annotations:
+          summary: "durable production report is older than 24 hours"
+      - alert: ExportV1ProductionRejectedOrBacklogged
+        expr: marketplace_auto_export_v1_production_rejected_rows > 0 or marketplace_auto_export_v1_production_unmapped_sellers > 0 or marketplace_auto_export_v1_production_backlog_rows > 0
+        labels: {severity: critical}
+        annotations:
+          summary: "production report contains rejected, unmapped or backlogged rows"
+      - alert: ExportV1ProductionConsumerGateClosed
+        expr: marketplace_auto_export_v1_production_consumer_gate_open != 1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "production consumer gate is closed"

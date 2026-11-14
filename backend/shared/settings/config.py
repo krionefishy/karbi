@@ -125,6 +125,24 @@ class RateLimitConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ExportConfig:
+    """Machine-only read API used by ma-bridge.
+
+    Both token slots may be populated during rotation.  An empty pair keeps the
+    endpoint disabled, and the network allow-list remains a second independent
+    boundary even when a bearer token is valid.
+    """
+
+    token: str = field(default="", repr=False)
+    token_next: str = field(default="", repr=False)
+    allowed_ips: tuple[str, ...] = ()
+    report_token: str = field(default="", repr=False)
+    report_token_next: str = field(default="", repr=False)
+    report_bridge_ips: tuple[str, ...] = ()
+    report_writer_ips: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class WorkerConfig:
     poll_interval_seconds: int = 30
     review_sync_hour: int = 0
@@ -580,6 +598,7 @@ class Settings:
     s3: S3Config
     auth: AuthConfig
     rate_limit: RateLimitConfig
+    export: ExportConfig
     worker: WorkerConfig
     egress: EgressConfig
     telegram: TelegramConfig
@@ -627,6 +646,14 @@ class Settings:
         rate_limit["enabled"] = _as_bool(rate_limit.get("enabled", True))
         rate_limit["requests"] = int(rate_limit.get("requests", 120))
         rate_limit["window_seconds"] = int(rate_limit.get("window_seconds", 60))
+        export = dict(data.get("export", {}))
+        for field_name in ("allowed_ips", "report_bridge_ips", "report_writer_ips"):
+            allowed_ips = export.get(field_name, ())
+            if isinstance(allowed_ips, str):
+                allowed_ips = tuple(value.strip() for value in allowed_ips.split(",") if value.strip())
+            else:
+                allowed_ips = tuple(str(value).strip() for value in allowed_ips if str(value).strip())
+            export[field_name] = allowed_ips
         worker = dict(data.get("worker", {}))
         worker["poll_interval_seconds"] = int(worker.get("poll_interval_seconds", 30))
         worker["review_sync_hour"] = int(worker.get("review_sync_hour", 0))
@@ -862,6 +889,7 @@ class Settings:
             s3=S3Config(**s3),
             auth=AuthConfig(**auth),
             rate_limit=RateLimitConfig(**rate_limit),
+            export=ExportConfig(**export),
             worker=WorkerConfig(**worker),
             egress=EgressConfig(**egress),
             telegram=TelegramConfig(**telegram),
@@ -886,6 +914,25 @@ class Settings:
         return settings
 
     def validate_values(self) -> None:
+        import ipaddress
+
+        for token in (
+            self.export.token,
+            self.export.token_next,
+            self.export.report_token,
+            self.export.report_token_next,
+        ):
+            if token and len(token) < 32:
+                raise ValueError("export tokens must contain at least 32 characters")
+        for network in (
+            *self.export.allowed_ips,
+            *self.export.report_bridge_ips,
+            *self.export.report_writer_ips,
+        ):
+            try:
+                ipaddress.ip_network(network, strict=False)
+            except ValueError as error:
+                raise ValueError(f"export.allowed_ips contains an invalid address or network: {network!r}") from error
         if not 0 <= self.worker.review_sync_hour <= 23:
             raise ValueError("worker.review_sync_hour must be between 0 and 23")
         if not 0 <= self.worker.review_sync_minute <= 59:
@@ -1301,6 +1348,13 @@ class Settings:
             invalid.append("egress.verify cannot disable TLS verification in production")
         if self.s3.enabled and not all((self.s3.key_id, self.s3.secret_key, self.s3.bucket)):
             invalid.append("s3 credentials and bucket")
+        if (self.export.token or self.export.token_next) and not self.export.allowed_ips:
+            invalid.append("export.allowed_ips")
+        if self.export.report_token or self.export.report_token_next:
+            if not self.export.report_bridge_ips:
+                invalid.append("export.report_bridge_ips")
+            if not self.export.report_writer_ips:
+                invalid.append("export.report_writer_ips")
         # Ключ HMAC скриншотов здесь не проверяется: без него выключается только сам модуль
         # (`_screenshot_control`), а api и остальные воркеры стартуют.
         if invalid:
